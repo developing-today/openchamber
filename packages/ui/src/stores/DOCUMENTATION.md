@@ -33,6 +33,16 @@ new one, and a load never joins a read that began in an older generation. It
 waits for that read and reads again, so a refresh after a delete cannot be
 answered by the read the delete itself started.
 
+Agent refreshes keep the ambient project and each location that raised the
+catalog event in the same batch. Settings can show a different project from the
+app, so refreshing only the ambient cache leaves its list stale. Invalidating a
+directory retires the Settings store, the composer store and the shared client
+request for that key. Their older responses cannot restore a pre-change list or
+stamp a fresh TTL over the replacement request. A runtime switch clears the
+directory maps and rejects loads captured from the previous runtime.
+
+A same-runtime load retired by a catalog change waits for the replacement list before it returns. A create or delete waiting for that read therefore keeps its successful result; the retired response itself publishes nothing. A runtime switch still returns failure instead of joining work for another runtime.
+
 Plugin catalogs carry `loadedDirectory` and `loadedRuntimeKey`, the owner of
 the installed list. The editor waits for that directory's catalog before hydrating a draft;
 plugin IDs alone are not unique across projects. Catalog requests and their
@@ -122,7 +132,7 @@ Examples:
 - `useFeatureFlagsStore.ts`
 - `useUpdateStore.ts`
 
-These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. Linear panel list filters (status, assignee, team, priority) live here too: the Linear rail surface remounts on switch, so those filters restore from this store rather than component state. `resetLinearIssueListFilters` restores those four defaults together; search stays local to the rail. The team filter is the one that is not a plain preference: a Linear team belongs to one workspace, and each OpenChamber instance has its own Linear login, so it is persisted per instance in `linearIssueListTeamIdByRuntime` and the flat `linearIssueListTeamId` is derived from it by `applyLinearIssueListFiltersForRuntime` — on an instance switch and when the rail mounts, since rehydration can run before the runtime endpoint is known. Carried across, a team id filters the new instance's list down to nothing. `linearIssueFocus` is a one-shot identifier so work-status can open a specific issue in that panel; it is not persisted. Opening a new browser tab with an address (`openContextPreview`, `openContextBrowser`, `openAgentBrowserTab`) notes it, keyed by directory and tab id, in the session-only set in `lib/browser/devServerWait.ts`; the tab's first mount reads and forgets it. Only a noted tab waits for its dev server on the first load. A tab restored from saved state, or remounted later, loads once and shows the failure. When those openers hit a tab that already exists, they send it a session-only load request instead. A mounted tab that shows a failure, or has not shown a page yet, loads the address the way a typed one loads, wait included, so a failure from launch does not stay up once a project action starts the server; a tab showing a working page ignores the request and is only focused, keeping what the person had on it.
+These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. Opening a new browser tab with an address (`openContextPreview`, `openContextBrowser`, `openAgentBrowserTab`) notes it, keyed by directory and tab id, in the session-only set in `lib/browser/devServerWait.ts`; the tab's first mount reads and forgets it. Only a noted tab waits for its dev server on the first load. A tab restored from saved state, or remounted later, loads once and shows the failure. When those openers hit a tab that already exists, they send it a session-only load request instead. A mounted tab that shows a failure, or has not shown a page yet, loads the address the way a typed one loads, wait included, so a failure from launch does not stay up once a project action starts the server; a tab showing a working page ignores the request and is only focused, keeping what the person had on it.
 
 Context-panel session chats render in this app as a chat column pinned to
 their session (`ChatView` `pinnedSession`, see the sync documentation's
@@ -140,6 +150,30 @@ new chat cannot even be created. A resolution still in flight is awaited, not
 replaced. If the server still cannot name the home, the app starts in `/` as it
 did before. A home that is already known, from storage or the desktop shell,
 shows the app at once.
+
+Nothing about directories is carried from one host to another (the desktop
+host switcher, a mobile instance switch). Three rules hold that:
+
+- The home lookup for a switch starts after every subscriber of the
+  endpoint-changed event has run. One of them rebinds the client; a lookup
+  started earlier still reaches the previous host and takes its home for the
+  new one's.
+- After a switch, only the host's own answer names the home. System info (which
+  derives a home from the stored last directory), the desktop shell's home, and
+  the stored home all describe the host the window booted on, so they are used
+  at boot only. A host that does not answer (401 before login) leaves the home
+  unknown, and the post-login resolution above names it.
+- `session-ui-store` restores the directory it remembers for the host being
+  entered. When it remembers none and the switch comes from another real host,
+  `resetForRuntimeSwitch` forgets the directory: it is unknown (`/`,
+  `isHomeReady` false, no client directory; `isDirectoryUnknown`) until the home
+  resolves, and `synchronizeHomeDirectory` then adopts the home whatever is
+  stored. The reset writes nothing, so the previous host's stored last
+  directory survives for its next start. Coming from no host (a cold launch
+  that connects through a switch) the directory the window started with stays.
+  Leaving a host records its directory unless it is unknown; a key that names
+  no host (disconnected) records none. A host whose home lookup failed still
+  has a directory, and it is recorded.
 
 ### Session / project coordination stores
 
@@ -163,7 +197,9 @@ Examples:
 
 These stores coordinate persistent project/session metadata across multiple views.
 
-`useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load that resolves while a write is in flight keeps the local value for that field group only, so a slow snapshot cannot undo newer typing while still delivering the plan list it fetched. A failed load sets `error` and preserves the cached snapshot — an unreachable server must never render as "this project has no notes". Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
+`useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load captures per-field mutation revisions and preserves fields changed by a newer write, even when that write finishes before the response arrives. A failed load sets `error` and preserves the cached snapshot. Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
+
+Ordinary loads still reuse a loaded entry. Visible-owner synchronization is owned by `lib/projectContextSync.ts`, as described in the panel's `DOCUMENTATION.md`. Forced loads wait for admitted local writes, so a notification sent before this client's save response cannot lose a peer change behind an in-flight flag. A write still pending when a forced read returns earns another read after it settles, including after rollback. Only a resolved write advances its field revision; a rejected attempt cannot hide authoritative peer data. Concurrent loads share one promise; refresh demand received during a read earns one trailing authoritative read. Runtime reset retires those promises and their generation, so an older success or failure cannot populate or alter a same-id entry on the new host.
 
 `useRoutingStore.ts` projects the server's Jev routing state (whether the Auto
 model may be offered, the config Settings → Routing edits, the last decision
@@ -174,6 +210,10 @@ failed read keeps what was known and records `loadError` instead of reading as
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
 On web, desktop, and mobile the server delivers the queue independently of the
 UI. The store projects authoritative snapshots and revisioned session updates.
+Scheduled queue items also retain their `scheduledTask` provenance. An inherited
+scheduled item has no pinned send config; ordinary items keep their captured
+provider and model. Both appear in the same queue. Scheduled items allow reorder
+and removal, but not editing or manual send. Bulk take leaves them queued.
 `sync/message-queue-sync.ts` receives queue events through the shared control SSE
 stream at `/api/openchamber/events`, including while OpenCode uses SSE fallback.
 It adds no poller or per-session connection. Either stream reconnecting requests
@@ -218,6 +258,7 @@ Global refresh rules:
 - Fetch failure must remain distinguishable from a successful empty list; failed scopes cannot destructively clear cached sessions.
 - Runtime switch increments the load generation and clears the previous runtime's snapshot so stale in-flight work cannot commit.
 - Live session mutations update the cache directly after successful SDK actions; they preserve stable directory metadata when lighter event payloads omit it.
+- Live directory-store sessions handed to a load or a directory refresh only fill gaps: they add sessions the cache does not hold, active or archived, and never replace a record it does. The cache hears every session event and action result itself, while a directory store can keep an old copy of a session it does not own; when that copy won, sessions the user had marked done came back under "In work" until the next full load. The desktop sidebar and the mobile sessions sheet apply the same rule when they combine the two sources.
 - Full and per-directory loads capture a mutation revision. At commit time they overlay only per-session create/update/archive/delete/move mutations newer than that baseline, including no-op deletion tombstones, so an older response cannot undo newer local authority.
 
 Permission auto-accept policy is authoritative in the active Web server or VS Code extension host. Owner snapshots carry a monotonic revision; the UI rejects lower revisions and any hydration or mutation completion captured before a runtime reset. Persisted UI policy is not live authority. The version-2 store retains an old unscoped policy only as a one-runtime legacy migration candidate, then removes it after successful migration.

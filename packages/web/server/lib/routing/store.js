@@ -20,12 +20,13 @@ import { z } from 'zod';
 import {
   BUILTIN_CATEGORIES,
   DEFAULT_MIN_CONFIDENCE,
+  DEFAULT_PRESERVE_CACHE,
   DEFAULT_SAFETY_THRESHOLD,
   DEFAULT_STICKINESS,
   THINKING_LEVELS,
   isAutoModel,
 } from './defaults.js';
-import { CLASSIFIER_SOURCES, normalizeCustomEndpointUrl } from './classifier.js';
+import { CLASSIFIER_SOURCES, parseCustomEndpointUrl } from './classifier.js';
 
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -74,6 +75,7 @@ const fileSchema = z.object({
   enabled: z.boolean().optional(),
   fallback: z.object({ model: modelSchema, variant: variantSchema.optional() }).strict().nullable().optional(),
   minConfidence: z.number().min(0).max(1).optional(),
+  preserveCache: z.boolean().optional(),
   safetyNet: z.object({ enabled: z.boolean(), threshold: z.number().min(0).max(1) }).strict().optional(),
   stickiness: stickinessSchema.optional(),
   categories: z.record(z.string().regex(CATEGORY_ID), z.discriminatedUnion('builtin', [builtinOverrideSchema, userCategorySchema])).optional(),
@@ -95,6 +97,8 @@ const effectiveConfigSchema = z.object({
   enabled: z.boolean(),
   fallback: z.object({ model: modelSchema, variant: variantSchema }).strict().nullable(),
   minConfidence: z.number().min(0).max(1),
+  // Clients from before the setting send a config without it.
+  preserveCache: z.boolean().default(DEFAULT_PRESERVE_CACHE),
   safetyNet: z.object({ enabled: z.boolean(), threshold: z.number().min(0).max(1) }).strict(),
   // Older clients send configs without it; the runtime keeps the stored value then.
   stickiness: stickinessSchema.optional(),
@@ -105,9 +109,9 @@ const authSchema = z.object({ token: z.string().min(1).max(4000) }).strict();
 
 const classifierSchema = z.object({ version: z.literal(FILE_VERSION), source: z.enum(CLASSIFIER_SOURCES) }).strict();
 
-const isNormalizedEndpointUrl = (url) => {
+const isParsedEndpointUrl = (url) => {
   try {
-    return normalizeCustomEndpointUrl(url) === url;
+    return parseCustomEndpointUrl(url) === url;
   } catch {
     return false;
   }
@@ -115,7 +119,7 @@ const isNormalizedEndpointUrl = (url) => {
 
 // A hand-edited URL that the setter would not have produced is not an endpoint.
 const customEndpointSchema = z.object({
-  url: z.string().max(2000).refine(isNormalizedEndpointUrl, { message: 'Invalid endpoint URL' }),
+  url: z.string().max(2000).refine(isParsedEndpointUrl, { message: 'Invalid endpoint URL' }),
   model: z.string().trim().min(1).max(200),
   key: z.string().min(1).max(4000).optional(),
 }).strict();
@@ -189,6 +193,7 @@ export const resolveEffectiveConfig = (stored) => {
     enabled: file.enabled ?? false,
     fallback: file.fallback ? { model: file.fallback.model, variant: file.fallback.variant ?? null } : null,
     minConfidence: file.minConfidence ?? DEFAULT_MIN_CONFIDENCE,
+    preserveCache: file.preserveCache ?? DEFAULT_PRESERVE_CACHE,
     safetyNet: file.safetyNet ?? { enabled: false, threshold: DEFAULT_SAFETY_THRESHOLD },
     stickiness: file.stickiness ?? { ...DEFAULT_STICKINESS },
     categories,
@@ -226,7 +231,13 @@ export const toStoredConfig = (config) => {
   for (const builtin of BUILTIN_CATEGORIES) {
     if (!present.has(builtin.id)) categories[builtin.id] = { builtin: true, deleted: true };
   }
-  const stored = { version: FILE_VERSION, enabled: config.enabled, minConfidence: config.minConfidence, safetyNet: config.safetyNet };
+  const stored = {
+    version: FILE_VERSION,
+    enabled: config.enabled,
+    minConfidence: config.minConfidence,
+    preserveCache: config.preserveCache,
+    safetyNet: config.safetyNet,
+  };
   const sameStickiness = config.stickiness
     && Object.keys(DEFAULT_STICKINESS).every((field) => config.stickiness[field] === DEFAULT_STICKINESS[field]);
   if (config.stickiness && !sameStickiness) stored.stickiness = config.stickiness;

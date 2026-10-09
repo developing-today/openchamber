@@ -74,6 +74,12 @@
         "desktop"
       ]
     },
+    "desktopLinuxNativeFrame": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "desktopUiPassword": {
       "scope": "instance",
       "surfaces": [
@@ -274,6 +280,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarShowChatsSection": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "workStatusSectionOrder": {
       "scope": "profile"
     },
@@ -371,6 +381,9 @@
     "diffWrapLines": {
       "scope": "profile"
     },
+    "diffHideWhitespace": {
+      "scope": "profile"
+    },
     "gitChangesViewMode": {
       "scope": "profile"
     },
@@ -387,6 +400,9 @@
       "scope": "profile"
     },
     "fileEditorKeymap": {
+      "scope": "profile"
+    },
+    "fileEditorVimMappings": {
       "scope": "profile"
     },
     "autoSaveEnabled": {
@@ -463,6 +479,12 @@
     "monoFont": {
       "scope": "profile"
     },
+    "customUiFont": {
+      "scope": "profile"
+    },
+    "customMonoFont": {
+      "scope": "profile"
+    },
     "padding": {
       "scope": "profile",
       "perSurface": true
@@ -516,6 +538,9 @@
     "recentAgents": {
       "scope": "profile"
     },
+    "favoriteAgents": {
+      "scope": "profile"
+    },
     "recentEfforts": {
       "scope": "profile"
     },
@@ -538,6 +563,17 @@
         "desktop",
         "mobile"
       ]
+    },
+    "sessionReviewOfferEnabled": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionWorkKeepInGroup": {
+      "scope": "profile"
     },
     "sessionGoalEnabled": {
       "scope": "profile"
@@ -770,22 +806,6 @@
       "local": true
     },
     "diffFileTreeWidth": {
-      "scope": "device",
-      "local": true
-    },
-    "linearIssueListStatus": {
-      "scope": "device",
-      "local": true
-    },
-    "linearIssueListAssignee": {
-      "scope": "device",
-      "local": true
-    },
-    "linearIssueListTeamIdByRuntime": {
-      "scope": "device",
-      "local": true
-    },
-    "linearIssueListPriority": {
       "scope": "device",
       "local": true
     },
