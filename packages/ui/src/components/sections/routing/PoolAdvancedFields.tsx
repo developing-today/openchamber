@@ -1,6 +1,7 @@
 import React from 'react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   SETTINGS_HELPER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
@@ -13,6 +14,7 @@ import {
   isConcreteTarget,
   parseFormNumber,
   pruneEmpty,
+  routeReferenceID,
   setRouteField,
   setTargetEntry,
   targetReference,
@@ -36,8 +38,9 @@ export const RangedNumberField: React.FC<{
   max: number;
   step?: number | 'any';
   placeholder?: string;
+  disabled?: boolean;
   onCommit: (value: number | undefined) => void;
-}> = ({ label, value, min, max, step = 1, placeholder, onCommit }) => {
+}> = ({ label, value, min, max, step = 1, placeholder, disabled = false, onCommit }) => {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState(value === undefined ? '' : String(value));
   const valid = isValidFormNumber(parseFormNumber(draft), min, max, step);
@@ -64,6 +67,7 @@ export const RangedNumberField: React.FC<{
         step={step}
         value={draft}
         placeholder={placeholder}
+        disabled={disabled}
         aria-label={label}
         aria-invalid={!valid}
         onChange={(event) => setDraft(event.target.value)}
@@ -92,6 +96,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
   const budgets = route.budgets ?? {};
   const concrete = (route.targets ?? []).filter(isConcreteTarget);
   const references = [...new Set(concrete.map(targetReference))];
+  const modelReferences = [...new Set(concrete.filter((target) => routeReferenceID(target) === null).map(targetReference))];
 
   const setHealth = (key: keyof Health, value: unknown) =>
     onChange(setRouteField(route, 'health', pruneEmpty(withOptional(route.health, key, value))));
@@ -171,12 +176,24 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
       <div className="space-y-2">
         <p className={heading}>{t('settings.pools.advanced.health')}</p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="typography-meta text-muted-foreground">{t('settings.pools.advanced.firstToken')}</span>
+            <div className="flex h-8 items-center gap-3">
+              <Switch
+                checked={health.firstTokenTimeoutMs === false}
+                onCheckedChange={(checked) => setHealth('firstTokenTimeoutMs', checked ? false : undefined)}
+                aria-label={t('settings.pools.advanced.firstTokenOff')}
+              />
+              <span className="typography-meta text-muted-foreground">{t('settings.pools.advanced.firstTokenOff')}</span>
+            </div>
+          </div>
           <RangedNumberField
             label={t('settings.pools.advanced.firstToken')}
             value={typeof health.firstTokenTimeoutMs === 'number' ? seconds(health.firstTokenTimeoutMs) : undefined}
             min={1}
             max={3600}
             placeholder="10"
+            disabled={health.firstTokenTimeoutMs === false}
             onCommit={(value) => setHealth('firstTokenTimeoutMs', toMs(value))}
           />
           <RangedNumberField
@@ -231,11 +248,11 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
         </div>
       </div>
 
-      {references.length > 0 ? (
+      {modelReferences.length > 0 ? (
         <div className="space-y-2">
           <p className={heading}>{t('settings.pools.advanced.budgets')}</p>
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.advanced.budgetsInfo')}</p>
-          {references.map((reference) => {
+          {modelReferences.map((reference) => {
             const budget: Budget = budgets[reference] ?? {};
             return (
               <div key={reference} className="space-y-2 rounded-md border border-border/40 p-3">

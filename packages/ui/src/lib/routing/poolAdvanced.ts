@@ -46,5 +46,47 @@ export const setTargetEntry = <T extends object>(
   return pruneEmpty(next);
 };
 
+export type TargetOptions = {
+  defaultVariant?: string;
+  variants?: Record<string, string>;
+  until?: number;
+};
+
+export const targetLabel = (target: ModelRouteTarget): string => (typeof target === 'string' ? target : target.model);
+
+export const targetUntil = (target: ModelRouteTarget): number | undefined =>
+  typeof target === 'string' ? undefined : target.until;
+
+export const targetOptions = (target: ModelRouteTarget): TargetOptions =>
+  typeof target === 'string' ? {} : { defaultVariant: target.defaultVariant, variants: target.variants, until: target.until };
+
+/** A target with no options stays a plain string so the saved config keeps its short form. */
+export const withTargetOptions = (target: ModelRouteTarget, options: TargetOptions): ModelRouteTarget => {
+  const model = targetLabel(target);
+  const kept: TargetOptions = {};
+  if (options.defaultVariant) kept.defaultVariant = options.defaultVariant;
+  if (options.variants && Object.keys(options.variants).length > 0) kept.variants = options.variants;
+  if (options.until !== undefined) kept.until = options.until;
+  return Object.keys(kept).length === 0 ? model : { model, ...kept };
+};
+
+const ROUTE_REFERENCE_PREFIX = 'opencode-route/';
+
+/** The route id a target points at when it is another pool, or null for a model. */
+export const routeReferenceID = (target: ModelRouteTarget): string | null => {
+  const reference = targetReference(target);
+  return reference.startsWith(ROUTE_REFERENCE_PREFIX) ? reference.slice(ROUTE_REFERENCE_PREFIX.length) : null;
+};
+
+export const routeReference = (routeID: string): string => `${ROUTE_REFERENCE_PREFIX}${routeID}`;
+
+/** An epoch-millisecond instant as the local value a datetime-local input expects. */
+export const epochToLocalInput = (epoch: number | undefined): string => {
+  if (epoch === undefined) return '';
+  const date = new Date(epoch);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+};
+
 /** The automatic-review settings to save, or null when every field is back at its default. */
 export const tuningToSave = (tuning: ModelRouteTuning): ModelRouteTuning | null => pruneEmpty(tuning) ?? null;

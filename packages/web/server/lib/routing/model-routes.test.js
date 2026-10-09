@@ -79,6 +79,30 @@ describe('validateModelRoute advanced fields', () => {
   });
 });
 
+describe('validateModelRoute target options and display name', () => {
+  it('accepts a display name and target variant defaults and remaps', () => {
+    expect(
+      validateModelRoute('luna', {
+        name: 'Luna pool',
+        targets: [{ model: 'openai/gpt-6-luna', defaultVariant: 'max', variants: { low: 'high' }, until: 1893575040000 }],
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects a non-string name, variant default or remap', () => {
+    expect(validateModelRoute('luna', { name: 4, targets: ['openai/gpt-6-luna'] })).toMatch(/name must be a string/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: 2 }] }),
+    ).toMatch(/defaultVariant must be a string/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: ['high'] }] }),
+    ).toMatch(/variants must map/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: 3 } }] }),
+    ).toMatch(/remap "low" must be a string/);
+  });
+});
+
 describe('validateModelRouteTuning', () => {
   it('accepts partial tuning and rejects out-of-range values', () => {
     expect(validateModelRouteTuning({})).toBeNull();

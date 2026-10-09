@@ -80,12 +80,20 @@ const validateTarget = (target) => {
     return "its model must look like provider/model";
   if (target.until !== undefined && !(Number.isInteger(target.until) && target.until > 0))
     return "its until must be a positive epoch-millisecond time";
+  if (target.defaultVariant !== undefined && typeof target.defaultVariant !== "string")
+    return "its defaultVariant must be a string";
+  if (target.variants !== undefined) {
+    if (!isRecord(target.variants)) return "its variants must map route variants to target variants";
+    for (const [from, to] of Object.entries(target.variants))
+      if (typeof to !== "string") return `its variant remap "${from}" must be a string`;
+  }
   return null;
 };
 
 export const validateModelRoute = (id, route) => {
   if (!ROUTE_ID_PATTERN.test(id)) return `invalid route id "${id}"`;
   if (!isRecord(route)) return `route "${id}" must be an object`;
+  if (route.name !== undefined && typeof route.name !== "string") return `route "${id}" name must be a string`;
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
   for (const target of route.targets) {

@@ -30,9 +30,11 @@ import {
   type RouteTargetStats,
 } from '@/lib/routing/modelRoutesApi';
 import { PoolAdvancedFields } from '@/components/sections/routing/PoolAdvancedFields';
+import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/PoolTargetOptions';
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
 import { PRESET_ROUTE_IDS, presetTargets, type PresetId } from '@/lib/routing/routePresets';
+import { routeReference, routeReferenceID, targetLabel, targetUntil } from '@/lib/routing/poolAdvanced';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 
@@ -44,13 +46,9 @@ const PRESETS = [
 
 type RouteTarget = NonNullable<ModelRoute['targets']>[number];
 
-const targetLabel = (target: RouteTarget): string => (typeof target === 'string' ? target : target.model);
-
-const targetUntil = (target: RouteTarget): number | undefined =>
-  typeof target === 'string' ? undefined : target.until;
-
-/** The concrete provider and model of a target, or null for a pattern that names several models. */
+/** The concrete provider and model of a target, or null for a pattern or another pool. */
 const concreteTarget = (target: RouteTarget): { providerID: string; modelID: string } | null => {
+  if (routeReferenceID(target) !== null) return null;
   const [ref] = targetLabel(target).split('#');
   const slash = ref.indexOf('/');
   if (slash <= 0) return null;
@@ -97,11 +95,12 @@ const TargetWait: React.FC<{ providerID: string; modelID: string }> = ({ provide
 const PoolRow: React.FC<{
   id: string;
   route: ModelRoute;
+  otherPoolIDs: string[];
   expanded: boolean;
   onToggle: () => void;
   onChange: (route: ModelRoute) => void;
   onRemove: () => void;
-}> = ({ id, route, expanded, onToggle, onChange, onRemove }) => {
+}> = ({ id, route, otherPoolIDs, expanded, onToggle, onChange, onRemove }) => {
   const { t } = useI18n();
   const [providerId, setProviderId] = React.useState('');
   const [modelId, setModelId] = React.useState('');
@@ -167,6 +166,14 @@ const PoolRow: React.FC<{
       </div>
       {expanded ? (
         <div className="space-y-4 px-1 pb-4 pt-2">
+          <SettingsStackedField label={t('settings.pools.name')} info={t('settings.pools.nameInfo')} controlClassName="max-w-none">
+            <CommitInput
+              label={t('settings.pools.name')}
+              value={route.name ?? ''}
+              placeholder={id}
+              onCommit={(next) => onChange({ ...route, name: next || undefined })}
+            />
+          </SettingsStackedField>
           <SettingsStackedField label={t('settings.pools.autonomy')} info={t('settings.pools.autonomyInfo')} controlClassName="max-w-none">
             <Select
               value={route.autonomy ?? '__unset__'}
@@ -196,28 +203,54 @@ const PoolRow: React.FC<{
             {targets.map((target, index) => {
               const until = targetUntil(target);
               const concrete = concreteTarget(target);
+              const pool = routeReferenceID(target);
               return (
-              <div key={`${targetLabel(target)}-${index}`} className="flex items-center gap-2">
-                <span className="typography-ui-label min-w-0 flex-1 truncate">
-                  {targetLabel(target)}
-                  {until !== undefined ? (
-                    <span className="typography-meta text-muted-foreground">
-                      {` · ${t('settings.pools.pattern.untilLabel', { time: new Date(until).toLocaleString() })}`}
-                    </span>
-                  ) : null}
-                </span>
-                {concrete ? <TargetWait providerID={concrete.providerID} modelID={concrete.modelID} /> : null}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onChange({ ...route, targets: targets.filter((_, i) => i !== index) })}
-                >
-                  {t('settings.pools.removeTarget')}
-                </Button>
+              <div key={`${targetLabel(target)}-${index}`} className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="typography-ui-label min-w-0 flex-1 truncate">
+                    {pool !== null ? `${t('settings.pools.targetPool')}: ${pool}` : targetLabel(target)}
+                    {until !== undefined ? (
+                      <span className="typography-meta text-muted-foreground">
+                        {` · ${t('settings.pools.pattern.untilLabel', { time: new Date(until).toLocaleString() })}`}
+                      </span>
+                    ) : null}
+                  </span>
+                  {concrete ? <TargetWait providerID={concrete.providerID} modelID={concrete.modelID} /> : null}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onChange({ ...route, targets: targets.filter((_, i) => i !== index) })}
+                  >
+                    {t('settings.pools.removeTarget')}
+                  </Button>
+                </div>
+                <PoolTargetOptions
+                  target={target}
+                  onChange={(next) => onChange({ ...route, targets: targets.map((entry, i) => (i === index ? next : entry)) })}
+                />
               </div>
               );
             })}
           </div>
+          {otherPoolIDs.length > 0 ? (
+            <SettingsStackedField label={t('settings.pools.addPoolTarget')} info={t('settings.pools.addPoolTargetInfo')} controlClassName="max-w-none">
+              <Select
+                value=""
+                onValueChange={(next) => onChange({ ...route, targets: [...targets, routeReference(next)] })}
+              >
+                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.addPoolTarget')}>
+                  <SelectValue placeholder={t('settings.pools.addPoolTargetPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {otherPoolIDs.map((poolID) => (
+                    <SelectItem key={poolID} value={poolID}>
+                      {poolID}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsStackedField>
+          ) : null}
           <SettingsStackedField label={t('settings.pools.pattern.label')} info={t('settings.pools.pattern.info')} controlClassName="max-w-none">
             <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
               <Input
@@ -377,6 +410,7 @@ export const ModelPoolsSection: React.FC = () => {
   const providers = useConfigStore((state) => state.providers);
   const decisions = useRoutingStore((state) => state.decisions);
   const [routes, setRoutes] = React.useState<Record<string, ModelRoute> | null>(null);
+  const [drafts, setDrafts] = React.useState<Record<string, ModelRoute>>({});
   const [tuning, setTuning] = React.useState<ModelRouteTuning | null>(null);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [newId, setNewId] = React.useState('');
@@ -442,13 +476,17 @@ export const ModelPoolsSection: React.FC = () => {
     setExpandedId(PRESET_ROUTE_IDS[preset]);
   };
 
+  // A pool needs at least one target to be saved, so a new pool stays a local draft until it gets one.
   const addPool = () => {
     const id = newId.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
-    if (!id || !routes || routes[id]) return;
-    void persist({ ...routes, [id]: { targets: [] } });
+    if (!id || !routes || routes[id] || drafts[id]) return;
+    setDrafts((current) => ({ ...current, [id]: { targets: [] } }));
     setNewId('');
     setExpandedId(id);
   };
+
+  const withoutKey = (record: Record<string, ModelRoute>, id: string) =>
+    Object.fromEntries(Object.entries(record).filter(([key]) => key !== id));
 
   const recentDecisions = React.useMemo(
     () => Object.values(decisions).sort((a, b) => b.at - a.at).slice(0, 8),
@@ -472,20 +510,36 @@ export const ModelPoolsSection: React.FC = () => {
               ))}
             </div>
             <div className="divide-y divide-border/40 border-y border-border/40">
-              {Object.entries(routes).map(([id, route]) => (
-                <PoolRow
-                  key={id}
-                  id={id}
-                  route={route}
-                  expanded={expandedId === id}
-                  onToggle={() => setExpandedId((current) => (current === id ? null : id))}
-                  onChange={(next) => void persist({ ...routes, [id]: next })}
-                  onRemove={() => {
-                    const rest = Object.fromEntries(Object.entries(routes).filter(([key]) => key !== id));
-                    void persist(rest);
-                  }}
-                />
-              ))}
+              {Object.entries({ ...routes, ...drafts }).map(([id, route]) => {
+                const isDraft = id in drafts;
+                return (
+                  <PoolRow
+                    key={id}
+                    id={id}
+                    route={route}
+                    otherPoolIDs={Object.keys(routes).filter(
+                      (other) => other !== id && !(route.targets ?? []).some((target) => routeReferenceID(target) === other),
+                    )}
+                    expanded={expandedId === id}
+                    onToggle={() => setExpandedId((current) => (current === id ? null : id))}
+                    onChange={(next) => {
+                      if (isDraft && (next.targets ?? []).length === 0) {
+                        setDrafts((current) => ({ ...current, [id]: next }));
+                        return;
+                      }
+                      if (isDraft) setDrafts((current) => withoutKey(current, id));
+                      void persist({ ...routes, [id]: next });
+                    }}
+                    onRemove={() => {
+                      if (isDraft) {
+                        setDrafts((current) => withoutKey(current, id));
+                        return;
+                      }
+                      void persist(withoutKey(routes, id));
+                    }}
+                  />
+                );
+              })}
             </div>
             <SettingsFieldRow label={t('settings.pools.addLabel')} settingsItem="pools.add-pool">
               <div className="flex w-full min-w-0 items-center gap-2">

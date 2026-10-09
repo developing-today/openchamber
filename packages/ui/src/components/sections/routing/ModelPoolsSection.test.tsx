@@ -138,13 +138,21 @@ const typeInto = async (input: HTMLInputElement, value: string) => {
   });
 };
 
-const openAdvanced = async (container: HTMLElement, poolName = 'kept') => {
+const expandPool = async (container: HTMLElement, poolName = 'kept') => {
   const row = [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]')].find((el) => el.textContent?.includes(poolName));
   expect(row).toBeTruthy();
   await act(async () => row!.click());
-  const toggle = [...container.querySelectorAll('button')].find((el) => el.textContent?.trim() === 'Show advanced options');
-  expect(toggle).toBeTruthy();
-  await act(async () => toggle!.click());
+};
+
+const clickButton = async (container: HTMLElement, text: string) => {
+  const button = [...container.querySelectorAll('button')].find((el) => el.textContent?.trim() === text);
+  expect(button).toBeTruthy();
+  await act(async () => button!.click());
+};
+
+const openAdvanced = async (container: HTMLElement, poolName = 'kept') => {
+  await expandPool(container, poolName);
+  await clickButton(container, 'Show advanced options');
 };
 
 describe('ModelPoolsSection', () => {
@@ -274,6 +282,57 @@ describe('ModelPoolsSection', () => {
       await typeInto(findInput(dom.container, 'Soft limit (% of allowance)'), '80');
       const saved = routeSaves.at(-1) as Record<string, { budgets?: Record<string, Record<string, number>> }>;
       expect(saved.kept.budgets).toEqual({ 'p/cheap': { requestsPerMinute: 60, softLimit: 0.8 } });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('display name saves when left and an empty name removes it', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'] } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container);
+      await typeInto(findInput(dom.container, 'Display name'), 'Budget pool');
+      expect((routeSaves.at(-1) as Record<string, { name?: string }>).kept.name).toBe('Budget pool');
+      await typeInto(findInput(dom.container, 'Display name'), '');
+      expect((routeSaves.at(-1) as Record<string, { name?: string }>).kept.name).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a target remap saves as a variants map on the object form', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'] } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container);
+      await clickButton(dom.container, 'Options');
+      await typeInto(findInput(dom.container, 'Default variant'), 'max');
+      expect((routeSaves.at(-1) as Record<string, { targets: unknown[] }>).kept.targets).toEqual([
+        { model: 'p/cheap', defaultVariant: 'max' },
+      ]);
+      await typeInto(findInput(dom.container, 'Pool variant'), 'low');
+      await typeInto(findInput(dom.container, 'Target variant'), 'high');
+      await clickButton(dom.container, 'Add remap');
+      expect((routeSaves.at(-1) as Record<string, { targets: unknown[] }>).kept.targets).toEqual([
+        { model: 'p/cheap', defaultVariant: 'max', variants: { low: 'high' } },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('disabling the first-token timeout saves false and re-enabling removes it', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'] } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await openAdvanced(dom.container);
+      await act(async () => findSwitch(dom.container, 'Never time out the first token').click());
+      expect((routeSaves.at(-1) as Record<string, { health?: { firstTokenTimeoutMs?: unknown } }>).kept.health).toEqual({
+        firstTokenTimeoutMs: false,
+      });
+      await act(async () => findSwitch(dom.container, 'Never time out the first token').click());
+      expect((routeSaves.at(-1) as Record<string, { health?: unknown }>).kept.health).toBeUndefined();
     } finally {
       await cleanup();
     }

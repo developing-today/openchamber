@@ -782,6 +782,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {
+    id: 'routing.pools-targets',
+    page: 'routing',
+    titleKey: 'settings.pools.target.options',
+    descriptionKey: 'settings.pools.target.remapsInfo',
+    keywords: ['pool', 'target', 'variant', 'remap', 'default variant', 'until', 'expiry', 'expire', 'nested pool', 'display name', 'first token'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
+  },
+  {
     id: 'routing.pools-tuning',
     page: 'routing',
     titleKey: 'settings.pools.tuning.enabled',

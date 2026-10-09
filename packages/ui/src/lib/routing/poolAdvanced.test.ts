@@ -1,14 +1,65 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  epochToLocalInput,
   isConcreteTarget,
   parseFormNumber,
   pruneEmpty,
+  routeReference,
+  routeReferenceID,
   setRouteField,
   setTargetEntry,
+  targetOptions,
   targetReference,
+  targetUntil,
   tuningToSave,
   withOptional,
+  withTargetOptions,
 } from './poolAdvanced';
+
+describe('target options', () => {
+  test('a target without options stays a plain string', () => {
+    expect(withTargetOptions('openai/gpt-6-luna', {})).toBe('openai/gpt-6-luna');
+    expect(withTargetOptions({ model: 'openai/gpt-6-luna', defaultVariant: 'max' }, { defaultVariant: undefined })).toBe(
+      'openai/gpt-6-luna',
+    );
+  });
+
+  test('options are written onto the object form and read back', () => {
+    const saved = withTargetOptions('openai/gpt-6-luna', { defaultVariant: 'max', variants: { low: 'high' }, until: 1893575040000 });
+    expect(saved).toEqual({
+      model: 'openai/gpt-6-luna',
+      defaultVariant: 'max',
+      variants: { low: 'high' },
+      until: 1893575040000,
+    });
+    expect(targetOptions(saved)).toEqual({ defaultVariant: 'max', variants: { low: 'high' }, until: 1893575040000 });
+    expect(targetUntil(saved)).toBe(1893575040000);
+    expect(targetUntil('openai/gpt-6-luna')).toBeUndefined();
+  });
+
+  test('clearing every option returns the short form', () => {
+    const object = { model: 'openai/gpt-6-luna', defaultVariant: 'max' };
+    expect(withTargetOptions(object, {})).toBe('openai/gpt-6-luna');
+    expect(withTargetOptions(object, { variants: {} })).toBe('openai/gpt-6-luna');
+  });
+});
+
+describe('pool references', () => {
+  test('a route reference names another pool by id', () => {
+    expect(routeReference('cheap')).toBe('opencode-route/cheap');
+    expect(routeReferenceID('opencode-route/cheap')).toBe('cheap');
+    expect(routeReferenceID({ model: 'opencode-route/cheap', until: 1893575040000 })).toBe('cheap');
+    expect(routeReferenceID('openai/gpt-6-luna')).toBeNull();
+  });
+});
+
+describe('epoch to local input', () => {
+  test('formats an instant for a datetime-local input in local time', () => {
+    const epoch = new Date(2030, 0, 2, 9, 5).getTime();
+    expect(epochToLocalInput(epoch)).toBe('2030-01-02T09:05');
+    expect(epochToLocalInput(undefined)).toBe('');
+  });
+});
 
 describe('target references', () => {
   test('keys budgets and weights by the model without its variant', () => {
