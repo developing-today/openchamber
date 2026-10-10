@@ -5,6 +5,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
     createTerminalRuntime,
     createDictationRuntime,
     createMessageStreamWsRuntime,
+    createPersistentPtyWsRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -102,6 +103,15 @@ export const createStartupPipelineRuntime = (dependencies) => {
       wsClients: messageStreamWsClients,
       triggerHealthCheck,
       upstreamStallTimeoutMs,
+    });
+
+    createPersistentPtyWsRuntime({
+      server,
+      uiAuthController,
+      isRequestOriginAllowed,
+      rejectWebSocketUpgrade,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
     });
 
     setupProxy(app);

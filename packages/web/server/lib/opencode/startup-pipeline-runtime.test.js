@@ -9,6 +9,7 @@ describe('startup pipeline runtime', () => {
       createTerminalRuntime: () => ({}),
       createDictationRuntime: () => ({}),
       createMessageStreamWsRuntime: () => ({}),
+      createPersistentPtyWsRuntime: () => ({}),
       createServerStartupRuntime: () => ({
         resolveBindHost: () => '127.0.0.1',
         startListeningAndMaybeTunnel: async () => {

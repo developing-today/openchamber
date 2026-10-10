@@ -138,6 +138,7 @@ import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-stora
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
+import { createPersistentPtyWsRuntime } from './lib/persistent-pty/runtime.js';
 import { createRelayService, relayBlockedByEnterprise } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createRelayKeyStore } from './lib/relay/key-store.js';
@@ -1389,6 +1390,7 @@ const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createDictationRuntime,
   createMessageStreamWsRuntime,
+  createPersistentPtyWsRuntime,
   createServerStartupRuntime,
 });
 
