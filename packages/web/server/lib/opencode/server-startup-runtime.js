@@ -1,6 +1,14 @@
 /** One stray uncaught exception is survivable; a storm means the process is broken. */
 const UNCAUGHT_STORM_LIMIT = 10;
 const UNCAUGHT_STORM_WINDOW_MS = 60_000;
+const INHERITED_LISTEN_FD = 3;
+
+// systemd socket activation passes the listening socket as fd 3 and names this process in LISTEN_PID.
+export const resolveInheritedListenFd = (env, pid) => {
+  if (env.LISTEN_PID !== String(pid)) return null;
+  const count = Number.parseInt(env.LISTEN_FDS ?? '', 10);
+  return Number.isInteger(count) && count >= 1 ? INHERITED_LISTEN_FD : null;
+};
 
 export const createServerStartupRuntime = (dependencies) => {
   const {
@@ -12,6 +20,7 @@ export const createServerStartupRuntime = (dependencies) => {
     tunnelAuthController,
     startTunnelWithNormalizedRequest,
     gracefulShutdown,
+    reloadOpenCodeConfiguration,
     getSignalsAttached,
     setSignalsAttached,
     syncToHmrState,
@@ -40,6 +49,7 @@ export const createServerStartupRuntime = (dependencies) => {
         reject(error);
       };
       server.once('error', onError);
+      const inheritedFd = resolveInheritedListenFd(process.env, process.pid);
       const onListening = async () => {
         server.off('error', onError);
         try {
@@ -124,7 +134,13 @@ export const createServerStartupRuntime = (dependencies) => {
         }
       };
 
-      server.listen(port, bindHost, onListening);
+      if (inheritedFd !== null) {
+        delete process.env.LISTEN_FDS;
+        delete process.env.LISTEN_PID;
+        server.listen({ fd: inheritedFd }, onListening);
+      } else {
+        server.listen(port, bindHost, onListening);
+      }
     });
 
     return { activePort };
@@ -132,18 +148,22 @@ export const createServerStartupRuntime = (dependencies) => {
 
   const attachProcessHandlers = ({ attachSignals }) => {
     if (attachSignals && !getSignalsAttached()) {
-      const handleSignal = async () => {
+      const handleStop = async () => {
         await gracefulShutdown();
       };
-      // Cover every signal a shell or dev harness may use to stop/restart us, so
-      // the managed OpenCode child is always torn down gracefully instead of
-      // orphaned: SIGINT/SIGQUIT (Ctrl+C/Ctrl+\), SIGTERM (kill/default), SIGHUP
-      // (terminal close), SIGUSR2 (nodemon restart outside Windows).
-      process.on('SIGTERM', handleSignal);
-      process.on('SIGINT', handleSignal);
-      process.on('SIGQUIT', handleSignal);
-      process.on('SIGHUP', handleSignal);
-      process.on('SIGUSR2', handleSignal);
+      // SIGTERM is the supervisor's stop: it drains HTTP and leaves OpenCode running for the next start to adopt.
+      const handleTerminate = async () => {
+        await gracefulShutdown({ keepOpenCode: true });
+      };
+      process.on('SIGTERM', handleTerminate);
+      process.on('SIGINT', handleStop);
+      process.on('SIGQUIT', handleStop);
+      process.on('SIGUSR2', handleStop);
+      process.on('SIGHUP', () => {
+        reloadOpenCodeConfiguration().catch((error) => {
+          console.error('Reload failed:', error);
+        });
+      });
       setSignalsAttached(true);
       syncToHmrState();
     }

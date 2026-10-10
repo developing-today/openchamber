@@ -248,7 +248,8 @@ async function serveCommand(options) {
         if (shutdownInProgress) return;
         shutdownInProgress = true;
         try {
-          await controller.stop({ exitProcess: false });
+          // SIGTERM is the supervisor's stop: OpenCode keeps running so the next start can adopt it.
+          await controller.stop({ exitProcess: false, keepOpenCode: signal === 'SIGTERM' });
         } catch {
         }
         cleanupFiles();
@@ -266,6 +267,9 @@ async function serveCommand(options) {
       process.on('SIGINT', () => { void shutdownForegroundServer('SIGINT'); });
       process.on('SIGTERM', () => { void shutdownForegroundServer('SIGTERM'); });
       process.on('SIGQUIT', () => { void shutdownForegroundServer('SIGQUIT'); });
+      process.on('SIGHUP', () => {
+        controller.reload().catch((error) => console.error('Reload failed:', error));
+      });
 
       // Block forever – the process stays alive until signalled.
       await new Promise(() => {});
