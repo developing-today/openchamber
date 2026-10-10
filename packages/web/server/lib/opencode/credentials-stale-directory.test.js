@@ -35,6 +35,7 @@ import { configureOpenCodeCredentials, openCodeCredentialSource, readOpenCodeCre
 import { createOpenCodeLifecycleRuntime } from './lifecycle.js';
 
 const createLifecycleRuntime = (warmupDirectories) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-credentials-'));
   const state = {
     openCodeWorkingDirectory: '/tmp/project',
     openCodeProcess: null,
@@ -62,6 +63,7 @@ const createLifecycleRuntime = (warmupDirectories) => {
   };
   return createOpenCodeLifecycleRuntime({
     state,
+    dataDir,
     env: {
       ENV_CONFIGURED_OPENCODE_PORT: 45678,
       ENV_CONFIGURED_OPENCODE_HOST: null,

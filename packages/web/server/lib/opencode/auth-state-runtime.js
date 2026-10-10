@@ -60,10 +60,15 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
 
   const isOpenCodeConnectionSecure = () => Object.prototype.hasOwnProperty.call(getOpenCodeAuthHeaders(), 'Authorization');
 
-  const ensureLocalOpenCodeServerPassword = async ({ rotateManaged = false } = {}) => {
+  const ensureLocalOpenCodeServerPassword = async ({ rotateManaged = false, reusePassword = null } = {}) => {
     const userProvidedPassword = getUserProvidedPassword();
     if (isValidOpenCodePassword(userProvidedPassword)) {
       return setOpenCodeAuthState(userProvidedPassword, 'user-env');
+    }
+
+    // A still-running managed OpenCode was started with this password; rotating would lock us out of it.
+    if (isValidOpenCodePassword(reusePassword)) {
+      return setOpenCodeAuthState(reusePassword, 'generated');
     }
 
     if (rotateManaged) {

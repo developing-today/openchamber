@@ -1424,6 +1424,7 @@ Object.defineProperties(openCodeLifecycleState, {
 
 const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   state: openCodeLifecycleState,
+  dataDir: OPENCHAMBER_USER_CONFIG_ROOT,
   env: {
     ENV_CONFIGURED_OPENCODE_PORT,
     ENV_CONFIGURED_OPENCODE_HOST,
@@ -1477,9 +1478,9 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   noProjectDirectory: OPENCHAMBER_CHATS_DIR,
   // A managed restart can move OpenCode to a NEW port (the old one may stay
-  // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,
-  // on any platform). Rebind the message-stream upstream readers to the current port
-  // so the UI keeps receiving events instead of staying pinned to the old
+  // occupied if waitForPortRelease didn't free it in time, on any platform).
+  // Rebind the message-stream upstream readers to the current port so the UI
+  // keeps receiving events instead of staying pinned to the old
   // process (#2638). The runtime is created later by the startup pipeline;
   // by the time any restart runs, it is assigned.
   onOpenCodeRestarted: () => {
@@ -1831,7 +1832,6 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     .then(() => sessionMetadataStore.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session metadata migration failed:', error?.message ?? error));
 };
-const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
 
 const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
@@ -1869,7 +1869,6 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setOpenCodeProcess: (value) => {
     openCodeProcess = value;
   },
-  killProcessOnPort,
   waitForPortRelease,
   getServer: () => server,
   getUiAuthController: () => uiAuthController,
@@ -1893,6 +1892,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
+const reloadOpenCodeConfiguration = () => openCodeLifecycleRuntime.reloadOpenCode();
 
 async function main(options = {}) {
   beginGuestServiceHost();
@@ -2569,6 +2569,7 @@ async function main(options = {}) {
     tunnelAuthController,
     startTunnelWithNormalizedRequest,
     gracefulShutdown,
+    reloadOpenCodeConfiguration,
     getSignalsAttached: () => signalsAttached,
     setSignalsAttached: (value) => {
       signalsAttached = value;
@@ -2655,7 +2656,11 @@ async function main(options = {}) {
         port: managed ? openCodePort : null,
       };
     },
-    stop: (shutdownOptions = {}) => gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false }),
+    stop: (shutdownOptions = {}) => gracefulShutdown({
+      exitProcess: shutdownOptions.exitProcess ?? false,
+      keepOpenCode: shutdownOptions.keepOpenCode ?? false,
+    }),
+    reload: () => reloadOpenCodeConfiguration(),
   };
 }
 

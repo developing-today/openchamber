@@ -26,7 +26,6 @@ const createRuntime = (server, overrides = {}) => {
     getOpenCodePort: () => null,
     getOpenCodeProcess: () => null,
     setOpenCodeProcess: vi.fn(),
-    killProcessOnPort: vi.fn(),
     waitForPortRelease: vi.fn(async () => true),
     getServer: () => server,
     getUiAuthController: () => null,
@@ -71,7 +70,7 @@ describe('graceful shutdown runtime', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('closes an active HTTP stream instead of waiting for the shutdown deadline', async () => {
+  it('cuts an HTTP stream that outlives the shutdown grace period', async () => {
     const server = http.createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.write('data: fixture\n\n');
@@ -86,7 +85,7 @@ describe('graceful shutdown runtime', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       await runtime.gracefulShutdown({ exitProcess: false });
-      expect(warning).not.toHaveBeenCalledWith('Server close timeout reached, forcing shutdown');
+      expect(warning).toHaveBeenCalledWith('Server close timeout reached, forcing shutdown');
       await closed;
     } finally {
       request.destroy();
@@ -128,6 +127,42 @@ describe('graceful shutdown runtime', () => {
       client.destroy();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it('waits for an in-flight HTTP request to finish within the grace period', async () => {
+    const server = http.createServer((_request, response) => {
+      setTimeout(() => response.end('done'), 200);
+    });
+    const runtime = createRuntime(server, { shutdownTimeoutMs: 2000 });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const body = new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${server.address().port}`, (response) => {
+        let text = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { text += chunk; });
+        response.on('end', () => resolve(text));
+      }).on('error', reject);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await runtime.gracefulShutdown({ exitProcess: false });
+    expect(await body).toBe('done');
+    expect(warning).not.toHaveBeenCalledWith('Server close timeout reached, forcing shutdown');
+    expect(server.listening).toBe(false);
+  });
+
+  it('keeps OpenCode running and skips the port wait when asked to keep it', async () => {
+    const server = { close: vi.fn((callback) => callback()) };
+    const processClose = vi.fn(async () => {});
+    const waitForPortRelease = vi.fn(async () => true);
+    const runtime = createRuntime(server, {
+      shouldSkipOpenCodeStop: () => false,
+      getOpenCodeProcess: () => ({ close: processClose }),
+      waitForPortRelease,
+    });
+    await runtime.gracefulShutdown({ exitProcess: false, keepOpenCode: true });
+    expect(processClose).not.toHaveBeenCalled();
+    expect(waitForPortRelease).not.toHaveBeenCalled();
   });
 
   it('drains processes before closing sockets accepted during cleanup, including after a cleanup failure', async () => {

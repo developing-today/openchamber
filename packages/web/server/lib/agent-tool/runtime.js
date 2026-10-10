@@ -396,12 +396,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * is currently off: a tool switched on later reaches a process that already
    * knows where and how to call back, so the toggle needs no restart.
    */
-  const createChildEnv = () => {
+  const createChildEnv = ({ reuseToken = null } = {}) => {
     const port = getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }
-    activeToken = crypto.randomBytes(32).toString('base64url');
+    // An adopted OpenCode still holds the token it was started with.
+    activeToken = reuseToken || crypto.randomBytes(32).toString('base64url');
     return {
       OPENCHAMBER_AGENT_TOOL_URL: `http://${callbackHost()}:${port}/api/openchamber/agent-tool`,
       OPENCHAMBER_AGENT_TOOL_TOKEN: activeToken,

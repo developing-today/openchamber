@@ -26,7 +26,6 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getOpenCodePort,
     getOpenCodeProcess,
     setOpenCodeProcess,
-    killProcessOnPort,
     waitForPortRelease,
     getServer,
     getUiAuthController,
@@ -46,6 +45,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
   let shutdownPromise = null;
   const serverConnections = new Set();
+  const busySocketRequests = new Map();
   let closingHttpServer = false;
 
   // Track TCP sockets before listen(): HTTP stops tracking them on upgrade,
@@ -57,10 +57,61 @@ export const createGracefulShutdownRuntime = (dependencies) => {
         return;
       }
       serverConnections.add(socket);
-      socket.once('close', () => serverConnections.delete(socket));
+      socket.once('close', () => {
+        serverConnections.delete(socket);
+        busySocketRequests.delete(socket);
+      });
+    };
+    const onRequest = (request, response) => {
+      const socket = request.socket;
+      busySocketRequests.set(socket, (busySocketRequests.get(socket) ?? 0) + 1);
+      response.once('close', () => {
+        const remaining = (busySocketRequests.get(socket) ?? 1) - 1;
+        if (remaining > 0) busySocketRequests.set(socket, remaining);
+        else busySocketRequests.delete(socket);
+      });
     };
     server.on('connection', onConnection);
-    server.once('close', () => server.off('connection', onConnection));
+    server.on('request', onRequest);
+    server.once('close', () => {
+      server.off('connection', onConnection);
+      server.off('request', onRequest);
+    });
+  };
+
+  // Stops accepting connections, then lets sockets with an in-flight HTTP request finish for up to
+  // shutdownTimeoutMs. Idle keep-alive and upgraded sockets are cut at once: their owning runtimes
+  // were stopped above, and net.Server.close() cannot complete while an upgraded socket is open.
+  const drainHttpServer = async (server) => {
+    let graceTimer = null;
+    let sweepTimer = null;
+    const closed = new Promise((resolve) => {
+      server.close(() => {
+        console.log('HTTP server closed');
+        resolve(true);
+      });
+    });
+    const sweepIdleSockets = () => {
+      server.closeIdleConnections?.();
+      for (const socket of serverConnections) {
+        if (!busySocketRequests.has(socket)) socket.destroy();
+      }
+    };
+    sweepIdleSockets();
+    sweepTimer = setInterval(sweepIdleSockets, 100);
+    const drained = await Promise.race([
+      closed,
+      new Promise((resolve) => {
+        graceTimer = setTimeout(() => resolve(false), shutdownTimeoutMs);
+      }),
+    ]);
+    clearInterval(sweepTimer);
+    clearTimeout(graceTimer);
+    if (!drained) {
+      console.warn('Server close timeout reached, forcing shutdown');
+      server.closeAllConnections?.();
+      for (const socket of serverConnections) socket.destroy();
+    }
   };
 
   const runShutdown = async (options = {}) => {
@@ -127,7 +178,11 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       }
     }
 
-    if (!shouldSkipOpenCodeStop()) {
+    if (shouldSkipOpenCodeStop()) {
+      console.log('Skipping OpenCode shutdown (external server)');
+    } else if (options.keepOpenCode) {
+      console.log('Leaving OpenCode running for the next start to adopt');
+    } else {
       const portToKill = getOpenCodePort();
       const openCodeProcess = getOpenCodeProcess();
 
@@ -141,44 +196,15 @@ export const createGracefulShutdownRuntime = (dependencies) => {
         setOpenCodeProcess(null);
       }
 
-      killProcessOnPort(portToKill);
       if (!(await waitForPortRelease(portToKill, 5000))) {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released during shutdown`);
       }
-    } else {
-      console.log('Skipping OpenCode shutdown (external server)');
     }
 
     const server = getServer();
     if (server) {
       closingHttpServer = true;
-      let closeTimeout = null;
-      try {
-        await Promise.race([
-          new Promise((resolve) => {
-            server.close(() => {
-              console.log('HTTP server closed');
-              resolve();
-            });
-            // The backend has stopped. Active SSE/HTTP clients must not keep
-            // Desktop waiting for the outer shutdown deadline.
-            server.closeAllConnections?.();
-            // Includes upgraded sockets and reconnects accepted while the
-            // services above were draining. No child-process grace is cut short.
-            for (const socket of serverConnections) socket.destroy();
-          }),
-          new Promise((resolve) => {
-            closeTimeout = setTimeout(() => {
-              console.warn('Server close timeout reached, forcing shutdown');
-              resolve();
-            }, shutdownTimeoutMs);
-          }),
-        ]);
-      } finally {
-        if (closeTimeout) {
-          clearTimeout(closeTimeout);
-        }
-      }
+      await drainHttpServer(server);
     }
 
     const uiAuthController = getUiAuthController();

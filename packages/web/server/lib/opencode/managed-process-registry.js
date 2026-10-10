@@ -263,13 +263,14 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
    * prune their registry files. Safe to call at startup before spawning a new
    * server. Returns { inspected, reaped }.
    */
-  const reapOrphanedProcesses = async ({ log } = {}) => {
+  const reapOrphanedProcesses = async ({ log, keepPids = [] } = {}) => {
     const records = await readAllEntries();
     if (records.length === 0) return { inspected: 0, reaped: 0 };
 
     let reaped = 0;
     for (const { entry, filePath } of records) {
       let drop = false;
+      if (keepPids.includes(entry.pid)) continue;
       try {
         const wasReaped = await processEntry(entry, { log });
         if (wasReaped) reaped += 1;

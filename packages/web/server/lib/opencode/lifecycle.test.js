@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,9 +29,13 @@ const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
 const originalFetch = globalThis.fetch;
+const tempDataDirs = [];
+let activeLogPath = null;
 
-afterEach(() => {
+afterEach(async () => {
   spawnMock.mockReset();
+  activeLogPath = null;
+  await Promise.all(tempDataDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
   spawnSyncMock.mockReset();
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
@@ -47,10 +52,23 @@ afterEach(() => {
   }
 });
 
+const routeToLogFile = (stream) => {
+  const emit = stream.emit.bind(stream);
+  stream.emit = (event, chunk) => {
+    if (event === 'data' && activeLogPath) {
+      fsSync.mkdirSync(path.dirname(activeLogPath), { recursive: true });
+      fsSync.appendFileSync(activeLogPath, chunk);
+    }
+    return emit(event, chunk);
+  };
+};
+
 const createMockChild = () => {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
+  routeToLogFile(child.stdout);
+  routeToLogFile(child.stderr);
   child.exitCode = null;
   child.signalCode = null;
   child.pid = 12345;
@@ -63,6 +81,9 @@ const createMockChild = () => {
 };
 
 const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) => {
+  const dataDir = overrides.dataDir ?? fsSync.mkdtempSync(path.join(os.tmpdir(), 'opencode-lifecycle-test-'));
+  if (!overrides.dataDir) tempDataDirs.push(dataDir);
+  activeLogPath = path.join(dataDir, 'managed-opencode', 'opencode.log');
   const state = {
     openCodeWorkingDirectory: '/tmp/project',
     openCodeProcess: null,
@@ -92,6 +113,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
 
   const runtime = createOpenCodeLifecycleRuntime({
     state,
+    dataDir,
     env: {
       ENV_CONFIGURED_OPENCODE_PORT: 45678,
       ENV_CONFIGURED_OPENCODE_HOST: null,
@@ -1242,73 +1264,6 @@ describe('OpenCode lifecycle', () => {
 
 });
 
-describe('killProcessOnPort on Windows', () => {
-  const originalPlatform = process.platform;
-
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
-  });
-
-  const setPlatform = (platform) => {
-    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-  };
-
-  it('force-kills the process listening on the target port via taskkill', () => {
-    setPlatform('win32');
-    const orphanPid = 54321;
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${orphanPid}\r\n` };
-      }
-      return { stdout: '' };
-    });
-
-    const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
-
-    expect(spawnSyncMock).toHaveBeenCalledWith(
-      'powershell',
-      expect.arrayContaining([expect.stringContaining('-LocalPort 45678')]),
-      expect.objectContaining({ windowsHide: true })
-    );
-    expect(spawnSyncMock).toHaveBeenCalledWith(
-      'taskkill',
-      ['/PID', String(orphanPid), '/F'],
-      expect.objectContaining({ windowsHide: true })
-    );
-  });
-
-  it('never force-kills its own process id', () => {
-    setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${process.pid}\r\n` };
-      }
-      return { stdout: '' };
-    });
-
-    const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
-
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
-  });
-
-  it('does nothing when no process is listening on the target port', () => {
-    setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: '' };
-      }
-      return { stdout: '' };
-    });
-
-    const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
-
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
-  });
-});
-
 it('shares the managed CLI preflight with desktop while startup is pending', async () => {
   let finish;
   let entered;
@@ -1355,3 +1310,107 @@ it('a rejected CLI preflight never permits desktop bootstrap', async () => {
   expect(await runtime.getManagedOpenCodePreflight()).toBe(false);
   expect(spawnMock).not.toHaveBeenCalled();
 });
+
+describe('managed OpenCode adoption across OpenChamber restarts', () => {
+  const READY_LINE = 'opencode server listening on http://127.0.0.1:45678\n';
+  const OWNED_PS_OUTPUT = 'opencode serve --hostname 127.0.0.1 --port 45678\n';
+  // Never a live pid, so a replace path cannot signal an unrelated process.
+  const DEAD_PID = 2147483646;
+
+  const startFirstRuntime = async () => {
+    const dataDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'opencode-adopt-test-'));
+    tempDataDirs.push(dataDir);
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      child.pid = DEAD_PID;
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    const server = await createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') }).startOpenCode();
+    spawnMock.mockClear();
+    return { dataDir, server };
+  };
+
+  it('adopts a healthy OpenCode whose recorded pid, port and launch config match', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir, server: firstServer } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+
+    const second = createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') });
+    const adopted = await second.startOpenCode();
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(adopted.pid).toBe(firstServer.pid);
+    expect(adopted.url).toBe('http://127.0.0.1:45678');
+  });
+
+  it('replaces the recorded OpenCode when its binary changed', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+
+    const second = createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => '/opt/other/opencode') });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0][0]).toBe('/opt/other/opencode');
+  });
+
+  it('replaces the recorded OpenCode when the launch fingerprint changed', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+
+    const second = createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') }, { openCodeWorkingDirectory: '/tmp/other-project' });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts fresh without signalling when the recorded pid no longer runs OpenCode', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation(() => ({ stdout: '' }));
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+
+    const second = createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a recorded OpenCode whose health check fails', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir, server: firstServer } = await startFirstRuntime();
+    expect(firstServer.pid).toBe(DEAD_PID);
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+
+    const second = createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+});
+

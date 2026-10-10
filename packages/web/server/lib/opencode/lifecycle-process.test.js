@@ -8,8 +8,9 @@ const alive = (pid) => {
   try { process.kill(pid, 0); return true; } catch { return false; }
 };
 
-const createRuntime = (waitForReady, state) => createOpenCodeLifecycleRuntime({
+const createRuntime = (waitForReady, state, dataDir) => createOpenCodeLifecycleRuntime({
   state,
+  dataDir,
   env: { ENV_CONFIGURED_OPENCODE_PORT: 45678, ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1' },
   syncToHmrState() {}, syncFromHmrState() {},
   checkOpenCodeBinary: async () => '2.0.14',
@@ -52,7 +53,7 @@ describe('managed process lifecycle with real children', () => {
         const runtime = createRuntime(async () => {
           if (failure === 'health-error') throw new Error('fixture health failure');
           return true;
-        }, state);
+        }, state, root);
         if (failure === 'none') {
           const server = await runtime.startOpenCode();
           await Promise.all([server.close(), server.close()]);
