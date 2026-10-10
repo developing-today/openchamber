@@ -1,6 +1,6 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 import { spawn, spawnSync } from 'node:child_process';
-import { accessSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, openSync, statSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, openSync, realpathSync, statSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
@@ -431,6 +431,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const managedOpenCodeArgs = (hostname) => ['serve', '--hostname', hostname];
 
+  // The managed bin link is re-pointed on each nix switch, so identity is the target it resolves to.
+  const resolveBinaryIdentity = (binary) => {
+    try {
+      return realpathSync(binary);
+    } catch {
+      return binary;
+    }
+  };
+
   const computeLaunchFingerprint = ({ binary, hostname, port, cwd, password, managedEnv }) => createLaunchFingerprint({
     binary,
     args: ['serve', '--hostname', hostname, '--port', String(port)],
@@ -849,6 +858,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     await applyOpencodeBinaryFromSettings({ strict: true });
     const resolvedBinary = ensureOpencodeCliEnv();
+    const binaryIdentity = resolveBinaryIdentity(resolvedBinary);
     const preflight = checkOpenCodeBinary(resolveManagedOpenCodeLaunchSpec(resolvedBinary));
     managedPreflight = preflight.then(() => true, () => false);
     await preflight;
@@ -913,12 +923,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.isShuttingDown) throw new Error('OpenCode startup cancelled during shutdown');
       const hostname = env.ENV_CONFIGURED_OPENCODE_HOSTNAME;
       const cwd = state.openCodeWorkingDirectory;
-      let launchFingerprint = computeLaunchFingerprint({ binary: resolvedBinary, hostname, port: spawnPort, cwd, password: openCodePassword, managedEnv: managedOpenCodeEnv });
+      let launchFingerprint = computeLaunchFingerprint({ binary: binaryIdentity, hostname, port: spawnPort, cwd, password: openCodePassword, managedEnv: managedOpenCodeEnv });
       const ownsSavedPid = savedState ? isOwnedOpenCodePid(savedState.pid, savedState.binary) : false;
       const healthy = ownsSavedPid ? await probeManagedOpenCodeHealth(`http://${formatHost(hostname)}:${savedState.port}`) : false;
       const args = managedOpenCodeArgs(hostname);
       let decision = savedState
-        ? decideManagedOpenCodeLaunch({ state: savedState, ownsPid: ownsSavedPid, binary: resolvedBinary, args, fingerprint: launchFingerprint, port: spawnPort, healthy })
+        ? decideManagedOpenCodeLaunch({ state: savedState, ownsPid: ownsSavedPid, binary: binaryIdentity, args, fingerprint: launchFingerprint, port: spawnPort, healthy })
         : { action: 'start', reason: 'no-state' };
       if (handoffContext?.force && decision.action === 'adopt') {
         decision = { action: 'handoff', reason: 'config-refresh' };
@@ -931,7 +941,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         if (spawnPort === savedState.port) {
           spawnPort = await resolveManagedOpenCodePort(0, hostname);
         }
-        launchFingerprint = computeLaunchFingerprint({ binary: resolvedBinary, hostname, port: spawnPort, cwd, password: openCodePassword, managedEnv: managedOpenCodeEnv });
+        launchFingerprint = computeLaunchFingerprint({ binary: binaryIdentity, hostname, port: spawnPort, cwd, password: openCodePassword, managedEnv: managedOpenCodeEnv });
         serverInstance = await createManagedOpenCodeServerProcess({
           resolvedBinary,
           hostname,
@@ -944,7 +954,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         writeManagedOpenCodeState(managedPaths.statePath, {
           pid: serverInstance.pid,
           port: spawnPort,
-          binary: resolvedBinary,
+          binary: binaryIdentity,
           args,
           fingerprint: launchFingerprint,
           password: openCodePassword,
@@ -961,7 +971,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           clearManagedOpenCodeState(managedPaths.statePath);
           if (reusedPort !== null && desiredPort === 0) {
             spawnPort = await resolveManagedOpenCodePort(desiredPort, hostname);
-            launchFingerprint = computeLaunchFingerprint({ binary: resolvedBinary, hostname, port: spawnPort, cwd, password: openCodePassword, managedEnv: managedOpenCodeEnv });
+            launchFingerprint = computeLaunchFingerprint({ binary: binaryIdentity, hostname, port: spawnPort, cwd, password: openCodePassword, managedEnv: managedOpenCodeEnv });
           }
         }
         serverInstance = await createManagedOpenCodeServerProcess({
@@ -976,7 +986,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         writeManagedOpenCodeState(managedPaths.statePath, {
           pid: serverInstance.pid,
           port: spawnPort,
-          binary: resolvedBinary,
+          binary: binaryIdentity,
           args,
           fingerprint: launchFingerprint,
           password: openCodePassword,

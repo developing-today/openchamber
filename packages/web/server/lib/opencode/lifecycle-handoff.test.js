@@ -145,7 +145,8 @@ describe('OpenCode handoff with real children', () => {
       await waitFor(() => oldStream.events() >= 2);
 
       const nextBinary = path.join(fixture.root, 'opencode-next');
-      fs.symlinkSync(process.execPath, nextBinary);
+      fs.copyFileSync(process.execPath, nextBinary);
+      fs.chmodSync(nextBinary, 0o755);
       fixture.binary.current = nextBinary;
 
       expect(await runtime.reloadOpenCode()).toBe(true);
