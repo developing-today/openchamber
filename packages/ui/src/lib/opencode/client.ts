@@ -12,7 +12,7 @@
  * here when they are part of the same directory/session workflows.
  */
 
-import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
+import { ClientError, OpenCode, type OpenCodeClient, type PersistentPtyInfo, type PersistentPtySnapshot } from "@opencode/client"
 import type {
   FileDiffInfo,
   SessionDiffInput,
@@ -1584,6 +1584,21 @@ class OpencodeService {
     }
     const page = await call("shell.output", () => client.shell.output({ id: shellID, cursor: start, limit: tailBytes }).then((r) => r.data))
     return { output: page.output, cursor: page.cursor, skipped: cursor === undefined && start > 0 }
+  }
+
+  /** Persistent terminals a session's agent started. Throws on fetch failure. */
+  async listSessionTerminals(sessionID: string, directory: string): Promise<PersistentPtyInfo[]> {
+    return call("persistentPty.list", () => this.clientFor(directory).experimental.persistentPty.list({ sessionID }))
+  }
+
+  /** A terminal's screen as text, for a read-only view. */
+  async readTerminalSnapshot(ptyID: string, directory: string): Promise<PersistentPtySnapshot> {
+    return call("persistentPty.snapshot", () => this.clientFor(directory).experimental.persistentPty.snapshot({ ptyID }))
+  }
+
+  /** Ends a terminal's process and removes it. */
+  async removeTerminal(ptyID: string, directory: string): Promise<void> {
+    await call("persistentPty.remove", () => this.clientFor(directory).experimental.persistentPty.remove({ ptyID }))
   }
 
   /**

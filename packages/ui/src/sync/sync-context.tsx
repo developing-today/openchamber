@@ -92,6 +92,7 @@ import {
 } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { applyPersistentPtyEvents } from "./persistent-ptys"
 import {
   CHAT_LOCATION_RELEASE_DELAY_MS,
   WORKTREE_LOCATION_RELEASE_DELAY_MS,
@@ -276,6 +277,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     // Before statuses: an idle that follows a command's start in the same
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
+    applyPersistentPtyEvents(directory, events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
   }
@@ -1913,6 +1915,7 @@ export function handleEvent(
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
       applyBackgroundShellEvents(directory, [payload])
+      applyPersistentPtyEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
     }

@@ -222,6 +222,8 @@ import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionDoneHintRow } from '@/components/chat/SessionDoneHintRow';
 import { SessionReviewHintRow } from '@/components/chat/SessionReviewHintRow';
 import { BackgroundShellsStrip } from '@/components/chat/BackgroundShellsStrip';
+import { PersistentTerminalsStrip } from '@/components/chat/PersistentTerminalsStrip';
+import { useHasSessionTerminals, useSessionTerminalsLoaded } from '@/hooks/usePersistentTerminals';
 import { WorktreeSetupStrip } from '@/components/chat/WorktreeSetupStrip';
 import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { FormDock } from '@/components/chat/FormDock';
@@ -3845,6 +3847,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             directory={currentSessionDirectoryForSync ?? currentDirectory}
         />
     ) : null;
+    // Terminals the agent started with the pty tool share the slot, after the commands.
+    const terminalsDirectory = currentSessionDirectoryForSync ?? currentDirectory;
+    useSessionTerminalsLoaded(currentSessionId, terminalsDirectory);
+    const hasSessionTerminals = useHasSessionTerminals(currentSessionId);
+    const persistentTerminalsRow = !isBtwActive && !newSessionDraftOpen && hasSessionTerminals ? (
+        <PersistentTerminalsStrip
+            key={currentSessionId ?? ''}
+            sessionId={currentSessionId}
+            directory={terminalsDirectory}
+        />
+    ) : null;
     // A new worktree still running its setup commands, first of all: until it
     // ends, a first prompt can wait with nothing else saying why.
     const worktreeSetupDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
@@ -3852,10 +3865,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const worktreeSetupRow = worktreeSetupPending ? <WorktreeSetupStrip /> : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRows = worktreeSetupRow || backgroundShellsRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    const composerTopRows = worktreeSetupRow || backgroundShellsRow || persistentTerminalsRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {worktreeSetupRow}
             {backgroundShellsRow}
+            {persistentTerminalsRow}
             {doneHintRow}
             {reviewHintRow}
             {suggestionRow}

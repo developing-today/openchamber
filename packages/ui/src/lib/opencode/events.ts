@@ -13,7 +13,7 @@
  * addressed by `(assistantMessageID, ordinal)`, tool calls by their call id.
  */
 
-import type { OpenCodeEvent } from "@opencode/client"
+import type { OpenCodeEvent, PersistentPtyInfo } from "@opencode/client"
 import {
   compact,
   partIds,
@@ -140,6 +140,9 @@ export type SyncEvent =
   | { type: "shell.started"; properties: { shell: RunningShell } }
   /** A shell command exited or was removed. */
   | { type: "shell.ended"; properties: { shellID: string; end: ShellEnd; endedAt: number } }
+  /** A terminal the agent started with the pty tool. */
+  | { type: "persistent-pty.added"; properties: { sessionID: string; terminal: PersistentPtyInfo } }
+  | { type: "persistent-pty.removed"; properties: { sessionID: string; ptyID: string } }
   | { type: "vcs.branch.updated"; properties: { branch?: string } }
   | { type: "mcp.status.changed"; properties: { server: string } }
   | { type: "catalog.updated"; properties: { kind: CatalogKind } }
@@ -880,9 +883,11 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "pty.updated":
     case "pty.deleted":
     case "pty.exited":
-    case "persistent-pty.added":
-    case "persistent-pty.removed":
       return []
+    case "persistent-pty.added":
+      return [{ type: "persistent-pty.added", properties: { sessionID: event.data.sessionID, terminal: event.data.terminal } }]
+    case "persistent-pty.removed":
+      return [{ type: "persistent-pty.removed", properties: { sessionID: event.data.sessionID, ptyID: event.data.ptyID } }]
     // Never framed onto the public stream in 2.0.8, so they cannot reach here
     // and are not listed above: `session.message.content.updated` (replay-only
     // for transcripts written by older releases), `session.usage.recorded`
