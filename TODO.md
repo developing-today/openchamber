@@ -1,0 +1,3 @@
+# TODO
+
+- [ ] Supervisor and listener handoff for upgrades. A small supervisor process owns the managed OpenCode children and the listening socket, so OpenChamber can be upgraded or restarted with no dropped OpenCode sessions and no port change. Today this works through detached OpenCode adoption (`state.json`) and optional socket activation (`LISTEN_FDS`), which still need a systemd `.socket` unit and `KillMode=process`. Open questions: who owns the socket across an OpenChamber version change, how the new process proves it speaks the same OpenCode protocol before taking over, and how a failed handoff rolls back.
