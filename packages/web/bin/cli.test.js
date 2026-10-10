@@ -814,13 +814,22 @@ describe('compatibility exports', () => {
   it('includes ngrok in fallback tunnel providers when no server is reachable', async () => {
     await withTempOpenChamberDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const output = await captureStdout(async () => {
-        await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
-      });
+      // The CLI also probes the default port, so an OpenChamber running there on this machine must not answer.
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (url, options) => (new URL(String(url)).port === '3000'
+        ? Promise.reject(new TypeError('fetch failed'))
+        : originalFetch(url, options));
+      try {
+        const output = await captureStdout(async () => {
+          await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
+        });
 
-      const body = JSON.parse(output);
-      expect(body.source).toBe('fallback');
-      expect(body.providers.map((entry) => entry.provider)).toContain('ngrok');
+        const body = JSON.parse(output);
+        expect(body.source).toBe('fallback');
+        expect(body.providers.map((entry) => entry.provider)).toContain('ngrok');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 
