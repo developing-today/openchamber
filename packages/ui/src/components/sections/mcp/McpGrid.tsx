@@ -32,6 +32,7 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { MCP_DRAFT_OAUTH_UNSET } from './mcpDraft';
+import { McpxDashboard } from './McpxDashboard';
 
 const nextServerName = (existing: readonly { name: string }[]): string => {
   const baseName = 'new-mcp-server';
@@ -175,6 +176,10 @@ export const McpGrid: React.FC = () => {
       {servers.length > 0 ? (
         <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.mcp.grid.searchPlaceholder')} />
       ) : null}
+
+      <div className="mb-6">
+        <McpxDashboard />
+      </div>
 
       {servers.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.mcp.grid.empty')}</p>

@@ -1,4 +1,5 @@
 import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
+import { registerMcpxRoutes } from './mcpx-routes.js';
 
 export const createBootstrapRuntime = (dependencies) => {
   const {
@@ -170,6 +171,8 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       desktopUpdater,
     });
+
+    registerMcpxRoutes(app);
 
     return {
       uiAuthController,
