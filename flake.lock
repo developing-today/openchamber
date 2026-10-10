@@ -32,7 +32,7 @@
         "type": "github"
       }
     },
-    "opencode-fork": {
+    "opencode": {
       "inputs": {
         "nixpkgs": "nixpkgs_2"
       },
@@ -53,7 +53,7 @@
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
-        "opencode-fork": "opencode-fork"
+        "opencode": "opencode"
       }
     }
   },
