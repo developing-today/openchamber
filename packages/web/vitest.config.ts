@@ -41,6 +41,8 @@ export default defineConfig({
     // own app (often in ~/.zshrc) must not flip what the suites assert; tests
     // that need them set them themselves.
     env: {
+      // React chooses its build from NODE_ENV; a production value from the shell drops act().
+      NODE_ENV: 'test',
       OPENCHAMBER_ENTERPRISE_MODE: '',
       OPENCHAMBER_RELAY_URL: '',
       OPENCHAMBER_JEV_URL: '',
