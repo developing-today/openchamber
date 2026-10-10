@@ -33,7 +33,7 @@ import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
 import {
@@ -190,6 +190,7 @@ const parseDraftStarters: SettingsParser<DraftStarterRef[]> = mapParser(fromSche
 // accumulate forever as sections get renamed.
 const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSchema(z.array(z.unknown())), (value) => sanitizeWorkStatusHiddenSections(value));
 const parseLargeTextPasteBehavior: SettingsParser<LargeTextPasteBehavior> = parseOneOf(['ask', 'attach', 'inline', 'inline-double-paste']);
+const parseAgentTerminalsPlacement: SettingsParser<AgentTerminalsPlacement> = parseOneOf(['terminal-panel', 'sidebar']);
 const parseFileEditorKeymap: SettingsParser<FileEditorKeymap> = parseOneOf(['default', 'vim']);
 
 /**
@@ -447,6 +448,7 @@ export const SETTINGS_REGISTRY = {
   enterToSendConfigured: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('enterToSendConfigured', (v) => useUIStore.getState().setEnterToSendConfigured(v)) }),
   persistChatDraft: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('persistChatDraft', (v) => useUIStore.getState().setPersistChatDraft(v)) }),
   largeTextPasteBehavior: field({ scope: 'profile', parse: parseLargeTextPasteBehavior, ui: uiStore('largeTextPasteBehavior', (v) => useUIStore.getState().setLargeTextPasteBehavior(v)) }),
+  agentTerminalsPlacement: field({ scope: 'profile', parse: parseAgentTerminalsPlacement, ui: uiStore('agentTerminalsPlacement', (v) => useUIStore.getState().setAgentTerminalsPlacement(v)) }),
   followUpBehavior: field({
     scope: 'profile',
     parse: parseFollowUpBehavior,

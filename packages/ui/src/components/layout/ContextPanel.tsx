@@ -7,6 +7,7 @@ import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-m
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
+import { AgentTerminalsSection } from '@/components/terminal/AgentTerminalsSection';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 // Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
@@ -498,6 +499,7 @@ export const ContextPanel: React.FC = () => {
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
+  const agentTerminalsPlacement = useUIStore((state) => state.agentTerminalsPlacement);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -1311,12 +1313,15 @@ export const ContextPanel: React.FC = () => {
           </div>
         ))}
         {terminalTab ? (
-          <div className={cn('absolute inset-0', activeTab?.mode === 'terminal' ? 'block' : 'hidden')}>
-            <TerminalView
-              visible={isOpen && activeTab?.mode === 'terminal'}
-              directory={terminalTab.targetDirectory}
-              onLastTabClosed={() => { if (directoryKey) closeContextPanelTab(directoryKey, terminalTab.id); }}
-            />
+          <div className={cn('absolute inset-0 flex flex-col', activeTab?.mode === 'terminal' ? 'flex' : 'hidden')}>
+            {agentTerminalsPlacement === 'terminal-panel' ? <AgentTerminalsSection /> : null}
+            <div className="relative min-h-0 flex-1">
+              <TerminalView
+                visible={isOpen && activeTab?.mode === 'terminal'}
+                directory={terminalTab.targetDirectory}
+                onLastTabClosed={() => { if (directoryKey) closeContextPanelTab(directoryKey, terminalTab.id); }}
+              />
+            </div>
           </div>
         ) : null}
         {hasWalkthroughTab ? (

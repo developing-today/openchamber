@@ -43,9 +43,11 @@ type DesktopWindowControlsPosition = 'left' | 'right';
 type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
+export type AgentTerminalsPlacement = 'terminal-panel' | 'sidebar';
 export type SessionGoalChecker = 'classifier' | 'small-model';
 
 const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
+const DEFAULT_AGENT_TERMINALS_PLACEMENT: AgentTerminalsPlacement = 'terminal-panel';
 
 const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
   if (value === 'attach' || value === 'inline' || value === 'ask' || value === 'inline-double-paste') {
@@ -53,6 +55,10 @@ const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior
   }
   return DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR;
 };
+
+const normalizeAgentTerminalsPlacement = (value: unknown): AgentTerminalsPlacement => (
+  value === 'sidebar' ? 'sidebar' : DEFAULT_AGENT_TERMINALS_PLACEMENT
+);
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
@@ -1025,6 +1031,7 @@ interface UIStore {
   projectContextTab: string;
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
+  agentTerminalsPlacement: AgentTerminalsPlacement;
   enterToSend: boolean;
   enterToSendConfigured: boolean;
   wideChatLayoutEnabled: boolean;
@@ -1250,6 +1257,7 @@ interface UIStore {
   setProjectContextTab: (value: string) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
+  setAgentTerminalsPlacement: (value: AgentTerminalsPlacement) => void;
   setEnterToSend: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
@@ -1455,6 +1463,7 @@ export const useUIStore = create<UIStore>()(
         projectContextTab: 'notes',
         inputSpellcheckEnabled: false,
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
+        agentTerminalsPlacement: DEFAULT_AGENT_TERMINALS_PLACEMENT,
         enterToSend: false,
         enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
@@ -2924,6 +2933,9 @@ export const useUIStore = create<UIStore>()(
         setLargeTextPasteBehavior: (value) => {
           set({ largeTextPasteBehavior: normalizeLargeTextPasteBehavior(value) });
         },
+        setAgentTerminalsPlacement: (value) => {
+          set({ agentTerminalsPlacement: normalizeAgentTerminalsPlacement(value) });
+        },
         setEnterToSend: (value) => {
           set({ enterToSend: value });
         },
@@ -3273,6 +3285,7 @@ export const useUIStore = create<UIStore>()(
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
+          state.agentTerminalsPlacement = normalizeAgentTerminalsPlacement(state.agentTerminalsPlacement);
 
           if (state.toolJsonViewMode !== 'summary'
             && state.toolJsonViewMode !== 'formatted'
@@ -3406,6 +3419,7 @@ export const useUIStore = create<UIStore>()(
           projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
+          agentTerminalsPlacement: state.agentTerminalsPlacement,
           enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,

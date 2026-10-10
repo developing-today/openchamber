@@ -123,7 +123,7 @@ describe('openPersistentPtyInput', () => {
       openSocket: () => socket,
     });
 
-    socket.onclose?.({ code: 4404, reason: 'terminal unavailable', wasClean: true });
+    socket.onclose?.({ code: 4404, reason: 'terminal unavailable' });
     expect(closed).toBe(1);
     expect(channel.isOpen).toBe(false);
     expect(channel.send('x')).toBe(false);

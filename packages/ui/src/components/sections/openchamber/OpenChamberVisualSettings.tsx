@@ -5,7 +5,7 @@ import { MessageSearchSettings } from './MessageSearchSettings';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
-import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { useUIStore, type AgentTerminalsPlacement, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
@@ -301,6 +301,17 @@ const LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS: Option<LargeTextPasteBehavior>[] = [
     },
 ];
 
+const AGENT_TERMINALS_PLACEMENT_OPTIONS: Option<AgentTerminalsPlacement>[] = [
+    {
+        id: 'terminal-panel',
+        labelKey: 'settings.openchamber.visual.option.agentTerminalsPlacement.terminalPanel',
+    },
+    {
+        id: 'sidebar',
+        labelKey: 'settings.openchamber.visual.option.agentTerminalsPlacement.sidebar',
+    },
+];
+
 const INPUT_HISTORY_SCOPE_OPTIONS: Option<InputHistoryScope>[] = [
     {
         id: 'global',
@@ -316,7 +327,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'animatedActivityIndicators';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'animatedActivityIndicators' | 'agentTerminalsPlacement';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -394,6 +405,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
     const terminalShell = useUIStore(state => state.terminalShell);
     const setTerminalShell = useUIStore(state => state.setTerminalShell);
+    const agentTerminalsPlacement = useUIStore(state => state.agentTerminalsPlacement);
+    const setAgentTerminalsPlacement = useUIStore(state => state.setAgentTerminalsPlacement);
     const terminalLoginShells = useUIStore(state => state.terminalLoginShells);
     const setTerminalLoginShells = useUIStore(state => state.setTerminalLoginShells);
     const editorFontSize = useUIStore(state => state.editorFontSize);
@@ -744,7 +757,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('scrollbars') && !hasThemeSettings) || (shouldShow('inputBarOffset') && isMobile);
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('agentTerminalsPlacement') || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
@@ -1641,6 +1654,24 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     info={t('settings.openchamber.visual.field.autoSaveEnabledInfo')}
                                     settingsItem="appearance.auto-save-enabled"
                                 />
+                            )}
+                            {shouldShow('agentTerminalsPlacement') && (
+                                <SettingsControlGroup
+                                    title={t('settings.openchamber.visual.field.agentTerminalsPlacement')}
+                                    info={t('settings.openchamber.visual.field.agentTerminalsPlacementHint')}
+                                    settingsItem="appearance.agent-terminals-placement"
+                                >
+                                    <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.agentTerminalsPlacementAria')}>
+                                        {AGENT_TERMINALS_PLACEMENT_OPTIONS.map((option) => (
+                                            <SettingsRadioOption
+                                                key={option.id}
+                                                selected={agentTerminalsPlacement === option.id}
+                                                onSelect={() => setAgentTerminalsPlacement(option.id)}
+                                                label={tUnsafe(option.labelKey)}
+                                            />
+                                        ))}
+                                    </SettingsRadioGroup>
+                                </SettingsControlGroup>
                             )}
                             {showTerminalShellSetting && (
                                 <SettingsStackedField

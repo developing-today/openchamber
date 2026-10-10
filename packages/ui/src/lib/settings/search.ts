@@ -148,6 +148,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'appearance.agent-terminals-placement',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.agentTerminalsPlacement',
+    descriptionKey: 'settings.openchamber.visual.field.agentTerminalsPlacementHint',
+    keywords: ['agent', 'terminal', 'pty', 'background', 'sidebar', 'terminal panel', 'context panel'],
+  },
+  {
     id: 'appearance.editor-font-size',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.editorFontSize',

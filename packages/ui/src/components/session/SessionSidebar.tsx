@@ -22,6 +22,7 @@ import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { SidebarHeader } from './sidebar/shell/SidebarHeader';
 import { SidebarFooter } from './sidebar/shell/SidebarFooter';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
+import { AgentTerminalsSection } from '@/components/terminal/AgentTerminalsSection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -95,6 +96,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
   const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
+  const agentTerminalsPlacement = useUIStore((state) => state.agentTerminalsPlacement);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const initialActiveSessionByProject = React.useMemo<Map<string, string>>(() => {
     try {
@@ -664,6 +666,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         expandAll={projectView.actions.expandAll}
       />
 
+      {agentTerminalsPlacement === 'sidebar' ? <AgentTerminalsSection /> : null}
       <SessionProjectCollection
         topology={{
           projects: sortedProjects,

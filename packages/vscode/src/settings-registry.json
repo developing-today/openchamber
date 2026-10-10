@@ -437,6 +437,9 @@
     "largeTextPasteBehavior": {
       "scope": "profile"
     },
+    "agentTerminalsPlacement": {
+      "scope": "profile"
+    },
     "followUpBehavior": {
       "scope": "profile"
     },
