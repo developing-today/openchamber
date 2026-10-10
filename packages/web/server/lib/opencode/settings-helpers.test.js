@@ -76,6 +76,15 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: 42 })).toEqual({});
   });
 
+  it('forgets the last directory when asked with an empty string', () => {
+    // Removing the last project sends this. A kept last directory would be
+    // turned back into a project on the next read and warmed at every start.
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ lastDirectory: '' })).toEqual({ lastDirectory: '' });
+    expect(helpers.sanitizeSettingsUpdate({ lastDirectory: '/home/testuser/project' })).toEqual({ lastDirectory: '/home/testuser/project' });
+    expect(helpers.sanitizeSettingsUpdate({ lastDirectory: 42 })).toEqual({});
+  });
+
   it('round-trips section order and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const changes = helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: ['mcp', 'session', 'mcp', null, ''] });
@@ -832,7 +841,7 @@ describe('settings registry gate', () => {
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, autoCreateWorktree: true, sessionTabsEnabled: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, persistChatDraft: true,
-    largeTextPasteBehavior: 'attach', followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
+    largeTextPasteBehavior: 'attach', agentTerminalsPlacement: 'sidebar', followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', padding: 100, cornerRadius: 8,
     shortcutOverrides: { 'chat.send': 'mod+enter' },

@@ -35,6 +35,7 @@ import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKe
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useSessionBlockingRequestCounts } from '@/sync/sync-context';
 import { usePrefetchSessionMessages, useSessionMessageRecordsForExport } from '@/sync/use-sync';
+import { useSessionHoverPrefetch } from '../list/useSessionPrefetch';
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
@@ -94,6 +95,8 @@ import {
 type SecondaryMeta = {
   projectLabel?: string | null;
   branchLabel?: string | null;
+  /** The branch label is an isolated space's name; the row marks it with the space's container icon. */
+  inSpace?: boolean;
 };
 
 export type SessionNodeItemProps = {
@@ -424,6 +427,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // the raw worktree branch. Project rows pass no secondaryMeta and keep the
   // worktree fallback.
   const tooltipBranchLabel = resolveTooltipBranchLabel(secondaryMeta, node.worktree?.branch ?? null);
+  // A space's name stands where a branch would; the mark beside it is the space's, as on its group.
+  const branchInSpace = secondaryMeta?.inSpace === true;
   const prLookup = React.useMemo(
     () => resolveSessionPrLookup(node.worktree, isVSCode),
     [isVSCode, node.worktree],
@@ -565,6 +570,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // Same gate as the sidebar's neighbor prefetch: the VS Code webview keeps
   // its message traffic to what is actually opened.
   const prefetchOnPressDisabled = isVSCode;
+  const hoverPrefetch = useSessionHoverPrefetch();
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const isRowSelected = useSessionMultiSelectStore(
@@ -915,6 +921,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             title={renameForm}
             titleClassName="text-foreground"
             branchLabel={tooltipBranchLabel}
+            spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
             statusDot={null}
             pinnedMarker={null}
             timeSlot={sessionCompactUpdatedLabel}
@@ -1178,6 +1185,23 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     ) {
       void prefetchSessionMessages({ directory: sessionDirectory, sessionID: session.id }).catch(() => undefined);
     }
+  };
+  // Resting the pointer on a row, or reaching it with the keyboard, starts
+  // loading its messages after a short delay, so the click that usually
+  // follows opens a warm session. Touch has no hover: a tap's enter event
+  // lands with the press, which the press prefetch above already covers.
+  const hoverPrefetchTarget = !isActive && !selectionModeEnabled && sessionDirectory
+    ? { id: session.id, directory: sessionDirectory }
+    : null;
+  const handleRowPointerEnter = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType !== 'mouse' || !hoverPrefetchTarget) return;
+    hoverPrefetch?.schedule(hoverPrefetchTarget);
+  };
+  const handleRowFocus = () => {
+    if (hoverPrefetchTarget) hoverPrefetch?.schedule(hoverPrefetchTarget);
+  };
+  const handleRowHoverEnd = () => {
+    if (hoverPrefetchTarget) hoverPrefetch?.cancel(hoverPrefetchTarget);
   };
   const handleRowPointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (mobileVariant && event.pointerType === 'touch') {
@@ -1638,6 +1662,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         ? 'text-interactive-selection-foreground'
         : needsAttention ? 'text-foreground' : 'text-foreground/80'}
       branchLabel={tooltipBranchLabel}
+      spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
       statusDot={isSessionActionPending ? sessionActionSpinner : showStatusMarker ? statusMarkerContent : null}
       pinnedMarker={isPinnedSession && !isSessionActionPending ? pinnedMarkerContent : null}
       timeSlot={showActivityDuration
@@ -1775,6 +1800,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
 	                    onPointerDown={handleRowPointerDown}
  	                    onPointerUp={handleRowPointerEnd}
  	                    onPointerCancel={handleRowPointerEnd}
+                    onPointerEnter={handleRowPointerEnter}
+                    onPointerLeave={handleRowHoverEnd}
+                    onFocus={handleRowFocus}
+                    onBlur={handleRowHoverEnd}
  	                    onMouseDown={handleRowMouseDown}
  	                    onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
@@ -1903,7 +1932,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                     ) : null}
                     {tooltipBranchLabel ? (
                       <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                        <Icon name="git-branch" className={cn('h-3 w-3 flex-shrink-0', branchPrIconColor && 'oc-ref-tint')} style={branchPrIconColor ? refTintStyle(branchPrIconColor) : undefined} />
+                        {branchInSpace
+                          ? <Icon name="box-3" className="h-3 w-3 flex-shrink-0" aria-hidden={false} role="img" aria-label={t('sessions.sidebar.group.space')} />
+                          : <Icon name="git-branch" className={cn('h-3 w-3 flex-shrink-0', branchPrIconColor && 'oc-ref-tint')} style={branchPrIconColor ? refTintStyle(branchPrIconColor) : undefined} />}
                         <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
                       </div>
                     ) : null}
@@ -2083,7 +2114,8 @@ const getNodeSessionDirectory = (node: SessionNode): string | null => {
 
 const isSecondaryMetaEqual = (prev?: SecondaryMeta | null, next?: SecondaryMeta | null): boolean => {
   return (prev?.projectLabel ?? null) === (next?.projectLabel ?? null)
-    && (prev?.branchLabel ?? null) === (next?.branchLabel ?? null);
+    && (prev?.branchLabel ?? null) === (next?.branchLabel ?? null)
+    && (prev?.inSpace ?? false) === (next?.inSpace ?? false);
 };
 
 const getMenuSessionIdFromKey = (props: SessionNodeItemProps): string | null => {
