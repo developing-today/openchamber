@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    opencode-fork.url = "github:developing-today/opencode/v2-routing";
+    opencode-fork.url = "github:developing-today/opencode";
   };
 
   outputs =
