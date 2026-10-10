@@ -10,6 +10,7 @@ export const resolveManagedOpenCodePaths = (dataDir) => {
     dir,
     statePath: path.join(dir, 'state.json'),
     logPath: path.join(dir, 'opencode.log'),
+    drainingPath: path.join(dir, 'draining.json'),
   };
 };
 
@@ -37,8 +38,38 @@ export const readManagedOpenCodeState = (statePath) => {
     && isText(parsed.binary) && parsed.binary.length > 0
     && isText(parsed.fingerprint)
     && isText(parsed.password) && parsed.password.length > 0
-    && (parsed.agentToolToken === null || isText(parsed.agentToolToken));
+    && (parsed.agentToolToken === null || isText(parsed.agentToolToken))
+    && (parsed.args === undefined || (Array.isArray(parsed.args) && parsed.args.every(isText)));
   return valid ? parsed : null;
+};
+
+// Replaced OpenCode processes that are still finishing their sessions. Kept apart from
+// state.json, which describes only the current process and is cleared when that one exits.
+export const readDrainingOpenCodeRecords = (drainingPath) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(drainingPath, 'utf8'));
+  } catch {
+    return [];
+  }
+  if (parsed?.version !== STATE_VERSION || !Array.isArray(parsed.draining)) return [];
+  return parsed.draining.filter((record) => (
+    Number.isInteger(record?.pid) && record.pid > 0
+    && Number.isInteger(record?.port) && record.port > 0
+    && isText(record?.binary) && record.binary.length > 0
+    && Number.isFinite(record?.drainStartedAt)
+  ));
+};
+
+export const writeDrainingOpenCodeRecords = (drainingPath, records) => {
+  if (records.length === 0) {
+    rmSync(drainingPath, { force: true });
+    return;
+  }
+  mkdirSync(path.dirname(drainingPath), { recursive: true, mode: 0o700 });
+  const tmpPath = `${drainingPath}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify({ version: STATE_VERSION, draining: records }, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmpPath, drainingPath);
 };
 
 // Holds the managed password and agent-tool token, so the file is 0600 and never logged.
@@ -53,14 +84,20 @@ export const clearManagedOpenCodeState = (statePath) => {
   rmSync(statePath, { force: true });
 };
 
+export const sameOpenCodeArgs = (recorded, current) => recorded === undefined
+  || (recorded.length === current.length && recorded.every((value, index) => value === current[index]));
+
 // `ownsPid` must be verified against the process command before any signal is sent: a recorded pid can be reused.
-export const decideManagedOpenCodeLaunch = ({ state, ownsPid, binary, fingerprint, port, healthy }) => {
+// A changed launch keeps the recorded process serving until its replacement is ready (`handoff`); only an
+// unhealthy recorded process is replaced in place, because it is not serving anything to hand over.
+export const decideManagedOpenCodeLaunch = ({ state, ownsPid, binary, args, fingerprint, port, healthy }) => {
   if (!state) return { action: 'start', reason: 'no-state' };
   if (!ownsPid) return { action: 'start', reason: 'recorded-process-gone' };
-  if (state.binary !== binary) return { action: 'replace', reason: 'binary-changed' };
-  if (state.port !== port) return { action: 'replace', reason: 'port-changed' };
-  if (state.fingerprint !== fingerprint) return { action: 'replace', reason: 'launch-config-changed' };
   if (!healthy) return { action: 'replace', reason: 'unhealthy' };
+  if (state.binary !== binary) return { action: 'handoff', reason: 'binary-changed' };
+  if (!sameOpenCodeArgs(state.args, args)) return { action: 'handoff', reason: 'args-changed' };
+  if (state.port !== port) return { action: 'handoff', reason: 'port-changed' };
+  if (state.fingerprint !== fingerprint) return { action: 'handoff', reason: 'launch-config-changed' };
   return { action: 'adopt', reason: 'matches-state' };
 };
 

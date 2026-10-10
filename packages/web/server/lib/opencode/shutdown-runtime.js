@@ -27,6 +27,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getOpenCodeProcess,
     setOpenCodeProcess,
     waitForPortRelease,
+    closeDrainingOpenCode,
     getServer,
     getUiAuthController,
     setUiAuthController,
@@ -183,6 +184,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     } else if (options.keepOpenCode) {
       console.log('Leaving OpenCode running for the next start to adopt');
     } else {
+      await closeDrainingOpenCode();
       const portToKill = getOpenCodePort();
       const openCodeProcess = getOpenCodeProcess();
 

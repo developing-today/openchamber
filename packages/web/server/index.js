@@ -1451,6 +1451,9 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  listBusySessionIds: () => Object.entries(sessionRuntime.getSessionStateSnapshot())
+    .filter(([, sessionState]) => sessionState?.status === 'busy' || sessionState?.status === 'retry')
+    .map(([sessionId]) => sessionId),
   // Most-recently-used directories first: OpenCode initializes each directory
   // lazily on first request (seconds on large session stores), so the
   // lifecycle warms these right after readiness — before the UI's first
@@ -1483,6 +1486,19 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // keeps receiving events instead of staying pinned to the old
   // process (#2638). The runtime is created later by the startup pipeline;
   // by the time any restart runs, it is assigned.
+  // The replaced process keeps its in-flight requests and the events of its busy sessions;
+  // the message stream reads the new process and follows the old one until it drains.
+  onOpenCodeHandoff: (predecessor) => {
+    resetOpenCodeRuntimeProviders();
+    if (!messageStreamRuntime) return null;
+    try {
+      messageStreamRuntime.rebindUpstream({ closeDirectorySockets: false });
+      return messageStreamRuntime.followUpstream(predecessor);
+    } catch (error) {
+      console.warn('Failed to follow replaced OpenCode event stream:', error?.message ?? error);
+      return null;
+    }
+  },
   onOpenCodeRestarted: () => {
     // A restart reloads plugins: provider ports, credentials and the provider
     // list itself can all differ from what was cached.
@@ -1870,6 +1886,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     openCodeProcess = value;
   },
   waitForPortRelease,
+  closeDrainingOpenCode: () => openCodeLifecycleRuntime.closeDrainingOpenCode(),
   getServer: () => server,
   getUiAuthController: () => uiAuthController,
   setUiAuthController: (value) => {

@@ -63,6 +63,11 @@ const routeToLogFile = (stream) => {
   };
 };
 
+// The managed child starts through /bin/sh, which closes the inherited socket fd before exec.
+const unwrapLaunch = (command, args) => (command === '/bin/sh'
+  ? { binary: args[2], args: args.slice(3) }
+  : { binary: command, args });
+
 const createMockChild = () => {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -175,7 +180,7 @@ describe('OpenCode lifecycle', () => {
     try {
       await runtime.restartOpenCode();
       expect(firstServer.signalCode).toBe('SIGTERM');
-      expect(spawnMock.mock.calls.map(([binary]) => binary)).toEqual(binaries);
+      expect(spawnMock.mock.calls.map(([command, args]) => unwrapLaunch(command, args).binary)).toEqual(binaries);
       expect(runtime.testState.lastOpenCodeLaunchDiagnostics.sourceBinary).toBe(binaries[1]);
       expect(process.env.OPENCODE_BINARY).toBeUndefined();
       for (const [, , options] of spawnMock.mock.calls) {
@@ -923,7 +928,8 @@ describe('OpenCode lifecycle', () => {
 
     const runtime = createRuntime();
     const server = await runtime.startOpenCode();
-    const [binary, args, options] = spawnMock.mock.calls[0];
+    const [command, commandArgs, options] = spawnMock.mock.calls[0];
+    const { binary, args } = unwrapLaunch(command, commandArgs);
 
     expect(binary).toBe('opencode');
     expect(args).toEqual(['serve', '--hostname', '127.0.0.1', '--port', '45678']);
@@ -950,7 +956,8 @@ describe('OpenCode lifecycle', () => {
 
     const runtime = createRuntime({}, {}, { ENV_CONFIGURED_OPENCODE_HOSTNAME: '0.0.0.0' });
     const server = await runtime.startOpenCode();
-    const [binary, args] = spawnMock.mock.calls[0];
+    const [command, commandArgs] = spawnMock.mock.calls[0];
+    const { binary, args } = unwrapLaunch(command, commandArgs);
 
     expect(binary).toBe('opencode');
     expect(args).toEqual(['serve', '--hostname', '0.0.0.0', '--port', '45678']);
@@ -1345,9 +1352,10 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     expect(adopted.url).toBe('http://127.0.0.1:45678');
   });
 
-  it('replaces the recorded OpenCode when its binary changed', async () => {
+  it('hands off from the recorded OpenCode when its binary changed and keeps it draining', async () => {
     delete process.env.OPENCODE_BINARY;
     const { dataDir } = await startFirstRuntime();
+    const recorded = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
     spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
     globalThis.fetch = vi.fn(async () => ({ ok: true }));
     spawnMock.mockImplementationOnce(() => {
@@ -1360,7 +1368,13 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     await second.startOpenCode();
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
-    expect(spawnMock.mock.calls[0][0]).toBe('/opt/other/opencode');
+    const { binary } = unwrapLaunch(spawnMock.mock.calls[0][0], spawnMock.mock.calls[0][1]);
+    expect(binary).toBe('/opt/other/opencode');
+    const draining = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'draining.json'), 'utf8'));
+    expect(draining.draining).toEqual([expect.objectContaining({ pid: recorded.pid, port: recorded.port, binary: recorded.binary })]);
+    const current = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
+    expect(current.port).not.toBe(recorded.port);
+    expect(current.binary).toBe('/opt/other/opencode');
   });
 
   it('replaces the recorded OpenCode when the launch fingerprint changed', async () => {

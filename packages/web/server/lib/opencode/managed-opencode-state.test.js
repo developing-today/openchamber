@@ -8,12 +8,16 @@ import {
   createLaunchFingerprint,
   decideManagedOpenCodeLaunch,
   hashLaunchSecret,
+  readDrainingOpenCodeRecords,
   readLogSince,
   readLogTail,
   readManagedOpenCodeState,
   resolveManagedOpenCodePaths,
+  writeDrainingOpenCodeRecords,
   writeManagedOpenCodeState,
 } from './managed-opencode-state.js';
+
+const serveArgs = ['serve', '--hostname', '127.0.0.1'];
 
 const validState = {
   pid: 4242,
@@ -26,9 +30,10 @@ const validState = {
 };
 
 const adoptable = {
-  state: { ...validState, version: 1 },
+  state: { ...validState, args: serveArgs, version: 1 },
   ownsPid: true,
   binary: '/usr/bin/opencode',
+  args: serveArgs,
   fingerprint: 'abc123',
   port: 45678,
   healthy: true,
@@ -43,20 +48,30 @@ describe('decideManagedOpenCodeLaunch', () => {
     expect(decideManagedOpenCodeLaunch({ ...adoptable, ownsPid: false })).toEqual({ action: 'start', reason: 'recorded-process-gone' });
   });
 
-  it('replaces when the binary changed', () => {
-    expect(decideManagedOpenCodeLaunch({ ...adoptable, binary: '/opt/new/opencode' })).toEqual({ action: 'replace', reason: 'binary-changed' });
+  it('hands off when the binary changed', () => {
+    expect(decideManagedOpenCodeLaunch({ ...adoptable, binary: '/opt/new/opencode' })).toEqual({ action: 'handoff', reason: 'binary-changed' });
   });
 
-  it('replaces when the port changed', () => {
-    expect(decideManagedOpenCodeLaunch({ ...adoptable, port: 45679 })).toEqual({ action: 'replace', reason: 'port-changed' });
+  it('hands off when the arguments changed', () => {
+    expect(decideManagedOpenCodeLaunch({ ...adoptable, args: ['serve', '--hostname', '0.0.0.0'] })).toEqual({ action: 'handoff', reason: 'args-changed' });
   });
 
-  it('replaces when the launch fingerprint changed', () => {
-    expect(decideManagedOpenCodeLaunch({ ...adoptable, fingerprint: 'other' })).toEqual({ action: 'replace', reason: 'launch-config-changed' });
+  it('adopts a state recorded before arguments were stored', () => {
+    const legacyState = { ...adoptable.state };
+    delete legacyState.args;
+    expect(decideManagedOpenCodeLaunch({ ...adoptable, state: legacyState })).toEqual({ action: 'adopt', reason: 'matches-state' });
   });
 
-  it('replaces when the health check fails', () => {
-    expect(decideManagedOpenCodeLaunch({ ...adoptable, healthy: false })).toEqual({ action: 'replace', reason: 'unhealthy' });
+  it('hands off when the port changed', () => {
+    expect(decideManagedOpenCodeLaunch({ ...adoptable, port: 45679 })).toEqual({ action: 'handoff', reason: 'port-changed' });
+  });
+
+  it('hands off when the launch fingerprint changed', () => {
+    expect(decideManagedOpenCodeLaunch({ ...adoptable, fingerprint: 'other' })).toEqual({ action: 'handoff', reason: 'launch-config-changed' });
+  });
+
+  it('replaces an unhealthy recorded OpenCode instead of handing off to it', () => {
+    expect(decideManagedOpenCodeLaunch({ ...adoptable, binary: '/opt/new/opencode', healthy: false })).toEqual({ action: 'replace', reason: 'unhealthy' });
   });
 
   it('adopts when pid, binary, port, fingerprint and health all match', () => {
@@ -66,6 +81,23 @@ describe('decideManagedOpenCodeLaunch', () => {
 
 describe('managed OpenCode state file', () => {
   let root;
+
+  it('keeps draining records when the current state is cleared', () => {
+    const drainingPath = path.join(root, 'draining.json');
+    const record = { pid: 7001, port: 45001, binary: '/usr/bin/opencode', drainStartedAt: 1700000000000 };
+    writeDrainingOpenCodeRecords(drainingPath, [record]);
+    writeManagedOpenCodeState(resolveManagedOpenCodePaths(root).statePath, validState);
+    clearManagedOpenCodeState(resolveManagedOpenCodePaths(root).statePath);
+    expect(readDrainingOpenCodeRecords(drainingPath)).toEqual([record]);
+  });
+
+  it('ignores malformed draining records and removes the file once nothing drains', () => {
+    const drainingPath = path.join(root, 'draining.json');
+    fs.writeFileSync(drainingPath, JSON.stringify({ version: 1, draining: [{ pid: -1 }, { pid: 7002, port: 45002, binary: '/usr/bin/opencode', drainStartedAt: 1 }] }));
+    expect(readDrainingOpenCodeRecords(drainingPath).map((record) => record.pid)).toEqual([7002]);
+    writeDrainingOpenCodeRecords(drainingPath, []);
+    expect(fs.existsSync(drainingPath)).toBe(false);
+  });
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'managed-opencode-state-'));

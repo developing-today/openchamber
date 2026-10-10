@@ -13,6 +13,7 @@ import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createGlobalMessageStreamWsBridge } from './global-ws-bridge.js';
 import { acceptDirectoryMessageStreamWsConnection } from './directory-ws-bridge.js';
 import {
+  createUpstreamSseReader,
   DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
 } from './upstream-reader.js';
@@ -190,15 +191,41 @@ export function createMessageStreamWsRuntime({
      * rebuilt by closing their client sockets, which reconnect with
      * `Last-Event-ID` and re-establish the stream against the new port.
      */
-    rebindUpstream() {
+    rebindUpstream({ closeDirectorySockets = true } = {}) {
       globalHub.stop();
       globalHub.start();
+      if (!closeDirectorySockets) return;
       for (const socket of Array.from(directorySockets)) {
         try {
           socket.close(1012, 'OpenCode upstream restarted');
         } catch {
         }
       }
+    },
+    // Keeps reading a replaced OpenCode's events until the returned function is called, so the
+    // sessions it still runs keep streaming to clients.
+    followUpstream({ url, headers }) {
+      const controller = new AbortController();
+      const reader = createUpstreamSseReader({
+        signal: controller.signal,
+        fetchImpl,
+        stallTimeoutMs: upstreamStallTimeoutMs,
+        reconnectDelayMs: upstreamReconnectDelayMs,
+        buildUrl: () => new URL('/api/event', url),
+        getHeaders: () => headers,
+        onEvent(event) {
+          globalHub.injectEvent({
+            payload: event.payload,
+            directory: event.envelope?.directory,
+            spaceId: event.envelope?.spaceId,
+          });
+        },
+      });
+      void reader.start();
+      return () => {
+        reader.stop();
+        controller.abort();
+      };
     },
     async close() {
       server.off('upgrade', upgradeHandler);
