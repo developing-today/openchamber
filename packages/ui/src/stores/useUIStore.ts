@@ -1032,6 +1032,7 @@ interface UIStore {
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
   agentTerminalsPlacement: AgentTerminalsPlacement;
+  agentTerminalNames: Record<string, string>;
   enterToSend: boolean;
   enterToSendConfigured: boolean;
   wideChatLayoutEnabled: boolean;
@@ -1258,6 +1259,7 @@ interface UIStore {
   setInputSpellcheckEnabled: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
   setAgentTerminalsPlacement: (value: AgentTerminalsPlacement) => void;
+  setAgentTerminalName: (ptyID: string, name: string) => void;
   setEnterToSend: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
@@ -1464,6 +1466,7 @@ export const useUIStore = create<UIStore>()(
         inputSpellcheckEnabled: false,
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
         agentTerminalsPlacement: DEFAULT_AGENT_TERMINALS_PLACEMENT,
+        agentTerminalNames: {},
         enterToSend: false,
         enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
@@ -2936,6 +2939,15 @@ export const useUIStore = create<UIStore>()(
         setAgentTerminalsPlacement: (value) => {
           set({ agentTerminalsPlacement: normalizeAgentTerminalsPlacement(value) });
         },
+        setAgentTerminalName: (ptyID, name) => {
+          set((state) => {
+            const trimmed = name.trim();
+            const next = { ...state.agentTerminalNames };
+            if (trimmed) next[ptyID] = trimmed;
+            else delete next[ptyID];
+            return { agentTerminalNames: next };
+          });
+        },
         setEnterToSend: (value) => {
           set({ enterToSend: value });
         },
@@ -3420,6 +3432,7 @@ export const useUIStore = create<UIStore>()(
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
           agentTerminalsPlacement: state.agentTerminalsPlacement,
+          agentTerminalNames: state.agentTerminalNames,
           enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
