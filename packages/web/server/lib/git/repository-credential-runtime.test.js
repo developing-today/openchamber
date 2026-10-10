@@ -170,9 +170,14 @@ describe('createGitRepositoryCredentialRuntime', () => {
       await fs.writeFile(endpointFile, endpointJson);
       process.env.__ENDPOINT_JSON = endpointJson;
       const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
+      // The helper's fall-through runs the person's own `git credential fill` with their system config,
+      // so a stub git on PATH stands in for a person who has nothing stored.
+      const quietBin = path.join(dataDir, 'bin');
+      await fs.mkdir(quietBin);
+      await fs.writeFile(path.join(quietBin, 'git'), '#!/bin/sh\ncat > /dev/null\n', { mode: 0o755 });
       const run = () => new Promise((resolve) => {
         const child = execFile(process.execPath, [helper, endpointFile, 'get'], {
-          env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', HOME: dataDir },
+          env: { ...process.env, PATH: `${quietBin}${path.delimiter}${process.env.PATH}` },
         }, (_error, stdout) => resolve(stdout));
         child.stdin.end('protocol=https\nhost=github.com\n');
       });
