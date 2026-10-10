@@ -15,14 +15,21 @@
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
+      opencode = opencode-fork.packages.${system}.opencode;
       openchamber = pkgs.callPackage ./nix/package.nix {
         src = self;
-        opencode = opencode-fork.packages.${system}.opencode;
+        inherit opencode;
+      };
+      openchamber-desktop = pkgs.callPackage ./nix/desktop.nix {
+        src = self;
+        inherit opencode;
+        inherit (openchamber) node_modules;
+        electron = pkgs.electron_43;
       };
     in
     {
       packages.${system} = {
-        inherit openchamber;
+        inherit openchamber openchamber-desktop;
         default = openchamber;
       };
 
