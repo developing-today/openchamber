@@ -68,6 +68,7 @@ stdenvNoCC.mkDerivation {
     cp -R ${node_modules}/. .
     chmod -R u+w .
     patchShebangs node_modules packages
+    bun run --cwd packages/sdk build
     bun run --cwd packages/web build
     runHook postBuild
   '';

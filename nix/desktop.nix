@@ -59,6 +59,7 @@ stdenvNoCC.mkDerivation {
     patchShebangs node_modules packages
     mkdir -p node_modules/@openchamber
     ln -sfn ../../packages/web node_modules/@openchamber/web
+    bun run --cwd packages/sdk build
     bun run --cwd packages/electron build:web-assets
     bun run --cwd packages/electron bundle:main
     ln -s ../resources packages/electron/dist-bundle/resources
