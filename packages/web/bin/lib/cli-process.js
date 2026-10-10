@@ -240,7 +240,7 @@ async function terminateProcessTree(pid, options = {}) {
   }
 
   try {
-    process.kill(pid, 'SIGTERM');
+    process.kill(pid, options.signal ?? 'SIGTERM');
   } catch {
   }
 

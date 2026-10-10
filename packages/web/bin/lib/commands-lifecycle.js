@@ -98,6 +98,7 @@ async function stopCommand(options) {
 
         if (Number.isFinite(explicitInstance.pid) && isProcessRunning(explicitInstance.pid)) {
           await stopInstanceProcess(explicitInstance.pid, {
+            signal: 'SIGINT',
             shutdownWaitMs: requested ? 5000 : 0,
             gracefulTimeoutMs: 2500,
             forceTimeoutMs: 3000,
@@ -159,6 +160,7 @@ async function stopCommand(options) {
         }
         unconfirmedStopSpin?.start(`Stopping unconfirmed OpenChamber on port ${options.port}...`);
         const stopped = await stopInstanceProcess(explicitInstance.pid, {
+          signal: 'SIGINT',
           shutdownWaitMs: 0,
           gracefulTimeoutMs: 2500,
           forceTimeoutMs: 3000,
@@ -218,6 +220,7 @@ async function stopCommand(options) {
       try {
         const requested = await requestServerShutdown(instance.port, instance.host || options.host);
         const stopped = await stopInstanceProcess(instance.pid, {
+          signal: 'SIGINT',
           shutdownWaitMs: requested ? 5000 : 0,
           gracefulTimeoutMs: 2500,
           forceTimeoutMs: 3000,
