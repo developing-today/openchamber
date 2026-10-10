@@ -11,6 +11,7 @@ import {
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
 import { recordStartupPerformance } from './startup-performance.js';
+import { beginUpstreamRequest } from './upstream-requests.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
@@ -1022,7 +1023,10 @@ export const registerOpenCodeProxy = (app, deps) => {
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
-      proxyReq: (proxyReq, req) => {
+      proxyReq: (proxyReq, req, res) => {
+        // A replaced OpenCode drains until no request still answers from its port.
+        const endUpstreamRequest = beginUpstreamRequest(Number(new URL(resolveProxyTarget()).port));
+        res?.once('close', endUpstreamRequest);
         // Inject OpenCode auth headers
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
