@@ -14,6 +14,7 @@ import { sourceBoardI18n } from './source-board.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
+import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict = {
@@ -138,6 +139,7 @@ export const dict = {
   ...environmentI18n.fr,
   ...providersI18n.fr,
   ...mcpGridI18n.fr,
+  ...mcpxSecretsI18n.fr,
   ...pluginsGridI18n.fr,
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',

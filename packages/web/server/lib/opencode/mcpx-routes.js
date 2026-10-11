@@ -3,6 +3,33 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import express from 'express';
+import { z } from 'zod';
+
+// The only shape a secret name takes: an environment variable name.
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const SECRET_REQUEST_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const SECRET_VALUE_MAX_LENGTH = 16 * 1024;
+
+const secretValueBody = z.object({
+  value: z.string().min(1).max(SECRET_VALUE_MAX_LENGTH),
+});
+
+// A body that fails to parse can carry the secret inside the error object, and
+// the framework logs the errors it is handed. These answers stay here, so the
+// body never reaches a log.
+const parseSecretBody = express.json({ limit: '64kb' });
+const readSecretBody = (req, res, next) => parseSecretBody(req, res, (error) => {
+  if (!error) return next();
+  if (error.status === 413) return res.status(413).json({ error: 'The secret value is too large' });
+  return res.status(400).json({ error: 'Send the secret as a JSON object with a value' });
+});
+
+const secretResponse = (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+};
+
 const defaultSocketPath = () => {
   if (process.env.MCPX_SOCKET) return process.env.MCPX_SOCKET;
   const stateDir = process.env.MCPX_STATE_DIR ||
@@ -133,6 +160,53 @@ export const registerMcpxRoutes = (app) => {
       const query = req.query.since ? `?since=${encodeURIComponent(req.query.since)}` : '';
       const log = await callDaemon(`/v1/log${query}`);
       res.json(log);
+    } catch (err) {
+      res.status(502).json({ error: err.message || 'mcpx daemon unreachable' });
+    }
+  });
+
+  // Secret prompts. The daemon keeps the values in memory; this server only
+  // relays them, so no response or log here may carry a value.
+  app.get('/api/mcpx/secret-requests', secretResponse, async (_req, res) => {
+    try {
+      res.json(await callDaemon('/v1/secret-requests'));
+    } catch (err) {
+      res.status(502).json({ error: err.message || 'mcpx daemon unreachable' });
+    }
+  });
+
+  app.get('/api/mcpx/secrets', secretResponse, async (_req, res) => {
+    try {
+      res.json(await callDaemon('/v1/secrets'));
+    } catch (err) {
+      res.status(502).json({ error: err.message || 'mcpx daemon unreachable' });
+    }
+  });
+
+  app.put('/api/mcpx/secrets/:name', secretResponse, readSecretBody, async (req, res) => {
+    if (!SECRET_NAME.test(req.params.name)) {
+      return res.status(400).json({ error: 'A secret name is an environment variable name, such as GITHUB_TOKEN' });
+    }
+    const body = secretValueBody.safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ error: `A secret value must be a non-empty string of at most ${SECRET_VALUE_MAX_LENGTH} characters` });
+    }
+    try {
+      const stored = await callDaemon(`/v1/secrets/${encodeURIComponent(req.params.name)}`, 'PUT', { value: body.data.value });
+      // Only these fields leave, so a daemon reply that echoed the value cannot pass it on.
+      res.json({ name: stored.name, set: stored.set, source: stored.source });
+    } catch {
+      // The daemon's error text is not forwarded, since it could repeat the value.
+      res.status(502).json({ error: 'mcpx daemon did not store the secret' });
+    }
+  });
+
+  app.delete('/api/mcpx/secret-requests/:id', secretResponse, async (req, res) => {
+    if (!SECRET_REQUEST_ID.test(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid secret request id' });
+    }
+    try {
+      res.json(await callDaemon(`/v1/secret-requests/${encodeURIComponent(req.params.id)}`, 'DELETE'));
     } catch (err) {
       res.status(502).json({ error: err.message || 'mcpx daemon unreachable' });
     }
