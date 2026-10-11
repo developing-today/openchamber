@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { OpenCodeClient } from "@opencode/client"
+import { OpenCode, type OpenCodeClient } from "@opencode/client"
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient, RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-auth"
@@ -13,8 +13,14 @@ const wireDelta = (id: string, directory: string, delta: string) => ({
   data: { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, delta },
 })
 
-/** The WebSocket transport never fetches, so the SSE client is never called. */
-const unusedSdk = {} as unknown as OpenCodeClient
+/**
+ * The WebSocket transport never reads the SDK, so this is a real client whose
+ * requests reject: a stray call fails the test instead of reaching the network.
+ */
+const unusedSdk: OpenCodeClient = OpenCode.make({
+  baseUrl: "http://runtime.test",
+  fetch: () => Promise.reject(new Error("the WebSocket transport must not fetch")),
+})
 
 /** A relay tunnel socket the test drives by hand. */
 function createFakeSocket(): RelayTunnelWebSocket {
