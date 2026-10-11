@@ -29,6 +29,13 @@ export function createGlobalMessageStreamWsBridge({
   // The upstream read that resumes a client the replay buffer could not answer, while it runs.
   const resumeStops = new Map();
 
+  // Every `ready` frame names the hub's head when the hub has seen an OpenCode event. A browser that
+  // holds no cursor adopts it, so its next reconnect resumes from there instead of refetching.
+  const readyFrame = (fields = {}) => {
+    const headEventId = globalHub.headEventId();
+    return { type: 'ready', scope: 'global', ...fields, ...(headEventId ? { headEventId } : {}) };
+  };
+
   const removeClient = (socket) => {
     clients.delete(socket);
     clientLastEventIds.delete(socket);
@@ -89,7 +96,7 @@ export function createGlobalMessageStreamWsBridge({
       return;
     }
 
-    const ready = { type: 'ready', scope: 'global' };
+    const ready = readyFrame();
     if (replay === null) {
       ready.replayReset = true;
     } else if (isOpenCodeEventId(requestedLastEventId)) {
@@ -112,7 +119,7 @@ export function createGlobalMessageStreamWsBridge({
   // also holds. The client is told it resumed at once, as it is after a replay. If OpenCode cannot
   // honour the cursor, it is told to refetch instead, and then it is live like any other client.
   const resumeFromUpstream = (socket, cursor) => {
-    if (!sendMessageStreamWsFrame(socket, { type: 'ready', scope: 'global', resumed: true })) {
+    if (!sendMessageStreamWsFrame(socket, readyFrame({ resumed: true }))) {
       removeClient(socket);
       return;
     }
@@ -124,7 +131,7 @@ export function createGlobalMessageStreamWsBridge({
     const refetch = () => {
       resumeStops.delete(socket);
       if (!clients.has(socket)) return;
-      if (!sendMessageStreamWsFrame(socket, { type: 'ready', scope: 'global', replayReset: true })) {
+      if (!sendMessageStreamWsFrame(socket, readyFrame({ replayReset: true }))) {
         removeClient(socket);
         return;
       }
@@ -187,7 +194,7 @@ export function createGlobalMessageStreamWsBridge({
         if (!readyClients.has(socket)) {
           continue;
         }
-        if (!sendMessageStreamWsFrame(socket, { type: 'ready', scope: 'global', replayReset: true })) {
+        if (!sendMessageStreamWsFrame(socket, readyFrame({ replayReset: true }))) {
           removeClient(socket);
         }
       }
@@ -229,7 +236,7 @@ export function createGlobalMessageStreamWsBridge({
         if (status.wasReady) {
           // The upstream reconnects from its own cursor, so what it missed is replayed; without an
           // OpenCode cursor there is nothing to replay from, and the client must refetch as before.
-          const ready = { type: 'ready', scope: 'global' };
+          const ready = readyFrame();
           if (isOpenCodeEventId(globalHub.upstreamCursor())) ready.resumed = true;
           const sent = sendMessageStreamWsFrame(socket, ready);
           if (!sent) {

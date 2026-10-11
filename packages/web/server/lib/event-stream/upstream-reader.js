@@ -1,7 +1,7 @@
 import { parseSseEventEnvelope } from './protocol.js';
+import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from './timeouts.js';
 
-export const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
-export const UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS * 3;
+export { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS };
 export const DEFAULT_UPSTREAM_RECONNECT_DELAY_MS = 250;
 const DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS = 5_000;
 const DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER = 2;
@@ -22,7 +22,7 @@ function resolveReconnectDelay(consecutiveFailures, baseMs, maxMs, multiplier) {
   return Math.min(candidate, safeMax);
 }
 
-export function resolveTimeoutMs(value, fallback) {
+function resolveTimeoutMs(value, fallback) {
   const resolved = typeof value === 'function' ? value() : value;
   return Number.isFinite(resolved) ? resolved : fallback;
 }

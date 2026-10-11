@@ -1,17 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
-import { createUpstreamSseReader, DEFAULT_UPSTREAM_STALL_TIMEOUT_MS, resolveTimeoutMs } from './upstream-reader.js';
+import { createUpstreamSseReader } from './upstream-reader.js';
 import { parseSseEventEnvelope, serializeMessageStreamWsEvent } from './protocol.js';
 import { isOpenCodeEventId, parseSseBlock, SSE_RESYNC_PAYLOAD_TYPE } from './sse-cursor.js';
 import { translateWireEvent } from './translate-v2.js';
 import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
+import { DEFAULT_RESUME_IDLE_TIMEOUT_MS } from './timeouts.js';
 
 // Raised from 512 → 2048 to improve recovery after brief disconnects during
 // long-running agent sessions where many events accumulate quickly.
 const MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT = 2048;
 const MESSAGE_STREAM_GLOBAL_REPLAY_BYTES = 8 * 1024 * 1024;
-
-const SERVER_CONNECTED_PAYLOAD_TYPE = 'server.connected';
 
 // The upstream's `id:` line is the cursor OpenCode replays from (`<instance>:<sequence>`), so it is
 // the reader's `eventId`, and only such a line moves the reader's cursor. A block without one, which
@@ -41,17 +40,20 @@ export function createGlobalMessageStreamHub({
   // The event subscribers that also take the events of isolated spaces.
   const spaceSubscribers = new Set();
   const statusSubscribers = new Set();
+  // The replay buffer holds only OpenCode's own `<instance>:<sequence>` events, the only ids a browser
+  // is ever sent as a cursor. Everything else is live only. Replaying a hub-numbered event would hand a
+  // reconnecting browser a frame it had already applied live.
   const replay = [];
   let replayBytes = 0;
+  // The newest OpenCode id the hub has seen: the head of the feed, which a browser may adopt as its
+  // cursor. Undefined until OpenCode has sent one, and after a resync that carries none.
   let latestEventId;
   // The upstream cursor, kept across a stop so the next connection replays what it missed. Only
   // OpenCode's own `<instance>:<sequence>` ids mean anything to it; anything else is a hub id.
   let resumeCursor = '';
-  // An upstream that carries no SSE ids (verified on 1.18.30: not one frame in a full response)
-  // never entered the replay buffer under an id, so a reconnecting browser had no cursor and every
-  // event in the gap was gone. The replay log is this hub's own, so the hub numbers what upstream
-  // leaves unnumbered. The per-process prefix makes a cursor from before a restart miss instead of
-  // matching an unrelated sequence number, which reports `replayReset` and sends the client to repair.
+  // An event without an OpenCode id (an upstream that carries no SSE ids, verified on 1.18.30, or
+  // an event this hub injects) is numbered here, so it has an id for fan-out. The per-process prefix
+  // keeps such an id from matching an unrelated cursor after a restart.
   const replayIdPrefix = `oc-${randomUUID().slice(0, 8)}-`;
   let replaySequence = 0;
 
@@ -99,9 +101,6 @@ export function createGlobalMessageStreamHub({
       // OpenCode's answer to a cursor it cannot honour. It is never replayed: it tells subscribers to
       // have their clients refetch.
       resync: payload?.type === SSE_RESYNC_PAYLOAD_TYPE,
-      // OpenCode's greeting to one upstream connection, sent outside its feed (so without an OpenCode
-      // id). It goes live, not into replay.
-      connection: payload?.type === SERVER_CONNECTED_PAYLOAD_TYPE && !isOpenCodeEventId(eventId),
       serialize() {
         // Only an OpenCode id goes to the browser as its cursor. A hub id or a payload id names a
         // position in this process's buffer or nothing OpenCode can replay from, so the frame omits it.
@@ -124,15 +123,15 @@ export function createGlobalMessageStreamHub({
   // always names a frame the buffer can find.
   const commitEvent = (event) => {
     const normalized = normalizeEvent(event);
-    latestEventId = normalized.eventId;
     if (normalized.resync) {
       // The upstream lost the cursor, so what is retained does not run on into what follows it: a
-      // cursor from before the resync must not replay across it.
+      // cursor from before the resync must not replay across it. The resync carries the head OpenCode
+      // restarts from when it has an OpenCode id; otherwise there is no head until the next event.
       replay.length = 0;
       replayBytes = 0;
-    } else if (!normalized.connection) {
-      // A reconnecting client that replayed a greeting would take it for a restart of its stream, and
-      // refresh for nothing. The greeting still reaches every client that is live.
+      latestEventId = isOpenCodeEventId(normalized.eventId) ? normalized.eventId : undefined;
+    } else if (isOpenCodeEventId(normalized.eventId)) {
+      latestEventId = normalized.eventId;
       const serializedFrame = normalized.serialize();
       const bytes = Buffer.byteLength(serializedFrame);
       if (bytes > replayByteLimit) {
@@ -148,6 +147,9 @@ export function createGlobalMessageStreamHub({
         }
       }
     }
+    // Any other frame goes live only: a greeting (a reconnecting client that replayed one would take it
+    // for a restart of the stream), a hub-numbered event, or a payload id that is not an OpenCode id.
+    // Every client that is live still receives it.
 
     for (const subscriber of Array.from(eventSubscribers)) {
       if (normalized.spaceId !== null && !spaceSubscribers.has(subscriber)) continue;
@@ -238,13 +240,9 @@ export function createGlobalMessageStreamHub({
 
   // The silence a catch-up read tolerates before it hands its client over to live. A healthy
   // connection delivers its replay at once, so a read silent this long has nothing left to hand over.
-  // It is twice the stall timeout: a connection that went quiet is reconnected by its own reader
-  // first, and only silence that survives that reconnect is taken as the head of OpenCode's feed.
-  const resumeIdleMs = () => {
-    if (resumeIdleTimeoutMs !== undefined) return resumeIdleTimeoutMs;
-    const stall = resolveTimeoutMs(upstreamStallTimeoutMs, DEFAULT_UPSTREAM_STALL_TIMEOUT_MS);
-    return 2 * (stall > 0 ? stall : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS);
-  };
+  // It is its own bound, not derived from the stall timeout: the bound must outlast a reader's
+  // reconnect, so a connection that went quiet is reconnected before the read gives up on it.
+  const resumeIdleMs = () => resumeIdleTimeoutMs ?? DEFAULT_RESUME_IDLE_TIMEOUT_MS;
 
   // Reads what OpenCode holds after a cursor the replay buffer cannot answer, for one client. It
   // reads on a connection of its own, from the cursor, and ends at the first event the hub also
@@ -333,6 +331,10 @@ export function createGlobalMessageStreamHub({
     /** The id of the last upstream event read, or the cursor the connection started from. */
     upstreamCursor() {
       return reader ? reader.getLastEventId() : resumeCursor;
+    },
+    /** The newest OpenCode id the hub has seen, or undefined before the first one. */
+    headEventId() {
+      return latestEventId;
     },
     isConnected() {
       return connected;

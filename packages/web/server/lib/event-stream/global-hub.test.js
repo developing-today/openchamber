@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createGlobalMessageStreamHub } from './global-hub.js';
 
+// OpenCode's cursor form, `<instance>:<sequence>`: the only ids the replay buffer holds.
+const INSTANCE = '6b1f3c2e-8d4a-4f7b-9c3e-2a5d7e9f1b40';
+const ocId = (sequence) => `${INSTANCE}:${sequence}`;
+
 it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () => {
-  // v2 carries the event id inside the payload; there are no `id:` SSE lines.
-  const blocks = Array.from({ length: 8 }, (_, i) => `data: ${JSON.stringify({ id: `e${i}`, type: 'message', properties: { text: '界'.repeat(40) } })}\n\n`);
+  const blocks = Array.from({ length: 8 }, (_, i) => `id: ${ocId(i)}\ndata: ${JSON.stringify({ id: `e${i}`, type: 'message', properties: { text: '界'.repeat(40) } })}\n\n`);
   const received = [];
   const hub = createGlobalMessageStreamHub({
     buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
@@ -16,10 +19,10 @@ it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () 
   try {
     hub.start();
     await waitForAssertion(() => expect(received).toHaveLength(8));
-    expect(hub.replayAfter('e0')).toBeNull();
-    expect(hub.replayAfter('e5')).toBeNull();
-    const tail = hub.replayAfter('e6');
-    expect(tail.map(entry => entry.eventId)).toEqual(['e7']);
+    expect(hub.replayAfter(ocId(0))).toBeNull();
+    expect(hub.replayAfter(ocId(5))).toBeNull();
+    const tail = hub.replayAfter(ocId(6));
+    expect(tail.map(entry => entry.eventId)).toEqual([ocId(7)]);
     expect(Buffer.byteLength(tail[0].serializedFrame) * 2).toBeLessThanOrEqual(600);
     expect(Buffer.byteLength(tail[0].serializedFrame) * 3).toBeGreaterThan(600);
   } finally { hub.stop(); }
@@ -109,7 +112,7 @@ describe('delta coalescing in the global hub', () => {
   it('resumes from any cursor without losing or repeating text', async () => {
     const blocks = [];
     let id = 0;
-    const nextId = () => `e${String(id++).padStart(4, '0')}`;
+    const nextId = () => ocId(id++);
     for (let index = 0; index < 40; index += 1) blocks.push(deltaBlock(nextId(), `a${index}.`, index % 3 === 0 ? 2 : 1));
     const snapshotId = nextId();
     blocks.push(`id: ${snapshotId}\ndata: ${JSON.stringify({ id: snapshotId, type: 'session.text.ended', data: { sessionID: 'ses_1', assistantMessageID: 'msg_1', ordinal: 1, text: '' } })}\n\n`);
@@ -140,9 +143,10 @@ describe('delta coalescing in the global hub', () => {
     } finally { hub.stop(); }
   });
 
-  // OpenCode sends no SSE ids at all. Before the hub numbered such events
-  // itself the replay buffer stayed empty and every reconnect lost its gap.
-  it('numbers id-less upstream events so a reconnect resumes from any cursor', async () => {
+  // OpenCode sends no SSE ids at all. Its events still reach every live browser, numbered by the hub
+  // so fan-out has an id. None of them is buffered or sent as a cursor, so nothing is replayed twice,
+  // and a browser holding none of OpenCode's ids refetches on reconnect.
+  it('delivers id-less upstream events live, numbered by the hub but never buffered or used as a cursor', async () => {
     const idless = (type, data) => `data: ${JSON.stringify({ type, data })}\n\n`;
     const blocks = [];
     for (let index = 0; index < 30; index += 1) {
@@ -162,34 +166,25 @@ describe('delta coalescing in the global hub', () => {
       await waitForAssertion(() => expect(applyFrames(received).text[1]).toBe(expected));
 
       const ids = received.map((event) => event.eventId);
-      expect(ids.every((eventId) => typeof eventId === 'string' && eventId.length > 0)).toBe(true);
+      expect(ids.every((eventId) => typeof eventId === 'string' && eventId.startsWith('oc-'))).toBe(true);
       expect(new Set(ids).size).toBe(ids.length);
       expect(ids).toEqual([...ids].sort());
+      // No OpenCode id was seen, so there is no head for a browser to adopt as its cursor.
+      expect(hub.headEventId()).toBeUndefined();
 
-      const complete = applyFrames(received);
-      for (let cut = 0; cut < received.length; cut += 1) {
-        const tail = hub.replayAfter(received[cut].eventId);
-        expect(tail).not.toBeNull();
-        const replayed = tail.map((entry) => JSON.parse(entry.serializedFrame));
-        expect(tail.every((entry) => typeof entry.eventId === 'string')).toBe(true);
-        // Hub ids are for this process's replay only: no frame sent to a browser carries one as its cursor.
-        expect(replayed.every((frame) => frame.eventId === undefined)).toBe(true);
-        expect(applyFrames([...received.slice(0, cut + 1), ...replayed])).toEqual(complete);
+      for (const event of received) {
+        // No frame sent to a browser carries a hub id as its cursor.
+        expect(JSON.parse(event.serialize()).eventId).toBeUndefined();
+        // And a hub id is not in the replay buffer: a reconnect cannot be answered from it.
+        expect(hub.replayAfter(event.eventId)).toBeNull();
       }
-
-      // A cursor minted by another server process must miss, never match by
-      // sequence number: the bridge then reports replayReset and the client
-      // repairs from HTTP instead of trusting a wrong tail.
-      const foreign = ids[0].replace(/^oc-[^-]+-/, 'oc-00000000-');
-      expect(foreign).not.toBe(ids[0]);
-      expect(hub.replayAfter(foreign)).toBeNull();
     } finally { hub.stop(); }
   });
 
   it('keeps pending text for replay when the hub stops', async () => {
     const hub = createDeltaHub({
       deltaCoalesceWindowMs: 60_000,
-      blocks: ['one ', 'two ', 'three'].map((text, index) => deltaBlock(`e${index}`, text)),
+      blocks: ['one ', 'two ', 'three'].map((text, index) => deltaBlock(ocId(index), text)),
     });
     const received = [];
     hub.subscribeEvent((event) => received.push(event));
@@ -200,16 +195,16 @@ describe('delta coalescing in the global hub', () => {
 
     hub.stop();
 
-    const entries = hub.replayAfter('e0');
+    const entries = hub.replayAfter(ocId(0));
     expect(applyFrames(entries.map((entry) => JSON.parse(entry.serializedFrame))).text[1]).toBe('two three');
     // The buffer keeps the id of the last merged fragment, which is what a cursor names.
-    expect(entries.at(-1).eventId).toBe('e2');
+    expect(entries.at(-1).eventId).toBe(ocId(2));
   });
 
   it('commits pending text on demand, so a client readied later starts after it', async () => {
     const hub = createDeltaHub({
       deltaCoalesceWindowMs: 60_000,
-      blocks: ['one ', 'two ', 'three'].map((text, index) => deltaBlock(`e${index}`, text)),
+      blocks: ['one ', 'two ', 'three'].map((text, index) => deltaBlock(ocId(index), text)),
     });
     const received = [];
     hub.subscribeEvent((event) => received.push(event));
@@ -221,7 +216,7 @@ describe('delta coalescing in the global hub', () => {
       hub.flushPending();
 
       expect(applyFrames(received).text[1]).toBe('one two three');
-      expect(hub.replayAfter('e2')).toEqual([]);
+      expect(hub.replayAfter(ocId(2))).toEqual([]);
     } finally { hub.stop(); }
   });
 });
@@ -333,7 +328,8 @@ describe('events of isolated spaces in the global hub', () => {
     fetchImpl: async () => createSseResponse({ blocks: [] }),
   });
 
-  it('delivers an injected space event to subscribers that asked for spaces only, numbered and replayable like the host\'s', () => {
+  // An injected event has no OpenCode id, so it is numbered by the hub and delivered live only.
+  it('delivers an injected space event to subscribers that asked for spaces only, numbered by the hub and not buffered', () => {
     const hub = makeHub();
     const plain = [];
     const withSpaces = [];
@@ -347,7 +343,8 @@ describe('events of isolated spaces in the global hub', () => {
     expect(withSpaces[0].translated()).toEqual([expect.objectContaining({ type: 'session.status' })]);
     expect(JSON.parse(withSpaces[0].serialize())).toMatchObject({ type: 'event', directory: '/spaces/a1b2c3d4e5f6/repo', payload: { type: 'session.execution.started' } });
     hub.injectEvent({ payload: { type: 'session.execution.succeeded', data: { sessionID: 's1' } }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
-    expect(hub.replayAfter(withSpaces[0].eventId).map(entry => entry.eventId)).toEqual([withSpaces[1].eventId]);
+    expect(withSpaces[1].eventId).toMatch(/^oc-/);
+    expect(hub.replayAfter(withSpaces[0].eventId)).toBeNull();
   });
 
   it('marks a host event with no space, so every subscriber sees it', () => {
