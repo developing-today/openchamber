@@ -63,6 +63,8 @@ describe('checked-in SDK examples', () => {
     }
   });
 
+  // Each bundle is rebuilt from its source. Under the full suite's load the rebuilds ran past bun's 5 s default;
+  // the longer budget covers that load and the comparison is unchanged.
   test('all shipped bundles match their source and current SDK', async () => {
     const temporary = await mkdtemp(path.join(tmpdir(), 'oc-example-bundles-'));
     try {
@@ -80,5 +82,5 @@ describe('checked-in SDK examples', () => {
       expect(Bun.hash(normalize(await readFile(output, 'utf8')))).toBe(Bun.hash(normalize(await readFile(new URL(`${entry}.js`, examples), 'utf8'))));
     }
     } finally { await rm(temporary, { recursive: true, force: true }); }
-  });
+  }, 30_000);
 });
