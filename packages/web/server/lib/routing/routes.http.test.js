@@ -31,6 +31,7 @@ const createApp = ({ routeSend, autoSessions = new Set() } = {}) => {
     setClassifierSource: vi.fn(async () => ({ available: true })),
     setCustomEndpoint: vi.fn(async () => ({ available: true })),
     clearCustomEndpoint: vi.fn(async () => ({ available: true })),
+    testClassifier: vi.fn(async () => ({ ok: true, source: 'typesafe', model: 'jev-latest', ms: 12 })),
   };
   const app = express();
   registerRoutingRoutes(app, runtime);
@@ -182,4 +183,32 @@ describe('routing routes', () => {
     expect(runtime.clearCustomEndpoint).toHaveBeenCalled();
   });
 
+  it('tests the provider answering now when the test request names no endpoint fields', async () => {
+    const { app, runtime } = createApp();
+    const response = await request(app).post('/api/routing/classifier/test').send({}).expect(200);
+    expect(runtime.testClassifier).toHaveBeenCalledWith(undefined);
+    expect(response.body).toEqual({ ok: true, source: 'typesafe', model: 'jev-latest', ms: 12 });
+  });
+
+  it('tests the custom endpoint fields as typed and passes on only the three it names', async () => {
+    const { app, runtime } = createApp();
+    const draft = { url: 'https://jev.example.com/v1', model: 'jev-latest', key: 'k', extra: true };
+    await request(app).post('/api/routing/classifier/test').send({ custom: draft }).expect(200);
+    expect(runtime.testClassifier).toHaveBeenCalledWith({ url: draft.url, model: draft.model, key: draft.key });
+  });
+
+  it('returns the probe result as the runtime reports it, failures included', async () => {
+    const { app, runtime } = createApp();
+    runtime.testClassifier.mockResolvedValueOnce({ ok: false, reason: 'http', status: 401, source: 'custom', model: 'jev-latest' });
+    const response = await request(app).post('/api/routing/classifier/test').send({ custom: { url: 'https://jev.example.com/v1', model: 'jev-latest' } }).expect(200);
+    expect(response.body).toEqual({ ok: false, reason: 'http', status: 401, source: 'custom', model: 'jev-latest' });
+  });
+
+  it('answers a refused draft with the runtime status and message', async () => {
+    const { app, runtime } = createApp();
+    runtime.testClassifier.mockRejectedValueOnce(Object.assign(new Error('A URL and a model are required'), { status: 400 }));
+    const response = await request(app).post('/api/routing/classifier/test').send({ custom: { url: '', model: '' } });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'A URL and a model are required' });
+  });
 });

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,8 +13,9 @@ import { createSettingsStore } from './route-settings.js';
 import { LOCAL_MODEL } from './route-local-model.js';
 
 const endpoint = { url: 'https://jev.test/answer', model: 'jev', headers: {} };
+const sha256Of = (content) => crypto.createHash('sha256').update(content).digest('hex');
 
-const setup = ({ jevAnswers = {}, localAnswers, modelInstalled = false, dbPath } = {}) => {
+const setup = ({ jevAnswers = {}, localAnswers, modelInstalled = false, dbPath, model, fetchImpl } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-rules-'));
   const modelFile = path.join(dir, LOCAL_MODEL.file);
   if (modelInstalled) {
@@ -40,7 +42,8 @@ const setup = ({ jevAnswers = {}, localAnswers, modelInstalled = false, dbPath }
     answerer,
     modelFile,
     dbPath: dbPath ?? path.join(dir, 'missing.db'),
-    fetchImpl: vi.fn(async () => new Response(null, { status: 503 })),
+    model,
+    fetchImpl: fetchImpl ?? vi.fn(async () => new Response(null, { status: 503 })),
   });
   return { app, dir, jev, answerer, store };
 };
@@ -217,5 +220,49 @@ describe('local model', () => {
     const { app } = setup({ modelInstalled: true });
     const response = await request(app).get('/api/model-routes/local');
     expect(response.body.installed).toBe(true);
+  });
+
+  it('refuses a download with no pinned checksum, says why, and fetches nothing', async () => {
+    const fetchImpl = vi.fn();
+    const { app, dir } = setup({ model: { ...LOCAL_MODEL, sha256: null }, fetchImpl });
+    const response = await request(app).post('/api/model-routes/local/download');
+    expect(response.status).toBe(409);
+    expect(response.body.error).toMatch(/No checksum is pinned/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(dir, LOCAL_MODEL.file))).toBe(false);
+    expect((await request(app).get('/api/model-routes/local')).body).toMatchObject({ downloading: false, installed: false, error: null });
+  });
+
+  it('downloads a model whose digest matches, then reports it installed', async () => {
+    const content = Buffer.from('a stand-in for the model file');
+    const model = { ...LOCAL_MODEL, url: 'https://models.test/stand-in.gguf', bytes: content.length, sha256: sha256Of(content) };
+    const fetchImpl = vi.fn(async () => new Response(content, { status: 200 }));
+    const { app, dir } = setup({ model, fetchImpl });
+    const started = await request(app).post('/api/model-routes/local/download');
+    expect(started.status).toBe(200);
+    const finished = await vi.waitFor(async () => {
+      const body = (await request(app).get('/api/model-routes/local')).body;
+      if (body.downloading) throw new Error('still downloading');
+      return body;
+    });
+    expect(finished).toMatchObject({ installed: true, error: null });
+    expect(fetchImpl).toHaveBeenCalledWith(model.url);
+    expect(fs.readFileSync(path.join(dir, LOCAL_MODEL.file))).toEqual(content);
+  });
+
+  it('reports a download that fails its digest as an error and keeps no model file', async () => {
+    const content = Buffer.from('a stand-in for the model file');
+    const model = { ...LOCAL_MODEL, url: 'https://models.test/stand-in.gguf', bytes: content.length, sha256: sha256Of('other bytes') };
+    const fetchImpl = vi.fn(async () => new Response(content, { status: 200 }));
+    const { app, dir } = setup({ model, fetchImpl });
+    await request(app).post('/api/model-routes/local/download').expect(200);
+    const finished = await vi.waitFor(async () => {
+      const body = (await request(app).get('/api/model-routes/local')).body;
+      if (body.downloading) throw new Error('still downloading');
+      return body;
+    });
+    expect(finished).toMatchObject({ installed: false, error: expect.stringMatching(/did not match its checksum/) });
+    expect(fs.existsSync(path.join(dir, LOCAL_MODEL.file))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${LOCAL_MODEL.file}.part`))).toBe(false);
   });
 });

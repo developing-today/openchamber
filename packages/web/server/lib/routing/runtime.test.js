@@ -756,6 +756,11 @@ describe('testClassifier', () => {
     expect(await off.runtime.testClassifier()).toEqual({ ok: false, reason: 'unavailable' });
   });
 
+  it('reports a dropped connection as a network failure, with its message', async () => {
+    const { runtime } = makeRuntime({ classifierSource: 'typesafe', askError: new Error('fetch failed') });
+    expect(await runtime.testClassifier()).toMatchObject({ ok: false, reason: 'network', message: 'fetch failed', source: 'typesafe' });
+  });
+
   it('tests typed custom endpoint fields without saving them, reusing the saved key when the field is empty', async () => {
     const { runtime, jev, store } = makeRuntime({
       customEndpoint: { url: 'https://old.example/v1/decision', model: 'm', key: 'saved' },

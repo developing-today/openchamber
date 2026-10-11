@@ -5,16 +5,30 @@
  * the user asks for it in Settings, and `node-llama-cpp` is loaded lazily, so
  * OpenChamber runs without either.
  */
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+/**
+ * The interpreter's model. `url` names one Hugging Face commit, so `sha256`
+ * (the file's LFS digest at that commit) always describes the same bytes. A
+ * model without a digest is never downloaded.
+ */
 export const LOCAL_MODEL = {
   id: 'qwen2.5-1.5b-instruct-q4_k_m',
   label: 'Qwen2.5 1.5B Instruct (Q4_K_M)',
   file: 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
-  url: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+  url: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/91cad51170dc346986eccefdc2dd33a9da36ead9/qwen2.5-1.5b-instruct-q4_k_m.gguf',
   bytes: 1117320736,
+  sha256: '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e',
+};
+
+/** Refuses a model that has no pinned digest, before anything is fetched or written. */
+export const assertVerifiable = (model = LOCAL_MODEL) => {
+  if (!model.sha256) {
+    throw Object.assign(new Error('No checksum is pinned for the local model in this build, so it cannot be downloaded safely'), { status: 409 });
+  }
 };
 
 const modelsDir = (env = process.env) => {
@@ -24,7 +38,7 @@ const modelsDir = (env = process.env) => {
 
 export const modelPath = (env) => path.join(modelsDir(env), LOCAL_MODEL.file);
 
-export const modelStatus = (file = modelPath()) => {
+export const modelStatus = (file = modelPath(), model = LOCAL_MODEL) => {
   let size = 0;
   try {
     size = fs.statSync(file).size;
@@ -32,29 +46,36 @@ export const modelStatus = (file = modelPath()) => {
     size = 0;
   }
   return {
-    ...LOCAL_MODEL,
+    ...model,
     path: file,
-    installed: size === LOCAL_MODEL.bytes,
+    installed: size === model.bytes,
     downloadedBytes: size,
   };
 };
 
-/** Downloads the model to a partial file and renames it only when the full size arrived. */
-export const downloadModel = async ({ file = modelPath(), fetchImpl = fetch, onProgress = () => {} } = {}) => {
-  if (modelStatus(file).installed) return modelStatus(file);
-  const response = await fetchImpl(LOCAL_MODEL.url);
+/**
+ * Downloads the model to a partial file. The partial file becomes the model
+ * only when its size and SHA-256 both match the model's pinned values;
+ * otherwise it is discarded and the error says why.
+ */
+export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, fetchImpl = fetch, onProgress = () => {} } = {}) => {
+  if (modelStatus(file, model).installed) return modelStatus(file, model);
+  assertVerifiable(model);
+  const response = await fetchImpl(model.url);
   if (!response.ok || !response.body) {
     throw Object.assign(new Error(`Model download failed (${response.status})`), { status: 502 });
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const partial = `${file}.part`;
   const out = fs.createWriteStream(partial);
+  const digest = createHash('sha256');
   let received = 0;
   try {
     for await (const chunk of response.body) {
       received += chunk.length;
+      digest.update(chunk);
       if (!out.write(chunk)) await new Promise((resolve) => out.once('drain', resolve));
-      onProgress(received, LOCAL_MODEL.bytes);
+      onProgress(received, model.bytes);
     }
     await new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve())));
   } catch (error) {
@@ -62,12 +83,16 @@ export const downloadModel = async ({ file = modelPath(), fetchImpl = fetch, onP
     fs.rmSync(partial, { force: true });
     throw error;
   }
-  if (received !== LOCAL_MODEL.bytes) {
+  if (received !== model.bytes) {
     fs.rmSync(partial, { force: true });
     throw Object.assign(new Error('The model download was incomplete; try again'), { status: 502 });
   }
+  if (digest.digest('hex') !== model.sha256) {
+    fs.rmSync(partial, { force: true });
+    throw Object.assign(new Error('The model download did not match its checksum, so it was discarded; try again'), { status: 502 });
+  }
   fs.renameSync(partial, file);
-  return modelStatus(file);
+  return modelStatus(file, model);
 };
 
 /**

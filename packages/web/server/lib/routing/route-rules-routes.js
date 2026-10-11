@@ -10,7 +10,7 @@ import {
   toOverrides,
 } from './route-interpreter.js';
 import { learnedChoices } from './route-learning.js';
-import { createLocalAnswerer, downloadModel, modelPath, modelStatus } from './route-local-model.js';
+import { LOCAL_MODEL, assertVerifiable, createLocalAnswerer, downloadModel, modelPath, modelStatus } from './route-local-model.js';
 import { createOverrideStore } from './route-overrides-store.js';
 import { createSettingsStore } from './route-settings.js';
 import { cooldownHistory, estimateWait } from './route-wait.js';
@@ -61,8 +61,8 @@ const promptFor = (text, questions) =>
 
 const choicesOf = (answers) => Object.fromEntries(Object.entries(answers).map(([key, answer]) => [key, answer?.choice]));
 
-const localStage = (answerer, file) => async (text, context) => {
-  if (!modelStatus(file).installed) return undefined;
+const localStage = (answerer, file, model) => async (text, context) => {
+  if (!modelStatus(file, model).installed) return undefined;
   const questions = choiceQuestions(context);
   const answers = await answerer.answer({ prompt: promptFor(text, questions), schema: schemaFor(questions) });
   return fromChoices(groundChoices(answers, text, context), { text, context, confidence: 'tentative' });
@@ -84,6 +84,7 @@ const createRouteRules = ({
   classifier,
   answerer = createLocalAnswerer(),
   modelFile = modelPath(),
+  model = LOCAL_MODEL,
   fetchImpl = fetch,
   dbPath = resolveOpenCodeDbPath(),
   now = () => Date.now(),
@@ -91,7 +92,7 @@ const createRouteRules = ({
   const download = { active: false, received: 0, error: null };
 
   const localStatus = () => {
-    const status = modelStatus(modelFile);
+    const status = modelStatus(modelFile, model);
     return {
       ...status,
       downloading: download.active,
@@ -100,10 +101,12 @@ const createRouteRules = ({
     };
   };
 
+  // A model with no pinned checksum is refused here, as an HTTP error, before any state changes.
   const startDownload = () => {
-    if (download.active || modelStatus(modelFile).installed) return localStatus();
+    if (download.active || modelStatus(modelFile, model).installed) return localStatus();
+    assertVerifiable(model);
     Object.assign(download, { active: true, received: 0, error: null });
-    downloadModel({ file: modelFile, fetchImpl, onProgress: (received) => (download.received = received) })
+    downloadModel({ file: modelFile, model, fetchImpl, onProgress: (received) => (download.received = received) })
       .catch((error) => (download.error = error.message))
       .finally(() => (download.active = false));
     return localStatus();
@@ -129,7 +132,7 @@ const createRouteRules = ({
       context: { ...context, now: now() },
       learned,
       toggles,
-      stages: { local: localStage(answerer, modelFile), external: externalStage({ jev, classifier }) },
+      stages: { local: localStage(answerer, modelFile, model), external: externalStage({ jev, classifier }) },
     });
     if (result.status === 'decided') return commit(result);
     if (result.status === 'clarify') {
