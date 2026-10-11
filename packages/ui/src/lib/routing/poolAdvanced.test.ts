@@ -4,6 +4,7 @@ import {
   epochToLocalInput,
   isConcreteTarget,
   parseFormNumber,
+  pickedAutonomy,
   pickedValue,
   pruneEmpty,
   routeReference,
@@ -161,5 +162,14 @@ describe('pickedValue', () => {
     expect(pickedValue('__unset__')).toBeUndefined();
     expect(pickedValue('weighted')).toBe('weighted');
     expect(pickedValue('round-robin')).toBe('round-robin');
+  });
+});
+
+describe('pickedAutonomy', () => {
+  test('the autonomy default clears the level and each listed level is itself', () => {
+    expect(pickedAutonomy('__unset__')).toBeUndefined();
+    expect(pickedAutonomy('fixed')).toBe('fixed');
+    expect(pickedAutonomy('predictive')).toBe('predictive');
+    expect(pickedAutonomy('agent')).toBe('agent');
   });
 });

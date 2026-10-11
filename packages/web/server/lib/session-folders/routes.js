@@ -2,7 +2,7 @@ import { isRecord as isObjectRecord } from '../shared/guards.js';
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-const hasValidFolderShape = (folder) => (
+const hasValidFolder = (folder) => (
   isObjectRecord(folder)
   && typeof folder.id === 'string'
   && typeof folder.name === 'string'
@@ -13,28 +13,28 @@ const hasValidFolderShape = (folder) => (
   && (folder.parentId === undefined || folder.parentId === null || typeof folder.parentId === 'string')
 );
 
-const hasValidFoldersMapShape = (foldersMap) => (
+const hasValidFoldersMap = (foldersMap) => (
   isObjectRecord(foldersMap)
   && Object.values(foldersMap).every((folders) => (
-    Array.isArray(folders) && folders.every(hasValidFolderShape)
+    Array.isArray(folders) && folders.every(hasValidFolder)
   ))
 );
 
 // folderId -> deletedAt. Optional so snapshots written before tombstones
 // existed stay valid.
-const hasValidTombstonesShape = (tombstones) => (
+const hasValidTombstones = (tombstones) => (
   tombstones === undefined
   || (isObjectRecord(tombstones)
     && Object.values(tombstones).every((deletedAt) => typeof deletedAt === 'number' && Number.isFinite(deletedAt)))
 );
 
-const hasValidFolderSnapshotShape = (snapshot) => (
+const hasValidFolderSnapshot = (snapshot) => (
   isObjectRecord(snapshot)
   && snapshot.version === 1
-  && hasValidFoldersMapShape(snapshot.foldersMap)
+  && hasValidFoldersMap(snapshot.foldersMap)
   && Array.isArray(snapshot.collapsedFolderIds)
   && snapshot.collapsedFolderIds.every((folderId) => typeof folderId === 'string')
-  && hasValidTombstonesShape(snapshot.deletedFolderIds)
+  && hasValidTombstones(snapshot.deletedFolderIds)
 );
 
 // A deleted folder id is remembered this long, which is longer than any device
@@ -153,7 +153,7 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
       try {
         const parsed = JSON.parse(raw);
         if (
-          !hasValidFolderSnapshotShape(parsed)
+          !hasValidFolderSnapshot(parsed)
           || typeof parsed.updatedAt !== 'number'
           || !Number.isFinite(parsed.updatedAt)
           || parsed.updatedAt <= 0
@@ -175,7 +175,7 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
     if (!isObjectRecord(body)) {
       return res.status(400).json({ error: 'Body must be an object' });
     }
-    if (!hasValidFolderSnapshotShape(body)) {
+    if (!hasValidFolderSnapshot(body)) {
       return res.status(400).json({ error: 'Invalid session folders payload' });
     }
     const serialized = JSON.stringify(body, null, 2);
@@ -199,7 +199,7 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
         if (currentRaw) {
           try {
             const parsed = JSON.parse(currentRaw);
-            if (hasValidFolderSnapshotShape(parsed)) {
+            if (hasValidFolderSnapshot(parsed)) {
               current = parsed;
             }
           } catch { /* A valid new snapshot repairs malformed prior state. */ }

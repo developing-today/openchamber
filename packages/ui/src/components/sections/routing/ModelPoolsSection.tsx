@@ -21,7 +21,6 @@ import {
   fetchRouteStats,
   saveModelRouteTuning,
   saveModelRoutes,
-  type AutonomyLevel,
   type HedgeAccuracy,
   type ModelRoute,
   type ModelRouteTuning,
@@ -33,7 +32,7 @@ import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/Po
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
 import { PRESET_ROUTE_IDS, presetTargets, type PresetId } from '@/lib/routing/routePresets';
-import { routeReference, routeReferenceID, targetLabel, targetUntil, withoutAbsentWeights } from '@/lib/routing/poolAdvanced';
+import { pickedAutonomy, routeReference, routeReferenceID, targetLabel, targetUntil, withoutAbsentWeights } from '@/lib/routing/poolAdvanced';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 
@@ -176,13 +175,7 @@ const PoolRow: React.FC<{
           <SettingsStackedField label={t('settings.pools.autonomy')} info={t('settings.pools.autonomyInfo')} controlClassName="max-w-none">
             <Select
               value={route.autonomy ?? '__unset__'}
-              onValueChange={(next) =>
-                onChange(
-                  next === '__unset__'
-                    ? { ...route, autonomy: undefined }
-                    : { ...route, autonomy: next as AutonomyLevel },
-                )
-              }
+              onValueChange={(next) => onChange({ ...route, autonomy: pickedAutonomy(next) })}
             >
               <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.autonomy')}>
                 <SelectValue placeholder={t('settings.pools.autonomyDefault')} />

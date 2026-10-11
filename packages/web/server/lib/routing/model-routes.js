@@ -191,9 +191,9 @@ export const validateModelRoutes = (routes) => {
   return null;
 };
 
-// The shape OpenCode's schema accepts for one note (`NoteLine`, packages/schema/src/config/model-routes.ts):
-// one line of `match: text`, with a non-space character on each side of a colon.
-const NOTE_LINE = /^[^:\r\n]*\S[^:\r\n]*:[^\r\n]*\S[^\r\n]*$/;
+// The shape OpenCode's schema accepts for one note (`NOTE_LINE`, packages/schema/src/config/model-routes.ts):
+// one line of `match: text`, with a non-space character before its first colon (never a colon) and after it.
+const NOTE_LINE = /^[^:\r\n]*[^\s:][^:\r\n]*:[^\r\n]*\S[^\r\n]*$/;
 
 export const validateModelRouteTuning = (tuning) => {
   if (!isRecord(tuning)) return "tuning must be an object";

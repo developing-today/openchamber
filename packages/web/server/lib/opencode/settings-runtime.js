@@ -21,7 +21,7 @@ const DEFAULT_NOTIFICATION_TEMPLATES = {
   subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
 };
 
-const ensureNotificationTemplateShape = (templates) => {
+const ensureNotificationTemplates = (templates) => {
   const input = templates && typeof templates === 'object' ? templates : {};
   let changed = false;
   const next = {};
@@ -937,7 +937,7 @@ export const createSettingsRuntime = (deps) => {
       changed = true;
     }
 
-    const { templates, changed: templatesChanged } = ensureNotificationTemplateShape(settings.notificationTemplates);
+    const { templates, changed: templatesChanged } = ensureNotificationTemplates(settings.notificationTemplates);
     if (templatesChanged || !settings.notificationTemplates || typeof settings.notificationTemplates !== 'object') {
       next.notificationTemplates = templates;
       changed = true;
