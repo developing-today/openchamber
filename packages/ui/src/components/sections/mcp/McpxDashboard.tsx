@@ -49,8 +49,8 @@ export const McpxDashboard: React.FC = () => {
         const nsData = await nsRes.json();
         setNamespaces(Array.isArray(nsData) ? nsData : nsData.namespaces || []);
       }
-    } catch (err: any) {
-      setError(err?.message || 'Failed to connect to mcpx daemon');
+    } catch (err) {
+      setError((err as { message?: string } | null)?.message || 'Failed to connect to mcpx daemon');
     } finally {
       setLoading(false);
     }
