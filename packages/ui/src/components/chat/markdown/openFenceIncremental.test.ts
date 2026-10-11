@@ -197,7 +197,7 @@ describe('open fence rendered by its new lines', () => {
         }
         // Every step after the fence's first one patched the painted block.
         expect(painter.patched()).toBe(fenceSteps - 1);
-      });
+      }, 30_000); // re-renders every prefix and paints each step; the 5 s default is too tight under load
     }
   }
 

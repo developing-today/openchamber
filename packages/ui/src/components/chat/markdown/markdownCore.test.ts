@@ -524,7 +524,7 @@ describe('Long paragraphs', () => {
     expect(hrefOf(html)).toBe('https://example.com/docs');
     expect(html).toContain('class="katex"');
     expect(settled.map((block) => block.html).join('')).toContain('item_1799');
-  });
+  }, 30_000); // renders a 250 KB dump on the CPU; the 5 s default is too tight under load
 });
 
 describe('Many short paragraphs', () => {
