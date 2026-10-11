@@ -172,8 +172,10 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
     if (!element) throw new Error(`Missing ${selector}`);
     await act(async () => element.click());
   };
+  // The diff is laid out in a worker, which can take well past 5 s when the whole suite shares the machine.
+  // The budget covers that load; the wait ends as soon as the actions are there.
   const waitForActions = async (count: number) => {
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 20_000;
     while (Date.now() < deadline) {
       if (workerFailures.length > 0) throw workerFailures[0];
       if (container.querySelectorAll('[data-hunk-actions]').length === count) {
