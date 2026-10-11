@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -313,18 +314,61 @@ test('the mounted poller recovers real store failure and starts a fresh load on 
  * so every root whose UI lists sessions from that store must start the
  * polling itself. The Mini Chat window's session switcher once read an
  * empty store because its root never did (#4643).
+ *
+ * Mounting the three roots needs their whole runtime, so the check reads each
+ * root's syntax tree rather than rendering it. The call is matched through the
+ * local name the root imports the hook under, so a rename of the hook or an
+ * alias cannot pass a commented-out or unrelated line.
  */
+const POLLING_HOOK_MODULE = '@/hooks/useGlobalSessionsPolling';
+const POLLING_HOOK_EXPORT = 'useGlobalSessionsPolling';
+
+const callsPollingHookWithTrue = (sourceText: string): boolean => {
+  const sourceFile = ts.createSourceFile('root.tsx', sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const localNames = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== POLLING_HOOK_MODULE) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      if ((element.propertyName ?? element.name).text === POLLING_HOOK_EXPORT) localNames.add(element.name.text);
+    }
+  }
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && localNames.has(node.expression.text)
+      && node.arguments.length === 1
+      && node.arguments[0].kind === ts.SyntaxKind.TrueKeyword
+    ) {
+      found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+};
+
 describe('global session polling root coverage', () => {
-  const rootSources: Array<[string, string]> = [
+  test('the check rejects a commented-out call and accepts an aliased one', () => {
+    expect(callsPollingHookWithTrue(`import { useGlobalSessionsPolling } from '${POLLING_HOOK_MODULE}';\n// useGlobalSessionsPolling(true);`)).toBe(false);
+    expect(callsPollingHookWithTrue(`import { useGlobalSessionsPolling as poll } from '${POLLING_HOOK_MODULE}';\nconst App = () => { poll(true); };`)).toBe(true);
+    expect(callsPollingHookWithTrue(`import { useGlobalSessionsPolling } from '${POLLING_HOOK_MODULE}';\nconst App = () => { useGlobalSessionsPolling(false); };`)).toBe(false);
+  });
+
+  const rootFiles: Array<[string, string]> = [
     ['App', '../App.tsx'],
     ['VSCodeApp', '../apps/VSCodeApp.tsx'],
     ['ElectronMiniChatApp', '../apps/ElectronMiniChatApp.tsx'],
   ];
 
-  for (const [rootName, sourcePath] of rootSources) {
+  for (const [rootName, sourcePath] of rootFiles) {
     test(`${rootName} mounts useGlobalSessionsPolling`, () => {
       const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
-      expect(/^\s*useGlobalSessionsPolling\(true\);/m.test(source)).toBe(true);
+      expect(callsPollingHookWithTrue(source)).toBe(true);
     });
   }
 });
