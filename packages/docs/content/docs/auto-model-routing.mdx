@@ -50,8 +50,9 @@ unless the evidence for a change is consistent:
   history yet.
 
 The routing decision shows `held` when Auto kept the model against Jev's latest
-answer. This memory lives in the server process, so a restart starts sessions
-fresh.
+answer. That history lives in the server process, so a restart starts sessions
+fresh. Whether a session is on Auto is saved, so a restart keeps it on Auto
+until you choose a real model.
 
 In **Settings → Routing**, turn **Stay on the current model** off to follow every
 prompt, or change **Prompts to switch** and **Prompts to switch back**. The
@@ -79,10 +80,12 @@ analysis. A turn is never replayed after any answer or tool output has started.
 OpenCode also reads each response's rate-limit headers and moves traffic off a
 target whose provider says its window is spent, before the provider starts refusing it.
 
-A pool can also retry a target before moving on (`attempts`), start the next target
-when the first is silent (`hedgeAfterMs`), cap a target's requests and tokens
-(`budgets`), and be tuned by the agent from its recorded history. These are
-OpenCode route options; see its configuration reference.
+A pool can also make several requests to a target before moving on (`attempts`,
+two in total by default), start the next target when the first is silent
+(`hedgeAfterMs`), cap a target's requests and tokens (`budgets`, which count every
+request OpenCode makes to the target, background ones such as titles included),
+and be tuned by the agent from its recorded history. These are OpenCode route
+options; see its configuration reference.
 
 Jev sorts prompts by reading the category names and descriptions, so the descriptions work as instructions. Say what belongs in the category and what doesn't. You can edit, turn off, remove or add categories, and restore a built-in one if you change your mind. Auto needs at least two categories turned on.
 
