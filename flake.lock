@@ -37,11 +37,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1791723750,
-        "narHash": "sha256-mKvKy0Fmhvruhg9B0VCFhTNI15M3qpDdYF/VxuUSqjM=",
+        "lastModified": 1791730025,
+        "narHash": "sha256-j9b+51RvXCxbeo4R1/5eBq4VmjJyXTEZ3GGcbZjWYOk=",
         "owner": "developing-today",
         "repo": "opencode",
-        "rev": "8e94a2ec6e766c32b0ff262bf134d654ddaeff9a",
+        "rev": "635d278857aea66fdf44a4cfc977e04849db9824",
         "type": "github"
       },
       "original": {
