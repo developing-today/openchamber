@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 const routeFetches: string[] = [];
 const routeSaves: unknown[] = [];
 const tuningSaves: unknown[] = [];
-let serverRoutes: Record<string, { targets: string[] }> = {};
+let serverRoutes: Record<string, { targets: string[]; selection?: 'ordered' | 'round-robin' | 'weighted'; weights?: Record<string, number> }> = {};
 let serverTuning: unknown = null;
 let saveError: Error | null = null;
 
@@ -240,7 +240,7 @@ describe('ModelPoolsSection', () => {
     const { dom, cleanup } = await renderSection();
     try {
       await openAdvanced(dom.container);
-      await typeInto(findInput(dom.container, 'Attempts before failover'), '3');
+      await typeInto(findInput(dom.container, 'Total requests before failover'), '3');
       expect(routeSaves.length).toBe(1);
       expect((routeSaves[0] as Record<string, { attempts?: number }>).kept.attempts).toBe(3);
     } finally {
@@ -253,7 +253,7 @@ describe('ModelPoolsSection', () => {
     const { dom, cleanup } = await renderSection();
     try {
       await openAdvanced(dom.container);
-      await typeInto(findInput(dom.container, 'Attempts before failover'), '99');
+      await typeInto(findInput(dom.container, 'Total requests before failover'), '99');
       expect(routeSaves.length).toBe(0);
       expect(dom.container.textContent).toContain('Enter a number from 1 to 50.');
     } finally {
@@ -317,6 +317,21 @@ describe('ModelPoolsSection', () => {
       expect((routeSaves.at(-1) as Record<string, { targets: unknown[] }>).kept.targets).toEqual([
         { model: 'p/cheap', defaultVariant: 'max', variants: { low: 'high' } },
       ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('removing a weighted target saves the pool without that target\'s weight', async () => {
+    // beforeEach gave the server an empty map; the pool is added to it.
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap', 'p/dear'], selection: 'weighted', weights: { 'p/cheap': 2, 'p/dear': 1 } } });
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container);
+      await clickButton(dom.container, 'Remove target');
+      expect(routeSaves.at(-1)).toMatchObject({
+        kept: { targets: ['p/dear'], selection: 'weighted', weights: { 'p/dear': 1 } },
+      });
     } finally {
       await cleanup();
     }

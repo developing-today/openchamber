@@ -12,6 +12,7 @@ import type { ModelRoute } from '@/lib/routing/modelRoutesApi';
 import {
   isConcreteTarget,
   parseFormNumber,
+  pickedValue,
   pruneEmpty,
   routeReferenceID,
   setRouteField,
@@ -121,7 +122,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
       <SettingsFieldRow label={t('settings.pools.advanced.selection')} description={t('settings.pools.advanced.selectionInfo')} settingsItem="pools.selection">
         <Select
           value={route.selection ?? '__unset__'}
-          onValueChange={(next) => onChange(setRouteField(route, 'selection', next === '__unset__' ? undefined : next))}
+          onValueChange={(next) => onChange(setRouteField(route, 'selection', pickedValue(next)))}
         >
           <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-56')} aria-label={t('settings.pools.advanced.selection')}>
             <SelectValue />
@@ -158,7 +159,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
           value={route.attempts}
           min={1}
           max={50}
-          placeholder="1"
+          placeholder="2"
           onCommit={(value) => onChange(setRouteField(route, 'attempts', value))}
         />
         <RangedNumberField

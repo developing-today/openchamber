@@ -33,7 +33,7 @@ import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/Po
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
 import { PRESET_ROUTE_IDS, presetTargets, type PresetId } from '@/lib/routing/routePresets';
-import { routeReference, routeReferenceID, targetLabel, targetUntil } from '@/lib/routing/poolAdvanced';
+import { routeReference, routeReferenceID, targetLabel, targetUntil, withoutAbsentWeights } from '@/lib/routing/poolAdvanced';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 
@@ -439,7 +439,8 @@ export const ModelPoolsSection: React.FC = () => {
     setRoutes(next);
     setSaving(true);
     try {
-      const state = await saveModelRoutes(next);
+      const payload = Object.fromEntries(Object.entries(next).map(([id, route]) => [id, withoutAbsentWeights(route)]));
+      const state = await saveModelRoutes(payload);
       lastSavedRef.current = state.routes;
       setRoutes(state.routes);
       setError(null);

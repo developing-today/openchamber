@@ -10,6 +10,9 @@ export const targetReference = (target: ModelRouteTarget): string => {
 export const isConcreteTarget = (target: ModelRouteTarget): boolean => !targetReference(target).includes('*');
 
 /** Blank or non-numeric form input means the setting is unset. */
+/** The select's default entry stands for no value, so it clears the field; any other entry is the value. */
+export const pickedValue = (picked: string): string | undefined => (picked === '__unset__' ? undefined : picked);
+
 export const parseFormNumber = (value: string): number | undefined => {
   if (value.trim() === '') return undefined;
   const parsed = Number(value);
@@ -90,3 +93,29 @@ export const epochToLocalInput = (epoch: number | undefined): string => {
 
 /** The automatic-review settings to save, or null when every field is back at its default. */
 export const tuningToSave = (tuning: ModelRouteTuning): ModelRouteTuning | null => pruneEmpty(tuning) ?? null;
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whether a weight key names a target, as the server reads it: the target's
+ * reference, or a concrete model that a `*` target matches. Mirrors
+ * `keyNamesTarget` in `packages/web/server/lib/routing/model-routes.js`.
+ */
+export const weightNamesTarget = (key: string, target: ModelRouteTarget): boolean => {
+  const reference = targetReference(target);
+  if (key === reference) return true;
+  if (!reference.includes('*')) return false;
+  const [provider, ...pattern] = reference.split('/');
+  const [keyProvider, ...model] = key.split('/');
+  if (provider !== keyProvider || model.length === 0) return false;
+  return new RegExp(`^${pattern.join('/').split('*').map(escapeRegExp).join('.*')}$`).test(model.join('/'));
+};
+
+/** Drops the weights of targets the route no longer has, so a removed or edited target cannot block the save. */
+export const withoutAbsentWeights = (route: ModelRoute): ModelRoute => {
+  if (!route.weights) return route;
+  const kept = Object.fromEntries(
+    Object.entries(route.weights).filter(([key]) => route.targets.some((target) => weightNamesTarget(key, target))),
+  );
+  return setRouteField(route, 'weights', pruneEmpty(kept));
+};

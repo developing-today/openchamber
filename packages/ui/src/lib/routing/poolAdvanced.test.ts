@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import type { ModelRoute } from './modelRoutesApi';
 import {
   epochToLocalInput,
   isConcreteTarget,
   parseFormNumber,
+  pickedValue,
   pruneEmpty,
   routeReference,
   routeReferenceID,
@@ -10,6 +12,8 @@ import {
   setTargetEntry,
   targetOptions,
   targetReference,
+  weightNamesTarget,
+  withoutAbsentWeights,
   targetUntil,
   tuningToSave,
   withOptional,
@@ -121,5 +125,41 @@ describe('automatic review settings', () => {
   test('an all-default tuning is saved as null so OpenCode defaults apply', () => {
     expect(tuningToSave({})).toBeNull();
     expect(tuningToSave({ enabled: false })).toEqual({ enabled: false });
+  });
+});
+
+describe('weightNamesTarget', () => {
+  test('names a target by its reference, without the variant', () => {
+    expect(weightNamesTarget('openai/gpt-6-luna', 'openai/gpt-6-luna#high')).toBe(true);
+    expect(weightNamesTarget('openai/gpt-6-luna#high', 'openai/gpt-6-luna#high')).toBe(false);
+    expect(weightNamesTarget('opencode-route/cheap', 'opencode-route/cheap')).toBe(true);
+  });
+
+  test('names a concrete model that a wildcard target matches, and no other', () => {
+    expect(weightNamesTarget('openai/gpt-6-luna', 'openai/gpt-*')).toBe(true);
+    expect(weightNamesTarget('anthropic/gpt-6-luna', 'openai/gpt-*')).toBe(false);
+    expect(weightNamesTarget('openai/claude-5', 'openai/gpt-*')).toBe(false);
+  });
+});
+
+describe('withoutAbsentWeights', () => {
+  test('drops the weights of targets the route no longer has', () => {
+    const route: ModelRoute = { targets: ['a/b', 'c/d'], selection: 'weighted', weights: { 'a/b': 3, 'x/y': 1 } };
+    expect(withoutAbsentWeights(route).weights).toEqual({ 'a/b': 3 });
+  });
+
+  test('removes the weights map when nothing is left, and returns a route without weights unchanged', () => {
+    const stale: ModelRoute = { targets: ['c/d'], weights: { 'a/b': 3 } };
+    expect(withoutAbsentWeights(stale)).toEqual({ targets: ['c/d'] });
+    const plain: ModelRoute = { targets: ['a/b'] };
+    expect(withoutAbsentWeights(plain)).toBe(plain);
+  });
+});
+
+describe('pickedValue', () => {
+  test('the select default clears the field and every other entry is the value', () => {
+    expect(pickedValue('__unset__')).toBeUndefined();
+    expect(pickedValue('weighted')).toBe('weighted');
+    expect(pickedValue('round-robin')).toBe('round-robin');
   });
 });
