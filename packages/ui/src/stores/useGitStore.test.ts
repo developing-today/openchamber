@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { beforeEach, describe, expect, jest, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -126,12 +126,14 @@ describe('useGitStore', () => {
       return request.promise;
     };
 
+    jest.useFakeTimers();
     const prefetch = useGitStore.getState().prefetchDiffs('/repo', git, paths);
     try {
       expect(pending.length).toBe(2);
-      // Exercise the real 15-second prefetch deadline. Expiring the UI wait
-      // does not settle the injected transport or stop its server-side work.
-      await new Promise((resolve) => setTimeout(resolve, 15_100));
+      // Advance the fake clock past the 15-second prefetch deadline. Expiring
+      // the UI wait does not settle the injected transport or stop its
+      // server-side work.
+      jest.advanceTimersByTime(15_100);
       expect(pending.length).toBe(2);
       await useGitStore.getState().prefetchDiffs('/repo', git, paths);
       expect(pending.length).toBe(2);
@@ -139,13 +141,14 @@ describe('useGitStore', () => {
     } finally {
       for (const { path, request } of pending) request.resolve({ path, original: 'before', modified: 'after', submodule: null });
       await prefetch;
+      jest.useRealTimers();
     }
     // Late responses were discarded, but their real completion frees capacity.
     expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(0);
     git.getGitFileDiff = async (_directory, { path }) => ({ path, original: 'fresh', modified: 'fresh', submodule: null });
     await useGitStore.getState().prefetchDiffs('/repo', git, paths);
     expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(4);
-  }, 40_000);
+  });
 
   test('limits overlapping diff batches per directory and retains capacity across a cache reset', async () => {
     const paths = ['one.ts', 'two.ts', 'three.ts'];

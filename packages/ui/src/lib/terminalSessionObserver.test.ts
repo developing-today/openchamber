@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { TerminalAPI, TerminalServerSession } from './api/types';
 import { observeTerminalSessions } from './terminalSessionObserver';
@@ -8,6 +8,8 @@ let browser: Window;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 const cleanups: Array<() => void> = [];
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+// Fake timers stop setTimeout, so the refresh chain settles on the microtask queue alone.
+const flushMicrotasks = async () => { for (let i = 0; i < 64; i += 1) await Promise.resolve(); };
 
 beforeEach(() => {
   browser = new Window({ url: 'http://localhost' });
@@ -43,19 +45,27 @@ const createTerminal = () => {
 const running: TerminalServerSession = { sessionId: 'peer-run', cwd: '/repo', status: 'running', createdAt: 1, mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'peer-run' } };
 
 test('visible consumers share one loop and discover a later peer run without interaction', async () => {
-  const source = createTerminal();
-  const first: TerminalServerSession[][] = [];
-  const second: TerminalServerSession[][] = [];
-  cleanups.push(observeTerminalSessions(source.terminal, '/repo', () => new Map(), result => first.push(result.sessions)));
-  cleanups.push(observeTerminalSessions(source.terminal, '/repo', () => new Map(), result => second.push(result.sessions)));
-  await tick();
-  expect(source.reads).toEqual(['']);
-  source.setRecords([running]);
-  await new Promise(resolve => setTimeout(resolve, 5100));
-  expect(source.reads).toEqual(['', '']);
-  expect(first.at(-1)).toEqual([running]);
-  expect(second.at(-1)).toEqual([running]);
-}, 10000);
+  jest.useFakeTimers();
+  try {
+    const source = createTerminal();
+    const first: TerminalServerSession[][] = [];
+    const second: TerminalServerSession[][] = [];
+    cleanups.push(observeTerminalSessions(source.terminal, '/repo', () => new Map(), result => first.push(result.sessions)));
+    cleanups.push(observeTerminalSessions(source.terminal, '/repo', () => new Map(), result => second.push(result.sessions)));
+    await flushMicrotasks();
+    expect(source.reads).toEqual(['']);
+    source.setRecords([running]);
+    // Past the 5-second refresh interval, on the fake clock.
+    jest.advanceTimersByTime(5100);
+    await flushMicrotasks();
+    expect(source.reads).toEqual(['', '']);
+    expect(first.at(-1)).toEqual([running]);
+    expect(second.at(-1)).toEqual([running]);
+  } finally {
+    for (const close of cleanups.splice(0)) close();
+    jest.useRealTimers();
+  }
+});
 
 test('hidden and offline scopes stop reads, wake on recovery, and preserve state on failure', async () => {
   const source = createTerminal();

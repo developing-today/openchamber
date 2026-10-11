@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, jest, test } from 'bun:test'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Window } from 'happy-dom'
@@ -159,11 +159,13 @@ const installHookTestDomWithStorage = () => {
   }
 }
 
+// Advances the fake clock in 25 ms steps, letting each step's promise chains
+// settle, so the watchdog's interval fires without waiting for real time.
 const waitFor = async (predicate: () => boolean, timeoutMs: number): Promise<boolean> => {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
+  for (let elapsed = 0; elapsed <= timeoutMs; elapsed += 25) {
     if (predicate()) return true
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    jest.advanceTimersByTime(25)
+    await act(async () => {})
   }
   return predicate()
 }
@@ -186,6 +188,7 @@ describe('SyncProvider child-session discovery pagination', () => {
   // effect creates the child store, so discovery's first effective pass is the
   // interval's second tick (~5s after mount).
   test('discovers a child session on page 2 beyond the 200 cutoff and materializes its parent', async () => {
+    jest.useFakeTimers()
     const dom = installHookTestDomWithStorage()
     cursorsSeenOnDiscoveryCalls.length = 0
     parentMessageFetches.length = 0
@@ -237,6 +240,7 @@ describe('SyncProvider child-session discovery pagination', () => {
     } finally {
       setActiveSession('', '')
       dom.restore()
+      jest.useRealTimers()
     }
-  }, 12000)
+  })
 })
