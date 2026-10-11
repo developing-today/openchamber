@@ -66,7 +66,8 @@ export type EventPipelineInput = {
   sdk: OpenCodeClient
   routeDirectory?: (directory: string, payload: SyncEvent) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
-  onReconnect?: (details: { replayReset: boolean }) => void
+  // `resumed`: the stream replayed from the client's cursor, so nothing was missed and no refetch is due.
+  onReconnect?: (details: { replayReset: boolean; resumed: boolean }) => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
   /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
@@ -105,6 +106,7 @@ export type EventPipeline = {
 const wsFrameSchema = z.object({
   type: z.enum(["ready", "event", "error", "backpressure"]),
   replayReset: z.boolean().optional(),
+  resumed: z.boolean().optional(),
   payload: z.unknown().optional(),
   eventId: z.string().optional(),
   directory: z.string().optional(),
@@ -351,6 +353,8 @@ function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
 
 type DirectoryQueue = {
   queue: SyncEvent[]
+  // The WebSocket frames each queued event was read from; a coalesced event carries all of them.
+  frames: number[][]
   buffer: SyncEvent[]
   coalesced: Map<string, number>
   timer: ReturnType<typeof setTimeout> | undefined
@@ -422,6 +426,23 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   let disconnected = false
   let lastEventId: string | undefined
   let wsFallbackUntil = 0
+  // The WebSocket frames read so far, numbered from 1. A frame is applied once every event it queued
+  // has been delivered. `lastEventId` moves only across the run of applied frames, so a reconnect
+  // never skips an event still queued for another directory, nor repeats one already applied.
+  let framesRead = 0
+  let framesSettled = 0
+  const unsettledFrames = new Map<number, { eventId: string | undefined; pending: number }>()
+
+  const settleFrames = () => {
+    while (framesSettled < framesRead) {
+      const next = framesSettled + 1
+      const frame = unsettledFrames.get(next)
+      if (frame && frame.pending > 0) return
+      unsettledFrames.delete(next)
+      framesSettled = next
+      if (frame?.eventId) lastEventId = frame.eventId
+    }
+  }
 
   const directories = new Map<string, DirectoryQueue>()
 
@@ -430,6 +451,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (d) return d
     d = {
       queue: [],
+      frames: [],
       buffer: [],
       coalesced: new Map(),
       timer: undefined,
@@ -449,9 +471,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (d.queue.length === 0) return
 
     const events = d.queue
+    const frames = d.frames
     d.queue = d.buffer
     d.buffer = events
     d.queue.length = 0
+    d.frames = []
     d.coalesced.clear()
 
     d.last = Date.now()
@@ -459,10 +483,22 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     for (let index = 0; index < events.length; index += 1) {
       countSyncPerformance("pipelineDeliveredEvents")
     }
-    if (onEvents) {
-      onEvents(directory, events)
-    } else if (onEvent) {
-      for (const payload of events) onEvent(directory, payload)
+    try {
+      if (onEvents) {
+        onEvents(directory, events)
+      } else if (onEvent) {
+        for (const payload of events) onEvent(directory, payload)
+      }
+    } finally {
+      // Applied only now: a frame whose events were just delivered may move the cursor. This runs
+      // even if delivery threw, so one failed batch cannot freeze the cursor and replay the rest.
+      for (const seqs of frames) {
+        for (const seq of seqs) {
+          const frame = unsettledFrames.get(seq)
+          if (frame) frame.pending -= 1
+        }
+      }
+      settleFrames()
     }
 
     d.buffer.length = 0
@@ -598,7 +634,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onDisconnect?.(reason)
   }
 
-  const markConnected = (replayReset = false) => {
+  const markConnected = (replayReset = false, resumed = false) => {
     disconnected = false
     consecutiveFailures = 0
     // Fire onReconnect on every successful connect — including the very
@@ -606,13 +642,17 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     // to be flipped positively; without this the send button throws
     // "Connection lost" until something else (HTTP health check) happens
     // to race a setState({isConnected: true}) through.
-    onReconnect?.({ replayReset })
+    onReconnect?.({ replayReset, resumed })
   }
 
-  const enqueueEvent = (directory: string, event: SyncEvent) => {
+  const enqueueEvent = (directory: string, event: SyncEvent, frame?: number) => {
     countSyncPerformance("pipelineRawEvents")
     const routedDirectory = routeDirectory?.(directory, event) || directory
     const d = getOrCreateDir(routedDirectory)
+    if (frame !== undefined) {
+      const tracked = unsettledFrames.get(frame)
+      if (tracked) tracked.pending += 1
+    }
 
     // A full part snapshot is a coalescing barrier for that part's deltas:
     // drop its pending delta coalescing keys so a delta arriving after the
@@ -646,6 +686,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       const index = d.coalesced.get(key)
       if (index !== undefined) {
         d.queue[index] = mergeCoalesced(d.queue[index], event)
+        if (frame !== undefined) d.frames[index].push(frame)
         countSyncPerformance("pipelineCoalescedEvents")
         syncDebug.pipeline.coalesced(event.type, key)
         return
@@ -654,10 +695,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     }
 
     d.queue.push(event)
+    d.frames.push(frame === undefined ? [] : [frame])
     scheduleDir(routedDirectory)
   }
 
-  const enqueuePayload = (payload: unknown, frameDirectory: string | undefined) => {
+  const enqueuePayload = (payload: unknown, frameDirectory: string | undefined, frame?: number) => {
     const classified = classifyStreamPayload(payload, frameDirectory)
     if (classified.kind === "space-stream") {
       onSpaceStream?.(classified.properties)
@@ -672,7 +714,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       return
     }
     for (const { directory, event } of classified.events) {
-      enqueueEvent(directory, event)
+      enqueueEvent(directory, event, frame)
     }
   }
 
@@ -837,7 +879,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
             readyTimer = undefined
           }
           streamErrorLogged = false
-          markConnected(frame.replayReset === true)
+          markConnected(frame.replayReset === true, frame.resumed === true)
           return
         }
 
@@ -859,10 +901,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           return
         }
 
-        if (frame.eventId) {
-          lastEventId = frame.eventId
-        }
-        enqueuePayload(frame.payload, frame.directory)
+        // The cursor moves once this event is applied, not on receipt: see settleFrames.
+        framesRead += 1
+        const seq = framesRead
+        unsettledFrames.set(seq, { eventId: frame.eventId, pending: 0 })
+        enqueuePayload(frame.payload, frame.directory, seq)
+        settleFrames()
       }
 
       socket.onerror = () => {

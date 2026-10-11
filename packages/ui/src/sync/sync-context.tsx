@@ -2919,7 +2919,7 @@ export function SyncProvider(props: {
         // The setup commands of a space moved on; what they do now is in the list.
         void refreshSpacesJourney().catch(() => undefined)
       },
-      onReconnect: ({ replayReset }) => {
+      onReconnect: ({ replayReset, resumed }) => {
         // The first connection and every one after a gap: spaces being made or whose making failed
         // are known only to the journey list, and a step announced during the gap was missed.
         if (useUIStore.getState().isolatedSpacesEnabled && !isVSCodeRuntime()) {
@@ -2934,6 +2934,10 @@ export function SyncProvider(props: {
         })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
+        // The stream replayed from this client's cursor: nothing was missed, so nothing to repair.
+        if (resumed && !replayReset) {
+          return
+        }
         if (!replayReset && isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
           return
         }
