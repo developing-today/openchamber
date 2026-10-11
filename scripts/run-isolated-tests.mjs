@@ -66,6 +66,9 @@ const FILE_TIMEOUT_MS = 5 * 60 * 1000;
 
 const run = ({ command, args }) => new Promise((resolve) => {
   const child = spawn(command, args, {
+    // A shell that exports NODE_ENV=production makes React load a build without
+    // `act`, so the DOM suites fail for a reason that is not in the code.
+    env: { ...process.env, NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
