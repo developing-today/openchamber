@@ -9,7 +9,6 @@ import {
   SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_HELPER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
   SettingsFieldRow,
   SettingsSection,
   SettingsStackedField,
@@ -185,7 +184,7 @@ const PoolRow: React.FC<{
                 )
               }
             >
-              <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.autonomy')}>
+              <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.autonomy')}>
                 <SelectValue placeholder={t('settings.pools.autonomyDefault')} />
               </SelectTrigger>
               <SelectContent>
@@ -238,7 +237,7 @@ const PoolRow: React.FC<{
                 value=""
                 onValueChange={(next) => onChange({ ...route, targets: [...targets, routeReference(next)] })}
               >
-                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.addPoolTarget')}>
+                <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.addPoolTarget')}>
                   <SelectValue placeholder={t('settings.pools.addPoolTargetPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>

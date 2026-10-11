@@ -17,6 +17,7 @@ import {
   type FingerprintState,
 } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
+import { createOpenFenceRenderer, type OpenFencePatch } from './openFenceIncremental';
 import { streamTuning } from '../lib/streamTuningFlags';
 import {
   DOCUMENT_HTML_ALLOWED_ATTR,
@@ -1174,6 +1175,7 @@ const markdownBlockCacheKey = (
 export const resetMarkdownHtmlCacheForTests = (): void => {
   fullBlockCache.clear();
   liveBlockCache.clear();
+  openFences.reset();
 };
 
 /** Test-only: entry counts per block cache, for churn/eviction assertions. */
@@ -1244,16 +1246,25 @@ const draftBlock = (
   return { html: sanitize(withMath), pendingHighlight: false };
 };
 
+// Open fences are sanitized by their new lines; see openFenceIncremental.ts.
+const openFences = createOpenFenceRenderer(sanitize);
+
 const parseBlock = async (
   block: MarkdownBlock,
+  id: string,
   imageMode: MarkdownImageMode,
   rawHtml: MarkdownRawHtmlMode,
-): Promise<string> => {
+): Promise<Omit<RenderedBlock, 'id'>> => {
   const draft = draftBlock(block, imageMode, rawHtml);
-  if (!draft.pendingHighlight) return draft.html;
+  if (!draft.pendingHighlight) return { html: draft.html };
   // A fence that is still open is highlighted again with every new line; its
   // intermediate results must not evict settled highlights from the cache.
-  return sanitize(await highlightCodeBlocks(draft.html, block.openFence === true));
+  const highlighted = await highlightCodeBlocks(draft.html, block.openFence === true);
+  if (!block.openFence) return { html: sanitize(highlighted) };
+  // Before its first content line, a fence's code is just marked's trailing
+  // break, which the first line will take the place of.
+  const unfinished = !block.raw.endsWith('\n') || block.raw.indexOf('\n') === block.raw.length - 1;
+  return openFences.render(highlighted, id, unfinished);
 };
 
 // Marks the id of a block painted before its code was highlighted, so the
@@ -1320,6 +1331,9 @@ type RenderedBlock = {
   // block) to re-morph; unchanged leading blocks are skipped entirely.
   id: string;
   html: string;
+  // A still-open code fence: how to bring a block painted from one of its
+  // earlier steps up to this one without rebuilding it.
+  patchFrom?: (paintedId: string) => OpenFencePatch | null;
 };
 
 /**
@@ -1350,9 +1364,9 @@ export const renderMarkdownBlocks = async (
       if (cached !== undefined) {
         return { id, html: cached };
       }
-      const html = await parseBlock(block, imageMode, rawHtml);
-      cache.set(id, html, utf16Bytes(id) + utf16Bytes(html));
-      return { id, html };
+      const rendered = await parseBlock(block, id, imageMode, rawHtml);
+      cache.set(id, rendered.html, utf16Bytes(id) + utf16Bytes(rendered.html));
+      return { id, ...rendered };
     }),
   );
 };

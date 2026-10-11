@@ -308,6 +308,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     projectRepoStatus: topology.projectRepoStatus,
     projectRootBranches: topology.projectRootBranches,
     gitBranches: topology.gitBranches,
+    sessionOrderRanks: collection.sessionOrderRanks,
     lastRepoStatus: topology.lastRepoStatus,
     buildGroupedSessions,
     hasSessionSearchQuery: view.hasSessionSearchQuery,
@@ -1032,4 +1033,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   </>;
 };
 
-export const SessionProjectCollection: React.FC<SessionProjectCollectionProps> = (props) => props.view.isVisible ? <VisibleSessionProjects {...props} /> : null;
+/**
+ * Built the first time the sidebar is shown and kept while it is closed, so
+ * opening the sidebar again does not rebuild and re-measure the whole list in
+ * the frame the toggle starts. The closed sidebar skips the list's rendering
+ * (see `Sidebar`), and the work it feeds on pauses with `view.isVisible`.
+ */
+export const SessionProjectCollection: React.FC<SessionProjectCollectionProps> = (props) => {
+  const [shown, setShown] = React.useState(props.view.isVisible);
+  if (props.view.isVisible && !shown) setShown(true);
+  return shown ? <VisibleSessionProjects {...props} /> : null;
+};

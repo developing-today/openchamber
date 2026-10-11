@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
-import { useAllLiveSessions } from '@/sync/sync-context';
+import { useLiveSessionsExcluding } from '@/sync/sync-context';
 import {
   EMPTY_SESSION_ORDER_RANKS,
   orderSessionsByLifecycleScopes,
@@ -110,25 +110,6 @@ const mergeSidebarSessionSources = (
     sessions.push(session);
   }
   return sessions;
-};
-
-const EMPTY_LIVE_GAP_SESSIONS: Session[] = [];
-
-/**
- * The live sessions the global cache does not hold yet: the only ones the
- * sidebar structure takes from the live list. A live session the global cache
- * already holds is dropped by the merge, so its live changes (a `time.updated`
- * bump on every streamed step) must not rebuild the structure. Returns
- * `previous` while the gap holds the same session objects.
- */
-export const selectLiveGapSessions = (
-  liveSessions: readonly Session[],
-  globalSessionIds: ReadonlySet<string>,
-  previous: Session[],
-): Session[] => {
-  const gap = liveSessions.filter((session) => !globalSessionIds.has(session.id));
-  if (gap.length === previous.length && gap.every((session, index) => session === previous[index])) return previous;
-  return gap.length === 0 ? EMPTY_LIVE_GAP_SESSIONS : gap;
 };
 
 // The collection owns hierarchy membership. Consumers receive this narrow
@@ -292,7 +273,6 @@ export const useSessionProjectCollection = ({
   const globalStructure = useGlobalSessionsStore((state) => state.structure);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
-  const liveSessions = useAllLiveSessions();
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
   const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
     (state) => isVisible ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
@@ -302,12 +282,10 @@ export const useSessionProjectCollection = ({
     () => new Set(globalActiveSessions.map((session) => session.id)),
     [globalActiveSessions],
   );
-  const liveGapSessionsRef = React.useRef<Session[]>(EMPTY_LIVE_GAP_SESSIONS);
-  const liveGapSessions = React.useMemo(() => {
-    const gap = selectLiveGapSessions(liveSessions, globalSessionIds, liveGapSessionsRef.current);
-    liveGapSessionsRef.current = gap;
-    return gap;
-  }, [globalSessionIds, liveSessions]);
+  // Only the live sessions the global cache does not hold yet: the merge drops
+  // a covered session's live copy, so its live bumps (`time.updated` on every
+  // streamed step) neither re-render the sidebar nor rebuild the structure.
+  const liveGapSessions = useLiveSessionsExcluding(globalSessionIds);
   const structure = React.useMemo(() => buildSidebarSessionStructure({
     globalActiveSessions,
     globalStructure,
@@ -349,7 +327,6 @@ export const useSessionProjectCollection = ({
     chatSessions,
     getDescendantIds: getDescendantIdsForAction,
     hasAuthoritativeGlobalSessions,
-    liveSessions,
     orderedSessions,
     pinnedSessionIds,
     sessionOrderRanks,

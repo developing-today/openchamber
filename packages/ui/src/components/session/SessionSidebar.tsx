@@ -57,7 +57,6 @@ import {
 import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
 
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
-const EMPTY_STRING_ARRAY: string[] = [];
 const activeSessionByProjectSchema = z.record(z.string(), z.string().min(1).catch(''));
 
 interface SessionSidebarProps {
@@ -459,7 +458,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     [normalizedProjects],
   );
 
-  const gitRepoStatus = useGitRepoStatusMap(isVisible ? normalizedProjectPaths : EMPTY_STRING_ARRAY);
+  const gitRepoStatus = useGitRepoStatusMap(normalizedProjectPaths, isVisible);
   useProjectRepoStatus({
     enabled: isVisible,
     normalizedProjects,
@@ -552,7 +551,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const mobileHeaderActionButtonClass =
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed';
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
-  const headerActionIconClass = 'h-4.5 w-4.5';
+  const headerActionIconClass = 'h-4 w-4';
 
   const worktreeRefreshDependencies = React.useMemo(() => ({
     projects,

@@ -39,6 +39,7 @@ import {
 
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
+const EMPTY_ROW_MESSAGE_IDS: readonly string[] = [];
 
 // --- Timeline virtualization (@legendapp/list) -----------------------------
 // The timeline is a single virtualized list on every surface: history turns
@@ -725,8 +726,8 @@ type TimelineRowContextValue = {
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
-    // The live tail row renders through StreamingTailContent, which subscribes
-    // to streaming parts; every other row renders statically.
+    // The live tail row subscribes to streaming parts; every other row renders
+    // statically (see TimelineRowContent).
     streamingTailKey: string | null;
     directory?: string;
     sessionIsWorking: boolean;
@@ -740,42 +741,24 @@ const TimelineRow = React.memo(({ entry }: { entry: RenderEntry }) => {
     const context = React.useContext(TimelineRowContext);
     if (!context) return null;
 
-    if (context.streamingTailKey === entry.key) {
-        return (
-            <StreamingTailContent
-                entry={entry}
-                directory={context.directory}
-                scrollToBottom={context.scrollToBottom}
-                stickyUserHeader={context.stickyUserHeader}
-                sessionIsWorking={context.sessionIsWorking}
-                defaultActivityExpanded={context.defaultActivityExpanded}
-                turnUiStates={context.turnUiStates}
-                onToggleTurnGroup={context.onToggleTurnGroup}
-                chatRenderMode={context.chatRenderMode}
-                showTurnChangedFiles={context.showTurnChangedFiles}
-                shouldAnimateUserMessage={context.shouldAnimateUserMessage}
-                onUserAnimationConsumed={context.onUserAnimationConsumed}
-                activeStreamingMessageId={context.activeStreamingMessageId}
-                activeStreamingPhase={context.activeStreamingPhase}
-                reviewTransferDirection={context.reviewTransferDirection}
-            />
-        );
-    }
-
+    const live = context.streamingTailKey === entry.key;
     return (
-        <MessageListEntry
+        <TimelineRowContent
             entry={entry}
+            live={live}
+            directory={context.directory}
             scrollToBottom={context.scrollToBottom}
             stickyUserHeader={context.stickyUserHeader}
-            sessionIsWorking={false}
+            sessionIsWorking={live && context.sessionIsWorking}
             defaultActivityExpanded={context.defaultActivityExpanded}
             turnUiStates={context.turnUiStates}
             onToggleTurnGroup={context.onToggleTurnGroup}
             chatRenderMode={context.chatRenderMode}
+            showTurnChangedFiles={context.showTurnChangedFiles}
             shouldAnimateUserMessage={context.shouldAnimateUserMessage}
             onUserAnimationConsumed={context.onUserAnimationConsumed}
-            activeStreamingMessageId={null}
-            activeStreamingPhase={null}
+            activeStreamingMessageId={live ? context.activeStreamingMessageId : null}
+            activeStreamingPhase={live ? context.activeStreamingPhase : null}
             reviewTransferDirection={context.reviewTransferDirection}
         />
     );
@@ -889,8 +872,16 @@ const TimelineList = React.memo(({
 
 TimelineList.displayName = 'TimelineList';
 
-const StreamingTailContent: React.FC<{
+// Every row renders through this one component, live tail or history, so a
+// row keeps its React tree when it moves between the two. The live tail
+// changes on every send and on a revert; with a different component per role
+// the row remounted, its state reset for a commit (a long user message lost
+// its "show full message" link), and the list measured that frame as the
+// row's height. The next row then sat that much too high until a later
+// re-measure.
+const TimelineRowContent: React.FC<{
     entry: RenderEntry;
+    live: boolean;
     directory?: string;
     scrollToBottom?: () => void;
     stickyUserHeader: boolean;
@@ -907,6 +898,7 @@ const StreamingTailContent: React.FC<{
     reviewTransferDirection?: ReviewTransferDirection | null;
 }> = ({
     entry,
+    live,
     directory,
     scrollToBottom,
     stickyUserHeader,
@@ -926,21 +918,23 @@ const StreamingTailContent: React.FC<{
     // currently streaming: a finished step message's base record can lag the
     // part store, and rendering it from that stale snapshot briefly unmounts
     // its completed tool parts when the stream hands off to the next message.
+    // A history row subscribes to nothing.
     const tailMessageIds = React.useMemo(() => {
+        if (!live) return EMPTY_ROW_MESSAGE_IDS;
         if (entry.kind === 'turn') return entry.turn.assistantMessageIds;
         return [entry.message.info.id];
-    }, [entry]);
+    }, [entry, live]);
     const livePartsByMessageId = useSessionPartsForMessages(tailMessageIds, directory);
-    const liveEntry = React.useMemo(() => buildLiveStreamingEntry(entry, {
+    const rowEntry = React.useMemo(() => (live ? buildLiveStreamingEntry(entry, {
         livePartsByMessageId,
         showTextJustificationActivity: chatRenderMode === 'sorted',
         showTurnChangedFiles,
         mergeHiddenUserTurns: true,
-    }), [chatRenderMode, entry, livePartsByMessageId, showTurnChangedFiles]);
+    }) : entry), [chatRenderMode, entry, live, livePartsByMessageId, showTurnChangedFiles]);
 
     return (
         <MessageListEntry
-            entry={liveEntry}
+            entry={rowEntry}
             scrollToBottom={scrollToBottom}
             stickyUserHeader={stickyUserHeader}
             sessionIsWorking={sessionIsWorking}
@@ -957,7 +951,7 @@ const StreamingTailContent: React.FC<{
     );
 };
 
-StreamingTailContent.displayName = 'StreamingTailContent';
+TimelineRowContent.displayName = 'TimelineRowContent';
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     sessionKey,

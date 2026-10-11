@@ -5,7 +5,6 @@ import { Switch } from '@/components/ui/switch';
 import {
   SETTINGS_HELPER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
   SettingsFieldRow,
 } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
@@ -124,7 +123,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
           value={route.selection ?? '__unset__'}
           onValueChange={(next) => onChange(setRouteField(route, 'selection', next === '__unset__' ? undefined : next))}
         >
-          <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-56')} aria-label={t('settings.pools.advanced.selection')}>
+          <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-56')} aria-label={t('settings.pools.advanced.selection')}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

@@ -316,6 +316,11 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
   )
 }
 
+const subscribeLiveSessionLists = (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
+  (state: State) => state.session,
+  notify,
+)
+
 export function useAllLiveSessions(): Session[] {
   return useLiveSyncSelector(
     useCallback((states) => {
@@ -323,13 +328,26 @@ export function useAllLiveSessions(): Session[] {
       return aggregateLiveSessions(states)
     }, []),
     areSessionListsEquivalent,
-    useCallback(
-      (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
-        (state: State) => state.session,
-        notify,
-      ),
-      [],
-    ),
+    subscribeLiveSessionLists,
+  )
+}
+
+const EMPTY_LIVE_SESSIONS: Session[] = []
+
+/**
+ * Live sessions whose ids are not in `excludedIds`, newest first. Updates to
+ * an excluded session (a `time.updated` bump on every streamed step) do not
+ * re-render the caller.
+ */
+export function useLiveSessionsExcluding(excludedIds: ReadonlySet<string>): Session[] {
+  return useLiveSyncSelector(
+    useCallback((states) => {
+      countSyncPerformance("liveSessionAggregateRuns")
+      const sessions = aggregateLiveSessions(states).filter((session) => !excludedIds.has(session.id))
+      return sessions.length === 0 ? EMPTY_LIVE_SESSIONS : sessions
+    }, [excludedIds]),
+    areSessionListsEquivalent,
+    subscribeLiveSessionLists,
   )
 }
 
@@ -3286,6 +3304,41 @@ export function useSessionMessages(sessionID: string, directory?: string) {
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
+/**
+ * Derive one value from a session's message list. The caller re-renders only
+ * when the derived value changes under `isEqual`, not on every message update:
+ * a streamed step replaces the list many times while a derived flag or reading
+ * stays the same. `select` runs when the session's list changes, and again on
+ * the caller's own renders, so it reads current state either way. A selector
+ * that also reads message parts passes `watchParts`, so parts that load after
+ * their message re-run it too.
+ */
+export function useSessionMessagesSelector<T>(
+  sessionID: string,
+  directory: string | undefined,
+  select: (messages: Message[], state: State) => T,
+  isEqual: (left: T, right: T) => boolean = Object.is,
+  watchParts = false,
+): T {
+  const store = useDirectoryStore(directory)
+  const cacheRef = useRef<{ value: T } | null>(null)
+  const getSnapshot = useCallback(() => {
+    const state = store.getState()
+    const next = select(sessionID ? state.message[sessionID] ?? EMPTY_MESSAGES : EMPTY_MESSAGES, state)
+    const cached = cacheRef.current
+    if (cached && isEqual(cached.value, next)) return cached.value
+    cacheRef.current = { value: next }
+    return next
+  }, [isEqual, select, sessionID, store])
+  const subscribe = useCallback((notify: () => void) => {
+    if (!sessionID) return () => undefined
+    return store.subscribe((state, previous) => {
+      if (state.message[sessionID] !== previous.message[sessionID] || (watchParts && state.part !== previous.part)) notify()
+    })
+  }, [sessionID, store, watchParts])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
 /** Check whether the message list for a session has been loaded into sync state. */
 export function useSessionMessagesResolved(sessionID: string, directory?: string): boolean {
   return useDirectorySync(
@@ -3593,10 +3646,52 @@ export function useSession(sessionID?: string | null, directory?: string) {
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
+/**
+ * Derive one value from a session record. `session.updated` replaces the
+ * record on every streamed step (its `time.updated` moves), so a caller that
+ * reads only a few fields re-renders only when the derived value changes
+ * under `isEqual`. Same lookup and subscription as `useSession`.
+ */
+export function useSessionSelector<T>(
+  sessionID: string | null | undefined,
+  directory: string | undefined,
+  select: (session: Session | undefined) => T,
+  isEqual: (left: T, right: T) => boolean = Object.is,
+): T {
+  const { childStores } = useSyncRuntime()
+  const cacheRef = useRef<{ value: T } | null>(null)
+  const getSnapshot = useCallback(() => {
+    let session: Session | undefined
+    if (directory) {
+      const sessions = childStores.getChild(directory)?.getState().session
+      session = sessions ? getSessionById(sessions, sessionID) : undefined
+    } else {
+      session = findLiveSession(getLiveStates(childStores), sessionID)
+    }
+    const next = select(session)
+    const cached = cacheRef.current
+    if (cached && isEqual(cached.value, next)) return cached.value
+    cacheRef.current = { value: next }
+    return next
+  }, [childStores, directory, isEqual, select, sessionID])
+
+  const subscribe = useCallback((notify: () => void) => {
+    if (directory) {
+      return childStores.ensureChild(directory, { bootstrap: false }).subscribe((state, previous) => {
+        if (state.session !== previous.session) notify()
+      })
+    }
+    return childStores.subscribeAllSelected((state) => state.session, notify)
+  }, [childStores, directory])
+
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+const selectSessionDirectory = (session: Session | undefined): string | undefined => session?.directory ?? undefined
+
 /** Get one session directory by id for a directory */
 export function useSessionDirectory(sessionID?: string | null, directory?: string): string | undefined {
-  const session = useSession(sessionID, directory)
-  return (session as (typeof session & { directory?: string | null }) | undefined)?.directory ?? undefined
+  return useSessionSelector(sessionID, directory, selectSessionDirectory)
 }
 
 /** Get the current directory */

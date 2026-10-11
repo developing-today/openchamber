@@ -66,7 +66,10 @@ reply resolves its directory from the store that holds the form.
 session, its subagents' included, in the same frame: one dot per pending
 request with the current one solid, the request's tool in the header, and
 Deny / Always allow / Allow once through the shared response hook, so
-Alt+Enter, Alt+Shift+Enter and Alt+Backspace answer the current request. A
+Alt+Enter, Alt+Shift+Enter and Alt+Backspace answer the current request.
+Always allow and its shortcut exist only when the request carries `save`
+patterns: OpenCode remembers nothing from an "always" without them, so the
+question tool's request offers Deny and Allow once. A
 pending permission hides the form dock and the suggestion.
 The BTW sheet keeps the inline `PermissionCard` for its child session's
 requests; both render the request through `PermissionRequestContent` and
@@ -138,22 +141,30 @@ opens the composer's review dialog (the one `/handoff-review` opens) or a
 walkthrough of the whole working tree, and is not shown on a mobile layout,
 where neither action is offered elsewhere either.
 
-The shared frame measures its height and gap into the chat column's
-`--chat-floating-panel-clearance`. The floating status row and
+The shared frame measures its height and gap as
+`--chat-floating-panel-clearance`, published through
+`state/composerInsetReaders.ts` onto the elements that read it, never on the
+chat column (inherited from the column, every resize of the frame restyled
+the whole transcript). The floating status row, the recap hint and
 `ScrollToBottomButton` translate upward by that amount, the transcript's tail
-spacer grows by it (so the frame never covers the last rows), and the column
-carries `data-floating-panel` while any frame is mounted so the recap hint
-hides instead of landing over the transcript. Unmounting clears the offset
-and the marker; resizing or collapsing the frame updates it.
+spacer and the end fade band grow by it (so the frame never covers the last
+rows), and the column carries `data-floating-panel` while any frame is
+mounted so the recap hint hides instead of landing over the transcript.
+Unmounting clears the offset and the marker; resizing or collapsing the frame
+updates it.
 
 ## Floating composer
 
 In a normal session view the composer slot is an absolute layer over the
 bottom of the transcript (`ChatContainer`), and the input box is glass
 (`oc-glass-composer`). The draft screen and the expanded editor keep the slot
-in flow. A `ResizeObserver` on the slot writes its height into the chat
-column's `--chat-composer-inset`, and the timeline's tail spacer height into
-`--chat-composer-tail-inset`: the resting composer (the smallest height the
+in flow. A `ResizeObserver` on the slot publishes its height as
+`--chat-composer-inset` and the timeline's tail spacer height as
+`--chat-composer-tail-inset`, written onto the elements that read them (the
+end fade band and the tail spacer, registered through
+`state/composerInsetReaders.ts`), never on the chat column: inherited from the
+column, every new composer line restyled the whole transcript. The tail
+spacer height is the resting composer (the smallest height the
 slot has measured) plus an 80px gap, or the current height minus an 8px
 overlap into the gap, whichever is larger. With the last turn's own bottom
 padding the visible band at rest is about 104px. A row appearing inside the
@@ -166,8 +177,11 @@ the same rule to announce how far the transcript's end moves, which is less
 than the slot's height change whenever part of it is taken from the gap. While the slot is taller than at rest
 the column carries `data-composer-grown`, and the recap hint, which rides the
 composer's top edge, hides until the composer is back at rest.
-The transcript's end fade reads `--chat-composer-inset` (plus the floating-panel
-clearance) through `--scroll-shadow-end-inset` in `index.css`, so a row that
+The transcript's end fade is a band in the chat background over the
+scroller's end (`.chat-scroll-fade--end` in `index.css`; a mask on the
+scroller made the GPU recomposite the whole transcript every frame). It reads
+`--chat-composer-inset` (plus the floating-panel clearance) through
+`--scroll-shadow-end-inset`, so a row that
 does reach the composer, as the newest lines of a live reply do while the
 follow glide is still catching up, dissolves above the box instead of being
 cut in half by its top edge. That inset applies only while a reply streams
@@ -657,6 +671,20 @@ one app-wide composer state is split per column:
   A pinned composer takes focus on session entry only when the focus is
   already inside its column, so opening a subtask in the panel never pulls
   keystrokes away from the main chat.
+- **Typing with nothing focused.** `editor/inputRedirect.ts` sends input that
+  has no text field to land in to a composer, on desktop only: a printable key
+  without Cmd, Ctrl or Alt is inserted at the end of the draft, a paste is
+  replayed on the editor so attachments and large-text handling still apply,
+  and coming back to the window puts the caret in the composer. The receiving
+  composer is the pinned chat's when the user last clicked or focused into
+  that column and it is still on screen, the main chat's otherwise. Input
+  stays where it is when its target takes text or is a button, link, tab,
+  list or menu item, while a dialog, menu, open select, settings or the BTW
+  composer is on screen, during IME composition, and while text is selected, because typing
+  over a selection starts a comment on it. The window-focus refocus skips a
+  focused field, terminal, editor or embedded page and keeps a selection.
+  `useKeyboardShortcuts` calls it after the shortcut dispatcher, so a
+  bare-key binding or sequence still wins.
 - **Stop prompt.** `armAbortPrompt` arms for a given session. A composer
   clears the prompt of the session it leaves, never another column's.
 

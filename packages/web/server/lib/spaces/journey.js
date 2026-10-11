@@ -43,7 +43,7 @@ import { SpaceError } from './errors.js';
 import { DEFAULT_IDLE_STOP, idleStopSchema } from './idle-stop.js';
 import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { spaceProjectPath, spaceWindowUrl } from './layout.js';
-import { loginGrantOf } from './space-opencode.js';
+import { LOGIN_PROVIDERS, loginEndOf, loginEnded, loginGrantOf } from './space-opencode.js';
 import { domainSchema, grantSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
 import { createSpaceToken } from './space-server.js';
 import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
@@ -407,7 +407,7 @@ export function createSpaceJourney({
    */
   const usableHostLogin = async (grant) => {
     const login = await readHostLogin(grant.provider).catch(() => null);
-    if (!login || login.methodID !== grant.method || login.expires <= now().getTime()) return null;
+    if (!login || login.methodID !== grant.method || loginEnded(grant.provider, login, now().getTime())) return null;
     return login;
   };
 
@@ -447,15 +447,15 @@ export function createSpaceJourney({
       const writing = (async () => {
         const { record } = records.read(spaceId);
         if (!record) return;
-        let written = false;
+        const written = new Set();
         for (const grant of record.grants) {
           if (grant.kind !== 'login') continue;
           const login = await usableHostLogin(grant);
           if (!login) continue;
           await spaceOpenCode.writeLogin(spaceId, grant.provider, login);
-          written = true;
+          written.add(grant.provider);
         }
-        if (!written) await spaceOpenCode.removeLogin(spaceId);
+        for (const provider of LOGIN_PROVIDERS) if (!written.has(provider)) await spaceOpenCode.removeLogin(spaceId, provider);
       })();
       rowRepairs.set(spaceId, writing);
       try {
@@ -467,8 +467,40 @@ export function createSpaceJourney({
       logger.warn?.(`[spaces] the login row of space ${spaceId} was not written again: ${error?.code ?? error?.message ?? error}`);
     });
   };
+  /**
+   * The host's own browser logins a space can be given, for the grant dialog to offer the choice
+   * and to say why a login grant needs the user again (7c): for each provider the host has a
+   * login for, its method, when it ends, null for a token with no end, and whether it can be said
+   * now, `usable`, has `expired` and could not be renewed, or was made in a way the window does
+   * not know, `unsupported`. Never the token. A host that cannot be asked throws, so a failed read
+   * never reads as "signed out".
+   */
+  const readHostLogins = async () => {
+    const logins = [];
+    for (const provider of LOGIN_PROVIDERS) {
+      const login = await readHostLogin(provider);
+      if (!login) continue;
+      const end = loginEndOf(provider, login);
+      const state = !loginWindowOf(provider, login) ? 'unsupported' : loginEnded(provider, login, now().getTime()) ? 'expired' : 'usable';
+      logins.push({ provider, method: login.methodID, expires: end === null ? null : new Date(end).toISOString(), state });
+    }
+    return { logins };
+  };
+
   /** Waits for a login row repair that is writing now; its failure is its own and logged there. */
   const afterRowRepair = (spaceId) => (rowRepairs.get(spaceId) ?? Promise.resolve()).catch(() => {});
+
+  /**
+   * Tells a space's gatekeeper the host's login again, for the keeper of `login-keeper.js`
+   * when the token changed: the same window grant, replaced in place. Resolves true when the
+   * gatekeeper took it and false when it refused, logged. A space with an action under way is
+   * left to it, which says the login itself at a start, and answers null so the keeper tries
+   * again on its next look.
+   */
+  const sayLogin = async (spaceId, grant, login) => {
+    if (busy.has(spaceId)) return null;
+    return deliverGrant(spaceId, grant, login);
+  };
 
   /**
    * The grants of every running space that its gatekeeper does not hold, said again from the
@@ -767,7 +799,7 @@ export function createSpaceJourney({
       if (!login) throw new SpaceError('login_not_found', `OpenChamber is not signed in to ${asked.provider} on this computer. Sign in first, or give a key instead.`);
       window = loginWindowOf(asked.provider, login);
       if (!window) throw new SpaceError('login_not_supported', `The ${asked.provider} login on this computer was made in a way the network filter does not know (${login.methodID}).`);
-      if (login.expires <= now().getTime()) throw new SpaceError('login_expired', `The ${asked.provider} login on this computer has run out. Use ${asked.provider} in OpenChamber once, then grant again.`);
+      if (loginEnded(asked.provider, login, now().getTime())) throw new SpaceError('login_expired', `The ${asked.provider} login on this computer has run out and could not be renewed. Sign in to ${asked.provider} again, then grant.`);
       grant = { kind: 'login', id: asked.provider, provider: asked.provider, method: login.methodID };
     } else {
       grant = { kind: 'domain', id: `open-${crypto.randomBytes(6).toString('hex')}`, upstream: asked.upstream };
@@ -777,7 +809,7 @@ export function createSpaceJourney({
     // keep the login's headers and model list for requests the window now sends with the key; a
     // removal that fails answers the grant before anything changed.
     const replaced = current.record.grants.find((entry) => entry.id === grant.id);
-    if (grant.kind === 'model' && replaced?.kind === 'login') await spaceOpenCode.removeLogin(spaceId);
+    if (grant.kind === 'model' && replaced?.kind === 'login') await spaceOpenCode.removeLogin(spaceId, grant.provider);
     await gatekeeper.addGrant(spaceId, { id: grant.id, ...window });
     const grants = [...current.record.grants.filter((entry) => entry.id !== grant.id), grant];
     if (records.update(spaceId, { grants }).status !== 'ok') {
@@ -1073,5 +1105,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, sayLogin, readHostLogins, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }
