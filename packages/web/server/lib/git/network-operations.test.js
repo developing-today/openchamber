@@ -2408,8 +2408,11 @@ process.exit(safe ? 0 : 1);
     });
   });
 
+  // The 10,000-path batching case runs in lfs-discovery.test.js against an
+  // in-memory git. Here the clone copies and verifies each file in turn, so 10,000
+  // real files took 16 s unloaded and more than 90 s under load.
   it.each([
-    { count: 257 }, { count: 1_025 }, { count: 10_000 },
+    { count: 257 }, { count: 1_025 },
     { count: 1_026, mixed: true }, { count: 1_026, mixed: true, latePointer: true },
   ])('clones a regular repository at scale $count, mixed=$mixed, pointer=$latePointer', async ({ count, mixed, latePointer }) => {
     const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-lfs-scale-'));
@@ -2472,7 +2475,7 @@ process.exit(safe ? 0 : 1);
     }
     expect(calls.filter((args) => args.includes('show'))).toHaveLength(0);
     expect(calls.length).toBeLessThanOrEqual(3 * Math.ceil(count / LFS_DISCOVERY_LIMITS.fileBatchSize) + 12);
-  }, 90_000);
+  });
 
   it.each(['CANCELLED', 'CANCELLED_ACTIVE', 'TIMEOUT', 'overflow'])('stops LFS discovery across batches on %s without publication', async (interruption) => {
     const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-lfs-interruption-'));
