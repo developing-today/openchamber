@@ -110,6 +110,8 @@ describe('settings helpers', () => {
     expect(helpers.formatSettingsResponse(next).workStatusHiddenSectionsExplicit).toBe(true);
     expect(helpers.sanitizeSettingsUpdate({ workStatusHiddenSectionsExplicit: 'true' }).workStatusHiddenSectionsExplicit).toBeUndefined();
   });
+  // Packs the whole package and installs it into a temporary folder. That takes longer than the 30 s default
+  // when the suite shares the machine, so the budget covers that load; the assertions are unchanged.
   it('imports from the packed @openchamber/web tarball without escaping the published package', async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'settings-helpers-pack-'));
     const packDir = join(tempRoot, 'pack');
@@ -177,7 +179,7 @@ describe('settings helpers', () => {
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it('accepts only booleans for draft starter visibility', () => {
     const helpers = createTestHelpers();
