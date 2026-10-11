@@ -387,13 +387,17 @@ async function resolveTunnelProviders(options = {}, deps = {}) {
     candidatePorts.push(options.port);
   }
 
-  const discoveredPorts = await Promise.resolve(readPorts());
-  if (Array.isArray(discoveredPorts)) {
-    candidatePorts.push(...discoveredPorts);
-  }
+  // An explicit --port names the one instance to ask. Any other instance on this
+  // machine, or the default port, would answer for a different server.
+  if (!options.explicitPort) {
+    const discoveredPorts = await Promise.resolve(readPorts());
+    if (Array.isArray(discoveredPorts)) {
+      candidatePorts.push(...discoveredPorts);
+    }
 
-  if (!candidatePorts.includes(DEFAULT_PORT)) {
-    candidatePorts.push(DEFAULT_PORT);
+    if (!candidatePorts.includes(DEFAULT_PORT)) {
+      candidatePorts.push(DEFAULT_PORT);
+    }
   }
 
   for (const port of candidatePorts) {
