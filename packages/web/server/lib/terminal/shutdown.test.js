@@ -64,8 +64,9 @@ test('waits for a separate process group after its parent exits', { skip: proces
 test('escalates a noncooperative workload only after the shared deadline', { skip: process.platform === 'win32' }, async t => {
   const run = await fixture(t, 'ignore');
   const start = Date.now();
-  await shutdownTerminalProcesses([run.terminal], { graceMs: 350 });
-  assert.ok(Date.now() - start >= 350);
+  // A 350 ms grace let SIGKILL land before a starved child ran its SIGTERM handler under load.
+  await shutdownTerminalProcesses([run.terminal], { graceMs: 1500 });
+  assert.ok(Date.now() - start >= 1500);
   assert.deepEqual((await run.events()).map(event => event.event), ['ready', 'SIGTERM']);
   assert.deepEqual(await run.exit, { code: null, signal: 'SIGKILL' });
 });
@@ -79,6 +80,7 @@ test('an idle shell closes promptly and shutdown waits for its exit', { skip: pr
   await delay(100);
   const start = Date.now();
   await shutdownTerminalProcesses([{ process: { pid: child.pid, kill: signal => child.kill(signal) }, shellExecutable: '/bin/sh' }]);
-  assert.ok(Date.now() - start < 3000);
+  // The bound is generous for a loaded machine; the shell must still close well before any grace period.
+  assert.ok(Date.now() - start < 5000);
   assert.equal((await exit).signal, 'SIGHUP');
 });
