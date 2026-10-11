@@ -467,15 +467,17 @@ describe('Long paragraphs', () => {
   // text that remains.
   const paragraphOf = (length: number): string => `${cjkLink}${'x'.repeat(length - cjkLink.length)}`;
 
-  // The reporter's data dump from openchamber/openchamber#4204: pretty-printed
-  // JSON with no blank line, about 250 KB in one paragraph.
+  // The reporter's data dump from openchamber/openchamber#4204, pretty-printed
+  // JSON with no blank line, in one paragraph. Its size is set so the quadratic
+  // scan would take several times the bound below; a larger dump only costs time.
+  // The scan count is deterministic, so the margin matters only for the time.
   const dataDump = (): string => {
     let seed = 7;
     const pick = (values: readonly string[]): string | undefined => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
       return values[Math.floor((seed / 0x100000000) * values.length)];
     };
-    const rows = Array.from({ length: 1800 }, (_, i) => ({
+    const rows = Array.from({ length: 600 }, (_, i) => ({
       id: `item_${i}`,
       label: pick(['alpha_beta', 'gamma_delta', 'epsilon_zeta', 'eta_theta', 'iota_kappa']),
       link: pick(['/Main', '/List', '/Detail', '/data/nested']),
@@ -508,23 +510,31 @@ describe('Long paragraphs', () => {
     expect(html.match(/href="https:\/\/example\.com"/g)).toHaveLength(200);
   });
 
-  test('the data dump from the report opens without the quadratic rescan', async () => {
+  // Opening a message paints it synchronously, then renders its blocks. Each
+  // render is a test of its own, so each stays inside the default timeout.
+  // Before the fix linkify searched the rest of the paragraph at every inline
+  // token, billions of characters for this dump. Now it only searches while
+  // at most LIMIT characters remain, which bounds each paragraph by LIMIT².
+  test('the data dump from the report opens without the quadratic rescan', () => {
     resetMarkdownHtmlCacheForTests();
     const text = dataDump();
-    expect(text.length).toBeGreaterThan(250_000);
-    // Opening a message paints it synchronously, then renders its blocks.
-    // Before the fix linkify searched the rest of the paragraph at every inline
-    // token, billions of characters for this dump. Now it only searches while
-    // at most LIMIT characters remain, which bounds each paragraph by LIMIT².
+    expect(text.length).toBeGreaterThan(80_000);
     resetScanStatsForTests();
     const html = renderMarkdownSync(text);
-    const settled = await renderMarkdownBlocks(text, false);
     expect(__scanStatsForTests().linkify).toBeLessThan(2 * LIMIT * LIMIT);
-    expect(html).toContain('item_1799');
+    expect(html).toContain('item_599');
     expect(hrefOf(html)).toBe('https://example.com/docs');
     expect(html).toContain('class="katex"');
-    expect(settled.map((block) => block.html).join('')).toContain('item_1799');
-  }, 30_000); // renders a 250 KB dump on the CPU; the 5 s default is too tight under load
+  });
+
+  test('the data dump from the report settles without the quadratic rescan', async () => {
+    resetMarkdownHtmlCacheForTests();
+    const text = dataDump();
+    resetScanStatsForTests();
+    const settled = await renderMarkdownBlocks(text, false);
+    expect(__scanStatsForTests().linkify).toBeLessThan(2 * LIMIT * LIMIT);
+    expect(settled.map((block) => block.html).join('')).toContain('item_599');
+  });
 });
 
 describe('Many short paragraphs', () => {

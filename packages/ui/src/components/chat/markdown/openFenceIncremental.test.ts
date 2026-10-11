@@ -84,6 +84,17 @@ const oneShot = async (text: string): Promise<Rendered> => {
   return renderMarkdownBlocks(text, true, 'label');
 };
 
+// The two variants of a fence repeat their committed-line prefixes, so each one
+// is rendered once.
+const oneShots = new Map<string, Rendered>();
+const rememberedOneShot = async (text: string): Promise<Rendered> => {
+  const known = oneShots.get(text);
+  if (known) return known;
+  const rendered = await oneShot(text);
+  oneShots.set(text, rendered);
+  return rendered;
+};
+
 const paint = (html: string): HTMLElement => {
   const block = document.createElement('div');
   block.innerHTML = html;
@@ -135,7 +146,9 @@ const streamPrefixes = (text: string, midLineEvery = 0): string[] => {
   return prefixes;
 };
 
-const LONG_LINE = `const long = [${Array.from({ length: 300 }, (_, index) => `"item <${index}> & 'x'"`).join(', ')}];`;
+// About sixteen mid-line releases. Each one re-sanitizes the open line, so the
+// line stays short enough for the case to run well inside the default timeout.
+const LONG_LINE = `const long = [${Array.from({ length: 80 }, (_, index) => `"item <${index}> & 'x'"`).join(', ')}];`;
 
 const SAMPLES = {
   typescript: {
@@ -175,7 +188,7 @@ describe('open fence rendered by its new lines', () => {
       test(`${name}${midLine ? ', released mid-line' : ''}: every step equals the one-shot render, in HTML and DOM`, async () => {
         const prefixes = streamPrefixes(fence(lang, lines), midLine);
         const expected: Rendered[] = [];
-        for (const prefix of prefixes) expected.push(await oneShot(prefix));
+        for (const prefix of prefixes) expected.push(await rememberedOneShot(prefix));
 
         resetAll();
         const painter = createPainter();
@@ -197,7 +210,7 @@ describe('open fence rendered by its new lines', () => {
         }
         // Every step after the fence's first one patched the painted block.
         expect(painter.patched()).toBe(fenceSteps - 1);
-      }, 30_000); // re-renders every prefix and paints each step; the 5 s default is too tight under load
+      });
     }
   }
 

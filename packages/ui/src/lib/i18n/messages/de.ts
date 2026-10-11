@@ -14,6 +14,7 @@ import { sourceBoardI18n } from './source-board.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
+import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict = {
@@ -138,6 +139,7 @@ export const dict = {
   ...environmentI18n.de,
   ...providersI18n.de,
   ...mcpGridI18n.de,
+  ...mcpxSecretsI18n.de,
   ...pluginsGridI18n.de,
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
