@@ -172,12 +172,14 @@ describe('createGitRepositoryCredentialRuntime', () => {
       const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
       // The helper's fall-through runs the person's own `git credential fill` with their system config,
       // so a stub git on PATH stands in for a person who has nothing stored.
+      // The stub also records what it was asked, so an empty answer cannot mean the helper never asked.
       const quietBin = path.join(dataDir, 'bin');
+      const stubLog = path.join(dataDir, 'git-stub.log');
       await fs.mkdir(quietBin);
-      await fs.writeFile(path.join(quietBin, 'git'), '#!/bin/sh\ncat > /dev/null\n', { mode: 0o755 });
+      await fs.writeFile(path.join(quietBin, 'git'), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$OC_GIT_STUB_LOG"\ncat >> "$OC_GIT_STUB_LOG"\n', { mode: 0o755 });
       const run = () => new Promise((resolve) => {
         const child = execFile(process.execPath, [helper, endpointFile, 'get'], {
-          env: { ...process.env, PATH: `${quietBin}${path.delimiter}${process.env.PATH}` },
+          env: { ...process.env, PATH: `${quietBin}${path.delimiter}${process.env.PATH}`, OC_GIT_STUB_LOG: stubLog },
         }, (_error, stdout) => resolve(stdout));
         child.stdin.end('protocol=https\nhost=github.com\n');
       });
@@ -185,9 +187,11 @@ describe('createGitRepositoryCredentialRuntime', () => {
       // System: the person's own chain is asked, which here holds nothing.
       mode = 'system';
       expect(await run()).toBe('');
+      expect(await fs.readFile(stubLog, 'utf8')).toBe('credential fill\nprotocol=https\nhost=github.com\n');
       // A server that is not there: the same fall-through, never a hang.
       await fs.writeFile(endpointFile, JSON.stringify({ version: 1, url: 'http://127.0.0.1:1/api/git/repository-credential', secret: 's' }));
       expect(await run()).toBe('');
+      expect((await fs.readFile(stubLog, 'utf8')).match(/credential fill/g)).toHaveLength(2);
     } finally {
       delete process.env.__ENDPOINT_JSON;
       await new Promise((resolve) => server.close(resolve));
