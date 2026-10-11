@@ -532,8 +532,8 @@ const extractOds = (archive: Unzipped, images: EmbeddedImages): string | undefin
   for (const table of tagBlocks(content, "table:table")) {
     const openTag = table.match(/^<table:table\b[^>]*>/i)?.[0] ?? ""
     sections.push(`## Sheet: ${attribute(openTag, "table:name") ?? "Sheet"}`)
-    for (const shapes of tagBlocks(table, "table:shapes")) {
-      sections.push(...odfContent(shapes, contentPath, images))
+    for (const drawings of tagBlocks(table, "table:shapes")) {
+      sections.push(...odfContent(drawings, contentPath, images))
     }
     for (const row of tagBlocks(table, "table:table-row")) {
       const cells = tagBlocks(row, "table:table-cell")

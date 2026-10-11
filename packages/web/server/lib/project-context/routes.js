@@ -33,7 +33,7 @@ const respondWithError = (res, error, fallbackMessage) => {
 
 const isValidNoteSource = (value) => value === 'manual' || value === 'selection' || value === 'agent';
 
-const hasValidTodosShape = (value) => (
+const hasValidTodos = (value) => (
   Array.isArray(value)
   && value.every((todo) => (
     isObjectRecord(todo)
@@ -60,7 +60,7 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     if (!isObjectRecord(body)) {
       return res.status(400).json({ error: 'Body must be an object' });
     }
-    if (!hasValidTodosShape(body.todos)) {
+    if (!hasValidTodos(body.todos)) {
       return res.status(400).json({ error: 'todos must be an array of todo items' });
     }
 

@@ -4,7 +4,7 @@ import { describeSmallModel, generateSmallModelText } from '../small-model/index
 import { buildDigest } from './digest.js';
 import { indexHunks } from './hunks.js';
 import { normalizeLanguage } from './languages.js';
-import { buildPrompt, JSON_SHAPE_INSTRUCTION } from './prompt.js';
+import { buildPrompt, JSON_OUTPUT_INSTRUCTION } from './prompt.js';
 import { normalizeWalkthrough, parseModelJson, responseSchema } from './schema.js';
 import {
   buildCacheKey,
@@ -535,7 +535,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   const withSchema = () => run({ prompt, system, responseSchema });
   const withoutSchema = () => run({
     prompt,
-    system: `${system}\n${JSON_SHAPE_INSTRUCTION}`,
+    system: `${system}\n${JSON_OUTPUT_INSTRUCTION}`,
     responseSchema: undefined,
   });
 

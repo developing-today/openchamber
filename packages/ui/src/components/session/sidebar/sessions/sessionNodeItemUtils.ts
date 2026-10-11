@@ -5,6 +5,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionNode } from '../types';
 
@@ -278,7 +279,7 @@ export const selectFolderIdsForProjection = (
 const sessionObjectVersions = new WeakMap<object, number>();
 let nextSessionObjectVersion = 1;
 
-const getSessionObjectVersion = (session: object): number => {
+const getSessionObjectVersion = (session: Session): number => {
   const existing = sessionObjectVersions.get(session);
   if (existing !== undefined) return existing;
   const version = nextSessionObjectVersion;

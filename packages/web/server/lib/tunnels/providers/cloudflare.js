@@ -54,7 +54,7 @@ export const cloudflareTunnelProviderCapabilities = {
 };
 
 export function createCloudflareTunnelProvider() {
-  const validateTokenShape = (value) => {
+  const validateTokenFormat = (value) => {
     if (typeof value !== 'string') {
       return { ok: false, detail: 'Managed remote token is missing.' };
     }
@@ -178,7 +178,7 @@ export function createCloudflareTunnelProvider() {
 
       const normalizedHost = normalizeCloudflareTunnelHostname(request.hostname);
       const hostnameMissing = !normalizedHost;
-      const remoteTokenValidation = validateTokenShape(request.token);
+      const remoteTokenValidation = validateTokenFormat(request.token);
       const tokenMissing = typeof request.token !== 'string' || request.token.trim().length === 0;
       const hasSavedManagedRemoteProfile = request.hasSavedManagedRemoteProfile === true;
       const tokenProvided = request.tokenProvided === true;
