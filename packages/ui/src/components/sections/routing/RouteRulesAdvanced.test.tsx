@@ -167,6 +167,22 @@ describe('RouteRulesAdvanced', () => {
     expect(putBodies().at(-1)).toEqual({ ...SETTINGS, learnAfter: 6 });
   });
 
+  test('saves a changed wait percentile as typed', async () => {
+    const container = await renderAdvanced();
+    await act(async () => buttonWith(container, 'Show advanced').click());
+    await settle();
+    await changeValue(inputNamed(container, 'Wait percentile'), '40');
+    expect(putBodies().at(-1)).toEqual({ ...SETTINGS, waitPercentile: 40 });
+  });
+
+  test('saves a changed minimum sample count as typed', async () => {
+    const container = await renderAdvanced();
+    await act(async () => buttonWith(container, 'Show advanced').click());
+    await settle();
+    await changeValue(inputNamed(container, 'Minimum samples'), '9');
+    expect(putBodies().at(-1)).toEqual({ ...SETTINGS, waitMinSamples: 9 });
+  });
+
   test('shows the reason the local model download was refused, and sends the download request once', async () => {
     respond = (request) => {
       if (request.url === '/api/model-routes/settings') return reply(JSON.stringify(SETTINGS));

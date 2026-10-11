@@ -1,4 +1,4 @@
-import type { ModelRoute, ModelRouteTarget, ModelRouteTuning } from '@/lib/routing/modelRoutesApi';
+import { AUTONOMY_LEVELS, type AutonomyLevel, type ModelRoute, type ModelRouteTarget, type ModelRouteTuning } from '@/lib/routing/modelRoutesApi';
 
 /** The model a budget or weight is keyed by: the target without its `#variant` suffix. */
 export const targetReference = (target: ModelRouteTarget): string => {
@@ -12,6 +12,9 @@ export const isConcreteTarget = (target: ModelRouteTarget): boolean => !targetRe
 /** Blank or non-numeric form input means the setting is unset. */
 /** The select's default entry stands for no value, so it clears the field; any other entry is the value. */
 export const pickedValue = (picked: string): string | undefined => (picked === '__unset__' ? undefined : picked);
+
+/** The autonomy select's default entry clears the level; each listed level stands for itself. */
+export const pickedAutonomy = (picked: string): AutonomyLevel | undefined => AUTONOMY_LEVELS.find((level) => level === picked);
 
 export const parseFormNumber = (value: string): number | undefined => {
   if (value.trim() === '') return undefined;

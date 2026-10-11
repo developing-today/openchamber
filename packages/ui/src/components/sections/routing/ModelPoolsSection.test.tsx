@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 
 // Hand-rolled recorders rather than bun's `mock()`: its installed types omit
 // `.mock`/`mockClear`, while the runtime behaviour is all these tests need.
@@ -38,8 +38,6 @@ mock.module('@/lib/routing/modelRoutesApi', () => ({
   fetchRouteStats,
 }));
 
-const { ModelPoolsSection } = await import('./ModelPoolsSection');
-const { I18nProvider } = await import('@/lib/i18n');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 
@@ -52,7 +50,13 @@ const DOM_GLOBAL_NAMES = [
   'HTMLElement',
   'Event',
   'KeyboardEvent',
+  'MouseEvent',
   'PointerEvent',
+  'MutationObserver',
+  'ResizeObserver',
+  'cancelAnimationFrame',
+  'getComputedStyle',
+  'requestAnimationFrame',
   'localStorage',
   'IS_REACT_ACT_ENVIRONMENT',
 ] as const;
@@ -69,7 +73,13 @@ const installDom = () => {
     HTMLElement: happyWindow.HTMLElement,
     Event: happyWindow.Event,
     KeyboardEvent: happyWindow.KeyboardEvent,
+    MouseEvent: happyWindow.MouseEvent,
     PointerEvent: happyWindow.PointerEvent,
+    MutationObserver: happyWindow.MutationObserver,
+    ResizeObserver: happyWindow.ResizeObserver,
+    cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
+    getComputedStyle: happyWindow.getComputedStyle.bind(happyWindow),
+    requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
     localStorage: happyWindow.localStorage,
     IS_REACT_ACT_ENVIRONMENT: true,
   };
@@ -105,6 +115,10 @@ const textModel = (id: string, cost: number, context: number) => ({
 
 const renderSection = async () => {
   const dom = installDom();
+  // Imported after the DOM exists: Base UI and react-dom read the window when their modules load.
+  const { createRoot } = await import('react-dom/client');
+  const { ModelPoolsSection } = await import('./ModelPoolsSection');
+  const { I18nProvider } = await import('@/lib/i18n');
   const root = createRoot(dom.container);
   await act(async () => {
     root.render(
@@ -135,6 +149,34 @@ const typeInto = async (input: HTMLInputElement, value: string) => {
   await act(async () => {
     input.value = value;
     input.dispatchEvent(new Event('focusout', { bubbles: true }));
+  });
+};
+
+const fire = (target: Element, type: string) => {
+  const init = { bubbles: true, cancelable: true, button: 0 };
+  target.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, { ...init, pointerType: 'mouse' }) : new MouseEvent(type, init));
+};
+
+// A press on the trigger opens the popup. An option commits only once a hover has highlighted it, so the
+// pick hovers first and presses in a later step; both steps run in their own act so React renders between them.
+const pickOption = async (container: HTMLElement, label: string, option: string) => {
+  const trigger = findByAriaLabel(container, '[role="combobox"]', label);
+  await act(async () => {
+    fire(trigger, 'pointerdown');
+    fire(trigger, 'mousedown');
+  });
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  const item = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((el) => el.textContent?.trim() === option);
+  if (!item) throw new Error(`no option "${option}"`);
+  await act(async () => {
+    for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']) fire(item, type);
+  });
+  await act(async () => {
+    fire(item, 'pointerdown');
+    fire(item, 'mousedown');
+    fire(item, 'pointerup');
+    fire(item, 'mouseup');
+    fire(item, 'click');
   });
 };
 
@@ -348,6 +390,22 @@ describe('ModelPoolsSection', () => {
       });
       await act(async () => findSwitch(dom.container, 'Never time out the first token').click());
       expect((routeSaves.at(-1) as Record<string, { health?: unknown }>).kept.health).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('the autonomy popup saves the level picked, and its default clears the level', async () => {
+    // beforeEach gave the server an empty map; the pool is added to it.
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'], autonomy: 'rules' } });
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container);
+      await pickOption(dom.container, 'Autonomy', 'Predictive');
+      expect(routeSaves.at(-1)).toMatchObject({ kept: { targets: ['p/cheap'], autonomy: 'predictive' } });
+      // toEqual ignores the undefined key the default leaves behind, which the JSON save drops anyway.
+      await pickOption(dom.container, 'Autonomy', 'Unset (full behavior)');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'] } });
     } finally {
       await cleanup();
     }

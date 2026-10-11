@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 
 import type { ModelRoute } from '@/lib/routing/modelRoutesApi';
 
@@ -14,7 +14,13 @@ const DOM_GLOBAL_NAMES = [
   'HTMLElement',
   'Event',
   'KeyboardEvent',
+  'MouseEvent',
   'PointerEvent',
+  'MutationObserver',
+  'ResizeObserver',
+  'cancelAnimationFrame',
+  'getComputedStyle',
+  'requestAnimationFrame',
   'localStorage',
   'IS_REACT_ACT_ENVIRONMENT',
 ] as const;
@@ -31,7 +37,13 @@ const installDom = () => {
     HTMLElement: happyWindow.HTMLElement,
     Event: happyWindow.Event,
     KeyboardEvent: happyWindow.KeyboardEvent,
+    MouseEvent: happyWindow.MouseEvent,
     PointerEvent: happyWindow.PointerEvent,
+    MutationObserver: happyWindow.MutationObserver,
+    ResizeObserver: happyWindow.ResizeObserver,
+    cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
+    getComputedStyle: happyWindow.getComputedStyle.bind(happyWindow),
+    requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
     localStorage: happyWindow.localStorage,
     IS_REACT_ACT_ENVIRONMENT: true,
   };
@@ -54,9 +66,11 @@ const installDom = () => {
 let mounted: { root: Root; restore: () => void } | null = null;
 
 const renderFields = async (route: ModelRoute, onChange: (next: ModelRoute) => void) => {
+  const dom = installDom();
+  // Imported after the DOM exists: Base UI and react-dom read the window when their modules load.
+  const { createRoot } = await import('react-dom/client');
   const { PoolAdvancedFields } = await import('./PoolAdvancedFields');
   const { I18nProvider } = await import('@/lib/i18n');
-  const dom = installDom();
   const root = createRoot(dom.container);
   mounted = { root, restore: dom.restore };
   await act(async () => {
@@ -86,6 +100,35 @@ const typeInto = async (input: HTMLInputElement, value: string) => {
   await act(async () => {
     input.value = value;
     input.dispatchEvent(new Event('focusout', { bubbles: true }));
+  });
+};
+
+const fire = (target: Element, type: string) => {
+  const init = { bubbles: true, cancelable: true, button: 0 };
+  target.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, { ...init, pointerType: 'mouse' }) : new MouseEvent(type, init));
+};
+
+// A press on the trigger opens the popup. An option commits only once a hover has highlighted it, so the
+// pick hovers first and presses in a later step; both steps run in their own act so React renders between them.
+const pickOption = async (container: HTMLElement, label: string, option: string) => {
+  const trigger = container.querySelector<HTMLElement>(`[role="combobox"][aria-label="${label}"]`);
+  if (!trigger) throw new Error(`no select labelled "${label}"`);
+  await act(async () => {
+    fire(trigger, 'pointerdown');
+    fire(trigger, 'mousedown');
+  });
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  const item = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((el) => el.textContent?.trim() === option);
+  if (!item) throw new Error(`no option "${option}"`);
+  await act(async () => {
+    for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']) fire(item, type);
+  });
+  await act(async () => {
+    fire(item, 'pointerdown');
+    fire(item, 'mousedown');
+    fire(item, 'pointerup');
+    fire(item, 'mouseup');
+    fire(item, 'click');
   });
 };
 
@@ -147,6 +190,19 @@ describe('PoolAdvancedFields', () => {
     const container = await renderFields({ targets: ['p/cheap', 'opencode-route/other'] }, onChange);
     await typeInto(inputNamed(container, 'Tokens per day'), '500000');
     expect(changes.at(-1)).toMatchObject({ budgets: { 'p/cheap': { tokensPerDay: 500000 } } });
+  });
+
+  test('the selection popup saves the mode picked', async () => {
+    const container = await renderFields({ targets: ['p/cheap'] }, onChange);
+    await pickOption(container, 'Selection', 'Round-robin');
+    expect(changes.at(-1)).toEqual({ targets: ['p/cheap'], selection: 'round-robin' });
+  });
+
+  test('the selection popup default removes the mode from the route', async () => {
+    const container = await renderFields({ targets: ['p/cheap'], selection: 'weighted' }, onChange);
+    await pickOption(container, 'Selection', 'Default (ordered)');
+    expect(changes.at(-1)).not.toHaveProperty('selection');
+    expect(changes.at(-1)).toEqual({ targets: ['p/cheap'] });
   });
 
   test('shows a weight per model target only when the selection is weighted, and saves it by reference', async () => {
