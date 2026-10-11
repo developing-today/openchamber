@@ -4,6 +4,10 @@ import { createHighlighter, hastToHtml } from 'shiki';
 import { createIncrementalCodeHighlighter, splitRendered, type ChunkRenderer } from './incrementalCodeHighlight';
 
 const THEME = 'github-dark';
+// Shiki leaves the rest of a line plain once it has tokenized for 500 ms of
+// wall-clock time. Under load that cut-off would decide the expected output,
+// so both sides run without it.
+const UNTIMED = { tokenizeTimeLimit: 0 };
 
 // Constructs whose tokens depend on the lines before them: a template literal
 // and a block comment that stay open across lines, a Python docstring, and a
@@ -40,11 +44,11 @@ let renderedChars = 0;
 
 const render: ChunkRenderer = (chunk, lang, grammarState) => {
   renderedChars += chunk.length;
-  const hast = instance.codeToHast(chunk, { lang, theme: THEME, tabindex: false, grammarState });
+  const hast = instance.codeToHast(chunk, { lang, theme: THEME, tabindex: false, grammarState, ...UNTIMED });
   return { html: hastToHtml(hast), grammarState: instance.getLastGrammarState(hast) };
 };
 
-const fullPass = (code: string, lang: string): string => instance.codeToHtml(code, { lang, theme: THEME, tabindex: false });
+const fullPass = (code: string, lang: string): string => instance.codeToHtml(code, { lang, theme: THEME, tabindex: false, ...UNTIMED });
 
 const highlighterReady = createHighlighter({ themes: [THEME], langs: ['typescript', 'python', 'markdown', 'javascript'] });
 
