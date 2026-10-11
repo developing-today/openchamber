@@ -10,6 +10,14 @@
 
 export const SSE_RESYNC_PAYLOAD_TYPE = 'server.resync';
 
+// OpenCode's wire form of an id: `<instance>:<sequence>`, with a random UUID per instance
+// (packages/server/src/event-feed.ts). Only such a cursor can be replayed from upstream.
+const OPENCODE_EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\d+$/i;
+
+export function isOpenCodeEventId(id) {
+  return OPENCODE_EVENT_ID.test(id ?? '');
+}
+
 export function parseSseBlock(block) {
   let id;
   let event;

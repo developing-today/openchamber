@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { createUpstreamSseReader } from './upstream-reader.js';
-import { serializeMessageStreamWsEvent } from './protocol.js';
+import { parseSseEventEnvelope, serializeMessageStreamWsEvent } from './protocol.js';
+import { parseSseBlock, SSE_RESYNC_PAYLOAD_TYPE } from './sse-cursor.js';
 import { translateWireEvent } from './translate-v2.js';
 import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
 
@@ -9,6 +10,16 @@ import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalesce
 // long-running agent sessions where many events accumulate quickly.
 const MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT = 2048;
 const MESSAGE_STREAM_GLOBAL_REPLAY_BYTES = 8 * 1024 * 1024;
+
+// The upstream's `id:` line is the cursor OpenCode replays from (`<instance>:<sequence>`), so it is
+// the reader's `eventId`, and only such a line moves the reader's cursor. A block without one, which
+// OpenCode sends outside its feed (`server.connected`), keeps its payload id as the buffer's id.
+const parseGlobalBlock = (block) => {
+  const envelope = parseSseEventEnvelope(block);
+  if (!envelope) return envelope;
+  const { id } = parseSseBlock(block);
+  return { ...envelope, eventId: id || undefined, bufferId: envelope.eventId };
+};
 
 export function createGlobalMessageStreamHub({
   buildOpenCodeUrl,
@@ -30,13 +41,14 @@ export function createGlobalMessageStreamHub({
   const replay = [];
   let replayBytes = 0;
   let latestEventId;
-  // OpenCode's event stream carries no SSE ids (verified on 1.18.30: not one
-  // frame in a full response), and an event without an id never entered the
-  // replay buffer, so a reconnecting browser had no cursor and every event in
-  // the gap was gone. The replay log is this hub's own, so the hub numbers
-  // what upstream leaves unnumbered. The per-process prefix makes a cursor
-  // from before a restart miss instead of matching an unrelated sequence
-  // number, which reports `replayReset` and sends the client to repair.
+  // The upstream cursor, kept across a stop so the next connection replays what it missed. Only
+  // OpenCode's own `<instance>:<sequence>` ids mean anything to it; anything else is a hub id.
+  let resumeCursor = '';
+  // An upstream that carries no SSE ids (verified on 1.18.30: not one frame in a full response)
+  // never entered the replay buffer under an id, so a reconnecting browser had no cursor and every
+  // event in the gap was gone. The replay log is this hub's own, so the hub numbers what upstream
+  // leaves unnumbered. The per-process prefix makes a cursor from before a restart miss instead of
+  // matching an unrelated sequence number, which reports `replayReset` and sends the client to repair.
   const replayIdPrefix = `oc-${randomUUID().slice(0, 8)}-`;
   let replaySequence = 0;
 
@@ -68,9 +80,7 @@ export function createGlobalMessageStreamHub({
   const normalizeEvent = ({ envelope, payload }) => {
     const directory =
       typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global';
-    const eventId = typeof envelope?.eventId === 'string' && envelope.eventId.length > 0
-      ? envelope.eventId
-      : `${replayIdPrefix}${String(++replaySequence).padStart(12, '0')}`;
+    const eventId = envelope?.eventId || envelope?.bufferId || `${replayIdPrefix}${String(++replaySequence).padStart(12, '0')}`;
     // An event of an isolated space carries the space's id; subscribers see it only when they
     // asked for space events, because a consumer that acts on the host's OpenCode by
     // directory must never act on a space's directory.
@@ -83,6 +93,9 @@ export function createGlobalMessageStreamHub({
       directory,
       eventId,
       spaceId,
+      // OpenCode's answer to a cursor it cannot honour. It is never replayed: it tells subscribers to
+      // have their clients refetch.
+      resync: payload?.type === SSE_RESYNC_PAYLOAD_TYPE,
       serialize() {
         serializedFrame ??= serializeMessageStreamWsEvent(payload, { directory, eventId });
         return serializedFrame;
@@ -103,18 +116,25 @@ export function createGlobalMessageStreamHub({
   const commitEvent = (event) => {
     const normalized = normalizeEvent(event);
     latestEventId = normalized.eventId;
-    const serializedFrame = normalized.serialize();
-    const bytes = Buffer.byteLength(serializedFrame);
-    if (bytes > replayByteLimit) {
-      // An oversized live event creates a hole: retain only a contiguous
-      // suffix after it, never replay an older prefix across the gap.
+    if (normalized.resync) {
+      // The upstream lost the cursor, so what is retained does not run on into what follows it: a
+      // cursor from before the resync must not replay across it.
       replay.length = 0;
       replayBytes = 0;
     } else {
-      replay.push({ eventId: normalized.eventId, serializedFrame, bytes });
-      replayBytes += bytes;
-      while (replay.length > replayLimit || replayBytes > replayByteLimit) {
-        replayBytes -= replay.shift().bytes;
+      const serializedFrame = normalized.serialize();
+      const bytes = Buffer.byteLength(serializedFrame);
+      if (bytes > replayByteLimit) {
+        // An oversized live event creates a hole: retain only a contiguous
+        // suffix after it, never replay an older prefix across the gap.
+        replay.length = 0;
+        replayBytes = 0;
+      } else {
+        replay.push({ eventId: normalized.eventId, serializedFrame, bytes });
+        replayBytes += bytes;
+        while (replay.length > replayLimit || replayBytes > replayByteLimit) {
+          replayBytes -= replay.shift().bytes;
+        }
       }
     }
 
@@ -125,6 +145,16 @@ export function createGlobalMessageStreamHub({
   };
 
   const coalescer = createDeltaCoalescer({ emit: commitEvent, windowMs: deltaCoalesceWindowMs });
+
+  const replayAfter = (eventId) => {
+    if (!eventId) {
+      return [];
+    }
+
+    const index = replay.findIndex((entry) => entry.eventId === eventId);
+    if (eventId === latestEventId) return [];
+    return index === -1 ? null : replay.slice(index + 1);
+  };
 
   const start = () => {
     if (reader) {
@@ -137,6 +167,8 @@ export function createGlobalMessageStreamHub({
       stallTimeoutMs: upstreamStallTimeoutMs,
       reconnectDelayMs: upstreamReconnectDelayMs,
       fetchImpl,
+      parseBlock: parseGlobalBlock,
+      initialLastEventId: resumeCursor,
       buildUrl: () => {
         buildUrlFailed = false;
         try {
@@ -180,6 +212,9 @@ export function createGlobalMessageStreamHub({
     connected = false;
     // Text that already arrived belongs in the retained replay suffix.
     coalescer.flush();
+    if (reader) {
+      resumeCursor = reader.getLastEventId();
+    }
     reader?.stop();
     if (controller && !controller.signal.aborted) {
       controller.abort();
@@ -190,9 +225,70 @@ export function createGlobalMessageStreamHub({
     buildUrlFailed = false;
   };
 
+  // Reads what OpenCode holds after a cursor the replay buffer cannot answer, for one client. It
+  // reads on a connection of its own, from the cursor, and ends at the first event the hub also
+  // holds: the shared stream carries everything after that event, so the client takes the rest from
+  // the buffer. Nothing is committed here; the shared stream commits what it reads, as it always has.
+  // `onResync` and `onFailed` both mean the client cannot be resumed and must refetch.
+  const openUpstreamAfter = (cursor, { onEvent, onCaughtUp, onResync, onFailed }) => {
+    const readController = new AbortController();
+    let done = false;
+    let connectedOnce = false;
+    const finish = () => {
+      done = true;
+      readController.abort();
+    };
+    const resumeReader = createUpstreamSseReader({
+      signal: readController.signal,
+      stallTimeoutMs: upstreamStallTimeoutMs,
+      reconnectDelayMs: upstreamReconnectDelayMs,
+      fetchImpl,
+      parseBlock: parseGlobalBlock,
+      initialLastEventId: cursor,
+      buildUrl: () => new URL(buildOpenCodeUrl('/api/event', '')),
+      getHeaders: getOpenCodeAuthHeaders,
+      onConnect() {
+        connectedOnce = true;
+      },
+      onEvent(event) {
+        if (done) return;
+        const normalized = normalizeEvent(event);
+        if (normalized.resync) {
+          finish();
+          onResync();
+          return;
+        }
+        // Pending text is committed first, so a buffer that holds this event is complete up to it.
+        coalescer.flush();
+        if (replayAfter(normalized.eventId) !== null) {
+          finish();
+          onCaughtUp(normalized);
+          return;
+        }
+        onEvent(normalized);
+      },
+      onError() {
+        // A read that never connected cannot be retried into a resume: the client refetches. Once
+        // connected, the reader reconnects from its own cursor, as the shared stream does.
+        if (done || connectedOnce) return;
+        finish();
+        onFailed();
+      },
+    });
+    void resumeReader.start();
+    return () => {
+      if (!done) finish();
+    };
+  };
+
   return {
     start,
     stop,
+    openUpstreamAfter,
+    /** The id of the last upstream event read, or the cursor the connection started from. */
+    upstreamCursor() {
+      return reader ? reader.getLastEventId() : resumeCursor;
+    },
     isConnected() {
       return connected;
     },
@@ -231,14 +327,6 @@ export function createGlobalMessageStreamHub({
     flushPending() {
       coalescer.flush();
     },
-    replayAfter(eventId) {
-      if (!eventId) {
-        return [];
-      }
-
-      const index = replay.findIndex((entry) => entry.eventId === eventId);
-      if (eventId === latestEventId) return [];
-      return index === -1 ? null : replay.slice(index + 1);
-    },
+    replayAfter,
   };
 }

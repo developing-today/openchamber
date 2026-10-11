@@ -488,7 +488,7 @@ describe('message stream websocket runtime', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              'data: {"id":"evt-1","type":"server.connected","data":{}}\n\n',
+              'id: evt-1\ndata: {"id":"evt-1","type":"server.connected","data":{}}\n\n',
             ],
           });
         }
@@ -497,7 +497,7 @@ describe('message stream websocket runtime', () => {
           signal: options.signal,
           holdOpen: true,
           blocks: [
-            'data: {"id":"evt-2","type":"server.connected","data":{}}\n\n',
+            'id: evt-2\ndata: {"id":"evt-2","type":"server.connected","data":{}}\n\n',
           ],
         });
       },
