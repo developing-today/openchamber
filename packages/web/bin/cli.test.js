@@ -833,6 +833,28 @@ describe('compatibility exports', () => {
     });
   });
 
+  it('asks only the explicit port for tunnel providers, not the default port or another instance', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const port = await allocateLoopbackPort();
+      const asked = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (url) => {
+        asked.push(new URL(String(url)).port);
+        return Promise.reject(new TypeError('fetch failed'));
+      };
+      try {
+        await captureStdout(async () => {
+          await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      expect(asked.length).toBeGreaterThan(0);
+      expect(new Set(asked)).toEqual(new Set([String(port)]));
+    });
+  });
+
   it('supports ngrok quick dry-run with an explicit port', async () => {
     await withTempOpenChamberDataDir(async () => {
       const output = await captureStdout(async () => {
