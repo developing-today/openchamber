@@ -78,6 +78,7 @@ export const installDom = (): DomFixture => {
     Event: dom.Event,
     KeyboardEvent: dom.KeyboardEvent,
     MouseEvent: dom.MouseEvent,
+    ResizeObserver: dom.ResizeObserver,
     getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
     cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
