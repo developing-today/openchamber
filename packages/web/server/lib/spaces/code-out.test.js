@@ -3560,6 +3560,8 @@ describe.skipIf(WIN)('bringCodeOut from a local stand-in for a space', () => {
     const before = hostState(space.repo);
     const failure = await space.out({ maxTransferBytes: 1024 * 1024 }).catch((error) => error);
     expect(failure).toMatchObject({ code: 'result_transfer_too_large', details: { step: 'fetch into the quarantine' } });
+    // The stand-in records its exit once the kill reaches it, which can trail the return of out() under load.
+    for (let i = 0; i < 500 && space.local.uploadPackExit() === null; i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
     expect(space.local.uploadPackExit(), 'the fetch was stopped in the middle, so this proves nothing about the cap after it').toBe('0');
     expect(anyChangeSince(before, space.repo)).toEqual([]);
   });
