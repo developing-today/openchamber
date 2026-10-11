@@ -127,7 +127,12 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(response.headers.get('cache-control')).toBe('no-cache, no-transform');
     expect(response.headers.get('x-accel-buffering')).toBe('no');
     expect(response.headers.get('x-upstream-test')).toBe('ok');
-    expect(await response.text()).toBe('data: {"ok":true}\n\n');
+    // OpenCode closing its stream is a reconnect, not the end of the browser's stream: the proxy
+    // keeps the response open for the next upstream connection, so read the block and stop there.
+    const reader = response.body.getReader();
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toBe('data: {"ok":true}\n\n');
+    await reader.cancel();
     expect(seenAuthorization).toBe('Bearer test-token');
   });
 

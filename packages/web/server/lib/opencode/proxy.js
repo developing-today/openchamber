@@ -10,11 +10,16 @@ import {
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
+import { createSseCursor } from '../event-stream/sse-cursor.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { beginUpstreamRequest } from './upstream-requests.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+// How long a browser's SSE stream waits, with no block forwarded, for OpenCode to take it back.
+const DEFAULT_SSE_RESUME_WINDOW_MS = 30_000;
+const DEFAULT_SSE_RECONNECT_DELAY_MS = 250;
+const DEFAULT_SSE_RECONNECT_MAX_DELAY_MS = 2_000;
 
 const OPENCODE_AGENT_KEEP_ALIVE_MS = 30_000;
 // Node's own default. A lower cap evicts pooled sockets under concurrency,
@@ -300,6 +305,9 @@ export const registerOpenCodeProxy = (app, deps) => {
     SSE_HEARTBEAT_INTERVAL_MS = DEFAULT_SSE_HEARTBEAT_INTERVAL_MS,
     SSE_UPSTREAM_STALL_TIMEOUT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
     getSseUpstreamStallTimeoutMs = () => SSE_UPSTREAM_STALL_TIMEOUT_MS,
+    SSE_RESUME_WINDOW_MS = DEFAULT_SSE_RESUME_WINDOW_MS,
+    SSE_RECONNECT_DELAY_MS = DEFAULT_SSE_RECONNECT_DELAY_MS,
+    SSE_RECONNECT_MAX_DELAY_MS = DEFAULT_SSE_RECONNECT_MAX_DELAY_MS,
     readWorktreeBootstrapStatus = getWorktreeBootstrapStatus,
     WORKTREE_READY_TIMEOUT_MS = 5 * 60 * 1000,
     // OpenCode 2.x has no archive route, so archive state is OpenChamber's own
@@ -560,6 +568,12 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   };
 
+  // A browser's stream outlives any one OpenCode connection. When OpenCode ends its stream cleanly
+  // or the connection fails, the proxy keeps the browser's response open and reconnects with
+  // Last-Event-ID set to the last id it forwarded, so OpenCode resumes from there, or answers with
+  // a resync frame, which passes through like any other block. A stall still ends the stream, as
+  // it always has, and so does a stretch with no forwarded block longer than the resume window:
+  // the browser's own reconnect then takes over with the same cursor.
   const forwardSseRequest = async (req, res) => {
     const abortController = new AbortController();
     const closeUpstream = () => abortController.abort();
@@ -570,7 +584,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     let didUpstreamStall = false;
     let unsubscribeSpaceEvents = null;
     let writeQueue = Promise.resolve(true);
-    const sseBoundary = createSseBoundaryTracker();
+    let sseBoundary = createSseBoundaryTracker();
 
     req.on('close', closeUpstream);
 
@@ -584,6 +598,8 @@ export const registerOpenCodeProxy = (app, deps) => {
       );
       headers.accept ??= 'text/event-stream';
       headers['cache-control'] ??= 'no-cache';
+      // The cursor starts at the id the browser already holds, so a reconnect here resumes from it.
+      const cursor = createSseCursor(String(req.headers['last-event-id'] ?? '').trim());
 
       upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
         method: 'GET',
@@ -686,25 +702,110 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       scheduleHeartbeat();
-      resetUpstreamStallTimer();
 
-      reader = upstream.body.getReader();
-      while (!abortController.signal.aborted) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        if (value && value.length > 0) {
-          resetUpstreamStallTimer();
-          sseBoundary.observe(value);
-          const canContinue = await enqueueSseWrite(value);
-          if (!canContinue) {
-            break;
+      let resumeFailures = 0;
+      let progressAt = Date.now();
+
+      // Writes one upstream connection through to the browser until it ends. Returns 'ended' when
+      // OpenCode closed its side between two blocks, 'cut' when it closed in the middle of one (the
+      // bytes of that block already went out, so the browser stream has to end here), or 'closed'
+      // when the browser is gone or the stream was aborted.
+      const pumpUpstream = async (response) => {
+        sseBoundary = createSseBoundaryTracker();
+        const decoder = new TextDecoder();
+        reader = response.body.getReader();
+        resetUpstreamStallTimer();
+        try {
+          while (!abortController.signal.aborted) {
+            let read;
+            try {
+              read = await reader.read();
+            } catch (error) {
+              // A reset socket reads as an error. Only an abort (the browser left, or the stall
+              // timer gave up) is not a reason to reconnect.
+              if (abortController.signal.aborted) throw error;
+              return sseBoundary.isAtBoundary() ? 'ended' : 'cut';
+            }
+            const { done, value } = read;
+            if (done) {
+              return sseBoundary.isAtBoundary() ? 'ended' : 'cut';
+            }
+            if (value && value.length > 0) {
+              resetUpstreamStallTimer();
+              sseBoundary.observe(value);
+              if (cursor.observe(decoder.decode(value, { stream: true })).length > 0) {
+                progressAt = Date.now();
+                resumeFailures = 0;
+              }
+              const canContinue = await enqueueSseWrite(value);
+              if (!canContinue) {
+                return 'closed';
+              }
+              if (!await flushSpaceBlocks()) {
+                return 'closed';
+              }
+            }
           }
-          if (!await flushSpaceBlocks()) {
-            break;
-          }
+          return 'closed';
+        } finally {
+          clearUpstreamStallTimer();
         }
+      };
+
+      // Re-dials OpenCode for the browser's stream, from the cursor. Null when that attempt failed.
+      const reconnectUpstream = async () => {
+        const resumeHeaders = { ...headers };
+        const lastEventId = cursor.lastEventId();
+        if (lastEventId) {
+          resumeHeaders['last-event-id'] = lastEventId;
+        } else {
+          delete resumeHeaders['last-event-id'];
+        }
+        try {
+          const response = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+            method: 'GET',
+            headers: resumeHeaders,
+            signal: abortController.signal,
+          });
+          if (response.ok && response.body) {
+            return response;
+          }
+          await response.body?.cancel().catch(() => {});
+          return null;
+        } catch (error) {
+          if (abortController.signal.aborted) throw error;
+          return null;
+        }
+      };
+
+      const waitBeforeReconnect = () => new Promise((resolve) => {
+        const delay = Math.min(
+          SSE_RECONNECT_DELAY_MS * 2 ** Math.min(resumeFailures, 10),
+          SSE_RECONNECT_MAX_DELAY_MS,
+        );
+        const finish = () => {
+          clearTimeout(timer);
+          abortController.signal.removeEventListener('abort', finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, delay);
+        abortController.signal.addEventListener('abort', finish, { once: true });
+      });
+
+      let response = upstream;
+      for (;;) {
+        const outcome = await pumpUpstream(response);
+        if (outcome !== 'ended') break;
+        response = null;
+        while (!response && !abortController.signal.aborted) {
+          if (Date.now() - progressAt > SSE_RESUME_WINDOW_MS) break;
+          await waitBeforeReconnect();
+          if (abortController.signal.aborted) break;
+          resumeFailures += 1;
+          response = await reconnectUpstream();
+        }
+        if (!response) break;
+        upstream = response;
       }
 
       res.end();
