@@ -133,6 +133,16 @@ describe('PoolAdvancedFields', () => {
     expect(changes.at(-1)).toMatchObject({ health: { firstTokenTimeoutMs: false } });
   });
 
+  test('saves the failure and quota cooldowns in seconds, and the slow-rate floor as typed', async () => {
+    const container = await renderFields({ targets: ['p/cheap'] }, onChange);
+    await typeInto(inputNamed(container, 'Cooldown after failure (seconds)'), '90');
+    expect(changes.at(-1)).toMatchObject({ health: { cooldownMs: 90000 } });
+    await typeInto(inputNamed(container, 'Cooldown when quota runs out (seconds)'), '1200');
+    expect(changes.at(-1)).toMatchObject({ health: { quotaCooldownMs: 1200000 } });
+    await typeInto(inputNamed(container, 'Slow below (tokens per second)'), '12.5');
+    expect(changes.at(-1)).toMatchObject({ health: { minOutputTokensPerSecond: 12.5 } });
+  });
+
   test('saves a tokens-per-day allowance against the model it names', async () => {
     const container = await renderFields({ targets: ['p/cheap', 'opencode-route/other'] }, onChange);
     await typeInto(inputNamed(container, 'Tokens per day'), '500000');
