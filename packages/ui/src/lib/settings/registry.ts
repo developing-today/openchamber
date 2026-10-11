@@ -656,6 +656,9 @@ export const LOCAL_DEVICE_KEYS = [
   'alwaysShowScrollbars',
   'agentMemoryViewedAt',
   'projectContextSidebarWidth',
+  // Keyed by terminal id. The server mints those ids per shell and they are gone once it exits,
+  // so a name has no meaning on another device and is never synced.
+  'agentTerminalNames',
 ] as const;
 
 /**

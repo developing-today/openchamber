@@ -853,6 +853,10 @@
       "scope": "device",
       "local": true
     },
+    "agentTerminalNames": {
+      "scope": "device",
+      "local": true
+    },
     "desktopSplashColors": {
       "scope": "instance",
       "owner": "desktop-shell",
