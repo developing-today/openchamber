@@ -72,8 +72,7 @@ const installFixtureDom = () => {
   // its reads and mutations. No real account or filesystem is touched.
   globalThis.fetch = Object.assign(async () => new Promise<Response>(() => {}), originalFetch);
   const restore = async () => {
-    const deadline = Date.now() + 5000;
-    while (pendingHighlightRequests.size > 0 && workerFailures.length === 0 && Date.now() < deadline) {
+    while (pendingHighlightRequests.size > 0 && workerFailures.length === 0) {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     }
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
@@ -87,6 +86,36 @@ const installFixtureDom = () => {
   return { dom, restore };
 };
 
+// A wait has no wall-clock budget. Under load a render or a highlight can take
+// many seconds, so the test timeout is the only bound on a wait that never
+// completes, and a highlight worker failure ends the wait at once.
+const waitFor = async (label: string, condition: () => boolean) => {
+  while (!condition()) {
+    if (workerFailures.length > 0) throw new Error(`Highlight worker failed while waiting for ${label}`, { cause: workerFailures[0] });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+  }
+};
+
+// The diff stack reads the DOM while it loads, so it loads under a temporary
+// window at collection time. Its transform cost stays out of the first test's budget.
+const diffStack = await (async () => {
+  const { restore } = installFixtureDom();
+  try {
+    const { createRoot } = await import('react-dom/client');
+    const { I18nProvider } = await import('@/lib/i18n');
+    const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+    const { createWebAPIs } = await import('../../../../web/src/api/index');
+    const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
+    const { MobileChangesPane } = await import('@/apps/MobileChangesSurface');
+    const { SyncProvider } = await import('@/sync/sync-context');
+    const { opencodeClient } = await import('@/lib/opencode/client');
+    const { useGitStore } = await import('@/stores/useGitStore');
+    return { createRoot, I18nProvider, RuntimeAPIContext, createWebAPIs, MultiFileDiffEntry, MobileChangesPane, SyncProvider, opencodeClient, useGitStore };
+  } finally {
+    await restore();
+  }
+})();
+
 export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' | 'cold-single', layout: 'inline' | 'side-by-side' = 'inline', wrapLines = false) {
   const { dom, restore } = installFixtureDom();
   // happy-dom does no layout. Give the code column and every hunk marker the
@@ -99,14 +128,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
     if (this.matches('[data-code], [data-content]')) return new dom.DOMRect(0, 100, 600, 1800);
     return measure.call(this);
   };
-  const { createRoot } = await import('react-dom/client');
-  const { I18nProvider } = await import('@/lib/i18n');
-  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-  const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
-  const { SyncProvider } = await import('@/sync/sync-context');
-  const { opencodeClient } = await import('@/lib/opencode/client');
-  const { useGitStore } = await import('@/stores/useGitStore');
+  const { createRoot, I18nProvider, RuntimeAPIContext, createWebAPIs, MultiFileDiffEntry, SyncProvider, opencodeClient, useGitStore } = diffStack;
   const changes = snapshotCase === 'cold-single' ? [1] : [1, 25, 50];
   let remaining = [...changes];
   const cold = snapshotCase === 'cold' || snapshotCase === 'cold-single';
@@ -173,32 +195,19 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
     await act(async () => element.click());
   };
   const waitForActions = async (count: number) => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      if (workerFailures.length > 0) throw workerFailures[0];
-      if (container.querySelectorAll('[data-hunk-actions]').length === count) {
-        for (const [index, line] of remaining.entries()) {
-          const target = container.querySelector<HTMLElement>(`[data-hunk-action-target="${index}"]`);
-          const wrapper = target?.parentElement;
-          const slots = container.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('slot') ?? [];
-          const slot = wrapper ? [...slots].find((candidate) => candidate.assignedElements().includes(wrapper)) : undefined;
-          expect(slot?.name).toBe(`annotation-additions-${line + 1}`);
-          expect(target?.style.height).toBe('0px');
-          expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
-          if (layout === 'side-by-side') expect(slot?.closest('[data-additions]')).not.toBeNull();
-          // The control floats 4px below its marker, unclamped mid-file.
-          expect(target?.style.getPropertyValue('--oc-hunk-action-offset')).toBe('4px');
-        }
-        return;
-      }
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    await waitFor(`${count} inline hunk actions`, () => container.querySelectorAll('[data-hunk-actions]').length === count);
+    for (const [index, line] of remaining.entries()) {
+      const target = container.querySelector<HTMLElement>(`[data-hunk-action-target="${index}"]`);
+      const wrapper = target?.parentElement;
+      const slots = container.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('slot') ?? [];
+      const slot = wrapper ? [...slots].find((candidate) => candidate.assignedElements().includes(wrapper)) : undefined;
+      expect(slot?.name).toBe(`annotation-additions-${line + 1}`);
+      expect(target?.style.height).toBe('0px');
+      expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
+      if (layout === 'side-by-side') expect(slot?.closest('[data-additions]')).not.toBeNull();
+      // The control floats 4px below its marker, unclamped mid-file.
+      expect(target?.style.getPropertyValue('--oc-hunk-action-offset')).toBe('4px');
     }
-    const host = container.querySelector('diffs-container');
-    throw new Error(`Missing inline actions: ${JSON.stringify({
-      expected: count, targets: host?.querySelectorAll('[data-hunk-action-target]').length,
-      slots: [...(host?.shadowRoot?.querySelectorAll('slot') ?? [])].map((slot) => ({ name: slot.name, assigned: slot.assignedElements().length })),
-      shadow: host?.shadowRoot?.innerHTML.slice(-1500),
-    })}`);
   };
   try {
     await render();
@@ -276,14 +285,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
  */
 export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-by-side' = 'inline') {
   const { dom, restore } = installFixtureDom();
-  const { createRoot } = await import('react-dom/client');
-  const { I18nProvider } = await import('@/lib/i18n');
-  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-  const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
-  const { SyncProvider } = await import('@/sync/sync-context');
-  const { opencodeClient } = await import('@/lib/opencode/client');
-  const { useGitStore } = await import('@/stores/useGitStore');
+  const { createRoot, I18nProvider, RuntimeAPIContext, createWebAPIs, MultiFileDiffEntry, SyncProvider, opencodeClient, useGitStore } = diffStack;
   const lineCount = 150;
   let changedIndex = 49;
   let fullReads = 0;
@@ -321,15 +323,6 @@ export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-
       hunkActionsEnabled={false} />
   </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
   const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
-  const waitFor = async (label: string, condition: () => boolean) => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      if (workerFailures.length > 0) throw workerFailures[0];
-      if (condition()) return;
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    }
-    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
-  };
   try {
     await render('middle');
     await waitFor('the partial diff', () => shadowText().includes('changed49'));
@@ -366,14 +359,7 @@ export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-
 // the whole file once, replays the expansion, and a failed read only toasts.
 export async function exerciseMobileComparisonContextExpansion() {
   const { dom, restore } = installFixtureDom();
-  const { createRoot } = await import('react-dom/client');
-  const { I18nProvider } = await import('@/lib/i18n');
-  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-  const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const { useGitStore } = await import('@/stores/useGitStore');
-  const { MobileChangesPane } = await import('@/apps/MobileChangesSurface');
-  const { SyncProvider } = await import('@/sync/sync-context');
-  const { opencodeClient } = await import('@/lib/opencode/client');
+  const { createRoot, I18nProvider, RuntimeAPIContext, createWebAPIs, useGitStore, MobileChangesPane, SyncProvider, opencodeClient } = diffStack;
   const lineCount = 150;
   const changedIndex = 49;
   const makePatch = (full: boolean) => {
@@ -427,15 +413,6 @@ export async function exerciseMobileComparisonContextExpansion() {
   document.body.append(container);
   const root = createRoot(container);
   const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
-  const waitFor = async (label: string, condition: () => boolean) => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      if (workerFailures.length > 0) throw workerFailures[0];
-      if (condition()) return;
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    }
-    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
-  };
   const click = async (selector: string) => {
     const element = container.querySelector<HTMLElement>(selector) ?? document.querySelector<HTMLElement>(selector);
     if (!element) throw new Error(`Missing ${selector}`);
@@ -480,14 +457,7 @@ export async function exerciseMobileComparisonContextExpansion() {
 // whitespace-only file into a note.
 export async function exerciseHiddenWhitespace() {
   const { dom, restore } = installFixtureDom();
-  const { createRoot } = await import('react-dom/client');
-  const { I18nProvider } = await import('@/lib/i18n');
-  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-  const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
-  const { SyncProvider } = await import('@/sync/sync-context');
-  const { opencodeClient } = await import('@/lib/opencode/client');
-  const { useGitStore } = await import('@/stores/useGitStore');
+  const { createRoot, I18nProvider, RuntimeAPIContext, createWebAPIs, MultiFileDiffEntry, SyncProvider, opencodeClient, useGitStore } = diffStack;
   const header = `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${'b'.repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`;
   const reindented = '@@ -1,6 +1,6 @@\n-line0\n-line1\n-line2\n+  line0\n+  line1\n+  line2\n line3\n line4\n line5\n';
   const edited = '@@ -28,7 +28,7 @@\n line27\n line28\n line29\n-line30\n+changed30\n line31\n line32\n line33\n';
@@ -512,15 +482,6 @@ export async function exerciseHiddenWhitespace() {
       isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}} hunkActionsEnabled />
   </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
   const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
-  const waitFor = async (label: string, condition: () => boolean) => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      if (workerFailures.length > 0) throw workerFailures[0];
-      if (condition()) return;
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    }
-    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
-  };
   try {
     await render('both', false);
     await waitFor('both hunks with actions', () => container.querySelectorAll('[data-hunk-actions]').length === 2);

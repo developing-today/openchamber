@@ -30,13 +30,20 @@ const installDom = () => {
   };
 };
 
+// The diff stack reads the DOM as it loads. Loading it at collection, under a
+// temporary window, keeps Vite's transform of it out of the test budgets.
+const restoreImportDom = installDom();
+const { createRoot } = await import('react-dom/client');
+const { I18nProvider } = await import('@/lib/i18n');
+const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+const { createWebAPIs } = await import('../../../../web/src/api/index');
+const { GitPathUnavailableError } = await import('@/lib/api/git-path-diff');
+const { useGitStore } = await import('@/stores/useGitStore');
+const { MultiFileDiffEntry } = await import('./DiffView');
+restoreImportDom();
+
 test('hidden diff entries defer reads, retain completed content and refresh changed files on resume', async () => {
   const restoreDom = installDom();
-  const { createRoot } = await import('react-dom/client');
-  const { I18nProvider } = await import('@/lib/i18n');
-  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-  const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const { MultiFileDiffEntry } = await import('./DiffView');
   const base = createWebAPIs();
   let reads = 0;
   const apis = { ...base, git: { ...base.git, getGitDiff: async () => {
@@ -84,13 +91,6 @@ test('hidden diff entries defer reads, retain completed content and refresh chan
 
 test('status paths without file contents render what git records instead of an empty diff or a failure', async () => {
   const restoreDom = installDom();
-  const { createRoot } = await import('react-dom/client');
-  const { I18nProvider } = await import('@/lib/i18n');
-  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-  const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const { GitPathUnavailableError } = await import('@/lib/api/git-path-diff');
-  const { useGitStore } = await import('@/stores/useGitStore');
-  const { MultiFileDiffEntry } = await import('./DiffView');
   const recorded = '1'.repeat(40);
   const moved = '2'.repeat(40);
   const statusRequests: string[] = [];
