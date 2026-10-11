@@ -3,6 +3,7 @@ import React from 'react';
 import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { McpxSecretRequestPrompt } from '@/components/mcp/McpxSecretRequestPrompt';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
@@ -901,6 +902,7 @@ function App({ apis }: AppProps) {
                   <Toaster />
                   <AppLinkConfirmDialog />
                   <SharedTrustConfirmDialog />
+                  <McpxSecretRequestPrompt />
                   <ConfigUpdateOverlay />
                   <AboutDialogWrapper />
                   {showMemoryDebug && (

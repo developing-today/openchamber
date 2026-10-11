@@ -15,6 +15,7 @@ import { sourceBoardI18n } from './source-board.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
+import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -139,6 +140,7 @@ export const dict: Record<I18nKey, string> = {
   ...environmentI18n.ko,
   ...providersI18n.ko,
   ...mcpGridI18n.ko,
+  ...mcpxSecretsI18n.ko,
   ...pluginsGridI18n.ko,
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',

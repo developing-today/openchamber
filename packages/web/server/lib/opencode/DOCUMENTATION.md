@@ -60,6 +60,7 @@ unless an output schema is declared; and a tool call no longer receives
 and OpenChamber resolves the directory itself.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.
+- `packages/web/server/lib/opencode/mcpx-routes.js`: the mcpx daemon proxy under `/api/mcpx/*`, including the secret prompt routes in "mcpx secret routes" below.
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
@@ -975,6 +976,18 @@ The VS Code extension owns its separate Git and proxy implementation.
   - Can still create its own `/api/event` reader when no shared hub is provided, which keeps module tests and isolated reuse simple.
   - Reuses event-stream parsing, `Last-Event-ID`, stall timeout, and reconnect behavior.
   - Translates each v2 wire event through `lib/event-stream/translate-v2.js` before handing it to notification/session side effects, so those consumers keep speaking the server's own event vocabulary.
+
+## mcpx secret routes
+
+The mcpx daemon holds secret values in memory. A server call that needs a missing one waits, and the OpenChamber prompt answers that wait:
+
+- `GET /api/mcpx/secret-requests` and `GET /api/mcpx/secrets` proxy the daemon's list routes. The secret list carries names and states only.
+- `PUT /api/mcpx/secrets/:name` relays `{ value }` to the daemon. The name must be an environment variable name. The value must be a non-empty string of at most 16384 characters.
+- `DELETE /api/mcpx/secret-requests/:id` declines a request.
+
+The PUT reply is `{ name, set, source }` only, so a value cannot come back even when the daemon echoes it. A parse error on the PUT body is answered in `mcpx-routes.js` and never passed to the framework, because the framework logs the error message, and a JSON parse error message can quote part of the body. Every secret route sends `Cache-Control: no-store`. A daemon failure on the PUT returns a fixed 502 message, since the daemon's error text could repeat the value. Nothing on these routes logs a request body or a value.
+
+The prompt is `components/mcp/McpxSecretRequestPrompt.tsx`, mounted in `App.tsx`, and its polling is in `hooks/useMcpxSecretRequests.ts`. It polls `GET /api/mcpx/secret-requests` every 2 s while the app is visible. When the daemon is unreachable it backs off, doubling up to 30 s, and keeps the last list it read. It shows the oldest pending request, one at a time. A runtime switch drops the list, so a secret goes only to the runtime that asked for it. Closing the dialog hides that request until the page reloads, and the request stays pending on the daemon.
 
 ## Storage and configuration
 - Provider auth: read from the running OpenCode over `GET /api/credential` (2.0.20+); OpenCode 2.x owns credentials.
