@@ -331,6 +331,13 @@ describe('validateModelRouteTuning strictness', () => {
     ).toBeNull();
   });
 
+  it('accepts a later colon in the text, and refuses a line with nothing before its colon or nothing after it', () => {
+    expect(validateModelRouteTuning({ notes: ['match: text'] })).toBeNull();
+    expect(validateModelRouteTuning({ notes: ['x::y'] })).toBeNull();
+    expect(validateModelRouteTuning({ notes: [':x:y'] })).toMatch(/line 1 must read "match: text"/);
+    expect(validateModelRouteTuning({ notes: ['x:'] })).toMatch(/line 1 must read "match: text"/);
+  });
+
   it('refuses notes that are not a list of strings, or whose lines OpenCode would drop', () => {
     expect(validateModelRouteTuning({ notes: 'openai: back in 3 hours' })).toMatch(/notes must be a list of strings/);
     expect(validateModelRouteTuning({ notes: [3] })).toMatch(/notes must be a list of strings/);
