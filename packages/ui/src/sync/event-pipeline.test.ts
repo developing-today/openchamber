@@ -5,6 +5,7 @@ import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tun
 import type { RelayTunnelClient, RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { useAuthSessionStore } from "@/lib/runtime-auth-expiry"
+import { createFakeSocket } from "./__tests__/relay-socket-fixture"
 import { classifyStreamPayload, createEventPipeline } from "./event-pipeline"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
@@ -370,20 +371,6 @@ describe("createEventPipeline", () => {
     })
   })
 })
-
-/** A relay tunnel socket the test drives by hand. */
-function createFakeSocket(): RelayTunnelWebSocket {
-  let readyState = 1
-  return {
-    get readyState() { return readyState },
-    onopen: null,
-    onmessage: null,
-    onerror: null,
-    onclose: null,
-    send: () => undefined,
-    close: () => { readyState = 3 },
-  }
-}
 
 describe("createEventPipeline over the WebSocket transport", () => {
   beforeEach(() => {
