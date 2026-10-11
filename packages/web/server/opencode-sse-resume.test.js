@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import net from 'node:net';
+import os from 'node:os';
 import express from 'express';
 import path from 'path';
 
 import { registerOpenCodeProxy } from './lib/opencode/proxy.js';
 
-// A stand-in for OpenCode's event stream, following the design in packages/core/TODO.md: every
-// event carries an `id:`, a reconnect with Last-Event-ID replays what came after that id from a
-// ring, and an id the ring does not hold (or one from another instance) gets a resync frame.
-// The real OpenCode does not emit ids yet, so these tests exercise OpenChamber's side only.
+// A stand-in for OpenCode's event stream, with the wire format of packages/server/src/event-feed.ts:
+// every event carries `id: <instance>:<sequence>`, a reconnect with Last-Event-ID replays what came
+// after that id, and an id the feed does not hold (another instance, or one not yet produced) gets
+// one `server.resync` frame carrying the head id. The real-OpenCode test below runs the same
+// scenarios against the actual server when one is available.
 const createFakeOpenCode = (instanceId = 'inst1') => {
   let currentInstance = instanceId;
   let sequence = 0;
@@ -28,7 +33,7 @@ const createFakeOpenCode = (instanceId = 'inst1') => {
     if (lastEventId) {
       const index = ring.findIndex((entry) => entry.id === lastEventId);
       if (index === -1) {
-        res.write('event: resync\ndata: {"type":"server.resync_required"}\n\n');
+        res.write(frame(`${currentInstance}:${sequence}`, '{"id":"evt_resync","type":"server.resync","data":{}}'));
       } else {
         for (const entry of ring.slice(index + 1)) res.write(frame(entry.id, entry.data));
       }
@@ -85,7 +90,7 @@ const closeServer = (server) => new Promise((resolve) => {
   server.close(() => resolve());
 });
 
-const startProxy = async ({ upstreamPort, resumeWindowMs = 2_000 }) => {
+const startProxy = async ({ upstreamPort, resumeWindowMs = 2_000, authHeaders = {} }) => {
   const app = express();
   registerOpenCodeProxy(app, {
     fs: {},
@@ -102,7 +107,7 @@ const startProxy = async ({ upstreamPort, resumeWindowMs = 2_000 }) => {
       openCodeNotReadySince: 0,
       isRestartingOpenCode: false,
     }),
-    getOpenCodeAuthHeaders: () => ({}),
+    getOpenCodeAuthHeaders: () => authHeaders,
     buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
     ensureOpenCodeApiPrefix: () => {},
   });
@@ -111,11 +116,21 @@ const startProxy = async ({ upstreamPort, resumeWindowMs = 2_000 }) => {
   });
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const waitFor = async (condition, timeoutMs = 3_000) => {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {
     if (Date.now() > deadline) throw new Error('timed out waiting for condition');
     await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+};
+
+const typeOf = (data) => {
+  try {
+    return JSON.parse(data ?? '')?.type;
+  } catch {
+    return undefined;
   }
 };
 
@@ -143,7 +158,7 @@ const openBrowserStream = async (url, headers = {}) => {
         const id = block.match(/^id: (.*)$/m)?.[1];
         const event = block.match(/^event: (.*)$/m)?.[1];
         const data = block.match(/^data: (.*)$/m)?.[1];
-        blocks.push({ id, event, data });
+        blocks.push({ id, event, data, type: typeOf(data) });
       }
     }
     ended = true;
@@ -234,7 +249,7 @@ describe('OpenCode SSE resume through OpenChamber', () => {
     second.close();
   });
 
-  it('passes a resync frame through to the browser and restarts the cursor from nothing', async () => {
+  it('passes a server.resync frame through to the browser, and a later reconnect resumes from its head id', async () => {
     const { fake, base } = await setup();
     const browser = await openBrowserStream(`${base}/api/global/event`);
     await waitFor(() => fake.liveCount() === 1);
@@ -242,21 +257,23 @@ describe('OpenCode SSE resume through OpenChamber', () => {
     fake.publish('{"n":2}');
     await waitFor(() => browser.ids().length === 2);
 
-    // A new OpenCode instance: the cursor it is handed belongs to another instance, so it resyncs.
+    // A new OpenCode instance: the cursor it is handed belongs to another instance, so it resyncs
+    // with its own head id (inst2:0, nothing published yet).
     fake.restartInstance('inst2');
     fake.dropAll();
-    await waitFor(() => browser.blocks.some((block) => block.event === 'resync'));
+    await waitFor(() => browser.blocks.some((block) => block.event === undefined && block.data?.includes('server.resync')));
     expect(fake.requests.map((request) => request.lastEventId)).toEqual([null, 'inst1:2']);
-    expect(browser.blocks.find((block) => block.event === 'resync')).toEqual({
-      id: undefined,
-      event: 'resync',
-      data: '{"type":"server.resync_required"}',
+    expect(browser.blocks.find((block) => block.type === 'server.resync')).toEqual({
+      id: 'inst2:0',
+      event: undefined,
+      data: '{"id":"evt_resync","type":"server.resync","data":{}}',
+      type: 'server.resync',
     });
 
-    // The resync frame carried no id, so the cursor is empty: a reconnect now sends no Last-Event-ID.
+    // The cursor is now the head id, so a reconnect resumes from it rather than from nothing.
     fake.dropAll();
     await waitFor(() => fake.requests.length === 3);
-    expect(fake.requests[2].lastEventId).toBeNull();
+    expect(fake.requests[2].lastEventId).toBe('inst2:0');
 
     fake.publish('{"n":3}');
     await waitFor(() => browser.ids().includes('inst2:1'));
@@ -310,7 +327,151 @@ describe('OpenCode SSE resume through OpenChamber', () => {
     expect(browser.ids()).toEqual(['inst1:1']);
   });
 
-  // Needs an OpenCode build that emits `id:` lines and replays from its ring (the design in
-  // packages/core/TODO.md, not on OpenCode main yet). Until it lands, the fake above stands in for it.
-  it.skip('resumes against a real OpenCode that emits id: lines and replays from its ring', () => {});
+});
+
+// The real OpenCode server, from a checkout of developing-today/opencode at dcf98976aa or later (the
+// commit that emits `id: <instance>:<seq>` and replays on Last-Event-ID). OPENCODE_RESUME_DRIVER is a
+// small entry file inside that checkout's packages/cli/src that starts ServerProcess.run on the port in
+// OC_PORT; the suite is skipped without it. The driver lives in the OpenCode tree, because it has to
+// resolve that tree's dependencies.
+const upstreamDriver = process.env.OPENCODE_RESUME_DRIVER;
+const upstreamPassword = 'resume-test-password';
+const upstreamAuth = `Basic ${Buffer.from(`opencode:${upstreamPassword}`).toString('base64')}`;
+
+const freePort = () => new Promise((resolve, reject) => {
+  const probe = net.createServer();
+  probe.once('error', reject);
+  probe.listen(0, '127.0.0.1', () => {
+    const { port } = probe.address();
+    probe.close(() => resolve(port));
+  });
+});
+
+describe.skipIf(!upstreamDriver)('against a real OpenCode that emits and replays SSE ids (OPENCODE_RESUME_DRIVER)', () => {
+  let tempHome = null;
+  let upstreamChild = null;
+  let upstreamPort = null;
+  let proxyServer = null;
+  const streams = [];
+
+  const startUpstream = async () => {
+    const child = spawn('bun', ['run', upstreamDriver], {
+      cwd: path.dirname(upstreamDriver),
+      env: {
+        ...process.env,
+        HOME: tempHome,
+        XDG_DATA_HOME: path.join(tempHome, '.local', 'share'),
+        XDG_CONFIG_HOME: path.join(tempHome, '.config'),
+        XDG_STATE_HOME: path.join(tempHome, '.local', 'state'),
+        OC_PORT: String(upstreamPort),
+        OPENCODE_PASSWORD: upstreamPassword,
+      },
+      stdio: 'ignore',
+    });
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      if (child.exitCode !== null) throw new Error('OpenCode exited before it listened');
+      try {
+        const response = await fetch(`http://127.0.0.1:${upstreamPort}/api/info`, { headers: { Authorization: upstreamAuth } });
+        if (response.ok) return child;
+      } catch {
+        // Not listening yet.
+      }
+      await sleep(250);
+    }
+    throw new Error('OpenCode did not start in time');
+  };
+
+  const stopUpstream = (child) => new Promise((resolve) => {
+    if (!child || child.exitCode !== null) {
+      resolve();
+      return;
+    }
+    child.once('exit', () => resolve());
+    child.kill('SIGKILL');
+  });
+
+  const createSession = async (title) => {
+    const response = await fetch(`http://127.0.0.1:${upstreamPort}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: upstreamAuth },
+      body: JSON.stringify({ title }),
+    });
+    expect(response.status).toBe(200);
+    await response.text();
+  };
+
+  const openStream = async (url, headers) => {
+    const stream = await openBrowserStream(url, headers);
+    streams.push(stream);
+    return stream;
+  };
+
+  afterEach(async () => {
+    for (const stream of streams.splice(0)) stream.close();
+    await closeServer(proxyServer);
+    proxyServer = null;
+    await stopUpstream(upstreamChild);
+    upstreamChild = null;
+    if (tempHome) await rm(tempHome, { recursive: true, force: true });
+    tempHome = null;
+  });
+
+  it('replays exactly the missed events on resume, and resyncs a browser stream held across an OpenCode restart', async () => {
+    tempHome = await mkdtemp(path.join(os.tmpdir(), 'oc-resume-'));
+    upstreamPort = await freePort();
+    upstreamChild = await startUpstream();
+    const upstreamBase = `http://127.0.0.1:${upstreamPort}`;
+
+    proxyServer = await startProxy({
+      upstreamPort,
+      resumeWindowMs: 90_000,
+      authHeaders: { Authorization: upstreamAuth },
+    });
+    const proxyBase = `http://127.0.0.1:${proxyServer.address().port}`;
+
+    // The control stream reads OpenCode directly and never disconnects: the ground truth for every event.
+    const control = await openStream(`${upstreamBase}/api/event`, { Authorization: upstreamAuth });
+    await waitFor(() => control.blocks.some((block) => block.type === 'server.connected'));
+    const browser = await openStream(`${proxyBase}/api/global/event`);
+    await waitFor(() => browser.blocks.some((block) => block.type === 'server.connected'));
+
+    await createSession('Replay one');
+    await createSession('Replay two');
+    await waitFor(() => browser.blocks.filter((block) => block.type === 'session.created').length === 2);
+    const cursor = browser.ids().at(-1);
+    expect(cursor).toMatch(/^[0-9a-f-]{36}:\d+$/);
+
+    // The browser goes away; two more sessions are created while nothing is listening for it.
+    browser.close();
+    await createSession('Missed one');
+    await createSession('Missed two');
+    await waitFor(() => control.blocks.filter((block) => block.type === 'session.created').length === 4);
+
+    const expected = control.blocks.filter((block) => block.id !== undefined);
+    const cut = expected.findIndex((block) => block.id === cursor);
+    const missed = expected.slice(cut + 1);
+    expect(missed.length).toBeGreaterThanOrEqual(2);
+
+    // EventSource reconnects with the last id it received: exactly the missed events come back, in order.
+    const resumed = await openStream(`${proxyBase}/api/global/event`, { 'Last-Event-ID': cursor });
+    await waitFor(() => resumed.ids().length === missed.length);
+    expect(resumed.ids()).toEqual(missed.map((block) => block.id));
+    expect(resumed.blocks.filter((block) => block.id !== undefined).map((block) => block.type))
+      .toEqual(missed.map((block) => block.type));
+
+    // The browser stream stays open across an OpenCode restart. The proxy keeps reconnecting with the
+    // cursor; the new OpenCode, a new instance, answers with a server.resync carrying its own head id.
+    const oldInstance = cursor.split(':')[0];
+    await stopUpstream(upstreamChild);
+    upstreamChild = await startUpstream();
+    await waitFor(() => resumed.blocks.some((block) => block.type === 'server.resync'), 90_000);
+    const resync = resumed.blocks.find((block) => block.type === 'server.resync');
+    expect(resync.id).toMatch(/^[0-9a-f-]{36}:\d+$/);
+    expect(resync.id.split(':')[0]).not.toBe(oldInstance);
+
+    // Live again after the resync: a new session reaches the held browser stream under the new instance.
+    await createSession('After restart');
+    await waitFor(() => resumed.blocks.some((block) => block.type === 'session.created' && block.id?.startsWith(`${resync.id.split(':')[0]}:`)), 30_000);
+  }, 300_000);
 });

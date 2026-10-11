@@ -1,14 +1,14 @@
 // The resume cursor of one proxied SSE stream: the `id:` of the last complete block the proxy
-// forwarded. The id is opaque here. OpenCode decides what it means, and OpenChamber only hands it
-// back as Last-Event-ID when the upstream connection is re-established.
+// forwarded. The id is opaque here. OpenCode decides what it means (`<instance>:<sequence>`, per
+// packages/server/src/event-feed.ts), and OpenChamber only hands it back as Last-Event-ID when the
+// upstream connection is re-established.
 //
 // Per the SSE spec an `id:` line sets the last event id, even to an empty value, so a block
-// carrying an empty `id:` clears the cursor. A resync block says the cursor is no longer usable
-// (OpenCode did not know the id, or it came from another instance): the client has to refetch,
-// so the cursor restarts from the resync block's own id, or from nothing.
+// carrying an empty `id:` clears the cursor. A `server.resync` block says the cursor is no longer
+// usable (OpenCode did not know the id, or it came from another instance): the client has to
+// refetch. OpenCode sends it with the head id of its own feed, so the cursor restarts there.
 
-export const SSE_RESYNC_EVENT_NAME = 'resync';
-export const SSE_RESYNC_PAYLOAD_TYPE = 'server.resync_required';
+export const SSE_RESYNC_PAYLOAD_TYPE = 'server.resync';
 
 export function parseSseBlock(block) {
   let id;
@@ -27,12 +27,10 @@ export function parseSseBlock(block) {
   return { id, event, data: data.join('\n') };
 }
 
-export function isResyncBlock({ event, data }) {
-  if (event === SSE_RESYNC_EVENT_NAME) return true;
+export function isResyncBlock({ data }) {
   if (!data.includes(SSE_RESYNC_PAYLOAD_TYPE)) return false;
   try {
-    const parsed = JSON.parse(data);
-    return parsed?.type === SSE_RESYNC_PAYLOAD_TYPE || parsed?.payload?.type === SSE_RESYNC_PAYLOAD_TYPE;
+    return JSON.parse(data)?.type === SSE_RESYNC_PAYLOAD_TYPE;
   } catch {
     return false;
   }

@@ -52,22 +52,22 @@ describe('SSE cursor', () => {
     expect(cursor.lastEventId()).toBe('');
   });
 
-  it('marks a resync frame and restarts the cursor from nothing when it carries no id', () => {
+  it('restarts the cursor from the head id that OpenCode puts on its server.resync frame', () => {
+    const cursor = createSseCursor('inst1:9');
+
+    const [block] = cursor.observe('id: inst2:0\ndata: {"id":"evt_1","type":"server.resync","data":{}}\n\n');
+
+    expect(block.resync).toBe(true);
+    expect(cursor.lastEventId()).toBe('inst2:0');
+  });
+
+  it('restarts the cursor from nothing when a resync frame carries no id', () => {
     const cursor = createSseCursor('ws:3');
 
-    const [block] = cursor.observe('event: resync\ndata: {"type":"server.resync_required"}\n\n');
+    const [block] = cursor.observe('data: {"type":"server.resync","data":{}}\n\n');
 
     expect(block.resync).toBe(true);
     expect(cursor.lastEventId()).toBe('');
-  });
-
-  it('restarts the cursor from the id of a resync frame that carries one', () => {
-    const cursor = createSseCursor('ws:3');
-
-    const [block] = cursor.observe('id: inst2:1\nevent: resync\ndata: {}\n\n');
-
-    expect(block.resync).toBe(true);
-    expect(cursor.lastEventId()).toBe('inst2:1');
   });
 
   it('starts from the id the browser already holds', () => {
@@ -84,11 +84,11 @@ describe('SSE block parsing', () => {
     });
   });
 
-  it('recognises the resync event name and the server.resync_required payload type', () => {
-    expect(isResyncBlock({ event: 'resync', data: '' })).toBe(true);
-    expect(isResyncBlock({ event: undefined, data: '{"type":"server.resync_required"}' })).toBe(true);
-    expect(isResyncBlock({ event: undefined, data: '{"payload":{"type":"server.resync_required"}}' })).toBe(true);
+  it('recognises only the server.resync payload type, as OpenCode sends it', () => {
+    expect(isResyncBlock({ event: undefined, data: '{"id":"evt_1","type":"server.resync","data":{}}' })).toBe(true);
     expect(isResyncBlock({ event: undefined, data: '{"type":"session.updated"}' })).toBe(false);
-    expect(isResyncBlock({ event: undefined, data: 'server.resync_required but not JSON' })).toBe(false);
+    expect(isResyncBlock({ event: undefined, data: '{"type":"server.resync_required"}' })).toBe(false);
+    expect(isResyncBlock({ event: 'resync', data: '' })).toBe(false);
+    expect(isResyncBlock({ event: undefined, data: 'server.resync but not JSON' })).toBe(false);
   });
 });
