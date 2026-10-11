@@ -1,11 +1,12 @@
 import React, { act } from 'react';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
+import { opencodeClient } from '@/lib/opencode/client';
 import type { Part } from '@/lib/opencode/model';
 import { SyncProvider } from '@/sync/sync-context';
 
@@ -39,9 +40,26 @@ const runtimeApis: RuntimeAPIs = {
   get notifications() { return unavailable(); },
   get sourceControl() { return unavailable(); },
 };
+// SyncProvider's global bootstrap reads the `opencodeClient` singleton, not this
+// `sdk`. That singleton was built at import, before this file installs its DOM,
+// so its relative base URL cannot be parsed here. The assertions below do not
+// depend on the bootstrap, so its two startup reads are answered locally.
+spyOn(opencodeClient, 'getLocation').mockResolvedValue({
+  directory: '/workspace',
+  project: { id: 'project', directory: '/workspace', canonical: '/workspace' },
+} as Awaited<ReturnType<typeof opencodeClient.getLocation>>);
+spyOn(opencodeClient, 'getFilesystemHome').mockResolvedValue(null);
+spyOn(opencodeClient, 'getConfig').mockResolvedValue({});
+spyOn(opencodeClient, 'listProjects').mockResolvedValue([]);
+
 const sdk = OpenCode.make({
   baseUrl: 'http://localhost',
-  fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
+  fetch: async (request) => {
+    const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
+    // An idle event stream: a JSON body on /event fails the event pipeline.
+    if (path.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    return new Response('[]', { headers: { 'Content-Type': 'application/json' } });
+  },
 });
 const TestProviders = ({ children }: { children: React.ReactNode }) => (
   <RuntimeAPIContext.Provider value={runtimeApis}>
