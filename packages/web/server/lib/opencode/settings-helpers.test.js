@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -118,8 +118,19 @@ describe('settings helpers', () => {
     try {
       mkdirSync(packDir);
       mkdirSync(extractDir);
-      execFileSync('npm', ['pack', '--silent', '--pack-destination', packDir], {
-        cwd: packagesWebDir,
+      // `npm pack` loads the whole workspace tree and runs prepack before it writes
+      // anything: 14 to 19 s unloaded, and past the test budget under load. Archiving
+      // the package's own `files` list gives the same published layout in under a second.
+      const stageRoot = join(tempRoot, 'stage');
+      const stagedPackage = join(stageRoot, 'package');
+      mkdirSync(stagedPackage, { recursive: true });
+      const { files } = JSON.parse(readFileSync(join(packagesWebDir, 'package.json'), 'utf8'));
+      for (const entry of new Set(['package.json', ...files])) {
+        if (existsSync(join(packagesWebDir, entry))) {
+          cpSync(join(packagesWebDir, entry), join(stagedPackage, entry), { recursive: true });
+        }
+      }
+      execFileSync('tar', ['-czf', join(packDir, 'openchamber-web.tgz'), '-C', stageRoot, 'package'], {
         stdio: 'pipe',
       });
 
