@@ -249,4 +249,95 @@ describe('registerModelRouteRoutes', () => {
   it('exposes every autonomy level the OpenCode schema accepts', () => {
     expect(AUTONOMY_LEVELS).toEqual(['fixed', 'rules', 'adaptive', 'predictive', 'agent']);
   });
+
+  it('names an unknown key in a PUT and writes nothing', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const response = res();
+    await handler({ body: { routes: { x: { targets: ['a/b'], attmepts: 2 } } } }, response);
+    expect(response.out.status).toBe(400);
+    expect(response.out.body.error).toMatch(/unknown key "attmepts"/);
+    expect(deps.writeConfig).not.toHaveBeenCalled();
+  });
+
+  it('saves tuning notes as sent', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const notes = ['openai/gpt-6: reset at 2026-01-01T06:00:00Z'];
+    const saved = res();
+    await handler({ body: { tuning: { enabled: true, notes } } }, saved);
+    expect(targetConfig.experimental.model_route_tuning).toEqual({ enabled: true, notes });
+    expect(saved.out.body.tuning).toEqual({ enabled: true, notes });
+  });
+});
+
+describe('validateModelRoute strictness', () => {
+  const base = { targets: ['a/b'] };
+
+  it('names an unknown key on the route, a target, a health block and a budget', () => {
+    expect(validateModelRoute('x', { ...base, attmepts: 2 })).toMatch(/route "x" has unknown key "attmepts" \(expected name, targets/);
+    expect(validateModelRoute('x', { targets: [{ model: 'a/b', defualtVariant: 'max' }] })).toMatch(/unknown key "defualtVariant"/);
+    expect(validateModelRoute('x', { ...base, health: { sampleWindo: 5 } })).toMatch(/health has unknown key "sampleWindo"/);
+    expect(validateModelRoute('x', { ...base, budgets: { 'a/b': { requestsPerDayy: 5 } } })).toMatch(/budget for "a\/b" has unknown key "requestsPerDayy"/);
+  });
+
+  it('refuses a weight for a target the route does not have', () => {
+    expect(validateModelRoute('x', { targets: ['a/b', 'c/d'], weights: { 'a/b': 2, 'c/d': 1 } })).toBeNull();
+    expect(validateModelRoute('x', { ...base, weights: { 'c/d': 2 } })).toMatch(/weight for "c\/d" matches no target/);
+  });
+
+  it('keys weights by the model without its variant, and does not accept a variant in the key', () => {
+    expect(validateModelRoute('x', { targets: ['a/b#high'], weights: { 'a/b': 2 } })).toBeNull();
+    expect(validateModelRoute('x', { targets: ['a/b#high'], weights: { 'a/b#high': 2 } })).toMatch(/matches no target/);
+  });
+
+  it('accepts a weight for a model a wildcard target matches, and refuses one it does not', () => {
+    expect(validateModelRoute('x', { targets: ['openai/gpt-*'], weights: { 'openai/gpt-6-luna': 3 } })).toBeNull();
+    expect(validateModelRoute('x', { targets: ['openai/gpt-*'], weights: { 'anthropic/gpt-6-luna': 3 } })).toMatch(/matches no target/);
+    expect(validateModelRoute('x', { targets: ['openai/gpt-*'], weights: { 'openai/claude-5': 3 } })).toMatch(/matches no target/);
+  });
+
+  it('refuses selection modes that a fixed route would ignore', () => {
+    expect(validateModelRoute('x', { ...base, autonomy: 'fixed', selection: 'weighted' })).toMatch(/is fixed.*"weighted" needs autonomy rules/);
+    expect(validateModelRoute('x', { ...base, autonomy: 'fixed', selection: 'round-robin' })).toMatch(/"round-robin" needs autonomy rules/);
+    expect(validateModelRoute('x', { ...base, autonomy: 'fixed', selection: 'ordered' })).toBeNull();
+    expect(validateModelRoute('x', { ...base, autonomy: 'rules', selection: 'weighted' })).toBeNull();
+    expect(validateModelRoute('x', { ...base, selection: 'weighted', weights: { 'a/b': 2 } })).toBeNull();
+  });
+
+  it('refuses a slow threshold larger than the window, using OpenCode defaults for unset values', () => {
+    expect(validateModelRoute('x', { ...base, health: { sampleWindow: 2, slowThreshold: 3 } })).toMatch(/slowThreshold \(3\) cannot exceed health\.sampleWindow \(2\)/);
+    expect(validateModelRoute('x', { ...base, health: { sampleWindow: 2 } })).toMatch(/slowThreshold \(3\) cannot exceed/);
+    expect(validateModelRoute('x', { ...base, health: { sampleWindow: 3, slowThreshold: 3 } })).toBeNull();
+    expect(validateModelRoute('x', { ...base, health: { slowThreshold: 6 } })).toMatch(/cannot exceed health\.sampleWindow \(5\)/);
+    expect(validateModelRoute('x', { ...base, health: { slowThreshold: 5 } })).toBeNull();
+    expect(validateModelRoute('x', { ...base, health: { slowThreshold: 4 } })).toBeNull();
+  });
+});
+
+describe('validateModelRouteTuning strictness', () => {
+  it('names an unknown tuning key', () => {
+    expect(validateModelRouteTuning({ enabled: true, intervalMinute: 5 })).toMatch(/tuning has unknown key "intervalMinute"/);
+  });
+
+  it('accepts notes written as `match: text` lines', () => {
+    expect(
+      validateModelRouteTuning({
+        enabled: true,
+        notes: ['openai/gpt-6: reset at 2026-01-01T06:00:00Z', 'anthropic: back in 3 hours'],
+      }),
+    ).toBeNull();
+  });
+
+  it('refuses notes that are not a list of strings, or whose lines OpenCode would drop', () => {
+    expect(validateModelRouteTuning({ notes: 'openai: back in 3 hours' })).toMatch(/notes must be a list of strings/);
+    expect(validateModelRouteTuning({ notes: [3] })).toMatch(/notes must be a list of strings/);
+    expect(validateModelRouteTuning({ notes: ['openai back in 3 hours'] })).toMatch(/line 1 must read "match: text"/);
+    expect(validateModelRouteTuning({ notes: ['ok: fine', ': no match'] })).toMatch(/line 2 must read/);
+    expect(validateModelRouteTuning({ notes: ['openai:   '] })).toMatch(/line 1 must read/);
+    expect(validateModelRouteTuning({ notes: ['openai: back\nin 3 hours'] })).toMatch(/line 1 must read "match: text" on one line/);
+    expect(validateModelRouteTuning({ notes: [{ match: 'openai', text: 'back' }] })).toMatch(/notes must be a list of strings/);
+  });
 });

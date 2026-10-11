@@ -23,6 +23,26 @@ const isWhole = (value, min, max) => Number.isInteger(value) && value >= min && 
 const MAX_MS = 3_600_000;
 const MAX_COUNT = 50;
 
+// The keys each object may carry, as OpenCode's schema defines them. OpenCode
+// reads only these, so any other key would be saved and silently ignored.
+const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights"];
+const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
+const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
+const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
+const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
+
+// OpenCode's defaults for the health window (model-route.ts).
+const DEFAULT_SAMPLE_WINDOW = 5;
+const DEFAULT_SLOW_THRESHOLD = 3;
+
+/** Names the keys of `value` that the schema does not define, or null. */
+const unknownKeysProblem = (value, allowed) => {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length === 0) return null;
+  const noun = unknown.length === 1 ? "key" : "keys";
+  return `unknown ${noun} ${unknown.map((key) => `"${key}"`).join(", ")} (expected ${allowed.join(", ")})`;
+};
+
 /** The raw `experimental.model_routes` map from a merged OpenCode config, or {}. */
 export const readModelRoutes = (config) => {
   const routes = config?.experimental?.model_routes;
@@ -45,6 +65,8 @@ const HEALTH_LIMITS = {
 
 const validateHealth = (id, health) => {
   if (!isRecord(health)) return `route "${id}" health must be an object`;
+  const unknown = unknownKeysProblem(health, HEALTH_KEYS);
+  if (unknown) return `route "${id}" health has ${unknown}`;
   for (const [key, max] of Object.entries(HEALTH_LIMITS)) {
     const value = health[key];
     if (value === undefined) continue;
@@ -53,6 +75,12 @@ const validateHealth = (id, health) => {
   }
   if (health.minOutputTokensPerSecond !== undefined && !(typeof health.minOutputTokensPerSecond === "number" && health.minOutputTokensPerSecond > 0))
     return `route "${id}" health.minOutputTokensPerSecond must be a positive number`;
+  // OpenCode clamps slowThreshold to the window without saying so; a window
+  // that cannot hold that many slow requests is refused instead.
+  const windowSize = health.sampleWindow ?? DEFAULT_SAMPLE_WINDOW;
+  const slowCount = health.slowThreshold ?? DEFAULT_SLOW_THRESHOLD;
+  if (slowCount > windowSize)
+    return `route "${id}" health.slowThreshold (${slowCount}) cannot exceed health.sampleWindow (${windowSize}): the window could never hold that many slow requests`;
   return null;
 };
 
@@ -62,6 +90,8 @@ const validateBudgets = (id, budgets) => {
   if (!isRecord(budgets)) return `route "${id}" budgets must map target references to allowances`;
   for (const [target, budget] of Object.entries(budgets)) {
     if (!isRecord(budget)) return `route "${id}" budget for "${target}" must be an object`;
+    const unknown = unknownKeysProblem(budget, BUDGET_KEYS);
+    if (unknown) return `route "${id}" budget for "${target}" has ${unknown}`;
     for (const key of BUDGET_LIMITS) {
       if (budget[key] !== undefined && !isWhole(budget[key], 1, Number.MAX_SAFE_INTEGER))
         return `route "${id}" budget for "${target}" ${key} must be a positive whole number`;
@@ -76,6 +106,8 @@ const validateBudgets = (id, budgets) => {
 const validateTarget = (target) => {
   if (typeof target === "string") return TARGET_PATTERN.test(target) ? null : "must look like provider/model";
   if (!isRecord(target)) return "must be a provider/model string or an object with a model field";
+  const unknown = unknownKeysProblem(target, TARGET_KEYS);
+  if (unknown) return unknown;
   if (typeof target.model !== "string" || !TARGET_PATTERN.test(target.model))
     return "its model must look like provider/model";
   if (target.until !== undefined && !(Number.isInteger(target.until) && target.until > 0))
@@ -90,9 +122,28 @@ const validateTarget = (target) => {
   return null;
 };
 
+// A weight or budget key names a target by its reference: the model with any
+// `#variant` removed (core keys them that way). A `*` target also covers the
+// concrete models it matches, so those keys are accepted too.
+const referenceOf = (target) => (target.model ?? target).split("#")[0];
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const keyNamesTarget = (key, target) => {
+  const reference = referenceOf(target);
+  if (key === reference) return true;
+  if (!reference.includes("*")) return false;
+  const [provider, ...pattern] = reference.split("/");
+  const [keyProvider, ...model] = key.split("/");
+  if (provider !== keyProvider || model.length === 0) return false;
+  const matcher = new RegExp(`^${pattern.join("/").split("*").map(escapeRegExp).join(".*")}$`);
+  return matcher.test(model.join("/"));
+};
+
 export const validateModelRoute = (id, route) => {
   if (!ROUTE_ID_PATTERN.test(id)) return `invalid route id "${id}"`;
   if (!isRecord(route)) return `route "${id}" must be an object`;
+  const unknown = unknownKeysProblem(route, ROUTE_KEYS);
+  if (unknown) return `route "${id}" has ${unknown}`;
   if (route.name !== undefined && typeof route.name !== "string") return `route "${id}" name must be a string`;
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
@@ -104,11 +155,16 @@ export const validateModelRoute = (id, route) => {
     return `route "${id}" has unknown autonomy "${route.autonomy}" (expected ${AUTONOMY_LEVELS.join(", ")})`;
   if (route.selection !== undefined && !SELECTION_MODES.includes(route.selection))
     return `route "${id}" has unknown selection "${route.selection}" (expected ${SELECTION_MODES.join(", ")})`;
+  // OpenCode keeps a fixed route in its configured order, so a selection mode there would be ignored.
+  if (route.autonomy === "fixed" && route.selection !== undefined && route.selection !== "ordered")
+    return `route "${id}" is fixed, so it keeps its configured order; selection "${route.selection}" needs autonomy rules or higher`;
   if (route.weights !== undefined) {
     if (!isRecord(route.weights)) return `route "${id}" weights must map target references to numbers`;
     for (const [key, weight] of Object.entries(route.weights)) {
       if (typeof weight !== "number" || !(weight > 0))
         return `route "${id}" weight for "${key}" must be a positive number`;
+      if (!route.targets.some((target) => keyNamesTarget(key, target)))
+        return `route "${id}" weight for "${key}" matches no target in the route`;
     }
   }
   if (route.attempts !== undefined && !isWhole(route.attempts, 1, MAX_COUNT))
@@ -135,13 +191,26 @@ export const validateModelRoutes = (routes) => {
   return null;
 };
 
+// The shape OpenCode's schema accepts for one note (`NoteLine`, packages/schema/src/config/model-routes.ts):
+// one line of `match: text`, with a non-space character on each side of a colon.
+const NOTE_LINE = /^[^:\r\n]*\S[^:\r\n]*:[^\r\n]*\S[^\r\n]*$/;
+
 export const validateModelRouteTuning = (tuning) => {
   if (!isRecord(tuning)) return "tuning must be an object";
+  const unknown = unknownKeysProblem(tuning, TUNING_KEYS);
+  if (unknown) return `tuning has ${unknown}`;
   if (tuning.enabled !== undefined && typeof tuning.enabled !== "boolean") return "tuning.enabled must be true or false";
   if (tuning.intervalMinutes !== undefined && !isWhole(tuning.intervalMinutes, 1, 1440))
     return "tuning.intervalMinutes must be a whole number from 1 to 1440";
   if (tuning.windowHours !== undefined && !isWhole(tuning.windowHours, 1, 336))
     return "tuning.windowHours must be a whole number from 1 to 336";
+  if (tuning.notes !== undefined) {
+    // Only a string is equal to its own String(), so this is a plain value check.
+    if (!Array.isArray(tuning.notes) || !tuning.notes.every((line) => String(line) === line))
+      return "tuning.notes must be a list of strings";
+    const bad = tuning.notes.findIndex((line) => !NOTE_LINE.test(line));
+    if (bad !== -1) return `tuning.notes line ${bad + 1} must read "match: text" on one line`;
+  }
   return null;
 };
 
