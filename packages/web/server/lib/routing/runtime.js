@@ -35,6 +35,7 @@ import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 const HISTORY_TIMEOUT_MS = 2500;
 /** A held permission is remembered so reconnect reconciliation does not re-ask Jev. */
 const PERMISSION_DECISION_TTL_MS = 15 * 60 * 1000;
+const AUTO_SESSION_LIMIT = 1000;
 
 const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
 
@@ -131,14 +132,20 @@ export function createRoutingRuntime({
 }) {
   const permissionDecisions = new Map();
   // Sessions the user put on Auto. The sentinel never reaches OpenCode, so
-  // nothing upstream remembers the choice for us.
-  // TODO(v2): this is process memory. A server restart drops the mark and the
-  // session silently runs on whatever model it was last switched to while the
-  // composer still shows Auto. Either persist it next to `routing.json` or have
-  // the client resend the sentinel with every send.
-  const autoSessions = new Map();
+  // nothing upstream remembers the choice; the list is kept in the routing
+  // store and read back here, so a restart keeps routing those sessions.
+  const autoSessions = new Map(
+    store.readAutoSessions().slice(-AUTO_SESSION_LIMIT).map(({ sessionId, directory, at }) => [sessionId, { directory, at }]),
+  );
+  const saveAutoSessions = () => {
+    try {
+      store.writeAutoSessions([...autoSessions].map(([sessionId, entry]) => ({ sessionId, ...entry })));
+    } catch (error) {
+      // The mark still holds in this process; only a restart would lose it.
+      console.warn('[routing] failed to save the Auto sessions:', errorMessage(error));
+    }
+  };
   const stickiness = createStickiness();
-  const AUTO_SESSION_LIMIT = 1000;
 
   const broadcast = (type, properties) => {
     try {
@@ -400,18 +407,22 @@ export function createRoutingRuntime({
 
   /**
    * `POST /session/:id/model` with the sentinel puts the session on Auto;
-   * with any real model it takes it off again.
+   * with any real model it takes it off again. A change is written before the
+   * caller answers, so a restart right after it keeps the mark; a failed write
+   * is logged and the mark holds until the next restart. A real model writes
+   * only when it removes a mark.
    */
   const noteModelSelection = (sessionId, model, directory) => {
     if (!sessionId) return false;
     if (!isAutoModel(model)) {
-      autoSessions.delete(sessionId);
       stickiness.forget(sessionId);
+      if (autoSessions.delete(sessionId)) saveAutoSessions();
       return false;
     }
     autoSessions.delete(sessionId);
     autoSessions.set(sessionId, { directory: directory ?? null, at: now() });
     while (autoSessions.size > AUTO_SESSION_LIMIT) autoSessions.delete(autoSessions.keys().next().value);
+    saveAutoSessions();
     return true;
   };
 

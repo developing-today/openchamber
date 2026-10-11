@@ -28,9 +28,9 @@ Auto. There is no env gate — the feature shipped dark behind
   `parseCustomEndpointUrl` (the custom endpoint's request URL).
 - `store.js` — `routing.json` (only deviations from the built-ins),
   `routing-auth.json` (the TypeSafe key alone, mode 0600),
-  `classification.json` (the classification provider pick) and
-  `classifier-endpoint.json` (the custom endpoint, mode 0600) in the
-  OpenChamber data dir. An unreadable pick file reads as no pick, an
+  `classification.json` (the classification provider pick),
+  `classifier-endpoint.json` (the custom endpoint, mode 0600) and
+  `auto-sessions.json` (the sessions on Auto) in the OpenChamber data dir. An unreadable pick file reads as no pick, an
   unreadable endpoint file as no endpoint. `resolveEffectiveConfig` merges built-ins with stored overrides;
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
@@ -75,8 +75,11 @@ Auto. There is no env gate — the feature shipped dark behind
   (`openchamber-sessions/routes.js`) talks to OpenCode through the SDK and can
   pick Auto up from Session Defaults, so it calls `resolveAutoSelection` itself
   before switching the session.
-- The mark lives in process memory. A server restart between the model switch
-  and the next send drops it (see the TODO in `runtime.js`).
+- The mark is saved in `auto-sessions.json` in the data dir, beside
+  `routing.json`. A change is written before the switch answers, and the list
+  is read back when the runtime starts, so a restart keeps Auto. Choosing a real
+  model removes the mark. A failed write is logged, and the mark holds until the
+  next restart.
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.

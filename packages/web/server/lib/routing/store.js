@@ -15,6 +15,7 @@
  * silently reset the user's categories.
  */
 import fs from 'node:fs/promises';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -126,10 +127,21 @@ const customEndpointSchema = z.object({
 
 const customEndpointFileSchema = z.object({ version: z.literal(FILE_VERSION), endpoint: customEndpointSchema }).strict();
 
+// Sessions the user put on Auto, oldest first: the order is the eviction order.
+const autoSessionsFileSchema = z.object({
+  version: z.literal(FILE_VERSION),
+  sessions: z.array(z.object({
+    sessionId: z.string().min(1).max(200),
+    directory: z.string().max(4000).nullable(),
+    at: z.number().finite(),
+  }).strict()),
+}).strict();
+
 const routingConfigPath = (dataDir) => path.join(dataDir, 'routing.json');
 const routingAuthPath = (dataDir) => path.join(dataDir, 'routing-auth.json');
 const classifierPath = (dataDir) => path.join(dataDir, 'classification.json');
 const customEndpointPath = (dataDir) => path.join(dataDir, 'classifier-endpoint.json');
+const autoSessionsPath = (dataDir) => path.join(dataDir, 'auto-sessions.json');
 
 const readJsonFile = async (file, schema) => {
   let raw;
@@ -152,6 +164,30 @@ const writeJsonFile = async (file, value, mode) => {
   await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode });
   await fs.rename(tmp, file);
   if (mode) await fs.chmod(file, mode);
+};
+
+/** The synchronous twin of `readJsonFile`, for the one file read before the server takes requests. */
+const readJsonFileSync = (file, schema) => {
+  let raw;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+  const text = raw.replace(/^﻿/, '').trim();
+  if (text === '') return null;
+  const parsed = schema.safeParse(JSON.parse(text));
+  if (!parsed.success) throw new Error(`Invalid ${path.basename(file)}: ${parsed.error.issues[0]?.message ?? 'schema mismatch'}`);
+  return parsed.data;
+};
+
+/** Writes through a temporary file, so a failed write leaves the previous file in place. */
+const writeJsonFileSync = (file, value) => {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  renameSync(tmp, file);
 };
 
 const emptyFile = () => ({ version: FILE_VERSION });
@@ -273,6 +309,7 @@ export const createRoutingStore = ({ dataDir }) => {
   const authFile = routingAuthPath(dataDir);
   const classifierFile = classifierPath(dataDir);
   const customEndpointFile = customEndpointPath(dataDir);
+  const autoSessionsFile = autoSessionsPath(dataDir);
   let writeChain = Promise.resolve();
   const serialize = (run) => {
     const next = writeChain.catch(() => undefined).then(run);
@@ -328,5 +365,22 @@ export const createRoutingStore = ({ dataDir }) => {
     clearCustomEndpoint: () => serialize(async () => {
       await fs.rm(customEndpointFile, { force: true });
     }),
+    /**
+     * The sessions on Auto, oldest first. Read once when the runtime starts,
+     * before any request, so it is synchronous. No file is no sessions; an
+     * unreadable file is none too, with a warning, as an unreadable pick is.
+     */
+    readAutoSessions: () => {
+      try {
+        return readJsonFileSync(autoSessionsFile, autoSessionsFileSchema)?.sessions ?? [];
+      } catch (error) {
+        console.warn('[routing] auto-sessions.json is unreadable:', error?.message ?? error);
+        return [];
+      }
+    },
+    /** Replaces the whole list in one synchronous write. A failed write throws and keeps the old file. */
+    writeAutoSessions: (sessions) => {
+      writeJsonFileSync(autoSessionsFile, { version: FILE_VERSION, sessions });
+    },
   };
 };

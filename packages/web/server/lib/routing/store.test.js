@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -163,5 +163,30 @@ describe('routing store', () => {
     const store = createRoutingStore({ dataDir: dir });
     await fs.writeFile(path.join(dir, 'classifier-endpoint.json'), JSON.stringify({ version: 1, endpoint: { url: 'file:///etc/hosts', model: 'jev-latest' } }));
     expect(await store.readCustomEndpoint()).toBeNull();
+  });
+
+  it('reads no Auto sessions before any are saved, and round-trips the list in its order', async () => {
+    const store = createRoutingStore({ dataDir: await tempDir() });
+    expect(store.readAutoSessions()).toEqual([]);
+    const sessions = [
+      { sessionId: 'ses_b', directory: '/repo', at: 2 },
+      { sessionId: 'ses_a', directory: null, at: 1 },
+    ];
+    store.writeAutoSessions(sessions);
+    expect(store.readAutoSessions()).toEqual(sessions);
+    store.writeAutoSessions([]);
+    expect(store.readAutoSessions()).toEqual([]);
+  });
+
+  it('reads a malformed Auto session file as none with a warning, and the next write replaces it', async () => {
+    const dir = await tempDir();
+    const store = createRoutingStore({ dataDir: dir });
+    await fs.writeFile(path.join(dir, 'auto-sessions.json'), JSON.stringify({ version: 1, sessions: [{ sessionId: '' }] }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(store.readAutoSessions()).toEqual([]);
+    expect(warn).toHaveBeenCalledWith('[routing] auto-sessions.json is unreadable:', expect.stringContaining('Invalid auto-sessions.json'));
+    warn.mockRestore();
+    store.writeAutoSessions([{ sessionId: 'ses_a', directory: null, at: 1 }]);
+    expect(store.readAutoSessions()).toEqual([{ sessionId: 'ses_a', directory: null, at: 1 }]);
   });
 });

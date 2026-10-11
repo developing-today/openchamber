@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createRoutingRuntime, readOpenCodeKeys, requestTextOf } from './runtime.js';
 import { resolveEffectiveConfig } from './store.js';
@@ -35,6 +38,8 @@ const makeRuntime = ({
     readCustomEndpoint: vi.fn(async () => customEndpoint),
     writeCustomEndpoint: vi.fn(async () => undefined),
     clearCustomEndpoint: vi.fn(async () => undefined),
+    readAutoSessions: vi.fn(() => []),
+    writeAutoSessions: vi.fn(),
   };
   const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
   const readConfigEntries = vi.fn(async () => {
@@ -445,13 +450,64 @@ describe('readOpenCodeKeys', () => {
 });
 
 describe('auto sessions', () => {
+  const REAL = { providerID: 'anthropic', id: 'claude-opus-5' };
+
   it('remembers the sentinel selection and forgets it when a real model is chosen', () => {
     const { runtime } = makeRuntime({ answers: {} });
     expect(runtime.isAutoSession('s1')).toBe(false);
     expect(runtime.noteModelSelection('s1', AUTO, '/repo')).toBe(true);
     expect(runtime.isAutoSession('s1')).toBe(true);
-    expect(runtime.noteModelSelection('s1', { providerID: 'anthropic', id: 'claude-opus-5' }, '/repo')).toBe(false);
+    expect(runtime.noteModelSelection('s1', REAL, '/repo')).toBe(false);
     expect(runtime.isAutoSession('s1')).toBe(false);
+  });
+
+  it('writes the list when a mark is added or removed, and not for a real model on an ordinary session', () => {
+    const { runtime, store } = makeRuntime({ answers: {} });
+    runtime.noteModelSelection('s1', REAL, '/repo');
+    expect(store.writeAutoSessions).not.toHaveBeenCalled();
+    runtime.noteModelSelection('s1', AUTO, '/repo');
+    expect(store.writeAutoSessions).toHaveBeenLastCalledWith([expect.objectContaining({ sessionId: 's1', directory: '/repo' })]);
+    runtime.noteModelSelection('s1', REAL, '/repo');
+    expect(store.writeAutoSessions).toHaveBeenLastCalledWith([]);
+  });
+
+  it('keeps the mark for this process and logs when the list cannot be written', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = { ...makeRuntime().store, writeAutoSessions: vi.fn(() => { throw new Error('disk full'); }) };
+    const runtime = createRoutingRuntime({ dataDir: '/unused', buildOpenCodeUrl: () => '', getOpenCodeAuthHeaders: () => ({}), store });
+    expect(runtime.noteModelSelection('s1', AUTO, '/repo')).toBe(true);
+    expect(runtime.isAutoSession('s1')).toBe(true);
+    expect(warn).toHaveBeenCalledWith('[routing] failed to save the Auto sessions:', 'disk full');
+    warn.mockRestore();
+  });
+
+  it('restores only the most recent sessions when the saved list is longer than the limit', () => {
+    const saved = Array.from({ length: 1002 }, (_, index) => ({ sessionId: `s${index}`, directory: null, at: index }));
+    const store = { ...makeRuntime().store, readAutoSessions: vi.fn(() => saved) };
+    const runtime = createRoutingRuntime({ dataDir: '/unused', buildOpenCodeUrl: () => '', getOpenCodeAuthHeaders: () => ({}), store });
+    expect(runtime.isAutoSession('s1')).toBe(false);
+    expect(runtime.isAutoSession('s2')).toBe(true);
+    expect(runtime.isAutoSession('s1001')).toBe(true);
+  });
+
+  it('keeps Auto across a restart until a real model is chosen', () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routing-auto-'));
+    const start = () => createRoutingRuntime({
+      dataDir,
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      broadcastGlobalUiEvent: () => {},
+    });
+    try {
+      expect(start().noteModelSelection('s1', AUTO, '/repo')).toBe(true);
+      expect(start().isAutoSession('s1')).toBe(true);
+
+      const restarted = start();
+      expect(restarted.noteModelSelection('s1', REAL, '/repo')).toBe(false);
+      expect(start().isAutoSession('s1')).toBe(false);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });
 
