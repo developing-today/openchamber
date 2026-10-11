@@ -468,16 +468,17 @@ describe('Long paragraphs', () => {
   const paragraphOf = (length: number): string => `${cjkLink}${'x'.repeat(length - cjkLink.length)}`;
 
   // The reporter's data dump from openchamber/openchamber#4204, pretty-printed
-  // JSON with no blank line, in one paragraph. Its size is set so the quadratic
-  // scan would take several times the bound below; a larger dump only costs time.
-  // The scan count is deterministic, so the margin matters only for the time.
-  const dataDump = (): string => {
+  // JSON with no blank line, in one paragraph. The row count sets its size: the
+  // quadratic scan would take several times the bound below, and a larger dump
+  // only costs time. The scan count is deterministic, so the margin matters only
+  // for the time.
+  const dataDump = (count: number): string => {
     let seed = 7;
     const pick = (values: readonly string[]): string | undefined => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
       return values[Math.floor((seed / 0x100000000) * values.length)];
     };
-    const rows = Array.from({ length: 600 }, (_, i) => ({
+    const rows = Array.from({ length: count }, (_, i) => ({
       id: `item_${i}`,
       label: pick(['alpha_beta', 'gamma_delta', 'epsilon_zeta', 'eta_theta', 'iota_kappa']),
       link: pick(['/Main', '/List', '/Detail', '/data/nested']),
@@ -517,7 +518,7 @@ describe('Long paragraphs', () => {
   // at most LIMIT characters remain, which bounds each paragraph by LIMIT².
   test('the data dump from the report opens without the quadratic rescan', () => {
     resetMarkdownHtmlCacheForTests();
-    const text = dataDump();
+    const text = dataDump(600);
     expect(text.length).toBeGreaterThan(80_000);
     resetScanStatsForTests();
     const html = renderMarkdownSync(text);
@@ -527,13 +528,15 @@ describe('Long paragraphs', () => {
     expect(html).toContain('class="katex"');
   });
 
+  // The settled render scans about twice as much as the synchronous one, so
+  // a smaller dump still leaves it several times the bound.
   test('the data dump from the report settles without the quadratic rescan', async () => {
     resetMarkdownHtmlCacheForTests();
-    const text = dataDump();
+    const text = dataDump(400);
     resetScanStatsForTests();
     const settled = await renderMarkdownBlocks(text, false);
     expect(__scanStatsForTests().linkify).toBeLessThan(2 * LIMIT * LIMIT);
-    expect(settled.map((block) => block.html).join('')).toContain('item_599');
+    expect(settled.map((block) => block.html).join('')).toContain('item_399');
   });
 });
 
@@ -617,11 +620,21 @@ describe('Streaming heal', () => {
     resetMarkdownHtmlCacheForTests();
     // One list of snake_case rows: marked parses it in tens of ms, and remend
     // 1.2.1 took about 3 s per stream step on it (openchamber/openchamber#4204).
+    // The bound compares CPU time with the same list rendered whole. A healthy
+    // streamed render costs about as much as a whole one, and remend 1.2.1 cost
+    // several times that, so five times is the bound. CPU time does not grow
+    // while other processes hold the cores, so the comparison holds on a loaded
+    // machine.
     const list = Array.from({ length: 5000 }, (_, i) => `- row_${i} has value_a and value_b_${i}`).join('\n');
     expect(list.length).toBeGreaterThan(190_000);
-    const started = performance.now();
+    const wholeStart = process.cpuUsage();
+    await renderMarkdownBlocks(list, false);
+    const whole = process.cpuUsage(wholeStart);
+    resetMarkdownHtmlCacheForTests();
+    const streamedStart = process.cpuUsage();
     const html = await streamed(list);
-    expect(performance.now() - started).toBeLessThan(1_500);
+    const streamedCost = process.cpuUsage(streamedStart);
+    expect(streamedCost.user + streamedCost.system).toBeLessThan(5 * (whole.user + whole.system));
     expect(html).toContain('row_4999 has value_a and value_b_4999');
   });
 });

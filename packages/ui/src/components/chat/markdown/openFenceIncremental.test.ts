@@ -24,12 +24,16 @@ const shiki = await createHighlighter({
   themes: [MARKDOWN_SHIKI_THEME_DEFINITION],
   langs: ['typescript', 'python'],
 });
+// Shiki leaves the rest of a line plain once it has tokenized for 500 ms of
+// wall-clock time. Under load that cut-off would decide the expected output,
+// so both sides run without it.
+const UNTIMED = { tokenizeTimeLimit: 0 };
 const resolveLang = (lang: string): string => (shiki.getLoadedLanguages().includes(lang) ? lang : 'text');
 const fullPass = (code: string, lang: string): string =>
-  shiki.codeToHtml(code, { lang: resolveLang(lang), theme: MARKDOWN_SHIKI_THEME, tabindex: false });
+  shiki.codeToHtml(code, { lang: resolveLang(lang), theme: MARKDOWN_SHIKI_THEME, tabindex: false, ...UNTIMED });
 const incremental = createIncrementalCodeHighlighter({
   render: (chunk, lang, grammarState) => {
-    const hast = shiki.codeToHast(chunk, { lang, theme: MARKDOWN_SHIKI_THEME, tabindex: false, grammarState });
+    const hast = shiki.codeToHast(chunk, { lang, theme: MARKDOWN_SHIKI_THEME, tabindex: false, grammarState, ...UNTIMED });
     return { html: hastToHtml(hast), grammarState: shiki.getLastGrammarState(hast) };
   },
 });
