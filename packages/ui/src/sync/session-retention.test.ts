@@ -226,6 +226,8 @@ describe('retention execution', () => {
     expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([{ ...old, time: { ...old.time, archived: now } }]);
   });
 
+  // The walk over 850 sessions ran past the 5 s default once, with the whole suite sharing the machine.
+  // The longer budget is for that load; the assertions are unchanged.
   test('processes 850 hierarchical sessions with one confirmed delete per candidate', async () => {
     const sessions = Array.from({ length: 850 }, (_, index) => {
       const item = session(`old-${index}`);
@@ -246,7 +248,7 @@ describe('retention execution', () => {
     expect(remove.mock.calls).toHaveLength(850);
     expect(existing.size).toBe(0);
     expect(useGlobalSessionsStore.getState().activeSessions).toHaveLength(5);
-  });
+  }, 30_000);
 });
 
 describe('archived-only retention', () => {

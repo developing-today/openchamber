@@ -50,8 +50,7 @@ import {
   createGlobalMessageStreamHub,
   createMessageStreamWsRuntime,
   resolveDeltaCoalesceWindowMs,
-  DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
-  UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
+  resolveEventStreamTimeouts,
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
@@ -609,10 +608,14 @@ const sessionRuntime = createSessionRuntime({
 
 const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
 
+// Read once at startup: OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_MS, OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS
+// and OPENCHAMBER_RESUME_IDLE_TIMEOUT_MS, each falling back to its default when unset or invalid.
+const EVENT_STREAM_TIMEOUTS = resolveEventStreamTimeouts();
+
 const getUpstreamStallTimeoutMs = () => (
   getActiveSessionCount() > 1
-    ? UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS
-    : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
+    ? EVENT_STREAM_TIMEOUTS.concurrentStallTimeoutMs
+    : EVENT_STREAM_TIMEOUTS.stallTimeoutMs
 );
 
 const movedUserDirs = await migrateLegacyUserDirs({
@@ -1043,6 +1046,7 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
+  resumeIdleTimeoutMs: EVENT_STREAM_TIMEOUTS.resumeIdleTimeoutMs,
   deltaCoalesceWindowMs: resolveDeltaCoalesceWindowMs(),
 });
 

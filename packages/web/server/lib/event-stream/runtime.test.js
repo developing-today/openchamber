@@ -62,7 +62,7 @@ it('delivers oversized events live, but reports a replay gap instead of replayin
     // A legacy cursor from before OpenCode ids is one the buffer cannot answer: it gets a reset.
     runtime.wsServer.emit('connection', reconnect, { url: '/api/global/event/ws?lastEventId=first' });
     await expect.poll(() => reconnect.sent.length).toBeGreaterThan(0);
-    expect(reconnect.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true }]);
+    expect(reconnect.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true, headEventId: `${INSTANCE}:3` }]);
   } finally {
     first.close(); reconnect.close(); hub.stop(); await runtime.close();
   }
@@ -300,7 +300,7 @@ describe('message stream websocket runtime', () => {
 
     // The buffer holds the cursor's successors, so the client resumed: it needs no refetch.
     expect(secondSocket.sent).toEqual([
-      { type: 'ready', scope: 'global', resumed: true },
+      { type: 'ready', scope: 'global', resumed: true, headEventId: `${INSTANCE}:2` },
       {
         type: 'event',
         payload: { id: 'evt-2', type: 'session.renamed', location: { directory: '/tmp/project' }, data: { sessionID: 's1', title: 't' } },

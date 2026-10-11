@@ -139,7 +139,9 @@ const fetchHealth = (port) => new Promise((resolve) => {
   request.on('error', () => resolve(null));
 });
 
-const waitForReady = async (port, timeoutMs = 30_000) => {
+// A server took longer than the old 30 s to listen once, with the whole suite sharing the machine. The
+// longer budget covers that load. It is only a readiness wait, and every assertion stays as it was.
+const waitForReady = async (port, timeoutMs = 60_000) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const health = await fetchHealth(port);

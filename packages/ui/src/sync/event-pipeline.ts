@@ -107,6 +107,8 @@ const wsFrameSchema = z.object({
   type: z.enum(["ready", "event", "error", "backpressure"]),
   replayReset: z.boolean().optional(),
   resumed: z.boolean().optional(),
+  // The newest OpenCode id the server has seen, on a ready frame. A client with no cursor adopts it.
+  headEventId: z.string().optional(),
   payload: z.unknown().optional(),
   eventId: z.string().optional(),
   directory: z.string().optional(),
@@ -872,6 +874,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           // The retained suffix no longer covers our cursor. The normal
           // reconnect callback repairs authoritative state; retire that cursor.
           if (frame.replayReset === true) lastEventId = undefined
+          // With no cursor of its own (it has applied no OpenCode event yet), this client adopts the server's
+          // head, so a reconnect resumes from it instead of refetching. It waits until every frame read so far
+          // is applied, so an older frame still queued cannot move the cursor back behind the head.
+          if (lastEventId === undefined && frame.headEventId && framesSettled === framesRead) {
+            lastEventId = frame.headEventId
+          }
           opened = true
           readyAt = Date.now()
           if (readyTimer) {

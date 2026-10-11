@@ -141,6 +141,72 @@ describe("createEventPipeline resume cursor over the WebSocket transport", () =>
     }
   })
 
+  test("adopts the server's head as its cursor when it has none, so an idle client resumes from it", async () => {
+    const opened = adoptTunnel()
+    const reconnects: Array<{ replayReset: boolean; resumed: boolean }> = []
+    const pipeline = createEventPipeline({
+      sdk: unusedSdk,
+      onEvents: () => undefined,
+      onReconnect: (details) => { reconnects.push(details) },
+      transport: "ws",
+      heartbeatTimeoutMs: 60_000,
+      reconnectDelayMs: 60_000,
+    })
+    try {
+      await waitFor(() => opened.length === 1)
+      opened[0].socket.onmessage?.({ data: JSON.stringify({ type: "ready", headEventId: "inst:5" }) })
+      await waitFor(() => reconnects.length === 1)
+
+      // No event was applied, yet the reconnect resumes from the head the server named.
+      pipeline.reconnect("probe")
+      await waitFor(() => opened.length === 2)
+      expect(cursorOf(opened[1].path)).toBe("inst:5")
+    } finally {
+      pipeline.cleanup()
+    }
+  })
+
+  test("takes no cursor from a ready frame without a head, and keeps its own cursor over a later head", async () => {
+    const opened = adoptTunnel()
+    const delivered: string[] = []
+    const reconnects: Array<{ replayReset: boolean; resumed: boolean }> = []
+    const pipeline = createEventPipeline({
+      sdk: unusedSdk,
+      onEvents: (_directory, batch) => { delivered.push(...batch.map((event) => event.type)) },
+      onReconnect: (details) => { reconnects.push(details) },
+      transport: "ws",
+      heartbeatTimeoutMs: 60_000,
+      reconnectDelayMs: 60_000,
+    })
+    try {
+      // The hub has seen no OpenCode event: no head, so this reconnect carries no cursor and refetches.
+      await waitFor(() => opened.length === 1)
+      opened[0].socket.onmessage?.({ data: JSON.stringify({ type: "ready" }) })
+      await waitFor(() => reconnects.length === 1)
+      pipeline.reconnect("probe")
+      await waitFor(() => opened.length === 2)
+      expect(cursorOf(opened[1].path)).toBeNull()
+
+      // The next connection is named a head, which it adopts; then an applied event moves the cursor past it.
+      const second = opened[1].socket
+      second.onmessage?.({ data: JSON.stringify({ type: "ready", headEventId: "inst:5" }) })
+      second.onmessage?.(frame({ eventId: "inst:6", event: wireDelta("evt_6", "/repo", "a") }))
+      await waitFor(() => delivered.length === 1)
+      pipeline.reconnect("probe")
+      await waitFor(() => opened.length === 3)
+      expect(cursorOf(opened[2].path)).toBe("inst:6")
+
+      // A later head does not move a cursor the client already has.
+      opened[2].socket.onmessage?.({ data: JSON.stringify({ type: "ready", resumed: true, headEventId: "inst:9" }) })
+      await waitFor(() => reconnects.length === 3)
+      pipeline.reconnect("probe")
+      await waitFor(() => opened.length === 4)
+      expect(cursorOf(opened[3].path)).toBe("inst:6")
+    } finally {
+      pipeline.cleanup()
+    }
+  })
+
   test("reports a resumed ready as resumed, and a replay reset clears the cursor", async () => {
     const opened = adoptTunnel()
     const reconnects: Array<{ replayReset: boolean; resumed: boolean }> = []

@@ -338,10 +338,22 @@ setTimeout(() => process.exit(0), 1000);
 
   it('reads the stderr of a keepAtExit child back, its last maxOutputBytes with keepTail, and refuses more without it', async () => {
     const script = 'process.stderr.write("x".repeat(5000) + "end"); process.stdout.write("gone"); process.exitCode = 2;';
-    expect(await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, keepTail: true, maxOutputBytes: 10 })).toEqual({ code: 2, stdout: '', stderr: 'xxxxxxxend' });
-    await expect(runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, maxOutputBytes: 10 })).rejects.toMatchObject({ code: 'command_output_too_large' });
-    expect(await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true })).toMatchObject({ code: 2, stderr: `${'x'.repeat(5000)}end` });
-    expect(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('openchamber-stderr-'))).toEqual([]);
+    // Other suites keep stderr folders in the shared temp directory at the same time, so this test uses
+    // its own: the check below then sees only what this test left behind. A test worker is its own process,
+    // so pointing TMPDIR here reaches nothing else.
+    const sharedTmp = process.env.TMPDIR;
+    const ownTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'run-command-stderr-'));
+    process.env.TMPDIR = ownTmp;
+    try {
+      expect(await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, keepTail: true, maxOutputBytes: 10 })).toEqual({ code: 2, stdout: '', stderr: 'xxxxxxxend' });
+      await expect(runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, maxOutputBytes: 10 })).rejects.toMatchObject({ code: 'command_output_too_large' });
+      expect(await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true })).toMatchObject({ code: 2, stderr: `${'x'.repeat(5000)}end` });
+      expect(fs.readdirSync(ownTmp).filter((name) => name.startsWith('openchamber-stderr-'))).toEqual([]);
+    } finally {
+      if (sharedTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = sharedTmp;
+      fs.rmSync(ownTmp, { recursive: true, force: true });
+    }
   });
 
   it('keeps a keepAtExit child out of the live set, and still kills its tree at the timeout', async () => {

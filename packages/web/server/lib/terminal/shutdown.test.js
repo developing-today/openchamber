@@ -7,6 +7,10 @@ import { test } from 'vitest';
 import { shutdownTerminalProcesses } from './shutdown.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// The grace a child gets to run its SIGTERM handler. Under the full suite's load a child can need longer
+// than the old 1500 ms, and then SIGKILL lands first, so no SIGTERM is recorded. Each test still ends as
+// soon as its children exit, so the longer grace only costs time when a child is slow.
+const GRACE_MS = 5000;
 const script = `
 const fs = require('node:fs');
 const [file, mode] = process.argv.slice(1);
@@ -45,7 +49,7 @@ async function fixture(t, mode) {
 test('graceful shutdown lets concurrent exec workloads finish without SIGHUP or SIGKILL', { skip: process.platform === 'win32' }, async t => {
   const first = await fixture(t, 'worker');
   const second = await fixture(t, 'worker');
-  await shutdownTerminalProcesses([first.terminal, second.terminal], { graceMs: 1500 });
+  await shutdownTerminalProcesses([first.terminal, second.terminal], { graceMs: GRACE_MS });
   for (const run of [first, second]) {
     assert.deepEqual((await run.events()).map(event => event.event), ['ready', 'SIGTERM', 'complete']);
     assert.deepEqual(await run.exit, { code: 0, signal: null });
@@ -54,7 +58,7 @@ test('graceful shutdown lets concurrent exec workloads finish without SIGHUP or 
 
 test('waits for a separate process group after its parent exits', { skip: process.platform === 'win32' }, async t => {
   const run = await fixture(t, 'parent');
-  await shutdownTerminalProcesses([run.terminal], { graceMs: 1500 });
+  await shutdownTerminalProcesses([run.terminal], { graceMs: GRACE_MS });
   const events = await run.events();
   assert.equal(events.filter(event => event.event === 'SIGTERM').length, 2);
   assert.equal(events.filter(event => event.event === 'complete').length, 1);
@@ -65,8 +69,8 @@ test('escalates a noncooperative workload only after the shared deadline', { ski
   const run = await fixture(t, 'ignore');
   const start = Date.now();
   // A 350 ms grace let SIGKILL land before a starved child ran its SIGTERM handler under load.
-  await shutdownTerminalProcesses([run.terminal], { graceMs: 1500 });
-  assert.ok(Date.now() - start >= 1500);
+  await shutdownTerminalProcesses([run.terminal], { graceMs: GRACE_MS });
+  assert.ok(Date.now() - start >= GRACE_MS);
   assert.deepEqual((await run.events()).map(event => event.event), ['ready', 'SIGTERM']);
   assert.deepEqual(await run.exit, { code: null, signal: 'SIGKILL' });
 });
