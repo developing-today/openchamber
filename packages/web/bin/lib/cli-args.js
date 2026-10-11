@@ -612,6 +612,7 @@ COMMANDS:
   serve          Start the web server (daemon default)
   stop           Stop running instance(s)
   restart        Stop and start the server
+  handoff        Start a successor on the same port, then stop (no dropped connections)
   status         Show server status
   schedule       Manage scheduled tasks
   session        Create, inspect, and read OpenChamber sessions
@@ -865,7 +866,7 @@ _openchamber_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="serve stop restart status schedule session models projects tunnel logs update"
+    commands="serve stop restart handoff status schedule session models projects tunnel logs update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -916,6 +917,7 @@ _openchamber() {
     'serve:Start the web server'
     'stop:Stop running instance(s)'
     'restart:Stop and start the server'
+    'handoff:Start a successor on the same port, then stop'
     'status:Show server status'
     'schedule:Manage scheduled tasks'
     'session:Create sessions'
@@ -982,6 +984,7 @@ complete -c openchamber -n '__fish_seen_subcommand_from serve' -l foreground -d 
 complete -c openchamber -n '__fish_seen_subcommand_from serve' -l no-daemon -d 'Run in foreground (alias for --foreground)'
 complete -c openchamber -n '__fish_use_subcommand' -a 'stop' -d 'Stop running instance(s)'
 complete -c openchamber -n '__fish_use_subcommand' -a 'restart' -d 'Stop and start the server'
+complete -c openchamber -n '__fish_use_subcommand' -a 'handoff' -d 'Start a successor on the same port, then stop'
 complete -c openchamber -n '__fish_use_subcommand' -a 'status' -d 'Show server status'
 complete -c openchamber -n '__fish_use_subcommand' -a 'tunnel' -d 'Tunnel lifecycle commands'
 complete -c openchamber -n '__fish_use_subcommand' -a 'logs' -d 'Tail logs'

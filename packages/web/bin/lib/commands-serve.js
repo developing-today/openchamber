@@ -8,9 +8,17 @@ import { isPortAvailable, resolveAvailablePort } from './cli-ports.js';
 import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
-import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
+import { getPidFilePath, getInstanceFilePath, readPidFile, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
 import { resolveInheritedListenFd } from '../../server/lib/opencode/server-startup-runtime.js';
+import {
+  HANDOFF_READY_MESSAGE,
+  SELF_HANDOFF_SIGNAL,
+  isSelfHandoffEnabled,
+  notifySystemdReady,
+  takeHandoffPredecessor,
+  waitUntilServing,
+} from '../../server/lib/opencode/self-handoff.js';
 import { assignInjectedEnv } from '../../server/lib/injected-env.js';
 import {
   intro as clackIntro,
@@ -34,6 +42,8 @@ function createServeCommand({
   setForegroundShutdown,
 }) {
 async function serveCommand(options) {
+    // A self-handoff successor is started with its predecessor's pid in the environment; take it before anything spawns.
+    const handoffPredecessor = takeHandoffPredecessor(process.env);
     const showOutput = shouldRenderHumanOutput(options);
     const jsonMessages = [];
     const emitNotice = (notice) => {
@@ -213,6 +223,12 @@ async function serveCommand(options) {
 
       const resolvedPort = controller.getPort();
 
+      // A self-handoff successor reports ready only once it serves in this process. It writes its
+      // pid files after that, so a successor that never gets there leaves its predecessor's files alone.
+      if (handoffPredecessor !== null) {
+        await waitUntilServing(() => controller.httpServer?.listening === true && (options.apiOnly === true || controller.isReady()));
+      }
+
       // Write PID / instance files so status, stop, and restart can discover
       // this foreground instance the same way they discover daemon instances.
       const fgPidFilePath = await getPidFilePath(resolvedPort);
@@ -225,6 +241,13 @@ async function serveCommand(options) {
         uiPassword: effectiveUiPassword,
         apiOnly: options.apiOnly === true,
       }, emitNotice);
+
+      // systemd (NotifyAccess=all) moves the main pid here before the predecessor exits. Then the predecessor
+      // is told it can stop: the IPC message is sent last, so the unit has already been told about this pid.
+      if (handoffPredecessor !== null) {
+        notifySystemdReady({ pid: process.pid });
+        process.send?.({ type: HANDOFF_READY_MESSAGE, pid: process.pid });
+      }
 
       if (isQuietMode(options)) {
         if (!options.suppressQuietOutput) {
@@ -239,13 +262,29 @@ async function serveCommand(options) {
         console.log('Save this password — it is not shown again.');
       }
 
-      // Clean up PID / instance files.
+      // Clean up PID / instance files. Once a successor has written them they name the successor, and this
+      // process must leave them for it.
       const cleanupFiles = () => {
+        const owner = readPidFile(fgPidFilePath);
+        if (owner !== null && owner !== process.pid) return;
         removePidFile(fgPidFilePath);
         removeInstanceFile(fgInstanceFilePath);
       };
 
       process.on('exit', cleanupFiles);
+
+      // SIGURG starts a successor on this socket and exits once the successor serves. `openchamber handoff` sends it.
+      if (isSelfHandoffEnabled(process.env)) {
+        process.on(SELF_HANDOFF_SIGNAL, () => {
+          void controller.handOff({ exitProcess: false }).then((result) => {
+            if (!result.ok) return;
+            cleanupFiles();
+            setForegroundServerActive(false);
+            setForegroundShutdown(null);
+            process.exit(0);
+          });
+        });
+      }
 
       // Idempotent graceful shutdown with deterministic exit codes.
       let shutdownInProgress = false;

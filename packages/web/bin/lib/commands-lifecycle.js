@@ -6,12 +6,15 @@ import {
   discoverUnconfirmedRegistryInstanceOnPort,
 } from './cli-lifecycle.js';
 import {
+  getPidFilePath,
   readInstanceOptions,
+  readPidFile,
   removePidFile,
   removeInstanceFile,
   isProcessRunning,
   stopInstanceProcess,
 } from './cli-process.js';
+import { SELF_HANDOFF_SIGNAL, isSelfHandoffEnabled, resolveHandoffTimeoutMs } from '../../server/lib/opencode/self-handoff.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -387,12 +390,97 @@ async function restartCommand(options, serveCommand) {
     }
 }
 
+// Asks a running instance to hand off: it starts a successor on its own listening socket and exits once the
+// successor serves. The pid file moves to the successor only after that, so it is the signal that the handoff
+// worked. A failed handoff leaves the old pid in place: the old process keeps serving.
+async function handOffInstance(instance) {
+  const pidFilePath = await getPidFilePath(instance.port);
+  const fromPid = instance.pid;
+  if (!Number.isInteger(fromPid) || fromPid <= 0) return { port: instance.port, ok: false, reason: 'unknown-pid' };
+  try {
+    process.kill(fromPid, SELF_HANDOFF_SIGNAL);
+  } catch (error) {
+    return { port: instance.port, ok: false, reason: 'signal-failed', message: error?.message };
+  }
+
+  const deadline = Date.now() + resolveHandoffTimeoutMs() + 10_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const pid = readPidFile(pidFilePath);
+    if (pid !== null && pid !== fromPid && isProcessRunning(pid)) {
+      return { port: instance.port, ok: true, fromPid, pid };
+    }
+  }
+  return { port: instance.port, ok: false, reason: `not-handed-off (see \`openchamber logs -p ${instance.port}\`)`, fromPid };
+}
+
+async function handoffCommand(options) {
+    const showOutput = shouldRenderHumanOutput(options);
+    const results = [];
+
+    if (showOutput) {
+      clackIntro('OpenChamber Handoff');
+    }
+
+    // Windows has no signal to send: process.kill with any signal other than 0 terminates the target there.
+    if (process.platform === 'win32') {
+      throw new TunnelCliError('Handoff needs POSIX signals and is not available on Windows. Use `openchamber restart`.', EXIT_CODE.USAGE_ERROR);
+    }
+    if (!isSelfHandoffEnabled()) {
+      throw new TunnelCliError('Self-handoff is disabled here (OPENCHAMBER_SELF_HANDOFF=0). Restart with `openchamber restart` instead.', EXIT_CODE.USAGE_ERROR);
+    }
+
+    const runningInstances = await discoverLifecycleInstances(options);
+    if (runningInstances.length === 0) {
+      if (isJsonMode(options)) {
+        printJson({ handedOffCount: 0, results });
+      }
+      if (showOutput) {
+        logStatus('info', 'No running OpenChamber instances to hand off');
+        clackOutro('nothing to hand off');
+      } else if (isQuietMode(options)) {
+        process.stdout.write('handed 0\n');
+      }
+      return;
+    }
+
+    for (const instance of runningInstances) {
+      if (instance.runtime === 'desktop') {
+        results.push({ port: instance.port, ok: false, reason: 'desktop-managed' });
+        if (showOutput) logStatus('warning', `port ${instance.port} is managed by OpenChamber Desktop`, 'cannot be handed off with this command');
+        continue;
+      }
+      const result = await handOffInstance(instance);
+      results.push(result);
+      if (showOutput) {
+        if (result.ok) logStatus('success', `port ${result.port} handed off`, `PID ${result.fromPid} -> ${result.pid}`);
+        else logStatus('error', `port ${result.port} not handed off`, `${result.reason}; PID ${instance.pid} keeps serving`);
+      }
+    }
+
+    const failed = results.filter((result) => !result.ok);
+    if (isJsonMode(options)) {
+      printJson({ handedOffCount: results.length - failed.length, results });
+    } else if (showOutput) {
+      clackOutro(failed.length === 0 ? `${results.length} instance(s) handed off` : `${failed.length} instance(s) not handed off`);
+    } else if (isQuietMode(options)) {
+      for (const result of results) {
+        if (result.ok) process.stdout.write(`handed ${result.port} ${result.pid}\n`);
+        else process.stdout.write(`failed ${result.port} ${result.reason}\n`);
+      }
+    }
+    if (failed.length > 0) {
+      process.exitCode = EXIT_CODE.GENERAL_ERROR;
+    }
+}
+
 function createLifecycleCommands({ serveCommand }) {
   return {
     stop: stopCommand,
     restart(options) {
       return restartCommand.call(this, options, serveCommand);
     },
+    handoff: handoffCommand,
   };
 }
 

@@ -1,3 +1,9 @@
+import net from 'node:net';
+
+// How long a handoff leaves idle keep-alive sockets open, so each can take one more request with
+// `Connection: close` before it is closed. Long enough for a client polling every few milliseconds.
+const HANDOFF_IDLE_GRACE_MS = 1000;
+
 export const createGracefulShutdownRuntime = (dependencies) => {
   const {
     process,
@@ -48,6 +54,10 @@ export const createGracefulShutdownRuntime = (dependencies) => {
   const serverConnections = new Set();
   const busySocketRequests = new Map();
   let closingHttpServer = false;
+  // Set once this process has stopped accepting. Requests already on open connections still get
+  // answers, each with `Connection: close`, so keep-alive clients move to whichever process accepts next.
+  let acceptingStopped = false;
+  let listenerClosed = null;
 
   // Track TCP sockets before listen(): HTTP stops tracking them on upgrade,
   // even when no WebSocket handler completes the handshake.
@@ -65,6 +75,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     };
     const onRequest = (request, response) => {
       const socket = request.socket;
+      if (acceptingStopped) response.setHeader('Connection', 'close');
       busySocketRequests.set(socket, (busySocketRequests.get(socket) ?? 0) + 1);
       response.once('close', () => {
         const remaining = (busySocketRequests.get(socket) ?? 1) - 1;
@@ -80,19 +91,37 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     });
   };
 
+  // Stops this process from accepting. When a successor holds the same listening socket, the socket
+  // stays open and connections queued in the kernel go to the successor.
+  // With keepIdleConnections, only the listener closes: http.Server.close() would also destroy idle
+  // keep-alive sockets at once, and a client may be writing on one of them at that moment. Those sockets
+  // instead answer their next request with `Connection: close`, and the drain closes them after a grace.
+  const stopAccepting = (server, { keepIdleConnections = false } = {}) => {
+    acceptingStopped = true;
+    if (!listenerClosed) {
+      listenerClosed = new Promise((resolve) => {
+        const onClosed = () => {
+          console.log('HTTP server closed');
+          resolve(true);
+        };
+        if (keepIdleConnections) net.Server.prototype.close.call(server, onClosed);
+        else server.close(onClosed);
+      });
+    }
+    return listenerClosed;
+  };
+
   // Stops accepting connections, then lets sockets with an in-flight HTTP request finish for up to
-  // shutdownTimeoutMs. Idle keep-alive and upgraded sockets are cut at once: their owning runtimes
-  // were stopped above, and net.Server.close() cannot complete while an upgraded socket is open.
-  const drainHttpServer = async (server) => {
+  // shutdownTimeoutMs. Idle keep-alive and upgraded sockets are cut at once, or after idleGraceMs on a
+  // handoff: their owning runtimes were stopped above, and net.Server.close() cannot complete while an
+  // upgraded socket is open.
+  const drainHttpServer = async (server, { idleGraceMs = 0 } = {}) => {
     let graceTimer = null;
     let sweepTimer = null;
-    const closed = new Promise((resolve) => {
-      server.close(() => {
-        console.log('HTTP server closed');
-        resolve(true);
-      });
-    });
+    const closed = stopAccepting(server, { keepIdleConnections: idleGraceMs > 0 });
+    const idleSweepAt = Date.now() + idleGraceMs;
     const sweepIdleSockets = () => {
+      if (Date.now() < idleSweepAt) return;
       server.closeIdleConnections?.();
       for (const socket of serverConnections) {
         if (!busySocketRequests.has(socket)) socket.destroy();
@@ -123,6 +152,12 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     syncToHmrState();
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
+
+    // A handoff stops accepting before any runtime stops, so no new request reaches a stopped runtime.
+    // The successor already serves this socket; only requests on open connections still come here.
+    const server = getServer();
+    const handoff = options.handoff === true;
+    if (handoff && server) stopAccepting(server, { keepIdleConnections: true });
 
     // Both embedded stop() and daemon exits use this sequence. Close admission
     // synchronously above, then stop viewers before draining their services.
@@ -203,10 +238,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       }
     }
 
-    const server = getServer();
     if (server) {
       closingHttpServer = true;
-      await drainHttpServer(server);
+      await drainHttpServer(server, { idleGraceMs: handoff ? HANDOFF_IDLE_GRACE_MS : 0 });
     }
 
     const uiAuthController = getUiAuthController();

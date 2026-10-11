@@ -1,7 +1,8 @@
+import { INHERITED_LISTEN_FD, SELF_HANDOFF_SIGNAL, isSelfHandoffEnabled } from './self-handoff.js';
+
 /** One stray uncaught exception is survivable; a storm means the process is broken. */
 const UNCAUGHT_STORM_LIMIT = 10;
 const UNCAUGHT_STORM_WINDOW_MS = 60_000;
-const INHERITED_LISTEN_FD = 3;
 
 // systemd socket activation passes the listening socket as fd 3 and names this process in LISTEN_PID.
 export const resolveInheritedListenFd = (env, pid) => {
@@ -24,6 +25,7 @@ export const createServerStartupRuntime = (dependencies) => {
     getSignalsAttached,
     setSignalsAttached,
     syncToHmrState,
+    requestHandoff = null,
     TUNNEL_MODE_QUICK,
     TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
@@ -164,6 +166,12 @@ export const createServerStartupRuntime = (dependencies) => {
           console.error('Reload failed:', error);
         });
       });
+      // Self-handoff: a successor takes the socket and this process exits once it serves. See self-handoff.js.
+      if (requestHandoff && isSelfHandoffEnabled(process.env)) {
+        process.on(SELF_HANDOFF_SIGNAL, () => {
+          void requestHandoff({ exitProcess: true });
+        });
+      }
       setSignalsAttached(true);
       syncToHmrState();
     }

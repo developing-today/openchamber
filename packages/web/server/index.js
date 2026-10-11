@@ -112,6 +112,7 @@ import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { createSelfHandoffRuntime } from './lib/opencode/self-handoff.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
 import { findInstalledGuest } from './lib/guests/catalog.js';
 import { extensionsPersistPath } from './lib/guests/persist.js';
@@ -2547,6 +2548,18 @@ async function main(options = {}) {
     idleStopMs: BROWSER_PROVIDER_IDLE_MS,
   });
 
+  // The successor is this same CLI in foreground mode, on the listener this process holds. See self-handoff.js.
+  const selfHandoffRuntime = createSelfHandoffRuntime({
+    process,
+    getServer: () => server,
+    spawn,
+    gracefulShutdown,
+    isShuttingDown: () => isShuttingDown,
+    entry: path.join(__dirname, '..', 'bin', 'cli.js'),
+    apiOnly,
+    log: console,
+  });
+
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,
     server,
@@ -2604,6 +2617,7 @@ async function main(options = {}) {
     tunnelRuntimeContext,
     attachSignals,
     apiOnly,
+    requestHandoff: selfHandoffRuntime.requestHandoff,
     dictationModelsDir: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'speech-models'),
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
@@ -2680,6 +2694,7 @@ async function main(options = {}) {
       keepOpenCode: shutdownOptions.keepOpenCode ?? false,
     }),
     reload: () => reloadOpenCodeConfiguration(),
+    handOff: (handoffOptions = {}) => selfHandoffRuntime.requestHandoff(handoffOptions),
   };
 }
 
