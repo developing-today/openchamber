@@ -10,6 +10,7 @@ import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { resolveInheritedListenFd } from '../../server/lib/opencode/server-startup-runtime.js';
 import { assignInjectedEnv } from '../../server/lib/injected-env.js';
 import {
   intro as clackIntro,
@@ -63,15 +64,19 @@ async function serveCommand(options) {
         }
       }
     };
+    // Under socket activation the unit's listening socket is already bound to the port and this
+    // process inherits it. Probing the port would find it busy, and refuse to start, so the probes
+    // are skipped: the inherited socket is the claim on the port.
+    const inheritsListener = resolveInheritedListenFd(process.env, process.pid) !== null;
     const explicitPort = options.explicitPort === true;
     const effectiveHost = resolveServeHost(options.host);
-    const targetPort = await resolveAvailablePort(options.port, explicitPort, emitNotice);
+    const targetPort = await resolveAvailablePort(options.port, explicitPort || inheritsListener, emitNotice);
 
     if (targetPort !== 0 && !options.suppressUnsafePortWarning) {
       assertSafeBrowserPort(targetPort, { context: 'OpenChamber serve' });
     }
 
-    if (targetPort !== 0) {
+    if (targetPort !== 0 && !inheritsListener) {
       const existingInstance = await discoverOpenChamberInstanceOnPort(targetPort, { host: effectiveHost });
       if (existingInstance?.runtime === 'desktop') {
         throw new Error(
