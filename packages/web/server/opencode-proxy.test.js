@@ -86,15 +86,24 @@ describe('OpenCode proxy SSE forwarding', () => {
 
   it('forwards event streams with nginx-safe headers', async () => {
     let seenAuthorization = null;
+    // The Last-Event-ID of each upstream connection, in order: the first has none.
+    const resumedFrom = [];
 
     const upstream = express();
     upstream.get('/api/event', (req, res) => {
       seenAuthorization = req.headers.authorization ?? null;
+      resumedFrom.push(req.headers['last-event-id'] ?? null);
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'private, max-age=0');
       res.setHeader('X-Upstream-Test', 'ok');
-      res.write('data: {"ok":true}\n\n');
-      res.end();
+      if (resumedFrom.length === 1) {
+        // OpenCode ends its first connection cleanly, between two blocks.
+        res.write('id: inst:1\ndata: {"ok":true,"n":1}\n\n');
+        res.write('id: inst:2\ndata: {"ok":true,"n":2}\n\n');
+        res.end();
+        return;
+      }
+      res.write('id: inst:3\ndata: {"ok":true,"n":3}\n\n');
     });
     upstreamServer = await listen(upstream);
     const upstreamPort = upstreamServer.address().port;
@@ -105,6 +114,7 @@ describe('OpenCode proxy SSE forwarding', () => {
       os: {},
       path,
       OPEN_CODE_READY_GRACE_MS: 0,
+      SSE_RECONNECT_DELAY_MS: 0,
       getRuntime: () => ({
         openCodePort: upstreamPort,
         isOpenCodeReady: true,
@@ -127,11 +137,24 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(response.headers.get('cache-control')).toBe('no-cache, no-transform');
     expect(response.headers.get('x-accel-buffering')).toBe('no');
     expect(response.headers.get('x-upstream-test')).toBe('ok');
-    // OpenCode closing its stream is a reconnect, not the end of the browser's stream: the proxy
-    // keeps the response open for the next upstream connection, so read the block and stop there.
+    // OpenCode ends its first connection after two events. The browser's stream stays open: the proxy
+    // reconnects from the last id it forwarded, and the third event arrives on that second connection.
     const reader = response.body.getReader();
-    const { value } = await reader.read();
-    expect(new TextDecoder().decode(value)).toBe('data: {"ok":true}\n\n');
+    const decoder = new TextDecoder();
+    let text = '';
+    while (!text.includes('"n":3')) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    // The whole stream, in order, with each block exactly once.
+    expect(text).toBe(
+      'id: inst:1\ndata: {"ok":true,"n":1}\n\n'
+      + 'id: inst:2\ndata: {"ok":true,"n":2}\n\n'
+      + 'id: inst:3\ndata: {"ok":true,"n":3}\n\n',
+    );
+    // The cursor advanced to the last forwarded id before the reconnect, so OpenCode resumed from it.
+    expect(resumedFrom).toEqual([null, 'inst:2']);
     await reader.cancel();
     expect(seenAuthorization).toBe('Bearer test-token');
   });

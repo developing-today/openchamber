@@ -28,6 +28,10 @@ function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024 } = {
     get connections() {
       return cursors.length;
     },
+    // Streams open right now: a connection that the hub closed no longer counts.
+    get open() {
+      return live.size;
+    },
     // Publishes one event: the feed retains it, and every open stream receives it.
     publish() {
       sequence += 1;
@@ -235,7 +239,8 @@ describe('global hub: upstream ids and resync', () => {
       expect(received).toEqual([`${instance}:1`, 'evt_connected']);
       // The reconnect cursor stays an OpenCode id, so OpenCode can replay from it.
       expect(hub.upstreamCursor()).toBe(`${instance}:1`);
-      expect(hub.replayAfter(`${instance}:1`)).toEqual([expect.objectContaining({ eventId: 'evt_connected' })]);
+      // The greeting went live to subscribers, but it is not replayed: it is not part of the feed.
+      expect(hub.replayAfter(`${instance}:1`)).toEqual([]);
     } finally {
       hub.stop();
     }
@@ -423,6 +428,103 @@ describe('WebSocket resume through the global hub', () => {
     } finally {
       first.close();
       legacy.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('lets the resume read go once OpenCode is idle, and the client is live from then on', async () => {
+    const feed = createFakeOpenCode();
+    const first = feed.publish();
+    const second = feed.publish();
+    const third = feed.publish();
+    const hub = createHub(feed.fetch, { resumeIdleTimeoutMs: 50 });
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime, first);
+    try {
+      await expect.poll(() => eventIds(browser).length).toBe(2);
+      expect(eventIds(browser)).toEqual([second, third]);
+      // The shared stream and the resume read are open. Once the read has been silent past the bound,
+      // only the shared stream is left, and the client has not been sent a second ready frame.
+      await expect.poll(() => feed.open).toBe(1);
+      expect(readyFrames(browser)).toEqual([{ type: 'ready', scope: 'global', resumed: true }]);
+
+      // The first event after the hand-over reaches the client once, through the shared stream.
+      const live = feed.publish();
+      await expect.poll(() => eventIds(browser).length).toBe(3);
+      expect(eventIds(browser)).toEqual([second, third, live]);
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('refetches, rather than goes live, when the resume read is down at the idle bound', async () => {
+    const feed = createFakeOpenCode();
+    const first = feed.publish();
+    const second = feed.publish();
+    const third = feed.publish();
+    // Once switched on, the resume read's reconnects (those carrying a cursor) fail, as a dead OpenCode would.
+    let failing = false;
+    const hub = createHub((url, options) => (
+      failing && options.headers?.['Last-Event-ID'] ? Promise.resolve(new Response('', { status: 503 })) : feed.fetch(url, options)
+    ), { resumeIdleTimeoutMs: 50, upstreamReconnectDelayMs: 5 });
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime, first);
+    try {
+      await expect.poll(() => eventIds(browser).length).toBe(2);
+      failing = true;
+      feed.cut();
+      // Silence while the read is down proves nothing about what OpenCode holds: the client is refetched.
+      await expect.poll(() => readyFrames(browser).some((frame) => frame.replayReset === true)).toBe(true);
+      expect(readyFrames(browser).slice(0, 2)).toEqual([
+        { type: 'ready', scope: 'global', resumed: true },
+        { type: 'ready', scope: 'global', replayReset: true },
+      ]);
+      // Nothing else arrives as an event: the shared stream's reconnect may add a plain ready, which is not pinned here.
+      expect(eventIds(browser)).toEqual([second, third]);
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('keeps the browser cursor on OpenCode ids: events without one are sent without an id', async () => {
+    const instance = randomUUID();
+    const encoder = new TextEncoder();
+    const blocks = [
+      `id: ${instance}:1\ndata: ${JSON.stringify({ id: 'evt_a', type: 'message.updated', properties: {} })}\n\n`,
+      // OpenCode sends `server.connected` outside its feed: no id line, only the payload's own id.
+      `data: ${JSON.stringify({ id: 'evt_connected', type: 'server.connected', data: {} })}\n\n`,
+      // An event with no id of its own is numbered by the hub, which OpenCode cannot replay from.
+      `data: ${JSON.stringify({ type: 'message.updated', properties: {} })}\n\n`,
+    ];
+    let index = 0;
+    const hub = createHub(async () => ({
+      ok: true,
+      body: {
+        getReader: () => ({
+          async read() {
+            if (index < blocks.length) return { value: encoder.encode(blocks[index++]), done: false };
+            return { value: undefined, done: true };
+          },
+        }),
+      },
+    }), HOLD_RECONNECT);
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    try {
+      await expect.poll(() => eventIds(browser).length).toBe(3);
+      expect(eventIds(browser)).toEqual([`${instance}:1`, undefined, undefined]);
+      // The last id the browser holds is the last OpenCode id, so a reconnect resumes from that one.
+      expect(eventIds(browser).filter(Boolean).at(-1)).toBe(`${instance}:1`);
+      // A reconnect from the OpenCode cursor replays the feed event after it, but not the greeting: a
+      // replayed greeting would look like a restart of the stream.
+      expect(hub.replayAfter(`${instance}:1`)).toEqual([expect.objectContaining({ eventId: expect.stringMatching(/^oc-/) })]);
+    } finally {
+      browser.close();
       hub.stop();
       await runtime.close();
     }

@@ -171,7 +171,9 @@ describe('delta coalescing in the global hub', () => {
         const tail = hub.replayAfter(received[cut].eventId);
         expect(tail).not.toBeNull();
         const replayed = tail.map((entry) => JSON.parse(entry.serializedFrame));
-        expect(replayed.every((frame) => typeof frame.eventId === 'string')).toBe(true);
+        expect(tail.every((entry) => typeof entry.eventId === 'string')).toBe(true);
+        // Hub ids are for this process's replay only: no frame sent to a browser carries one as its cursor.
+        expect(replayed.every((frame) => frame.eventId === undefined)).toBe(true);
         expect(applyFrames([...received.slice(0, cut + 1), ...replayed])).toEqual(complete);
       }
 
@@ -198,9 +200,10 @@ describe('delta coalescing in the global hub', () => {
 
     hub.stop();
 
-    const tail = hub.replayAfter('e0').map((entry) => JSON.parse(entry.serializedFrame));
-    expect(applyFrames(tail).text[1]).toBe('two three');
-    expect(tail.at(-1).eventId).toBe('e2');
+    const entries = hub.replayAfter('e0');
+    expect(applyFrames(entries.map((entry) => JSON.parse(entry.serializedFrame))).text[1]).toBe('two three');
+    // The buffer keeps the id of the last merged fragment, which is what a cursor names.
+    expect(entries.at(-1).eventId).toBe('e2');
   });
 
   it('commits pending text on demand, so a client readied later starts after it', async () => {

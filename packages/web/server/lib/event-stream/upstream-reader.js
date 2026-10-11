@@ -22,7 +22,7 @@ function resolveReconnectDelay(consecutiveFailures, baseMs, maxMs, multiplier) {
   return Math.min(candidate, safeMax);
 }
 
-function resolveTimeoutMs(value, fallback) {
+export function resolveTimeoutMs(value, fallback) {
   const resolved = typeof value === 'function' ? value() : value;
   return Number.isFinite(resolved) ? resolved : fallback;
 }

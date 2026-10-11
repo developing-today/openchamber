@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createMessageStreamWsRuntime } from './runtime.js';
 
+// OpenCode's cursor form, `<instance>:<sequence>`, as its feed puts it in `id:` lines.
+const INSTANCE = '6b1f3c2e-8d4a-4f7b-9c3e-2a5d7e9f1b40';
+
 class FakeSocket extends EventEmitter {
   constructor() {
     super();
@@ -81,13 +84,13 @@ describe('rebindUpstream (#2638)', () => {
         return createSseResponse({
           signal: options.signal,
           holdOpen: true,
-          blocks: ['data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n'],
+          blocks: [`id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"server.connected","properties":{}}\n\n`],
         });
       }
       return createSseResponse({
         signal: options.signal,
         holdOpen: true,
-        blocks: ['data: {"id":"evt-2","type":"session.updated","properties":{"sessionID":"ses_1"}}\n\n'],
+        blocks: [`id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"session.updated","properties":{"sessionID":"ses_1"}}\n\n`],
       });
     });
 
@@ -119,7 +122,7 @@ describe('rebindUpstream (#2638)', () => {
     runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fetchCalls).toBe(1);
-    expect(socket.sent.some((frame) => frame.type === 'event' && frame.eventId === 'evt-1')).toBe(true);
+    expect(socket.sent.some((frame) => frame.type === 'event' && frame.eventId === `${INSTANCE}:1`)).toBe(true);
 
     // The managed process was restarted onto a new port while the old
     // process's SSE stream stays open (orphaned survivor).
@@ -131,7 +134,7 @@ describe('rebindUpstream (#2638)', () => {
     // from the new upstream without reconnecting its own socket.
     expect(fetchCalls).toBe(2);
     expect(fetchImpl.mock.calls[1][0]).toContain(':5000/api/event');
-    expect(socket.sent.some((frame) => frame.type === 'event' && frame.eventId === 'evt-2')).toBe(true);
+    expect(socket.sent.some((frame) => frame.type === 'event' && frame.eventId === `${INSTANCE}:2`)).toBe(true);
 
     socket.close();
     await runtime.close();
@@ -149,7 +152,7 @@ describe('rebindUpstream (#2638)', () => {
       return createSseResponse({
         signal: options.signal,
         holdOpen: true,
-        blocks: ['data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n'],
+        blocks: [`id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"server.connected","properties":{}}\n\n`],
       });
     });
 
