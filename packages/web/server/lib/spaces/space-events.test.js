@@ -105,6 +105,18 @@ describe('createSpaceEventSources', () => {
     expect(sources.has(ID)).toBe(true);
   });
 
+  it('keeps the OpenCode id of an event from a space\'s stream, so the hub replays it under that id', async () => {
+    start();
+    sources.sync([ID]);
+    expect(await until(() => streams[ID].length === 1)).toBe(true);
+    const instance = '6b1f3c2e-8d4a-4f7b-9c3e-2a5d7e9f1b40';
+    streams[ID][0].write(`id: ${instance}:7\ndata: ${JSON.stringify({ id: 'e7', type: 'session.execution.started', data: { sessionID: 's1' }, location: { directory: `/spaces/${ID}/repo` } })}\n\n`);
+    // The connection announcement comes first; the space's own event follows it.
+    expect(await until(() => received.length === 2)).toBe(true);
+    expect(received[1]).toMatchObject({ spaceId: ID, eventId: `${instance}:7`, payload: { id: 'e7' } });
+    expect(hub.replayAfter(`${instance}:7`)).toEqual([]);
+  });
+
   it('drops an event that claims a directory outside the space or a session of the host', async () => {
     start();
     index.observeHostRecords([{ id: 'host-1' }]);

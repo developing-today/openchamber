@@ -9,7 +9,7 @@ import {
   serializeMessageStreamWsEvent,
   sendSerializedMessageStreamWsFrame,
 } from './protocol.js';
-import { createGlobalMessageStreamHub } from './global-hub.js';
+import { createGlobalMessageStreamHub, parseGlobalBlock } from './global-hub.js';
 import { createGlobalMessageStreamWsBridge } from './global-ws-bridge.js';
 import { acceptDirectoryMessageStreamWsConnection } from './directory-ws-bridge.js';
 import {
@@ -213,11 +213,14 @@ export function createMessageStreamWsRuntime({
         reconnectDelayMs: upstreamReconnectDelayMs,
         buildUrl: () => new URL('/api/event', url),
         getHeaders: () => headers,
+        // Read the SSE `id:` line, so the followed OpenCode's ids reach the buffer and its reconnects.
+        parseBlock: parseGlobalBlock,
         onEvent(event) {
           globalHub.injectEvent({
             payload: event.payload,
             directory: event.envelope?.directory,
             spaceId: event.envelope?.spaceId,
+            eventId: event.eventId,
           });
         },
       });

@@ -91,7 +91,9 @@ export function createGlobalMessageStreamWsBridge({
 
     globalHub.flushPending();
     const replay = globalHub.replayAfter(requestedLastEventId);
-    if (replay === null && isOpenCodeEventId(requestedLastEventId)) {
+    // A cursor the buffer does not hold goes upstream only while no local frame has been committed: OpenCode
+    // cannot replay one, so a resume could skip it. Otherwise the client is reset to refetch.
+    if (replay === null && isOpenCodeEventId(requestedLastEventId) && globalHub.localFrames() === 0) {
       resumeFromUpstream(socket, requestedLastEventId);
       return;
     }
@@ -145,7 +147,13 @@ export function createGlobalMessageStreamWsBridge({
       onCaughtUp(event) {
         resumeStops.delete(socket);
         if (!clients.has(socket) || !forwardUpstreamEvent(socket, event)) return;
-        replayEvents(socket, globalHub.replayAfter(event.eventId) ?? []);
+        const tail = globalHub.replayAfter(event.eventId);
+        // A local frame after the caught-up event cannot be replayed: refetch, as for any other gap.
+        if (tail === null) {
+          refetch();
+          return;
+        }
+        replayEvents(socket, tail);
         if (clients.has(socket)) goLive();
       },
       // OpenCode had nothing after the cursor, so the client is current: it goes live with nothing to

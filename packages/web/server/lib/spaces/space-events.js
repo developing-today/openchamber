@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 import { z } from 'zod';
 
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { parseGlobalBlock } from '../event-stream/global-hub.js';
 
 const EVENT_PATH = '/api/event';
 const STATUS_PATH = '/api/sessions/status';
@@ -54,7 +55,8 @@ const readBody = (response, cap) => new Promise((resolve, reject) => {
 export function createSpaceEventSources({ requestInside, index, hub, logger = console, stallTimeoutMs, now = Date.now }) {
   const sources = new Map();
 
-  const inject = (spaceId, payload, directory) => hub.injectEvent({ payload, directory, spaceId });
+  // `eventId` is the space's OpenCode id when the event came from its stream; the announcements have none.
+  const inject = (spaceId, payload, directory, eventId) => hub.injectEvent({ payload, directory, spaceId, eventId });
 
   const announce = (spaceId, status, wasReady) => {
     inject(spaceId, { type: 'openchamber:space-stream', properties: { spaceId, status, wasReady, timestamp: now() } }, 'global');
@@ -95,6 +97,8 @@ export function createSpaceEventSources({ requestInside, index, hub, logger = co
     source.reader = createUpstreamSseReader({
       signal: controller.signal,
       fetchImpl: fetchInside(spaceId),
+      // Read the SSE `id:` line, so the space's ids are kept and its reconnect resumes from them.
+      parseBlock: parseGlobalBlock,
       stallTimeoutMs,
       reconnectDelayMs: () => reconnectDelayAfter(source.failures),
       buildUrl: () => new URL(`http://space${EVENT_PATH}`),
@@ -109,10 +113,10 @@ export function createSpaceEventSources({ requestInside, index, hub, logger = co
         source.failures += 1;
         if (source.everConnected && reason !== 'stopped') announce(spaceId, 'disconnected', true);
       },
-      onEvent({ payload }) {
+      onEvent({ payload, eventId }) {
         const parsed = eventPayloadSchema.safeParse(payload);
         if (!parsed.success || !index.acceptSpaceEvent(spaceId, payload)) return;
-        inject(spaceId, payload, parsed.data.location?.directory ?? '');
+        inject(spaceId, payload, parsed.data.location?.directory ?? '', eventId);
       },
       // Every failed attempt ends in `onDisconnect`, which is where it is counted.
       onError(error) {

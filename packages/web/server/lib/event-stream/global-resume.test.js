@@ -149,7 +149,7 @@ const createHub = (fetchImpl, overrides = {}) => createGlobalMessageStreamHub({
 // A block-driven upstream ends its stream after the blocks: hold the reconnect back so it does not spin.
 const HOLD_RECONNECT = { upstreamReconnectDelayMs: 60_000 };
 
-const createRuntime = (hub) => createMessageStreamWsRuntime({
+const createRuntime = (hub, fetchImpl) => createMessageStreamWsRuntime({
   server: new EventEmitter(),
   globalEventHub: hub,
   wsClients: new Set(),
@@ -160,7 +160,11 @@ const createRuntime = (hub) => createMessageStreamWsRuntime({
   getOpenCodeAuthHeaders: () => ({}),
   processForwardedEventPayload() {},
   heartbeatIntervalMs: 60_000,
+  fetchImpl,
 });
+
+// A followed upstream is the OpenCode a restart replaced: it runs on its own port and has its own instance.
+const FOLLOWED_URL = 'http://127.0.0.1:5000';
 
 const connect = (runtime, lastEventId) => {
   const socket = new FakeSocket();
@@ -532,9 +536,10 @@ describe('WebSocket resume through the global hub', () => {
       expect(eventIds(browser)).toEqual([`${instance}:1`, undefined, undefined]);
       // The last id the browser holds is the last OpenCode id, so a reconnect resumes from that one.
       expect(eventIds(browser).filter(Boolean).at(-1)).toBe(`${instance}:1`);
-      // A reconnect from the OpenCode cursor replays nothing: the hub-numbered event went live only, so
-      // replaying it would hand the browser a frame it already applied, and the greeting is never replayed.
-      expect(hub.replayAfter(`${instance}:1`)).toEqual([]);
+      // The hub-numbered event is a local frame: the browser applied it live, and nothing can replay it. A
+      // reconnect from the OpenCode cursor before it must refetch rather than resume past it. The greeting
+      // itself is never replayed.
+      expect(hub.replayAfter(`${instance}:1`)).toBeNull();
     } finally {
       browser.close();
       hub.stop();
@@ -561,15 +566,26 @@ describe('WebSocket resume through the global hub', () => {
       const missed = feed.publish();
       await expect.poll(() => hub.headEventId()).toBe(missed);
 
-      // It resumes from its cursor. The unnumbered frame is behind that cursor and was applied live, so
-      // only the event it missed comes back: nothing the browser already had is sent again.
+      // It resumes from its cursor. The unnumbered frame lies after that cursor and cannot be replayed, so the
+      // browser is reset to refetch. Nothing it already applied is sent again.
       const resumed = connect(runtime, cursor);
       try {
-        await expect.poll(() => eventIds(resumed).length).toBe(1);
-        expect(eventIds(resumed)).toEqual([missed]);
-        expect(readyFrames(resumed)).toEqual([expect.objectContaining({ type: 'ready', resumed: true })]);
+        await expect.poll(() => readyFrames(resumed).length).toBe(1);
+        expect(readyFrames(resumed)).toEqual([{ type: 'ready', scope: 'global', replayReset: true, headEventId: missed }]);
+        expect(eventIds(resumed)).toEqual([]);
       } finally {
         resumed.close();
+      }
+
+      // A browser whose cursor is past the unnumbered frame is replayed only what came after it.
+      const later = feed.publish();
+      const past = connect(runtime, missed);
+      try {
+        await expect.poll(() => eventIds(past).length).toBe(1);
+        expect(eventIds(past)).toEqual([later]);
+        expect(readyWithoutHead(past)).toEqual([{ type: 'ready', scope: 'global', resumed: true }]);
+      } finally {
+        past.close();
       }
     } finally {
       browser.close();
@@ -611,6 +627,183 @@ describe('WebSocket resume through the global hub', () => {
       }
     } finally {
       busy.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('replays a followed upstream\'s events under their own ids after a reconnect, once and in order', async () => {
+    const host = createFakeOpenCode();
+    const followed = createFakeOpenCode();
+    const fetchImpl = (url, options) => (url.startsWith(FOLLOWED_URL) ? followed.fetch(url, options) : host.fetch(url, options));
+    const hub = createHub(fetchImpl);
+    const runtime = createRuntime(hub, fetchImpl);
+    const stopFollowing = runtime.followUpstream({ url: FOLLOWED_URL, headers: {} });
+    const browser = connect(runtime);
+    try {
+      await expect.poll(() => host.connections).toBe(1);
+      await expect.poll(() => followed.connections).toBe(1);
+      await expect.poll(() => readyFrames(browser).length).toBe(1);
+      const first = followed.publish();
+      const second = followed.publish();
+      await expect.poll(() => eventIds(browser).length).toBe(2);
+      expect(eventIds(browser)).toEqual([first, second]);
+      browser.close();
+
+      // While the browser is away, the followed OpenCode produces one more event.
+      const missed = followed.publish();
+      await expect.poll(() => hub.headEventId()).toBe(missed);
+
+      const back = connect(runtime, second);
+      try {
+        await expect.poll(() => readyFrames(back).length).toBe(1);
+        expect(readyWithoutHead(back)).toEqual([{ type: 'ready', scope: 'global', resumed: true }]);
+        await expect.poll(() => eventIds(back).length).toBe(1);
+        // Only what came after the cursor: the two it already applied are not sent again.
+        expect(eventIds(back)).toEqual([missed]);
+        const live = followed.publish();
+        await expect.poll(() => eventIds(back).length).toBe(2);
+        expect(eventIds(back)).toEqual([missed, live]);
+      } finally {
+        back.close();
+      }
+    } finally {
+      stopFollowing();
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('replays an isolated space\'s events under their own ids after a reconnect, once', async () => {
+    const feed = createFakeOpenCode();
+    const hub = createHub(feed.fetch);
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    const spaceInstance = randomUUID();
+    const inject = (sequence) => {
+      const eventId = `${spaceInstance}:${sequence}`;
+      hub.injectEvent({
+        payload: { id: `space_evt_${sequence}`, type: 'session.execution.started', data: { sessionID: 's1' } },
+        directory: '/spaces/a1b2c3d4e5f6/repo',
+        spaceId: 'a1b2c3d4e5f6',
+        eventId,
+      });
+      return eventId;
+    };
+    try {
+      await expect.poll(() => feed.connections).toBe(1);
+      await expect.poll(() => readyFrames(browser).length).toBe(1);
+      const first = inject(1);
+      const second = inject(2);
+      await expect.poll(() => eventIds(browser).length).toBe(2);
+      expect(eventIds(browser)).toEqual([first, second]);
+      browser.close();
+
+      const missed = inject(3);
+      const back = connect(runtime, second);
+      try {
+        await expect.poll(() => readyFrames(back).length).toBe(1);
+        expect(readyWithoutHead(back)).toEqual([{ type: 'ready', scope: 'global', resumed: true }]);
+        await expect.poll(() => eventIds(back).length).toBe(1);
+        expect(eventIds(back)).toEqual([missed]);
+      } finally {
+        back.close();
+      }
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('resets a browser disconnected across a local frame, rather than replaying past it', async () => {
+    const feed = createFakeOpenCode();
+    const hub = createHub(feed.fetch);
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    try {
+      await expect.poll(() => feed.connections).toBe(1);
+      const before = feed.publish();
+      await expect.poll(() => eventIds(browser).length).toBe(1);
+      // A frame with no OpenCode id reaches the browser live, and no reconnect can replay it.
+      feed.publishUnnumbered({ type: 'message.updated', properties: { local: true } });
+      await expect.poll(() => eventIds(browser).length).toBe(2);
+      browser.close();
+
+      const head = feed.publish();
+      await expect.poll(() => hub.headEventId()).toBe(head);
+      const back = connect(runtime, before);
+      try {
+        await expect.poll(() => readyFrames(back).length).toBe(1);
+        expect(readyFrames(back)).toEqual([{ type: 'ready', scope: 'global', replayReset: true, headEventId: head }]);
+        expect(eventIds(back)).toEqual([]);
+      } finally {
+        back.close();
+      }
+
+      // The same for a browser holding the head, when the local frame came after it.
+      feed.publishUnnumbered({ type: 'message.updated', properties: { local: true } });
+      await expect.poll(() => hub.localFrames()).toBe(2);
+      const atHead = connect(runtime, head);
+      try {
+        await expect.poll(() => readyFrames(atHead).length).toBe(1);
+        expect(readyFrames(atHead)).toEqual([{ type: 'ready', scope: 'global', replayReset: true, headEventId: head }]);
+        expect(eventIds(atHead)).toEqual([]);
+      } finally {
+        atHead.close();
+      }
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('does not resume upstream from a cursor the buffer lacks once a local frame has been committed', async () => {
+    const feed = createFakeOpenCode();
+    const hub = createHub(feed.fetch);
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    try {
+      await expect.poll(() => feed.connections).toBe(1);
+      await expect.poll(() => readyFrames(browser).length).toBe(1);
+      feed.publishUnnumbered({ type: 'message.updated', properties: {} });
+      await expect.poll(() => hub.localFrames()).toBe(1);
+
+      // OpenCode could honour this cursor, but the local frame after it cannot be replayed: reset, no resume.
+      const back = connect(runtime, `${feed.instance}:0`);
+      try {
+        await expect.poll(() => readyFrames(back).length).toBe(1);
+        expect(readyFrames(back)).toEqual([{ type: 'ready', scope: 'global', replayReset: true }]);
+        // Only the shared stream is open upstream: no resume read was opened.
+        expect(feed.connections).toBe(1);
+      } finally {
+        back.close();
+      }
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('refetches a resume read that a local frame overtakes, rather than going live past it', async () => {
+    const feed = createFakeOpenCode();
+    const first = feed.publish();
+    feed.publish();
+    const hub = createHub(feed.fetch, { resumeIdleTimeoutMs: 5_000 });
+    const runtime = createRuntime(hub);
+    const back = connect(runtime, first);
+    try {
+      // The resume read is the second connection the feed sees.
+      await expect.poll(() => feed.connections).toBe(2);
+      hub.injectEvent({ payload: { type: 'session.updated', data: {} } });
+      await expect.poll(() => hub.localFrames()).toBe(1);
+      feed.publish();
+      await expect.poll(() => readyFrames(back).some((frame) => frame.replayReset === true)).toBe(true);
+    } finally {
+      back.close();
       hub.stop();
       await runtime.close();
     }

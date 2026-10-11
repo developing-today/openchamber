@@ -12,10 +12,12 @@ import { DEFAULT_RESUME_IDLE_TIMEOUT_MS } from './timeouts.js';
 const MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT = 2048;
 const MESSAGE_STREAM_GLOBAL_REPLAY_BYTES = 8 * 1024 * 1024;
 
+const SERVER_CONNECTED_PAYLOAD_TYPE = 'server.connected';
+
 // The upstream's `id:` line is the cursor OpenCode replays from (`<instance>:<sequence>`), so it is
 // the reader's `eventId`, and only such a line moves the reader's cursor. A block without one, which
 // OpenCode sends outside its feed (`server.connected`), keeps its payload id as the buffer's id.
-const parseGlobalBlock = (block) => {
+export const parseGlobalBlock = (block) => {
   const envelope = parseSseEventEnvelope(block);
   if (!envelope) return envelope;
   const { id } = parseSseBlock(block);
@@ -40,11 +42,16 @@ export function createGlobalMessageStreamHub({
   // The event subscribers that also take the events of isolated spaces.
   const spaceSubscribers = new Set();
   const statusSubscribers = new Set();
-  // The replay buffer holds only OpenCode's own `<instance>:<sequence>` events, the only ids a browser
-  // is ever sent as a cursor. Everything else is live only. Replaying a hub-numbered event would hand a
-  // reconnecting browser a frame it had already applied live.
+  // The replay buffer holds OpenCode's own `<instance>:<sequence>` events, the only ids a browser is
+  // ever sent as a cursor, and a marker for each run of local frames. A local frame (no OpenCode id:
+  // a synthetic space announcement, an event numbered by the hub) is delivered live but cannot be
+  // replayed. A cursor that sits before a marker gets `null` from `replayAfter`, which is a reset: the
+  // browser refetches rather than resume past a frame it never saw.
   const replay = [];
   let replayBytes = 0;
+  // Local frames committed since this hub was created. A cursor the buffer does not hold may only go
+  // upstream while this is zero: OpenCode cannot replay a local frame, so a resume could skip one.
+  let localFrameCount = 0;
   // The newest OpenCode id the hub has seen: the head of the feed, which a browser may adopt as its
   // cursor. Undefined until OpenCode has sent one, and after a resync that carries none.
   let latestEventId;
@@ -146,10 +153,13 @@ export function createGlobalMessageStreamHub({
           replayBytes -= replay.shift().bytes;
         }
       }
+    } else if (normalized.payload?.type !== SERVER_CONNECTED_PAYLOAD_TYPE) {
+      // A local frame. A greeting is not one: it is OpenCode's hello to one connection, not part of the
+      // state a browser holds, so it goes live without a marker.
+      localFrameCount += 1;
+      if (replay.at(-1)?.marker !== true) replay.push({ marker: true, eventId: undefined, bytes: 0 });
     }
-    // Any other frame goes live only: a greeting (a reconnecting client that replayed one would take it
-    // for a restart of the stream), a hub-numbered event, or a payload id that is not an OpenCode id.
-    // Every client that is live still receives it.
+    // Every client that is live receives every frame, local or not.
 
     for (const subscriber of Array.from(eventSubscribers)) {
       if (normalized.spaceId !== null && !spaceSubscribers.has(subscriber)) continue;
@@ -164,9 +174,13 @@ export function createGlobalMessageStreamHub({
       return [];
     }
 
+    // The head can sit outside the buffer after a resync that named it, so it is answered by the buffer's
+    // whole tail. Any other cursor the buffer does not hold cannot be answered.
     const index = replay.findIndex((entry) => entry.eventId === eventId);
-    if (eventId === latestEventId) return [];
-    return index === -1 ? null : replay.slice(index + 1);
+    if (index === -1 && eventId !== latestEventId) return null;
+    const tail = index === -1 ? replay : replay.slice(index + 1);
+    // A local frame after the cursor cannot be replayed to the browser, so it must refetch rather than resume.
+    return tail.some((entry) => entry.marker) ? null : tail;
   };
 
   const start = () => {
@@ -253,6 +267,10 @@ export function createGlobalMessageStreamHub({
   // replay, so the client goes live without one. Each callback runs once, after the read has ended.
   const openUpstreamAfter = (cursor, { onEvent, onCaughtUp, onIdle, onResync, onFailed }) => {
     const readController = new AbortController();
+    // OpenCode cannot replay a local frame, so one committed while this read runs is a gap the read cannot
+    // fill: every hand-over then refetches instead.
+    const localAtStart = localFrameCount;
+    const lostLocal = () => localFrameCount !== localAtStart;
     let done = false;
     let connectedOnce = false;
     // Whether the read is connected right now. Silence while it is down (a failed reconnect, say)
@@ -268,7 +286,7 @@ export function createGlobalMessageStreamHub({
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
         if (done) return;
-        const handover = attached ? onIdle : onFailed;
+        const handover = attached && !lostLocal() ? onIdle : onFailed;
         finish();
         handover();
       }, resumeIdleMs());
@@ -302,6 +320,11 @@ export function createGlobalMessageStreamHub({
         }
         // Pending text is committed first, so a buffer that holds this event is complete up to it.
         coalescer.flush();
+        if (lostLocal()) {
+          finish();
+          onFailed();
+          return;
+        }
         if (replayAfter(normalized.eventId) !== null) {
           finish();
           onCaughtUp(normalized);
@@ -359,8 +382,14 @@ export function createGlobalMessageStreamHub({
      * had arrived upstream: numbered, coalesced, replayed and fanned out with the host's, so
      * a client keeps one cursor for everything. `directory` is the space's, `spaceId` marks it.
      */
-    injectEvent({ payload, directory, spaceId }) {
-      coalescer.push({ envelope: { directory, spaceId }, payload });
+    injectEvent({ payload, directory, spaceId, eventId }) {
+      // The OpenCode id of a followed upstream or a space's stream is kept, so it is replayed like the host's
+      // events. An event without one (a synthetic announcement) is numbered by the hub and is a local frame.
+      coalescer.push({ envelope: { directory, spaceId, eventId }, payload });
+    },
+    /** Local frames committed since this hub was created: the buffer cannot replay across any of them. */
+    localFrames() {
+      return localFrameCount;
     },
     subscribeStatus(subscriber) {
       statusSubscribers.add(subscriber);
