@@ -13,7 +13,7 @@ import type { Model, Provider } from '@/lib/opencode/model';
 
 export type PresetId = 'cheap' | 'fast' | 'sturdy';
 
-export interface CatalogModel {
+interface CatalogModel {
   providerID: string;
   modelID: string;
   model: Model;

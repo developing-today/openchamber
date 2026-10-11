@@ -13,7 +13,7 @@ import express from 'express';
  */
 
 export const AUTONOMY_LEVELS = ["fixed", "rules", "adaptive", "predictive", "agent"];
-export const SELECTION_MODES = ["ordered", "round-robin", "weighted"];
+const SELECTION_MODES = ["ordered", "round-robin", "weighted"];
 
 const ROUTE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const TARGET_PATTERN = /^[^/#]+\/[^#]+(?:#[^#]+)?$/;

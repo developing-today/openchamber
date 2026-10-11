@@ -75,7 +75,7 @@ const waitSchema = z.object({
 
 export type WaitEstimate = z.infer<typeof waitSchema>;
 
-export interface RoutingContext {
+interface RoutingContext {
   providers: string[];
   models: Array<{ id: string; providerID: string }>;
 }

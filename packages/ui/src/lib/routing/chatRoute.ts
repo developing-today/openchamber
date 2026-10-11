@@ -1,6 +1,6 @@
 import { interpretRoute, routingContextFromProviders, type InterpretResult } from '@/lib/routing/routeRulesApi';
 
-export type ChatRouteOutcome =
+type ChatRouteOutcome =
   | { status: 'applied'; summary: string }
   | { status: 'needs-choice' }
   | { status: 'unknown'; reason: string };

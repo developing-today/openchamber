@@ -36,6 +36,7 @@
         "src/sw.ts",
         "bin/**/*.{test,spec}.{js,cjs,mjs}",
         "server/**/*.{test,spec}.{js,cjs,mjs}",
+        "server/lib/opencode/listener-service.fixture.mjs",
         "src/**/*.{test,spec}.{ts,tsx}"
       ],
       "project": [

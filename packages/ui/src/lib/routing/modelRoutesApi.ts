@@ -75,7 +75,7 @@ const modelRoutesStateSchema = z.object({
   path: z.string().optional(),
 });
 
-export type ModelRoutesState = z.infer<typeof modelRoutesStateSchema> & { available: boolean };
+type ModelRoutesState = z.infer<typeof modelRoutesStateSchema> & { available: boolean };
 
 const errorPayloadSchema = z.object({ error: z.string().min(1) });
 
@@ -150,7 +150,7 @@ const routeStatsSchema = z.object({
 export type RouteTargetStats = z.infer<typeof routeTargetStatsSchema>;
 export type RouteErrorGroup = z.infer<typeof routeErrorSchema>;
 export type HedgeAccuracy = z.infer<typeof hedgeAccuracySchema>;
-export type RouteStats = z.infer<typeof routeStatsSchema>;
+type RouteStats = z.infer<typeof routeStatsSchema>;
 
 export const fetchRouteStats = async (hours = 24): Promise<RouteStats> => {
   const response = await runtimeFetch(`/api/model-routes/stats?hours=${hours}`);

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export const defaultSocketPath = () => {
+const defaultSocketPath = () => {
   if (process.env.MCPX_SOCKET) return process.env.MCPX_SOCKET;
   const stateDir = process.env.MCPX_STATE_DIR ||
     (process.env.XDG_STATE_HOME ? path.join(process.env.XDG_STATE_HOME, 'mcpx') :
@@ -11,7 +11,7 @@ export const defaultSocketPath = () => {
   return path.join(stateDir, 'daemon.sock');
 };
 
-export const findDaemonSocket = () => {
+const findDaemonSocket = () => {
   const direct = defaultSocketPath();
   if (fs.existsSync(direct)) return direct;
 
@@ -32,7 +32,7 @@ export const findDaemonSocket = () => {
   return undefined;
 };
 
-export const callDaemon = async (reqPath, method = 'GET', body = null, headers = {}) => {
+const callDaemon = async (reqPath, method = 'GET', body = null, headers = {}) => {
   const endpoint = process.env.MCPX_DAEMON_ENDPOINT || process.env.MCPX_ENDPOINT;
   const socket = findDaemonSocket();
 
