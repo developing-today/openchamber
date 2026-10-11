@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import { createUpstreamSseReader } from './upstream-reader.js';
+import { createUpstreamSseReader, DEFAULT_UPSTREAM_STALL_TIMEOUT_MS, resolveTimeoutMs } from './upstream-reader.js';
 import { parseSseEventEnvelope, serializeMessageStreamWsEvent } from './protocol.js';
-import { parseSseBlock, SSE_RESYNC_PAYLOAD_TYPE } from './sse-cursor.js';
+import { isOpenCodeEventId, parseSseBlock, SSE_RESYNC_PAYLOAD_TYPE } from './sse-cursor.js';
 import { translateWireEvent } from './translate-v2.js';
 import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
 
@@ -10,6 +10,8 @@ import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalesce
 // long-running agent sessions where many events accumulate quickly.
 const MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT = 2048;
 const MESSAGE_STREAM_GLOBAL_REPLAY_BYTES = 8 * 1024 * 1024;
+
+const SERVER_CONNECTED_PAYLOAD_TYPE = 'server.connected';
 
 // The upstream's `id:` line is the cursor OpenCode replays from (`<instance>:<sequence>`), so it is
 // the reader's `eventId`, and only such a line moves the reader's cursor. A block without one, which
@@ -30,6 +32,7 @@ export function createGlobalMessageStreamHub({
   replayLimit = MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT,
   replayByteLimit = MESSAGE_STREAM_GLOBAL_REPLAY_BYTES,
   deltaCoalesceWindowMs = DELTA_COALESCE_WINDOW_MS,
+  resumeIdleTimeoutMs,
 }) {
   if (!Number.isSafeInteger(replayLimit) || replayLimit < 0 || !Number.isSafeInteger(replayByteLimit) || replayByteLimit < 0) {
     throw new RangeError('Replay limits must be nonnegative safe integers');
@@ -96,8 +99,14 @@ export function createGlobalMessageStreamHub({
       // OpenCode's answer to a cursor it cannot honour. It is never replayed: it tells subscribers to
       // have their clients refetch.
       resync: payload?.type === SSE_RESYNC_PAYLOAD_TYPE,
+      // OpenCode's greeting to one upstream connection, sent outside its feed (so without an OpenCode
+      // id). It goes live, not into replay.
+      connection: payload?.type === SERVER_CONNECTED_PAYLOAD_TYPE && !isOpenCodeEventId(eventId),
       serialize() {
-        serializedFrame ??= serializeMessageStreamWsEvent(payload, { directory, eventId });
+        // Only an OpenCode id goes to the browser as its cursor. A hub id or a payload id names a
+        // position in this process's buffer or nothing OpenCode can replay from, so the frame omits it.
+        const cursor = isOpenCodeEventId(eventId) ? eventId : undefined;
+        serializedFrame ??= serializeMessageStreamWsEvent(payload, { directory, eventId: cursor });
         return serializedFrame;
       },
       // Browser clients receive the raw wire payload and translate it
@@ -121,7 +130,9 @@ export function createGlobalMessageStreamHub({
       // cursor from before the resync must not replay across it.
       replay.length = 0;
       replayBytes = 0;
-    } else {
+    } else if (!normalized.connection) {
+      // A reconnecting client that replayed a greeting would take it for a restart of its stream, and
+      // refresh for nothing. The greeting still reaches every client that is live.
       const serializedFrame = normalized.serialize();
       const bytes = Buffer.byteLength(serializedFrame);
       if (bytes > replayByteLimit) {
@@ -225,18 +236,45 @@ export function createGlobalMessageStreamHub({
     buildUrlFailed = false;
   };
 
+  // The silence a catch-up read tolerates before it hands its client over to live. A healthy
+  // connection delivers its replay at once, so a read silent this long has nothing left to hand over.
+  // It is twice the stall timeout: a connection that went quiet is reconnected by its own reader
+  // first, and only silence that survives that reconnect is taken as the head of OpenCode's feed.
+  const resumeIdleMs = () => {
+    if (resumeIdleTimeoutMs !== undefined) return resumeIdleTimeoutMs;
+    const stall = resolveTimeoutMs(upstreamStallTimeoutMs, DEFAULT_UPSTREAM_STALL_TIMEOUT_MS);
+    return 2 * (stall > 0 ? stall : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS);
+  };
+
   // Reads what OpenCode holds after a cursor the replay buffer cannot answer, for one client. It
   // reads on a connection of its own, from the cursor, and ends at the first event the hub also
   // holds: the shared stream carries everything after that event, so the client takes the rest from
   // the buffer. Nothing is committed here; the shared stream commits what it reads, as it always has.
-  // `onResync` and `onFailed` both mean the client cannot be resumed and must refetch.
-  const openUpstreamAfter = (cursor, { onEvent, onCaughtUp, onResync, onFailed }) => {
+  // `onResync` and `onFailed` both mean the client cannot be resumed and must refetch. `onIdle` means
+  // the read went silent past the idle bound after connecting: nothing after the cursor is left to
+  // replay, so the client goes live without one. Each callback runs once, after the read has ended.
+  const openUpstreamAfter = (cursor, { onEvent, onCaughtUp, onIdle, onResync, onFailed }) => {
     const readController = new AbortController();
     let done = false;
     let connectedOnce = false;
+    // Whether the read is connected right now. Silence while it is down (a failed reconnect, say)
+    // proves nothing about what OpenCode holds, so only silence on a live connection is a hand-over.
+    let attached = false;
+    let idleTimer = null;
     const finish = () => {
       done = true;
+      clearTimeout(idleTimer);
       readController.abort();
+    };
+    const armIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (done) return;
+        const handover = attached ? onIdle : onFailed;
+        finish();
+        handover();
+      }, resumeIdleMs());
+      idleTimer.unref?.();
     };
     const resumeReader = createUpstreamSseReader({
       signal: readController.signal,
@@ -249,9 +287,15 @@ export function createGlobalMessageStreamHub({
       getHeaders: getOpenCodeAuthHeaders,
       onConnect() {
         connectedOnce = true;
+        attached = true;
+        armIdle();
+      },
+      onDisconnect() {
+        attached = false;
       },
       onEvent(event) {
         if (done) return;
+        armIdle();
         const normalized = normalizeEvent(event);
         if (normalized.resync) {
           finish();
@@ -275,6 +319,7 @@ export function createGlobalMessageStreamHub({
         onFailed();
       },
     });
+    armIdle();
     void resumeReader.start();
     return () => {
       if (!done) finish();

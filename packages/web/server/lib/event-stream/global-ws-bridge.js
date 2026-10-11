@@ -22,7 +22,8 @@ export function createGlobalMessageStreamWsBridge({
   heartbeatIntervalMs,
 }) {
   const clients = new Set();
-  // The id of the last upstream event each client was sent, or the cursor it connected with until then.
+  // The last OpenCode id each client was sent, or the cursor it connected with until then. Hub ids
+  // and payload ids are never kept: the browser keeps no cursor it could not replay from upstream.
   const clientLastEventIds = new Map();
   const readyClients = new Set();
   // The upstream read that resumes a client the replay buffer could not answer, while it runs.
@@ -37,12 +38,16 @@ export function createGlobalMessageStreamWsBridge({
     resumeStops.delete(socket);
   };
 
+  const rememberCursor = (socket, eventId) => {
+    if (isOpenCodeEventId(eventId)) clientLastEventIds.set(socket, eventId);
+  };
+
   const forwardEvent = (socket, event) => {
     if (!sendSerializedMessageStreamWsFrame(socket, event.serialize())) {
       removeClient(socket);
       return false;
     }
-    clientLastEventIds.set(socket, event.eventId);
+    rememberCursor(socket, event.eventId);
     return true;
   };
 
@@ -65,7 +70,7 @@ export function createGlobalMessageStreamWsBridge({
         removeClient(socket);
         return;
       }
-      clientLastEventIds.set(socket, entry.eventId);
+      rememberCursor(socket, entry.eventId);
     }
   };
 
@@ -134,6 +139,12 @@ export function createGlobalMessageStreamWsBridge({
         resumeStops.delete(socket);
         if (!clients.has(socket) || !forwardUpstreamEvent(socket, event)) return;
         replayEvents(socket, globalHub.replayAfter(event.eventId) ?? []);
+        if (clients.has(socket)) goLive();
+      },
+      // OpenCode had nothing after the cursor, so the client is current: it goes live with nothing to
+      // replay. Events committed from here on reach it through the shared stream.
+      onIdle() {
+        resumeStops.delete(socket);
         if (clients.has(socket)) goLive();
       },
       onResync: refetch,
