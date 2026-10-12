@@ -281,6 +281,41 @@ test('a runtime switch drops the prompt, so a secret never goes to the runtime t
   expect(titleText()).toBeNull();
 });
 
+test('closing the dialog hides the request without declining it', async () => {
+  const sent: string[] = [];
+  fetchSpy.mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes('/api/mcpx/')) sent.push(`${init?.method ?? 'GET'} ${url.slice(url.indexOf('/api/'))}`);
+    return Response.json({ requests: [REQUEST] });
+  });
+  await mount(<I18nProvider><McpxSecretRequestPrompt /></I18nProvider>);
+  await settle();
+  expect(titleText()).toBe('github needs secrets');
+
+  await click(document.querySelector<HTMLButtonElement>('[data-slot="dialog-close"]') ?? undefined);
+  await settle();
+  expect(titleText()).toBeNull();
+  expect(sent).toEqual(['GET /api/mcpx/secret-requests']);
+});
+
+test('a closed request comes back on the next list read while the daemon still lists it', async () => {
+  fetchSpy.mockImplementation(async (input) => {
+    if (!String(input).endsWith('/api/mcpx/secret-requests')) return new Response(null, { status: 404 });
+    return Response.json({ requests: [REQUEST] });
+  });
+  await mount(<I18nProvider><McpxSecretRequestPrompt /></I18nProvider>);
+  await settle();
+  await click(document.querySelector<HTMLButtonElement>('[data-slot="dialog-close"]') ?? undefined);
+  expect(titleText()).toBeNull();
+
+  // A runtime switch starts a fresh list read at once, so the request is listed again.
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent('openchamber:runtime-endpoint-changed', { detail: {} }));
+  });
+  await settle();
+  expect(titleText()).toBe('github needs secrets');
+});
+
 test('in enterprise mode the prompt stays away and never asks the daemon for requests', async () => {
   await setEnterpriseMode(true);
   const callsBefore = fetchSpy.mock.calls.length;
@@ -293,6 +328,29 @@ test('in enterprise mode the prompt stays away and never asks the daemon for req
   } finally {
     await setEnterpriseMode(false);
   }
+});
+
+test('closing each pending request in turn hides them all until the next list read', async () => {
+  const OTHER: McpxSecretRequest = { ...REQUEST, id: 'req_43', server: 'linear', secrets: ['LINEAR_KEY'] };
+  fetchSpy.mockImplementation(async (input) => {
+    if (!String(input).endsWith('/api/mcpx/secret-requests')) return new Response(null, { status: 404 });
+    return Response.json({ requests: [REQUEST, OTHER] });
+  });
+  await mount(<I18nProvider><McpxSecretRequestPrompt /></I18nProvider>);
+  await settle();
+  expect(titleText()).toBe('github needs secrets');
+
+  await click(document.querySelector<HTMLButtonElement>('[data-slot="dialog-close"]') ?? undefined);
+  expect(titleText()).toBe('linear needs secrets');
+  await click(document.querySelector<HTMLButtonElement>('[data-slot="dialog-close"]') ?? undefined);
+  expect(titleText()).toBeNull();
+
+  // A runtime switch starts a fresh list read at once, so both requests are listed again.
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent('openchamber:runtime-endpoint-changed', { detail: {} }));
+  });
+  await settle();
+  expect(titleText()).toBe('github needs secrets');
 });
 
 test('turning enterprise mode on closes a prompt that is already open', async () => {

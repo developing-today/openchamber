@@ -99,6 +99,11 @@ export const McpxSecretRequestDialog = ({
   );
 };
 
+// The requests closed from one list. A close hides them only while that list is
+// the current one: the next list read replaces it, so a request the daemon still
+// lists comes back.
+type ClosedRequests = { list: McpxSecretRequest[]; requestIds: ReadonlySet<string> };
+
 /**
  * App-level prompt for the secrets an mcpx server needs. It shows the oldest pending
  * request; the next one follows once this one is saved, declined or closed. Enterprise
@@ -113,13 +118,17 @@ export const McpxSecretRequestPrompt = () => {
 const McpxSecretRequestQueue = () => {
   const { t } = useI18n();
   const { requests, refresh } = useMcpxSecretRequests();
-  const [dismissedIds, setDismissedIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [closed, setClosed] = React.useState<ClosedRequests | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [failure, setFailure] = React.useState<{ requestId: string; message: string } | null>(null);
-  const request = requests.find((candidate) => !dismissedIds.has(candidate.id)) ?? null;
+  const isClosed = (candidate: McpxSecretRequest) => closed?.list === requests && closed.requestIds.has(candidate.id);
+  const request = requests.find((candidate) => !isClosed(candidate)) ?? null;
 
-  const dismiss = (requestId: string) => {
-    setDismissedIds((current) => new Set(current).add(requestId));
+  const close = (target: McpxSecretRequest) => {
+    setClosed((current) => {
+      const closedHere = current?.list === requests ? current.requestIds : new Set<string>();
+      return { list: requests, requestIds: new Set(closedHere).add(target.id) };
+    });
   };
 
   const save = async (target: McpxSecretRequest, entries: McpxSecretEntry[]) => {
@@ -163,7 +172,7 @@ const McpxSecretRequestQueue = () => {
       error={failure?.requestId === request.id ? failure.message : null}
       onSubmit={(entries) => { void save(request, entries); }}
       onDecline={() => { void decline(request); }}
-      onDismiss={() => dismiss(request.id)}
+      onDismiss={() => close(request)}
     />
   );
 };
