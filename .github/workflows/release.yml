@@ -76,7 +76,7 @@ jobs:
   publish-npm:
     needs: create-release
     if: ${{ github.event.inputs.finish_published_release != 'true' }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -136,7 +136,7 @@ jobs:
           - target: aarch64-apple-darwin
             arch: arm64
             platform: darwin-aarch64
-            runner: blacksmith-6vcpu-macos-26
+            runner: macos-26
           - target: x86_64-apple-darwin
             arch: x64
             platform: darwin-x86_64
@@ -378,12 +378,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: blacksmith-4vcpu-ubuntu-2404
+          - runner: ubuntu-24.04
             arch: x64
             host_arch: x86_64
             artifact_arch: x86_64
             manifest: latest-linux.yml
-          - runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - runner: ubuntu-24.04-arm
             arch: arm64
             host_arch: aarch64
             artifact_arch: arm64
