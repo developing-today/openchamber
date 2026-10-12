@@ -395,6 +395,11 @@ const isSessionMessageApiPath = (pathname: string) => /^\/api\/session\/[^/]+\/p
 const isApiPath = (pathname: string) => pathname === '/api' || pathname.startsWith('/api/');
 const isLocalRuntimePath = (pathname: string) => isApiPath(pathname) || pathname === '/auth/session';
 
+// The MCP secret prompt's routes, answered by the extension host with the status
+// and body the web server would send (`bridge-mcpx-runtime.ts`).
+type McpxSecretOutcome = { status: number; body: unknown };
+const mcpxSecretResponse = ({ status, body }: McpxSecretOutcome): Response => jsonResponse(body, status);
+
 const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: RequestInit | undefined, method: string) => {
   const pathname = url.pathname;
   const normalizedPathname = pathname !== '/' ? pathname.replace(/\/+$/, '') : pathname;
@@ -1161,6 +1166,31 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
       const message = error instanceof Error ? error.message : String(error);
       return new Response(JSON.stringify({ error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     }
+  }
+
+  if (pathname === '/api/mcpx/secret-requests' && method === 'GET') {
+    return mcpxSecretResponse(await sendBridgeMessage<McpxSecretOutcome>('api:mcpx/secret-requests'));
+  }
+
+  if (pathname === '/api/mcpx/secrets' && method === 'GET') {
+    return mcpxSecretResponse(await sendBridgeMessage<McpxSecretOutcome>('api:mcpx/secrets'));
+  }
+
+  const mcpxSecretMatch = pathname.match(/^\/api\/mcpx\/secrets\/([^/]+)$/);
+  if (mcpxSecretMatch && method === 'PUT') {
+    const body = await extractJsonBody(input, init, method).catch(() => null);
+    if (!body) return jsonResponse({ error: 'Send the secret as a JSON object with a value' }, 400);
+    return mcpxSecretResponse(await sendBridgeMessage<McpxSecretOutcome>('api:mcpx/secrets:store', {
+      name: decodeURIComponent(mcpxSecretMatch[1]),
+      value: body.value,
+    }));
+  }
+
+  const mcpxRequestMatch = pathname.match(/^\/api\/mcpx\/secret-requests\/([^/]+)$/);
+  if (mcpxRequestMatch && method === 'DELETE') {
+    return mcpxSecretResponse(await sendBridgeMessage<McpxSecretOutcome>('api:mcpx/secret-requests:decline', {
+      requestId: decodeURIComponent(mcpxRequestMatch[1]),
+    }));
   }
 
   if (pathname.startsWith('/api/openchamber/update-check')) {

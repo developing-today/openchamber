@@ -13,6 +13,7 @@ import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { McpxSecretRequestPrompt } from '@/components/mcp/McpxSecretRequestPrompt';
 import { SpaceAccessDialog } from '@/components/session/spaces/SpaceAccessDialog';
 import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
 import { SpaceApplyDialog } from '@/components/session/spaces/SpaceApplyDialog';
@@ -1427,6 +1428,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
               }} />
               <AppLinkConfirmDialog />
               <SharedTrustConfirmDialog />
+              <McpxSecretRequestPrompt />
               {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
               <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
               {isInitialized ? <ConfigUpdateOverlay /> : null}

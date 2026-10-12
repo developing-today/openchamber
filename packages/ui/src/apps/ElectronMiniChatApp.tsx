@@ -7,6 +7,8 @@ import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { McpxSecretRequestPrompt } from '@/components/mcp/McpxSecretRequestPrompt';
+import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
@@ -341,6 +343,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
   useRoutingSync();
+  useEnterprisePolicySync();
   useRootScrollLock();
   // The header session switcher lists the global session list; this window
   // is its own app root, so it loads that list itself.
@@ -355,6 +358,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
               <ElectronMiniChatContent config={config} />
               <AppLinkConfirmDialog />
               <SharedTrustConfirmDialog />
+              <McpxSecretRequestPrompt />
               <Toaster />
             </div>
           </TooltipProvider>
