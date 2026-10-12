@@ -2,6 +2,12 @@ name: Mobile Smoke Build
 
 on:
   workflow_dispatch:
+    inputs:
+      build_ios:
+        description: 'Also build the iOS simulator app on a macOS runner. Off by default: Android is the target.'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: mobile-smoke-${{ github.ref }}
@@ -46,6 +52,7 @@ jobs:
 
   ios-simulator:
     name: iOS simulator app
+    if: ${{ inputs.build_ios }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

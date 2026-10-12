@@ -561,6 +561,9 @@ jobs:
       release_tag: v${{ needs.create-release.outputs.version }}
       upload_github_release: true
       build_android: ${{ github.event.inputs.finish_published_release != 'true' }}
+      # iOS is off unless a run explicitly asks for the "finish" path. A plain
+      # tag push or release therefore ships Android only.
+      build_ios: ${{ github.event.inputs.finish_published_release == 'true' }}
     secrets: inherit
 
   finalize-release:
