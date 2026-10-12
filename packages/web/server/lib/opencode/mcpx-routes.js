@@ -1,19 +1,14 @@
-import http from 'node:http';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-
 import express from 'express';
-import { z } from 'zod';
 
-// The only shape a secret name takes: an environment variable name.
-const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
-const SECRET_REQUEST_ID = /^[A-Za-z0-9._-]{1,128}$/;
-const SECRET_VALUE_MAX_LENGTH = 16 * 1024;
-
-const secretValueBody = z.object({
-  value: z.string().min(1).max(SECRET_VALUE_MAX_LENGTH),
-});
+import { isEnterpriseMode } from '../enterprise-mode.js';
+import { callDaemon } from './mcpx-daemon.js';
+import {
+  MCPX_SECRETS_ENTERPRISE_REFUSAL,
+  declineSecretRequest,
+  listSecretRequests,
+  listSecrets,
+  storeSecret,
+} from './mcpx-secrets.js';
 
 // A body that fails to parse can carry the secret inside the error object, and
 // the framework logs the errors it is handed. These answers stay here, so the
@@ -30,86 +25,10 @@ const secretResponse = (_req, res, next) => {
   next();
 };
 
-const defaultSocketPath = () => {
-  if (process.env.MCPX_SOCKET) return process.env.MCPX_SOCKET;
-  const stateDir = process.env.MCPX_STATE_DIR ||
-    (process.env.XDG_STATE_HOME ? path.join(process.env.XDG_STATE_HOME, 'mcpx') :
-    path.join(os.homedir(), '.local', 'state', 'mcpx'));
-  return path.join(stateDir, 'daemon.sock');
-};
-
-const findDaemonSocket = () => {
-  const direct = defaultSocketPath();
-  if (fs.existsSync(direct)) return direct;
-
-  const stateDir = process.env.MCPX_STATE_DIR ||
-    (process.env.XDG_STATE_HOME ? path.join(process.env.XDG_STATE_HOME, 'mcpx') :
-    path.join(os.homedir(), '.local', 'state', 'mcpx'));
-  if (fs.existsSync(stateDir)) {
-    try {
-      const files = fs.readdirSync(stateDir).filter((f) => f.startsWith('daemon-') && f.endsWith('.json'));
-      for (const file of files) {
-        try {
-          const info = JSON.parse(fs.readFileSync(path.join(stateDir, file), 'utf-8'));
-          if (info.socket && fs.existsSync(info.socket)) return info.socket;
-        } catch {}
-      }
-    } catch {}
-  }
-  return undefined;
-};
-
-const callDaemon = async (reqPath, method = 'GET', body = null, headers = {}) => {
-  const endpoint = process.env.MCPX_DAEMON_ENDPOINT || process.env.MCPX_ENDPOINT;
-  const socket = findDaemonSocket();
-
-  if (endpoint && endpoint.startsWith('http')) {
-    const res = await fetch(`${endpoint.replace(/\/+$/, '')}${reqPath}`, {
-      method,
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) throw new Error(`mcpx daemon HTTP ${res.status}: ${await res.text()}`);
-    return await res.json();
-  }
-
-  if (socket) {
-    return new Promise((resolve, reject) => {
-      const opt = {
-        socketPath: socket,
-        path: reqPath,
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-      };
-
-      const req = http.request(opt, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 400) {
-            return reject(new Error(`mcpx daemon HTTP ${res.statusCode}: ${data}`));
-          }
-          try {
-            resolve(JSON.parse(data));
-          } catch {
-            resolve(data);
-          }
-        });
-      });
-
-      req.on('error', reject);
-      if (body) {
-        req.write(JSON.stringify(body));
-      }
-      req.end();
-    });
-  }
-
-  throw new Error('No mcpx daemon reachable');
-};
+// Enterprise mode keeps secrets out of OpenChamber. This refuses before the body is read.
+const refuseSecretsInEnterpriseMode = (_req, res, next) => (
+  isEnterpriseMode() ? res.status(403).json(MCPX_SECRETS_ENTERPRISE_REFUSAL) : next()
+);
 
 export const registerMcpxRoutes = (app) => {
   // 1. GET /api/mcpx/status
@@ -167,48 +86,23 @@ export const registerMcpxRoutes = (app) => {
 
   // Secret prompts. The daemon keeps the values in memory; this server only
   // relays them, so no response or log here may carry a value.
-  app.get('/api/mcpx/secret-requests', secretResponse, async (_req, res) => {
-    try {
-      res.json(await callDaemon('/v1/secret-requests'));
-    } catch (err) {
-      res.status(502).json({ error: err.message || 'mcpx daemon unreachable' });
-    }
+  app.get('/api/mcpx/secret-requests', secretResponse, refuseSecretsInEnterpriseMode, async (_req, res) => {
+    const outcome = await listSecretRequests();
+    res.status(outcome.status).json(outcome.body);
   });
 
-  app.get('/api/mcpx/secrets', secretResponse, async (_req, res) => {
-    try {
-      res.json(await callDaemon('/v1/secrets'));
-    } catch (err) {
-      res.status(502).json({ error: err.message || 'mcpx daemon unreachable' });
-    }
+  app.get('/api/mcpx/secrets', secretResponse, refuseSecretsInEnterpriseMode, async (_req, res) => {
+    const outcome = await listSecrets();
+    res.status(outcome.status).json(outcome.body);
   });
 
-  app.put('/api/mcpx/secrets/:name', secretResponse, readSecretBody, async (req, res) => {
-    if (!SECRET_NAME.test(req.params.name)) {
-      return res.status(400).json({ error: 'A secret name is an environment variable name, such as GITHUB_TOKEN' });
-    }
-    const body = secretValueBody.safeParse(req.body);
-    if (!body.success) {
-      return res.status(400).json({ error: `A secret value must be a non-empty string of at most ${SECRET_VALUE_MAX_LENGTH} characters` });
-    }
-    try {
-      const stored = await callDaemon(`/v1/secrets/${encodeURIComponent(req.params.name)}`, 'PUT', { value: body.data.value });
-      // Only these fields leave, so a daemon reply that echoed the value cannot pass it on.
-      res.json({ name: stored.name, set: stored.set, source: stored.source });
-    } catch {
-      // The daemon's error text is not forwarded, since it could repeat the value.
-      res.status(502).json({ error: 'mcpx daemon did not store the secret' });
-    }
+  app.put('/api/mcpx/secrets/:name', secretResponse, refuseSecretsInEnterpriseMode, readSecretBody, async (req, res) => {
+    const outcome = await storeSecret(req.params.name, req.body?.value);
+    res.status(outcome.status).json(outcome.body);
   });
 
-  app.delete('/api/mcpx/secret-requests/:id', secretResponse, async (req, res) => {
-    if (!SECRET_REQUEST_ID.test(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid secret request id' });
-    }
-    try {
-      res.json(await callDaemon(`/v1/secret-requests/${encodeURIComponent(req.params.id)}`, 'DELETE'));
-    } catch (err) {
-      res.status(502).json({ error: err.message || 'mcpx daemon unreachable' });
-    }
+  app.delete('/api/mcpx/secret-requests/:id', secretResponse, refuseSecretsInEnterpriseMode, async (req, res) => {
+    const outcome = await declineSecretRequest(req.params.id);
+    res.status(outcome.status).json(outcome.body);
   });
 };

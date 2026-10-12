@@ -35,6 +35,10 @@ import { z } from 'zod';
  *   policy is the real lock; this closes the way in through the app.
  *   Signing in to a remote MCP server from the OpenCode config uses the same
  *   routes and stays allowed.
+ * - MCP server secrets (the prompt for the tokens an mcpx server waits on) are
+ *   refused: the secret routes answer 403 (`opencode/mcpx-routes.js`), the VS
+ *   Code host refuses them too (`packages/vscode/src/bridge-mcpx-runtime.ts`),
+ *   and the prompt stays off, without polling, in the UI.
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: their provider sees plain text (`tunnels`).

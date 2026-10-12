@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { useMcpxSecretRequests } from '@/hooks/useMcpxSecretRequests';
 import { useI18n } from '@/lib/i18n';
 import { declineSecretRequest, putMcpxSecret, type McpxSecretRequest } from '@/lib/mcpxSecrets';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 
 export type McpxSecretEntry = { name: string; value: string };
 
@@ -100,9 +101,16 @@ export const McpxSecretRequestDialog = ({
 
 /**
  * App-level prompt for the secrets an mcpx server needs. It shows the oldest pending
- * request; the next one follows once this one is saved, declined or closed.
+ * request; the next one follows once this one is saved, declined or closed. Enterprise
+ * mode refuses secrets, so the prompt stays away and never polls the daemon.
  */
 export const McpxSecretRequestPrompt = () => {
+  const enterpriseMode = useEnterpriseMode();
+  if (enterpriseMode) return null;
+  return <McpxSecretRequestQueue />;
+};
+
+const McpxSecretRequestQueue = () => {
   const { t } = useI18n();
   const { requests, refresh } = useMcpxSecretRequests();
   const [dismissedIds, setDismissedIds] = React.useState<ReadonlySet<string>>(() => new Set());

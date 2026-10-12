@@ -23,6 +23,11 @@ const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { McpxSecretRequestDialog, McpxSecretRequestPrompt } = await import('./McpxSecretRequestPrompt');
+const { useEnterprisePolicyStore } = await import('@/stores/useEnterprisePolicyStore');
+
+const setEnterpriseMode = async (enterpriseMode: boolean) => {
+  await act(async () => { useEnterprisePolicyStore.setState({ enterpriseMode }); });
+};
 
 const REQUEST: McpxSecretRequest = {
   id: 'req_42',
@@ -274,4 +279,33 @@ test('a runtime switch drops the prompt, so a secret never goes to the runtime t
   });
   await settle();
   expect(titleText()).toBeNull();
+});
+
+test('in enterprise mode the prompt stays away and never asks the daemon for requests', async () => {
+  await setEnterpriseMode(true);
+  const callsBefore = fetchSpy.mock.calls.length;
+  try {
+    await mount(<I18nProvider><McpxSecretRequestPrompt /></I18nProvider>);
+    await settle();
+    expect(titleText()).toBeNull();
+    const mcpxCalls = fetchSpy.mock.calls.slice(callsBefore).filter(([input]) => String(input).includes('/api/mcpx/'));
+    expect(mcpxCalls).toEqual([]);
+  } finally {
+    await setEnterpriseMode(false);
+  }
+});
+
+test('turning enterprise mode on closes a prompt that is already open', async () => {
+  fetchSpy.mockImplementation(async () => Response.json({ requests: [REQUEST] }));
+  await mount(<I18nProvider><McpxSecretRequestPrompt /></I18nProvider>);
+  await settle();
+  expect(titleText()).toBe('github needs secrets');
+
+  try {
+    await setEnterpriseMode(true);
+    await settle();
+    expect(titleText()).toBeNull();
+  } finally {
+    await setEnterpriseMode(false);
+  }
 });

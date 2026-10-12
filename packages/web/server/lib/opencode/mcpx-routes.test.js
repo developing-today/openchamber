@@ -2,7 +2,7 @@ import http from 'node:http';
 import { format } from 'node:util';
 
 import express from 'express';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
 import { registerMcpxRoutes } from './mcpx-routes.js';
 
@@ -249,5 +249,57 @@ describe('MCPX secret routes against a fake daemon', () => {
     } finally {
       process.env.MCPX_DAEMON_ENDPOINT = daemon.url;
     }
+  });
+
+  describe('in enterprise mode', () => {
+    let previousMode;
+
+    beforeEach(() => {
+      previousMode = process.env.OPENCHAMBER_ENTERPRISE_MODE;
+      process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    });
+
+    afterEach(() => {
+      if (previousMode === undefined) delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+      else process.env.OPENCHAMBER_ENTERPRISE_MODE = previousMode;
+    });
+
+    it('refuses every secret route with 403 and never reaches the daemon', async () => {
+      const responses = [
+        await fetch(`${baseUrl}/api/mcpx/secret-requests`),
+        await fetch(`${baseUrl}/api/mcpx/secrets`),
+        await putSecret('GITHUB_TOKEN', SECRET),
+        await fetch(`${baseUrl}/api/mcpx/secret-requests/req_42`, { method: 'DELETE' }),
+      ];
+      for (const response of responses) {
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+          error: 'MCP server secrets are not available in enterprise mode.',
+          code: 'enterprise_mode',
+        });
+      }
+      expect(daemon.state.calls).toEqual([]);
+    });
+
+    it('refuses a secret before its body is read, so an oversized value is never parsed', async () => {
+      const response = await fetch(`${baseUrl}/api/mcpx/secrets/GITHUB_TOKEN`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: `${SECRET}${'x'.repeat(70 * 1024)}` }),
+      });
+      expect(response.status).toBe(403);
+      expect(await response.text()).not.toContain(SECRET);
+      expect(parseErrors).toEqual([]);
+      expect(daemon.state.calls).toEqual([]);
+    });
+
+    it('reads the mode at each request, so the routes answer again once it is off', async () => {
+      expect((await fetch(`${baseUrl}/api/mcpx/secret-requests`)).status).toBe(403);
+
+      process.env.OPENCHAMBER_ENTERPRISE_MODE = '';
+      const response = await fetch(`${baseUrl}/api/mcpx/secret-requests`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ requests: [PENDING_REQUEST] });
+    });
   });
 });
