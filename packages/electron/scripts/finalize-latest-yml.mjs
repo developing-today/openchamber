@@ -78,9 +78,11 @@ const output = {};
 // are already on the release and stay untouched.
 const macOnly = process.env.MAC_ONLY === '1';
 
-if (!macOnly) {
-  const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest.yml');
-  const winArm64 = await read('latest-yml-aarch64-pc-windows-msvc', 'latest.yml');
+// Windows is manual-only, so its manifests are optional. Missing both means the
+// Windows build was not chosen; a partial pair is still an error.
+const winX64 = macOnly ? null : await read('latest-yml-x86_64-pc-windows-msvc', 'latest.yml');
+const winArm64 = macOnly ? null : await read('latest-yml-aarch64-pc-windows-msvc', 'latest.yml');
+if (winX64 || winArm64) {
   if (!winX64 || !winArm64) {
     throw new Error('Both x64 and arm64 Windows update manifests are required');
   }

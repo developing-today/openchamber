@@ -20,6 +20,16 @@ on:
         required: false
         default: false
         type: boolean
+      build_macos:
+        description: 'Build the macOS desktop app. Off by default; a tag push never builds macOS unless this is chosen.'
+        required: false
+        default: false
+        type: boolean
+      build_windows:
+        description: 'Build the Windows desktop app. Off by default; a tag push never builds Windows unless this is chosen.'
+        required: false
+        default: false
+        type: boolean
 
 env:
   CARGO_INCREMENTAL: 0
@@ -129,6 +139,8 @@ jobs:
 
   build-desktop-electron-macos:
     needs: create-release
+    # Manual only: chosen with build_macos, or by the finish path that adds macOS to a published release.
+    if: ${{ github.event.inputs.build_macos == 'true' || github.event.inputs.finish_published_release == 'true' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -279,7 +291,8 @@ jobs:
 
   build-desktop-electron-windows:
     needs: create-release
-    if: ${{ github.event.inputs.finish_published_release != 'true' }}
+    # Manual only: chosen with build_windows.
+    if: ${{ github.event.inputs.build_windows == 'true' && github.event.inputs.finish_published_release != 'true' }}
     # windows-latest currently resolves to a runner with Visual Studio 18,
     # which this electron/node-gyp stack does not detect correctly.
     runs-on: windows-2022
@@ -517,7 +530,8 @@ jobs:
 
   combine-electron-manifests:
     needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows]
-    if: ${{ !cancelled() && needs.create-release.result == 'success' }}
+    # A skipped Mac or Windows build is fine; a failed one still stops the manifest step.
+    if: ${{ !cancelled() && needs.create-release.result == 'success' && needs.build-desktop-electron-macos.result != 'failure' && needs.build-desktop-electron-windows.result != 'failure' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
