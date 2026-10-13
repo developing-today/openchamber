@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 
+// The developing-today fork publishes its own GitHub releases with the same version
+// numbers as upstream, so desktop updates come from the fork's releases, not upstream's.
 export const PRODUCTION_UPDATER_FEED = Object.freeze({
   provider: 'github',
-  owner: 'openchamber',
+  owner: 'developing-today',
   repo: 'openchamber',
 });
 
