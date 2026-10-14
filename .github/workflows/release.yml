@@ -520,6 +520,7 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
+          draft: ${{ github.event.inputs.finish_published_release != 'true' }}
           files: |
             artifacts/x64/OpenChamber-${{ needs.create-release.outputs.version }}-linux-x86_64.AppImage
             artifacts/x64/latest-linux.yml
@@ -558,6 +559,7 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
+          draft: ${{ github.event.inputs.finish_published_release != 'true' }}
           files: |
             ${{ runner.temp }}/latest-mac.yml
             ${{ runner.temp }}/latest.yml
