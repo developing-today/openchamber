@@ -607,11 +607,13 @@ jobs:
             `OpenChamber-${version}-linux-arm64.AppImage`,
             'latest-linux-arm64.yml',
           ];
-          const response = await fetch(`https://api.github.com/repos/${repo}/releases/tags/v${version}`, {
+          // The tag lookup skips drafts, and this release is still a draft until the publish step.
+          const response = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`, {
             headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
           });
           if (!response.ok) throw new Error(`Failed to inspect release assets: ${response.status} ${await response.text()}`);
-          const release = await response.json();
+          const release = (await response.json()).find((candidate) => candidate.tag_name === `v${version}`);
+          if (!release) throw new Error(`No release found for v${version}`);
           for (const name of expected) {
             const matches = release.assets.filter((asset) => asset.name === name);
             if (matches.length !== 1) throw new Error(`Expected exactly one ${name} release asset, found ${matches.length}`);
