@@ -52,6 +52,16 @@ if (process.platform === 'linux') {
       }
     }
   }
+  // electron-builder also collects the real package directories in bun's store.
+  if (fs.existsSync(bunStore)) {
+    for (const name of fs.readdirSync(bunStore)) {
+      const match = /^@node-llama-cpp\+linux-([^@]+)@/.exec(name);
+      if (match && !match[1].startsWith(targetArchitecture.node)) {
+        console.log(`[electron] pruning other-architecture store entry ${name}`);
+        fs.rmSync(path.join(bunStore, name), { recursive: true, force: true });
+      }
+    }
+  }
 }
 
 if (process.platform === 'linux' && !builderArgs.some((argument) => (
