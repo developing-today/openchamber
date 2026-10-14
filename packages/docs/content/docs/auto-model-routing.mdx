@@ -105,6 +105,17 @@ The fallback model answers when:
 
 Choosing any real model in the picker takes the session out of Auto. Pick **Auto** again to come back. You can also make Auto the default for new sessions in **Settings → Sessions**.
 
+## Plans, usage and reviews
+
+**Settings → Routing → Plans and usage** keeps what the review cannot measure: your subscriptions and their quota windows (name, unit, limit, how long the window is, how it resets), fees and expiry dates, the date each plan was last checked and where from, a cost tier for each model (`plan`, `common`, `medium`, `high`, with the plans that cover it), what each pool is for, and notes about how usage has felt. Notes are kept as you wrote them and never rewritten. Use them for things like "ran out of Claude too fast" or "I always have GPT left at month end"; the review weighs them against the usage history.
+
+Two buttons start a new chat with a command ready to send:
+
+- **Review routing** runs `/routing-review`. It reads the route history (requests, tokens, cost, sessions, and which pools used or skipped each provider and model), the plan records and the notes, and proposes changes. It changes nothing until you approve a specific change.
+- **Update plans** runs `/plan-update`. It finds plans that are missing details or were last checked more than a month ago, asks for the few fields it needs, and records your answers.
+
+The records live in OpenCode's data directory as `plans.json` and `plan-notes.jsonl`, and nothing in them expires. The history is kept too; `route_usage` can read any window of it.
+
 ## Where it works
 
 Auto runs in the OpenChamber server: the desktop app, the web app, and your phone connected to either. VS Code doesn't offer Auto, because the extension talks to OpenCode directly.
