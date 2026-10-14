@@ -30,9 +30,18 @@ const bunBinary = bunBinaryCandidates.find((candidate) => {
 // only carries native code it can load (verify-linux-appimage checks this).
 if (process.platform === 'linux') {
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  // bun's isolated layout keeps the platform packages as links beside node-llama-cpp
+  // under node_modules/.bun, so look there as well as in the hoisted scope.
+  const bunStore = path.join(repoRoot, 'node_modules/.bun');
+  const bunLlamaScopes = fs.existsSync(bunStore)
+    ? fs.readdirSync(bunStore)
+      .filter((name) => name.startsWith('node-llama-cpp@'))
+      .map((name) => path.join(bunStore, name, 'node_modules/@node-llama-cpp'))
+    : [];
   const llamaScopes = [
     path.join(repoRoot, 'node_modules/@node-llama-cpp'),
     path.join(repoRoot, 'packages/electron/node_modules/@node-llama-cpp'),
+    ...bunLlamaScopes,
   ];
   for (const scope of llamaScopes) {
     if (!fs.existsSync(scope)) continue;
