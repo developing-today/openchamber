@@ -23,7 +23,7 @@ import {
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
-const GITHUB_URL = 'https://github.com/openchamber/openchamber';
+const GITHUB_URL = 'https://github.com/developing-today/openchamber';
 const DISCORD_URL = 'https://discord.gg/ZYRSdnwwKA';
 const X_URL = 'https://x.com/openchamber_dev';
 

@@ -54,205 +54,88 @@ describe('checkForUpdates', () => {
     delete process.env.OPENCHAMBER_UPDATE_API_URL;
   });
 
-  // --- Scenario: API says update available, npm confirms ---
-
-  it('returns available=true when both API and npm confirm a newer version', async () => {
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({
-          latestVersion: '1.10.0',
-          updateAvailable: true,
-          releaseNotes: '## [1.10.0] - 2026-05-01\n\n- Great new feature',
-        }),
-      })
-      .when('registry.npmjs.org', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.10.0' },
-        }),
-      })
-      .when('raw.githubusercontent.com', {
-        ok: true,
-        text: async () => '## [1.10.0] - 2026-05-01\n\n- Great new feature',
-      });
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(true);
-    expect(result.version).toBe('1.10.0');
-    expect(result.currentVersion).toBe('1.9.10');
+  const release = (tag, extra = {}) => ({
+    tag_name: tag,
+    draft: false,
+    prerelease: false,
+    assets: [],
+    body: `notes for ${tag}`,
+    html_url: `https://github.com/developing-today/openchamber/releases/tag/${tag}`,
+    ...extra,
   });
+  const forkReleases = (...releases) => ({ ok: true, json: async () => releases });
+  const upstreamCalls = () => fetchMock.mock.calls.filter(([url]) => /api\.openchamber\.dev|registry\.npmjs\.org|raw\.githubusercontent\.com\/openchamber/.test(String(url)));
 
-  // --- Scenario: cross-verification uses the configured npm registry ---
+  it('reports the highest published fork release as the update, for every app type', async () => {
+    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(release('v1.9.10'), release('v1.10.0')));
 
-  it('cross-verifies against the configured npm registry, not registry.npmjs.org', async () => {
-    const previousLower = process.env.npm_config_registry;
-    const previous = process.env.NPM_CONFIG_REGISTRY;
-    process.env.npm_config_registry = '';
-    process.env.NPM_CONFIG_REGISTRY = 'https://mirror.example.com/npm';
-    // Only the mirror is mocked. A stray call to registry.npmjs.org would reject,
-    // drop npm cross-verification, and flip available to false.
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({
-          latestVersion: '1.10.0',
-          updateAvailable: true,
-          releaseNotes: '## [1.10.0]\n\n- New',
-        }),
-      })
-      .when('mirror.example.com/npm/@openchamber%2Fweb', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.10.0' },
-        }),
-      })
-      .when('raw.githubusercontent.com', {
-        ok: true,
-        text: async () => '## [1.10.0]\n\n- New',
-      });
-
-    try {
-      const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
+    for (const appType of ['web', 'desktop-electron', 'vscode']) {
+      const result = await checkForUpdates({ currentVersion: '1.9.10', appType });
       expect(result.available).toBe(true);
       expect(result.version).toBe('1.10.0');
-      expect(
-        fetchMock.mock.calls.some(([url]) => String(url) === 'https://mirror.example.com/npm/@openchamber%2Fweb'),
-      ).toBe(true);
-    } finally {
-      if (previousLower === undefined) delete process.env.npm_config_registry;
-      else process.env.npm_config_registry = previousLower;
-      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
-      else process.env.NPM_CONFIG_REGISTRY = previous;
+      expect(result.releaseUrl).toBe('https://github.com/developing-today/openchamber/releases/tag/v1.10.0');
+      expect(result.manualUpdate).toBe(true);
+      expect(result.updateCommand).toContain('https://github.com/developing-today/openchamber/releases/tag/v1.10.0');
     }
+    expect(upstreamCalls()).toHaveLength(0);
   });
 
-  it('cross-verifies scoped metadata without exposing registry credentials', async () => {
-    const previousLower = process.env.npm_config_registry;
-    const previous = process.env.NPM_CONFIG_REGISTRY;
-    process.env.npm_config_registry = '';
-    process.env.NPM_CONFIG_REGISTRY = 'https://test-user:test-password@mirror.example.com/npm/';
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({ latestVersion: '1.10.0', updateAvailable: true }),
-      })
-      .when('mirror.example.com/npm/@openchamber%2Fweb', {
-        ok: true,
-        json: async () => ({ 'dist-tags': { latest: '1.10.0' } }),
-      });
+  it('ignores drafts and prereleases when picking the latest release', async () => {
+    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(
+      release('v1.11.0', { draft: true }),
+      release('v1.10.1-rc.1', { prerelease: true }),
+      release('v1.10.0'),
+    ));
 
-    try {
-      const result = await checkForUpdates({ currentVersion: '1.9.10' });
-      const npmCall = fetchMock.mock.calls.find(([url]) => String(url).includes('mirror.example.com'));
-
-      expect(result.available).toBe(true);
-      expect(npmCall[0]).toBe('https://mirror.example.com/npm/@openchamber%2Fweb');
-      expect(npmCall[0]).not.toContain('test-password');
-      expect(npmCall[1].headers.Authorization).toBe(`Basic ${Buffer.from('test-user:test-password').toString('base64')}`);
-    } finally {
-      if (previousLower === undefined) delete process.env.npm_config_registry;
-      else process.env.npm_config_registry = previousLower;
-      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
-      else process.env.NPM_CONFIG_REGISTRY = previous;
-    }
-  });
-
-  // --- Scenario (THE FIX): API says update available, npm does NOT have it ---
-
-  it('returns available=false when API claims update but npm has same version', async () => {
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({
-          latestVersion: '1.10.0',
-          updateAvailable: true,
-          releaseNotes: '## [1.10.0] - 2026-05-01\n\n- Great new feature',
-        }),
-      })
-      .when('registry.npmjs.org', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.9.10' },
-        }),
-      });
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(false);
-  });
-
-  it('returns available=false when npm only has a prerelease of the current version', async () => {
-    fetchMock
-      .when('api.openchamber.dev', Promise.reject(new Error('Network error')))
-      .when('registry.npmjs.org', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.10.0-beta.1' },
-        }),
-      });
-
-    const result = await checkForUpdates({ currentVersion: '1.10.0' });
-
-    expect(result.available).toBe(false);
-  });
-
-  it('accepts electron desktop update claims without npm cross-checking', async () => {
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({
-          latestVersion: '1.10.0',
-          updateAvailable: true,
-          releaseNotes: '## [1.10.0] - 2026-05-01\n\n- Great new feature',
-        }),
-      });
-
-    const result = await checkForUpdates({
-      appType: 'desktop-electron',
-      currentVersion: '1.9.10',
-      installId: '4f4dfead-9688-4c4f-97d7-4607fbbfc3ab',
-      platform: 'windows',
-      arch: 'arm64',
-    });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
 
     expect(result.available).toBe(true);
     expect(result.version).toBe('1.10.0');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
-      installId: '4f4dfead-9688-4c4f-97d7-4607fbbfc3ab',
-      platform: 'windows',
-      arch: 'arm64',
+  });
+
+  it('picks the highest semver release, not the newest one created', async () => {
+    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(release('v2.2.0'), release('v2.10.0'), release('v2.9.0')));
+
+    const result = await checkForUpdates({ currentVersion: '2.2.0', appType: 'web' });
+
+    expect(result.version).toBe('2.10.0');
+  });
+
+  it('reports no update when the fork release has the installed version', async () => {
+    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(release('v1.10.0')));
+
+    const result = await checkForUpdates({ currentVersion: '1.10.0', appType: 'web' });
+
+    expect(result.available).toBe(false);
+  });
+
+  it('reports no update and does not fall back to npm when the fork feed is unreachable', async () => {
+    fetchMock.when('developing-today/openchamber/releases?per_page=30', { ok: false, status: 503, json: async () => ({}) });
+
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
+
+    expect(result.available).toBe(false);
+    expect(result.error).toBe('Unable to reach the release feed');
+    expect(upstreamCalls()).toHaveLength(0);
+  });
+
+  it('uses OPENCHAMBER_UPDATE_API_URL instead of the fork feed when it is set', async () => {
+    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({ latestVersion: '1.10.0', updateAvailable: true, releaseNotes: '- override' }),
     });
+
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
+
+    expect(result.available).toBe(true);
+    expect(result.version).toBe('1.10.0');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('developing-today/openchamber/releases?per_page'))).toBe(false);
   });
 
-  it('still checks for updates in enterprise mode but reports no usage', async () => {
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({ latestVersion: '1.10.0', updateAvailable: true, releaseNotes: '' }),
-      });
-    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
-    try {
-      const result = await checkForUpdates({
-        appType: 'desktop-electron',
-        currentVersion: '1.9.10',
-        installId: '4f4dfead-9688-4c4f-97d7-4607fbbfc3ab',
-        platform: 'windows',
-        arch: 'arm64',
-      });
-      expect(result.available).toBe(true);
-      const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(sent.reportUsage).toBe(false);
-      expect(sent.installId).toBeUndefined();
-    } finally {
-      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
-    }
-  });
+  // --- Android APK resolution (the API override still hands over a direct APK URL) ---
 
-  it('resolves an Android APK asset when the update API returns an AAB', async () => {
+  it('resolves an Android APK asset from the fork release when the update API returns an AAB', async () => {
     process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
     fetchMock
       .when('api.openchamber.dev', {
@@ -260,166 +143,19 @@ describe('checkForUpdates', () => {
         json: async () => ({
           latestVersion: '1.10.0',
           updateAvailable: true,
-          downloadUrl: 'https://github.com/openchamber/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.aab',
+          downloadUrl: 'https://github.com/developing-today/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.aab',
         }),
       })
       .when('api.github.com/repos/developing-today/openchamber/releases/tags/v1.10.0', {
         ok: true,
         json: async () => ({
-          assets: [
-            {
-              name: 'OpenChamber-1.10.0-42-android.aab',
-              browser_download_url: 'https://downloads.example/OpenChamber-1.10.0-42-android.aab',
-            },
-            {
-              name: 'app-release.apk',
-              browser_download_url: 'https://downloads.example/app-release.apk',
-            },
-            {
-              name: 'OpenChamber-1.10.0-42-android.apk',
-              browser_download_url: 'https://downloads.example/OpenChamber-1.10.0-42-android.apk',
-            },
-          ],
+          assets: [{ name: 'OpenChamber-1.10.0-42-android.apk', browser_download_url: 'https://downloads.example/OpenChamber-1.10.0-42-android.apk' }],
         }),
       });
 
-    const result = await checkForUpdates({
-      appType: 'mobile-capacitor',
-      platform: 'android',
-      currentVersion: '1.9.10',
-    });
+    const result = await checkForUpdates({ appType: 'mobile-capacitor', platform: 'android', currentVersion: '1.9.10' });
 
     expect(result.downloadUrl).toBe('https://downloads.example/OpenChamber-1.10.0-42-android.apk');
-  });
-
-  it('keeps a direct Android APK URL from the update API', async () => {
-    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
-    const apkUrl = 'https://github.com/openchamber/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.apk';
-    fetchMock.when('api.openchamber.dev', {
-      ok: true,
-      json: async () => ({
-        latestVersion: '1.10.0',
-        updateAvailable: true,
-        downloadUrl: apkUrl,
-      }),
-    });
-
-    const result = await checkForUpdates({
-      appType: 'mobile-capacitor',
-      platform: 'android',
-      currentVersion: '1.9.10',
-    });
-
-    expect(result.downloadUrl).toBe(apkUrl);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('returns available=false when API claims update but npm is behind', async () => {
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({
-          latestVersion: '1.10.0',
-          updateAvailable: true,
-          releaseNotes: '## [1.10.0] - 2026-05-01\n\n- Great new feature',
-        }),
-      })
-      .when('registry.npmjs.org', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.9.9' },
-        }),
-      });
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(false);
-  });
-
-  // --- Scenario: API says no update, npm agrees ---
-
-  it('returns available=false when API says no update and versions match', async () => {
-    fetchMock.when('api.openchamber.dev', {
-      ok: true,
-      json: async () => ({
-        latestVersion: '1.9.10',
-        updateAvailable: false,
-      }),
-    });
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(false);
-  });
-
-  // --- Scenario: API unreachable, npm fallback ---
-
-  it('returns available=true from npm fallback when API is unreachable and npm has newer version', async () => {
-    fetchMock
-      .when('api.openchamber.dev', Promise.reject(new Error('Network error')))
-      .when('registry.npmjs.org', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.10.0' },
-        }),
-      })
-      .when('raw.githubusercontent.com', {
-        ok: true,
-        text: async () => '## [1.10.0] - 2026-05-01\n\n- Great new feature',
-      });
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(true);
-    expect(result.version).toBe('1.10.0');
-  });
-
-  it('returns available=false from npm fallback when API is unreachable and versions match', async () => {
-    fetchMock
-      .when('api.openchamber.dev', Promise.reject(new Error('Network error')))
-      .when('registry.npmjs.org', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.9.10' },
-        }),
-      });
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(false);
-  });
-
-  // --- Scenario: API returns null (bad response), npm fallback ---
-
-  it('returns available=false when API returns non-ok status and versions match on npm', async () => {
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: false,
-        status: 500,
-        json: async () => ({}),
-      })
-      .when('registry.npmjs.org', {
-        ok: true,
-        json: async () => ({
-          'dist-tags': { latest: '1.9.10' },
-        }),
-      });
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(false);
-  });
-
-  // --- Scenario: Both API and npm are unreachable ---
-
-  it('returns available=false when both sources are unreachable', async () => {
-    fetchMock
-      .when('api.openchamber.dev', Promise.reject(new Error('Network error')))
-      .when('registry.npmjs.org', Promise.reject(new Error('Registry unreachable')));
-
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
-
-    expect(result.available).toBe(false);
   });
 });
 
@@ -448,59 +184,16 @@ describe('getUpdateCommand', () => {
 });
 
 describe('executeUpdate', () => {
-  function stubSpawnSync({ installStatus = 0, listingStdout = '', listingStatus = 0 } = {}) {
-    spawnSync.mockImplementation((command, args) => {
-      if (!Array.isArray(args)) {
-        return { status: installStatus, stdout: '', stderr: '' };
-      }
-      if (args.includes('--version')) {
-        return { status: 0, stdout: '10.0.0', stderr: '' };
-      }
-      if (args[0] === 'list' || args[0] === 'pm' || args[0] === 'global') {
-        return { status: listingStatus, stdout: listingStdout, stderr: '' };
-      }
-      return { status: 0, stdout: '', stderr: '' };
-    });
-  }
+  it('never runs the package manager and points at the fork release', () => {
+    vi.mocked(spawnSync).mockClear();
 
-  afterEach(() => {
-    spawnSync.mockReset();
-  });
+    const result = executeUpdate('npm', { targetVersion: '1.10.0' });
 
-  it('reports success when the installed version matches the target', () => {
-    stubSpawnSync({ listingStdout: '└── @openchamber/web@1.24.1' });
-    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
-    expect(result.success).toBe(true);
-    expect(result.installedVersion).toBe('1.24.1');
-  });
-
-  it('fails when the package manager exits non-zero', () => {
-    stubSpawnSync({ installStatus: 1 });
-    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('exited with code 1');
-  });
-
-  it('fails when the package manager exits successfully but installed the wrong version', () => {
-    stubSpawnSync({ listingStdout: '└── @openchamber/web@1.19.0' });
-    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('1.19.0');
-    expect(result.error).toContain('1.24.1');
-  });
-
-  it('fails loudly when the installed version cannot be verified', () => {
-    stubSpawnSync({ listingStdout: '', listingStatus: 1 });
-    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Could not determine');
-  });
-
-  it('keeps the previous behavior when no target version is given', () => {
-    stubSpawnSync();
-    const result = executeUpdate('npm');
-    expect(result.success).toBe(true);
-    expect(result.installedVersion).toBeNull();
+    expect(result.manualUpdate).toBe(true);
+    expect(result.error).toContain('https://github.com/developing-today/openchamber/releases/latest');
+    expect(result.error).toContain('(v1.10.0)');
+    expect(spawnSync).not.toHaveBeenCalled();
   });
 });
 

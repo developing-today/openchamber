@@ -234,6 +234,12 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       if (!updateInfo.available) {
         return res.status(400).json({ error: 'No update available' });
       }
+      if (updateInfo.manualUpdate) {
+        return res.status(409).json({
+          error: `Install ${updateInfo.version} by hand from ${updateInfo.releaseUrl}; this build does not update through npm`,
+          releaseUrl: updateInfo.releaseUrl,
+        });
+      }
 
       const pmDetails = detectPackageManagerDetails();
       const pm = pmDetails.packageManager;

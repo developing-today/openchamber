@@ -70,6 +70,15 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
       return;
     }
 
+    // Checked before any running instance is stopped: this build installs releases by hand.
+    if (updateInfo.manualUpdate) {
+      updateSpin?.error('Update available');
+      if (showOutput) {
+        clackOutro('install by hand');
+      }
+      throw new Error(`Version ${updateInfo.version} is released at ${updateInfo.releaseUrl}. This build does not update through npm; install that release by hand.`);
+    }
+
     if (showOutput && !updateSpin) {
       logStatus('info', `updating ${updateInfo.currentVersion || currentVersion} -> ${updateInfo.version || 'latest'}`);
     }
