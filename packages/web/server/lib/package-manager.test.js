@@ -51,6 +51,7 @@ describe('checkForUpdates', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    delete process.env.OPENCHAMBER_UPDATE_API_URL;
   });
 
   // --- Scenario: API says update available, npm confirms ---
@@ -252,6 +253,7 @@ describe('checkForUpdates', () => {
   });
 
   it('resolves an Android APK asset when the update API returns an AAB', async () => {
+    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
     fetchMock
       .when('api.openchamber.dev', {
         ok: true,
@@ -261,7 +263,7 @@ describe('checkForUpdates', () => {
           downloadUrl: 'https://github.com/openchamber/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.aab',
         }),
       })
-      .when('api.github.com/repos/openchamber/openchamber/releases/tags/v1.10.0', {
+      .when('api.github.com/repos/developing-today/openchamber/releases/tags/v1.10.0', {
         ok: true,
         json: async () => ({
           assets: [
@@ -291,6 +293,7 @@ describe('checkForUpdates', () => {
   });
 
   it('keeps a direct Android APK URL from the update API', async () => {
+    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
     const apkUrl = 'https://github.com/openchamber/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.apk';
     fetchMock.when('api.openchamber.dev', {
       ok: true,
@@ -505,5 +508,59 @@ describe('CLI update exports', () => {
   it('exports package-manager helpers used by the update command', () => {
     expect(typeof detectPackageManager).toBe('function');
     expect(typeof executeUpdate).toBe('function');
+  });
+});
+
+describe('checkForUpdates for the Android app', () => {
+  let fetchMock;
+  let originalFetch;
+
+  beforeEach(() => {
+    fetchMock = createFetchMock();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const apk = (version) => ({
+    name: `OpenChamber-${version}-android.apk`,
+    browser_download_url: `https://github.com/developing-today/openchamber/releases/download/v${version}/OpenChamber-${version}-android.apk`,
+  });
+
+  it('uses the highest published fork release and its APK, never the upstream API', async () => {
+    fetchMock
+      .when('releases/tags/v2.3.0', {
+        ok: true,
+        json: async () => ({ assets: [apk('2.3.0')] }),
+      })
+      .when('developing-today/openchamber/releases?per_page=30', {
+        ok: true,
+        json: async () => [
+          { tag_name: 'v2.4.0', draft: true, prerelease: false, assets: [] },
+          { tag_name: 'v2.3.1-beta.1', draft: false, prerelease: true, assets: [] },
+          { tag_name: 'v2.3.0', draft: false, prerelease: false, body: '- fork release', html_url: 'https://github.com/developing-today/openchamber/releases/tag/v2.3.0' },
+          { tag_name: 'v2.2.0', draft: false, prerelease: false, assets: [] },
+        ],
+      });
+
+    const result = await checkForUpdates({ currentVersion: '2.2.0', appType: 'mobile-capacitor', platform: 'android' });
+
+    expect(result.available).toBe(true);
+    expect(result.version).toBe('2.3.0');
+    expect(result.downloadUrl).toBe('https://github.com/developing-today/openchamber/releases/download/v2.3.0/OpenChamber-2.3.0-android.apk');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('api.openchamber.dev'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('registry.npmjs.org'))).toBe(false);
+  });
+
+  it('reports no update and does not fall back to npm when the fork feed is unreachable', async () => {
+    fetchMock.when('developing-today/openchamber/releases?per_page=30', { ok: false, status: 503, json: async () => ({}) });
+
+    const result = await checkForUpdates({ currentVersion: '2.2.0', appType: 'mobile-capacitor', platform: 'android' });
+
+    expect(result.available).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('registry.npmjs.org'))).toBe(false);
   });
 });

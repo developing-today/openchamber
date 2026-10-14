@@ -14,8 +14,10 @@ const __dirname = path.dirname(__filename);
 
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
-const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
-const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
+// This build is developing-today's fork: its releases are the source for the update
+// checks that it ships with (the Android app reads these directly).
+const GITHUB_RELEASES_URL = 'https://github.com/developing-today/openchamber/releases';
+const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/developing-today/openchamber/releases';
 let cachedDetectedPm = null;
 
 function getSpawnSyncBaseOptions() {
@@ -122,6 +124,51 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
   }
 }
 
+async function postUpdateCheck(payload) {
+  const response = await fetch(UPDATE_CHECK_URL, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+/**
+ * Latest published release of this fork, in the shape the update API returns. Drafts and
+ * prereleases are skipped; the highest semver tag wins, not the most recently created one.
+ */
+async function fetchLatestForkRelease() {
+  const response = await fetch(`${GITHUB_RELEASES_API_URL}?per_page=30`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'openchamber-update-check',
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) return null;
+
+  const releases = await response.json();
+  if (!Array.isArray(releases)) return null;
+  const published = releases
+    .filter((release) => !release?.draft && !release?.prerelease && /^v\d+\.\d+\.\d+$/.test(release?.tag_name || ''))
+    .map((release) => ({ release, version: release.tag_name.slice(1) }))
+    .sort((left, right) => compareVersions(right.version, left.version));
+  const latest = published[0];
+  if (!latest) return null;
+
+  return {
+    latestVersion: latest.version,
+    updateAvailable: true,
+    releaseNotes: typeof latest.release.body === 'string' ? latest.release.body : undefined,
+    releaseNotesUrl: typeof latest.release.html_url === 'string' ? latest.release.html_url : undefined,
+  };
+}
+
 async function checkForUpdatesFromApi(currentVersion, options = {}) {
   try {
     const appType = normalizeAppType(options.appType);
@@ -145,18 +192,9 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       reportUsage,
     };
 
-    const response = await fetch(UPDATE_CHECK_URL, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) return null;
-    const data = await response.json();
+    const data = appType === 'mobile-capacitor' && !process.env.OPENCHAMBER_UPDATE_API_URL
+      ? await fetchLatestForkRelease()
+      : await postUpdateCheck(payload);
     if (typeof data?.latestVersion !== 'string') return null;
 
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
@@ -811,6 +849,12 @@ export async function checkForUpdates(options = {}) {
         updateCommand: 'openchamber update',
       };
     }
+  }
+
+  // The npm package is upstream's; a mobile app must not be told about upstream's version
+  // when the fork's release feed is unreachable.
+  if (appType === 'mobile-capacitor') {
+    return { available: false, currentVersion, error: 'Unable to reach the release feed' };
   }
 
   const latestVersion = await getLatestVersion();
