@@ -4,10 +4,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { fetchUpdateNotes } from './changelog/update-notes.js';
 import { isEnterpriseMode } from './enterprise-mode.js';
 
-import { resolveNpmRegistryRequest } from './opencode/npm-registry-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +16,9 @@ const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 // checks that it ships with (the Android app reads these directly).
 const GITHUB_RELEASES_URL = 'https://github.com/developing-today/openchamber/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/developing-today/openchamber/releases';
+// npm publishes upstream's @openchamber/web, so this build never installs updates through
+// the package manager. The server and CLI report the fork release and the user installs it.
+export const FORK_RELEASES_LATEST_URL = `${GITHUB_RELEASES_URL}/latest`;
 let cachedDetectedPm = null;
 
 function getSpawnSyncBaseOptions() {
@@ -192,9 +193,9 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       reportUsage,
     };
 
-    const data = appType === 'mobile-capacitor' && !process.env.OPENCHAMBER_UPDATE_API_URL
-      ? await fetchLatestForkRelease()
-      : await postUpdateCheck(payload);
+    const data = process.env.OPENCHAMBER_UPDATE_API_URL
+      ? await postUpdateCheck(payload)
+      : await fetchLatestForkRelease();
     if (typeof data?.latestVersion !== 'string') return null;
 
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
@@ -767,28 +768,6 @@ export function getCurrentVersion() {
 }
 
 /**
- * Fetch latest version from npm registry
- */
-async function getLatestVersion() {
-  try {
-    const request = resolveNpmRegistryRequest(PACKAGE_NAME);
-    const response = await fetch(request.url, {
-      headers: { Accept: 'application/json', ...request.headers },
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Registry responded with ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data['dist-tags']?.latest || null;
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
  * Compare semver-like version strings.
  */
 function parseVersionForComparison(value) {
@@ -823,70 +802,26 @@ function compareVersions(left, right) {
   return 0;
 }
 
-/** Release notes between the installed and the offered version, or undefined. */
-async function fetchChangelogNotes(fromVersion, toVersion) {
-  return (await fetchUpdateNotes(fromVersion, toVersion, compareVersions)) ?? undefined;
-}
-
 export async function checkForUpdates(options = {}) {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
-  const appType = normalizeAppType(options.appType);
-  const platform = normalizePlatform(options.platform);
 
-  if (currentVersion !== 'unknown') {
-    const remote = await checkForUpdatesFromApi(currentVersion, options);
-    if (remote) {
-      if (remote.available && appType === 'web') {
-        const npmLatest = await getLatestVersion();
-        if (!npmLatest || compareVersions(npmLatest, remote.version) < 0) {
-          remote.available = false;
-        }
-      }
-      return {
-        ...remote,
-        packageManager: pm,
-        updateCommand: 'openchamber update',
-      };
-    }
+  if (currentVersion === 'unknown') {
+    return { available: false, currentVersion, error: 'Unable to determine versions' };
   }
 
-  // The npm package is upstream's; a mobile app must not be told about upstream's version
-  // when the fork's release feed is unreachable.
-  if (appType === 'mobile-capacitor') {
+  // No npm fallback: the registry only has upstream's package, so an unreachable release
+  // feed means no update is reported rather than upstream's version.
+  const remote = await checkForUpdatesFromApi(currentVersion, options);
+  if (!remote) {
     return { available: false, currentVersion, error: 'Unable to reach the release feed' };
   }
 
-  const latestVersion = await getLatestVersion();
-
-  if (!latestVersion || currentVersion === 'unknown') {
-    return {
-      available: false,
-      currentVersion,
-      error: 'Unable to determine versions',
-    };
-  }
-
-  const available = compareVersions(latestVersion, currentVersion) > 0;
-  let changelog;
-  let downloadUrl;
-  if (available) {
-    changelog = await fetchChangelogNotes(currentVersion, latestVersion);
-    if (appType === 'mobile-capacitor' && platform === 'android') {
-      downloadUrl = await resolveAndroidApkUrl(latestVersion);
-    }
-  }
-
   return {
-    available,
-    version: latestVersion,
-    currentVersion,
-    body: changelog,
-    releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${latestVersion}`,
-    downloadUrl,
+    ...remote,
     packageManager: pm,
-    // Show our CLI command, not raw package manager command
-    updateCommand: 'openchamber update',
+    manualUpdate: true,
+    updateCommand: `Download the release from ${remote.releaseUrl || FORK_RELEASES_LATEST_URL}`,
   };
 }
 
@@ -898,55 +833,11 @@ export async function checkForUpdates(options = {}) {
  * and the caller must not report success without the version matching.
  */
 export function executeUpdate(pm = detectPackageManager(), options = {}) {
-  const command = getUpdateCommand(pm, { targetVersion: options.targetVersion });
-  if (!options?.silent) {
-    console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
-    console.log(`Running: ${command}`);
-  }
-
-  const result = spawnSync(command, {
-    stdio: 'inherit',
-    shell: true,
-    ...getSpawnSyncBaseOptions(),
-  });
-
-  if (result.status !== 0) {
-    return {
-      success: false,
-      exitCode: result.status,
-      error: `Package manager exited with code ${result.status}`,
-    };
-  }
-
-  const targetVersion = normalizeTargetVersion(options.targetVersion);
-  if (!targetVersion) {
-    return {
-      success: true,
-      exitCode: result.status,
-      installedVersion: null,
-    };
-  }
-
-  const installedVersion = getInstalledGlobalVersion(pm);
-  if (!installedVersion) {
-    return {
-      success: false,
-      exitCode: result.status,
-      error: `Could not determine the globally installed ${PACKAGE_NAME} version after the update; not reporting success`,
-    };
-  }
-
-  if (compareVersions(installedVersion, targetVersion) !== 0) {
-    return {
-      success: false,
-      exitCode: result.status,
-      error: `Installed ${PACKAGE_NAME} version ${installedVersion} does not match target ${targetVersion}. The package manager may have resolved different metadata or filtered the release.`,
-    };
-  }
-
+  const version = normalizeTargetVersion(options.targetVersion);
   return {
-    success: true,
-    exitCode: result.status,
-    installedVersion,
+    success: false,
+    exitCode: null,
+    manualUpdate: true,
+    error: `Install the new release by hand from ${FORK_RELEASES_LATEST_URL}${version ? ` (v${version})` : ''}; this build does not update through npm`,
   };
 }
