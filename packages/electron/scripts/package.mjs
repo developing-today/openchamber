@@ -25,6 +25,26 @@ const bunBinary = bunBinaryCandidates.find((candidate) => {
   return false;
 }) || (process.platform === 'win32' ? 'bun.exe' : 'bun');
 
+// bun installs the optional node-llama-cpp platform packages for every Linux arch, and
+// electron-builder packs them. Drop the ones for the other architecture so the AppImage
+// only carries native code it can load (verify-linux-appimage checks this).
+if (process.platform === 'linux') {
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  const llamaScopes = [
+    path.join(repoRoot, 'node_modules/@node-llama-cpp'),
+    path.join(repoRoot, 'packages/electron/node_modules/@node-llama-cpp'),
+  ];
+  for (const scope of llamaScopes) {
+    if (!fs.existsSync(scope)) continue;
+    for (const name of fs.readdirSync(scope)) {
+      if (name.startsWith('linux-') && !name.startsWith(`linux-${targetArchitecture.node}`)) {
+        console.log(`[electron] pruning other-architecture native package @node-llama-cpp/${name}`);
+        fs.rmSync(path.join(scope, name), { recursive: true, force: true });
+      }
+    }
+  }
+}
+
 if (process.platform === 'linux' && !builderArgs.some((argument) => (
   argument === '--x64' || argument === '--arm64' || argument === '--arch' || argument.startsWith('--arch=')
 ))) {
