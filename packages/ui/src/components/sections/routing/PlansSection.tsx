@@ -44,14 +44,21 @@ const listOf = (value: string) =>
     .map((item) => item.trim())
     .filter((item) => item !== '');
 
-/** Starts a new chat and puts the command in its composer, ready to send. */
-const startCommand = async (command: string, title: string, failed: string) => {
+export type ActionSendMode = 'prefill' | 'autosend';
+const ACTION_SEND_MODE_STORAGE_KEY = 'openchamber.routing.plans.actionSendMode';
+
+/** Starts a new chat and either prefills the command or sends it immediately. */
+const startCommand = async (command: string, title: string, failed: string, mode: ActionSendMode = 'prefill') => {
   const session = await useSessionUIStore.getState().createSession(title);
   if (!session) {
     toast.error(failed);
     return;
   }
-  useInputStore.getState().setPendingInputText(`/${command}`, 'replace');
+  if (mode === 'autosend') {
+    void useSessionUIStore.getState().sendMessage(`/${command}`, '', '');
+  } else {
+    useInputStore.getState().setPendingInputText(`/${command}`, 'replace');
+  }
 };
 
 interface QuotaDraft {
@@ -301,7 +308,7 @@ const PoolPurposeRow: React.FC<{
   onSaved: (poolID: string, tier: PlanTier | undefined, purpose: string | undefined) => void;
 }> = ({ poolID, tier, purpose, onSaved }) => {
   const { t } = useI18n();
-  const [nextTier, setNextTier] = React.useState<PlanTier>(tier ?? 'common');
+  const [nextTier, setNextTier] = React.useState<PlanTier>(tier ?? 'standard');
   const [text, setText] = React.useState(purpose ?? '');
   const [saving, setSaving] = React.useState(false);
 
@@ -357,10 +364,27 @@ export const PlansSection: React.FC = () => {
   const [state, setState] = React.useState<PlanState | null>(null);
   const [pools, setPools] = React.useState<Record<string, { tier?: PlanTier; purpose?: string }>>({});
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [actionSendMode, setActionSendMode] = React.useState<ActionSendMode>(() => {
+    try {
+      const saved = localStorage.getItem(ACTION_SEND_MODE_STORAGE_KEY);
+      return saved === 'autosend' ? 'autosend' : 'prefill';
+    } catch {
+      return 'prefill';
+    }
+  });
+
+  const handleActionSendModeChange = (mode: ActionSendMode) => {
+    setActionSendMode(mode);
+    try {
+      localStorage.setItem(ACTION_SEND_MODE_STORAGE_KEY, mode);
+    } catch {
+      // Ignore storage error
+    }
+  };
   const [newProvider, setNewProvider] = React.useState('');
   const [newPlanName, setNewPlanName] = React.useState('');
   const [newModel, setNewModel] = React.useState('');
-  const [newModelTier, setNewModelTier] = React.useState<PlanTier>('common');
+  const [newModelTier, setNewModelTier] = React.useState<PlanTier>('standard');
   const [noteText, setNoteText] = React.useState('');
   const [noteKind, setNoteKind] = React.useState<NoteKind>('experience');
   const [noteProvider, setNoteProvider] = React.useState('');
@@ -452,16 +476,35 @@ export const PlansSection: React.FC = () => {
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
           <div className="flex flex-1 flex-col gap-1">
-            <Button size="sm" onClick={() => void startCommand('routing-review', t('settings.routing.plans.reviewTitle'), t('settings.routing.plans.commandFailed'))}>
+            <Button size="sm" onClick={() => void startCommand('routing-review', t('settings.routing.plans.reviewTitle'), t('settings.routing.plans.commandFailed'), actionSendMode)}>
               {t('settings.routing.plans.review')}
             </Button>
             <div className={SETTINGS_HELPER_CLASS}>{t('settings.routing.plans.reviewHint')}</div>
           </div>
           <div className="flex flex-1 flex-col gap-1">
-            <Button size="sm" variant="outline" onClick={() => void startCommand('plan-update', t('settings.routing.plans.updateTitle'), t('settings.routing.plans.commandFailed'))}>
+            <Button size="sm" variant="outline" onClick={() => void startCommand('plan-update', t('settings.routing.plans.updateTitle'), t('settings.routing.plans.commandFailed'), actionSendMode)}>
               {t('settings.routing.plans.update')}
             </Button>
             <div className={SETTINGS_HELPER_CLASS}>{t('settings.routing.plans.updateHint')}</div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border-b border-border/40 pb-3">
+          <div className="flex flex-col gap-0.5">
+            <div className="typography-ui-label font-medium text-foreground">{t('settings.routing.plans.actionSendMode')}</div>
+            <div className={SETTINGS_HELPER_CLASS}>
+              {actionSendMode === 'autosend'
+                ? t('settings.routing.plans.actionSendMode.autosend')
+                : t('settings.routing.plans.actionSendMode.prefill')}
+            </div>
+          </div>
+          <div className="w-56">
+            <SelectField
+              value={actionSendMode}
+              options={['prefill', 'autosend'] as const}
+              label={(m) => t(`settings.routing.plans.actionSendMode.${m}`)}
+              onChange={handleActionSendModeChange}
+            />
           </div>
         </div>
 

@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 // Recorders rather than bun's `mock()`: the installed types omit `.mock`, and the behaviour these tests need is simple.
 const commandStarts: string[] = [];
 const pendingTexts: Array<{ text: string; mode: string }> = [];
+const sentMessages: Array<{ content: string; providerID: string; modelID: string }> = [];
 const savedPlans: Array<Record<string, unknown>> = [];
 
 const serverPlans = [
@@ -24,7 +25,7 @@ const serverPlans = [
 
 mock.module('@/lib/routing/plansApi', () => ({
   PLAN_COVERAGE: ['subscription', 'credits', 'metered', 'free', 'trial'],
-  PLAN_TIERS: ['plan', 'common', 'medium', 'high'],
+  PLAN_TIERS: ['cheap', 'standard', 'frontier'],
   PLAN_UNITS: ['requests', 'messages', 'tokens', 'usd', 'percent', 'other'],
   PLAN_STATUSES: ['active', 'expired', 'cancelled', 'unknown'],
   PLAN_PERIODS: ['monthly', 'yearly', 'once'],
@@ -34,7 +35,7 @@ mock.module('@/lib/routing/plansApi', () => ({
     savedPlans.push(plan);
     return { ...serverPlans[0], ...plan };
   },
-  saveModelTier: async () => ({ tier: 'common', updatedAt: '2026-10-14T00:00:00.000Z' }),
+  saveModelTier: async () => ({ tier: 'standard', updatedAt: '2026-10-14T00:00:00.000Z' }),
   savePoolPurpose: async () => ({ updatedAt: '2026-10-14T00:00:00.000Z' }),
   addPlanNote: async () => ({ id: 'note_1', at: '2026-10-14T00:00:00.000Z', kind: 'other', text: '', source: 'ui' }),
 }));
@@ -49,6 +50,9 @@ mock.module('@/sync/session-ui-store', () => ({
       createSession: async (title: string) => {
         commandStarts.push(title);
         return { id: 'ses_test' };
+      },
+      sendMessage: async (content: string, providerID: string, modelID: string) => {
+        sentMessages.push({ content, providerID, modelID });
       },
     }),
   },
@@ -119,7 +123,7 @@ let root: Root | null = null;
 const flush = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 
 const renderSection = async () => {
-  dom = installDom();
+  if (!dom) dom = installDom();
   root = createRoot(dom.container);
   await act(async () => {
     root?.render(
@@ -154,6 +158,7 @@ const typeInto = async (input: HTMLInputElement, value: string) => {
 beforeEach(() => {
   commandStarts.length = 0;
   pendingTexts.length = 0;
+  sentMessages.length = 0;
   savedPlans.length = 0;
 });
 
@@ -202,5 +207,17 @@ describe('PlansSection', () => {
     await flush();
     expect(savedPlans).toHaveLength(1);
     expect(savedPlans[0]).toMatchObject({ id: 'anthropic-max-20x', providerID: 'anthropic', label: 'Work' });
+  });
+
+  test('switching action send mode to autosend triggers sendMessage immediately', async () => {
+    dom = installDom();
+    dom.container.ownerDocument.defaultView?.localStorage.setItem('openchamber.routing.plans.actionSendMode', 'autosend');
+    const container = await renderSection();
+    const button = buttonNamed(container, 'Review routing');
+    await act(async () => button?.click());
+    await flush();
+    expect(commandStarts).toEqual(['Routing review']);
+    expect(sentMessages).toEqual([{ content: '/routing-review', providerID: '', modelID: '' }]);
+    expect(pendingTexts).toHaveLength(0);
   });
 });

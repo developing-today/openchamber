@@ -41,10 +41,10 @@ describe('plan store', () => {
   });
 
   it('stores a model tier and a pool purpose beside the plans', () => {
-    const withModel = setModel(emptyPlanStore(), 'openai/gpt-6-astra', { tier: 'high', coveredBy: ['openai-plus'] }, NOW);
-    const withPool = setPool(withModel, 'hard', { tier: 'high', purpose: 'debugging with an unknown cause' }, NOW);
-    expect(withPool.models['openai/gpt-6-astra']).toMatchObject({ tier: 'high', coveredBy: ['openai-plus'] });
-    expect(withPool.pools.hard).toMatchObject({ tier: 'high', purpose: 'debugging with an unknown cause' });
+    const withModel = setModel(emptyPlanStore(), 'openai/gpt-6-astra', { tier: 'frontier', coveredBy: ['openai-plus'] }, NOW);
+    const withPool = setPool(withModel, 'hard', { tier: 'frontier', purpose: 'debugging with an unknown cause' }, NOW);
+    expect(withPool.models['openai/gpt-6-astra']).toMatchObject({ tier: 'frontier', coveredBy: ['openai-plus'] });
+    expect(withPool.pools.hard).toMatchObject({ tier: 'frontier', purpose: 'debugging with an unknown cause' });
   });
 
   it('writes atomically and reads back what it wrote', () => {

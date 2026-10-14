@@ -43,15 +43,15 @@ describe('plan routes', () => {
     const app = createApp(dir());
     const model = await request(app)
       .put('/api/routing/plans/model')
-      .send({ model: 'openai/gpt-6-astra', tier: 'high', coveredBy: ['openai-plus'] })
+      .send({ model: 'openai/gpt-6-astra', tier: 'frontier', coveredBy: ['openai-plus'] })
       .expect(200);
-    expect(model.body).toMatchObject({ tier: 'high', coveredBy: ['openai-plus'] });
-    await request(app).put('/api/routing/plans/model').send({ model: 'no-slash', tier: 'high' }).expect(400);
+    expect(model.body).toMatchObject({ tier: 'frontier', coveredBy: ['openai-plus'] });
+    await request(app).put('/api/routing/plans/model').send({ model: 'no-slash', tier: 'frontier' }).expect(400);
     const pool = await request(app)
       .put('/api/routing/plans/pool')
-      .send({ id: 'hard', tier: 'high', purpose: 'debugging with an unknown cause' })
+      .send({ id: 'hard', tier: 'frontier', purpose: 'debugging with an unknown cause' })
       .expect(200);
-    expect(pool.body).toMatchObject({ tier: 'high', purpose: 'debugging with an unknown cause' });
+    expect(pool.body).toMatchObject({ tier: 'frontier', purpose: 'debugging with an unknown cause' });
   });
 
   it('adds a note from the UI and lists it back', async () => {

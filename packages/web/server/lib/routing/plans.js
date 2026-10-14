@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { resolveOpenCodeDataDir } from './route-overrides-store.js';
 
 export const COVERAGE = ['subscription', 'credits', 'metered', 'free', 'trial'];
-export const TIERS = ['plan', 'common', 'medium', 'high'];
+export const TIERS = ['cheap', 'standard', 'frontier'];
 export const UNITS = ['requests', 'messages', 'tokens', 'usd', 'percent', 'other'];
 export const STATUSES = ['active', 'expired', 'cancelled', 'unknown'];
 export const PERIODS = ['monthly', 'yearly', 'once'];
@@ -168,7 +168,7 @@ export const upsertPlan = (store, patch, now) => {
 export const setModel = (store, model, patch, now) => {
   const existing = store.models[model];
   const tier = patch.tier ?? existing?.tier;
-  if (!tier) throw httpError(400, `${model} needs a tier: plan, common, medium or high.`, 'INVALID_TIER');
+  if (!tier) throw httpError(400, `${model} needs a tier: cheap, standard or frontier.`, 'INVALID_TIER');
   const entry = modelEntrySchema.parse(merge(existing ?? {}, { ...patch, tier, updatedAt: now }));
   return { ...store, models: { ...store.models, [model]: entry } };
 };

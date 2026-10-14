@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export const PLAN_COVERAGE = ['subscription', 'credits', 'metered', 'free', 'trial'] as const;
-export const PLAN_TIERS = ['plan', 'common', 'medium', 'high'] as const;
+export const PLAN_TIERS = ['cheap', 'standard', 'frontier'] as const;
 export const PLAN_UNITS = ['requests', 'messages', 'tokens', 'usd', 'percent', 'other'] as const;
 export const PLAN_STATUSES = ['active', 'expired', 'cancelled', 'unknown'] as const;
 export const PLAN_PERIODS = ['monthly', 'yearly', 'once'] as const;
