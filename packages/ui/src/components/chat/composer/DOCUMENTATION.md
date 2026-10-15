@@ -573,6 +573,22 @@ and the send path reading the same grammar.
   draft target UI is mounted.
   Keyboard selection returns focus to the current form's composer, including
   when the selected value is unchanged.
+  Beside the branch select (and in the mobile branch sheet) sits the
+  **Auto-create worktree** switch (`settingsAutoCreateWorktree`, the profile
+  setting `autoCreateWorktree`, also on Settings → Sessions) with an optional
+  name kept on the draft (`autoWorktreeName`). It shows, and applies, only
+  while a git project draft is aimed at its project root
+  (`shouldAutoCreateDraftWorktree` in `lib/worktrees/autoDraftWorktree.ts`).
+  `ChatInput` starts it right before the first send, when nothing can cancel
+  the send any more: it puts a pending worktree request on the draft snapshot
+  and the live draft, and draft materialization waits on it as it does for
+  Quick worktree. A typed plain name is the branch and the directory under the
+  worktree root; a value starting with `/` is an exact checkout path, passed
+  to the server unslugged; no name asks
+  `POST /api/git/worktrees/generate-name` with the prompt and the model it is
+  sent with, falling back to the random Quick-worktree name. A failed creation
+  fails the send, so the prompt returns to the composer and the draft returns
+  to the project root.
 - `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
   mention picker after its IME guard.
 

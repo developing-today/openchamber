@@ -40,6 +40,10 @@ import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
+import { shouldAutoCreateDraftWorktree } from '@/lib/worktrees/autoDraftWorktree';
+import { Switch } from '@/components/ui/switch';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { shortcutRegistry } from '@/lib/shortcuts';
 import { useKeybind } from '@/hooks/useKeybind';
 import type { Theme } from '@/types/theme';
@@ -96,6 +100,56 @@ function WorktreeCreateActions({ onQuick, onCustom, className }: {
                 </button>
             ) : null}
         </>
+    );
+}
+
+/**
+ * The draft's auto-create worktree switch and its optional name. Shown only
+ * while the draft is aimed at the project root, where the switch applies; it
+ * reads the stores itself so the memoized selectors do not re-render with it.
+ */
+function AutoWorktreeControl({ projectPath, className }: {
+    projectPath: string;
+    className?: string;
+}) {
+    const { t } = useI18n();
+    const enabled = useConfigStore((state) => state.settingsAutoCreateWorktree);
+    const setEnabled = useConfigStore((state) => state.setSettingsAutoCreateWorktree);
+    const draft = useSessionUIStore((state) => state.newSessionDraft);
+    const setName = useSessionUIStore((state) => state.setDraftAutoWorktreeName);
+    // Rendered only beside the branch selector, which exists only for a git repository.
+    if (!shouldAutoCreateDraftWorktree({ enabled: true, draft, projectPath, isGitRepo: true })) return null;
+
+    return (
+        <div className={cn('flex min-w-0 items-center gap-1.5', className)}>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <span className="inline-flex shrink-0 items-center gap-1.5 typography-ui-label text-muted-foreground">
+                        <Switch
+                            checked={enabled}
+                            onCheckedChange={(checked) => setEnabled(checked)}
+                            aria-label={t('chat.chatInput.autoWorktree.label')}
+                        />
+                        <span className="truncate">{t('chat.chatInput.autoWorktree.label')}</span>
+                    </span>
+                </TooltipTrigger>
+                <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
+                    {t('chat.chatInput.autoWorktree.tooltip')}
+                </TooltipContent>
+            </Tooltip>
+            {enabled ? (
+                <Input
+                    inputSize="compact"
+                    value={draft.autoWorktreeName ?? ''}
+                    onChange={(event) => setName(event.target.value)}
+                    // Enter here must not send the prompt from inside the name field.
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}
+                    placeholder={t('chat.chatInput.autoWorktree.namePlaceholder')}
+                    aria-label={t('chat.chatInput.autoWorktree.namePlaceholder')}
+                    className="w-44 min-w-0"
+                />
+            ) : null}
+        </div>
     );
 }
 
@@ -256,7 +310,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
     };
 
     return (
-        <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
+        <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-1.5 px-0.5">
             {/* Plain popover (not a menu): the popup owns a combobox +
                 listbox, so menu/menuitem semantics would be wrong here. */}
             <Popover.Root
@@ -488,6 +542,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     </SelectContent>
                 </Select>
             ) : null}
+            {showBranchSelector ? <AutoWorktreeControl projectPath={selectedProject.path} /> : null}
         </div>
     );
 }
@@ -692,6 +747,7 @@ export function MobileDraftTargetSheets(
                                         onQuick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}
                                         onCustom={onCreateCustomWorktree ? () => { onOpenPickerChange(null); onCreateCustomWorktree(); } : undefined}
                                     />
+                                    <AutoWorktreeControl projectPath={selectedProject.path} className="px-2 py-1.5" />
                                     <div className="my-1 h-px bg-border" />
                                     <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
                                         {t('chat.chatInput.worktrees')}

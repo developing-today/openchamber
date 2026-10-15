@@ -365,6 +365,7 @@ export function useDraftTarget(enabled: boolean) {
         projects,
         selectedDraftProject,
         selectedDraftProjectPath,
+        selectedDraftProjectIsGitRepo,
         draftProjectLabel,
         selectedDraftDirectory,
         selectedDraftBranchLabel,

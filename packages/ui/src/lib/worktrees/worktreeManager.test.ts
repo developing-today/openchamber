@@ -868,6 +868,14 @@ describe('worktreeManager fork remote payload wiring', () => {
     expect(createPayloads).toHaveLength(1);
     expect(createPayloads[0]).toEqual({ ...args, returnAfterDirectoryCreated: true });
   });
+
+  test('a worktree name starting with / reaches the server as an exact path, a plain one is slugged', async () => {
+    const project = { id: 'project-1', path: '/repo' };
+    await validateWorktreeCreate(project, { mode: 'new', worktreeName: ' /work/my checkout ' });
+    await validateWorktreeCreate(project, { mode: 'new', worktreeName: 'my checkout' });
+    expect(validatePayloads[0]).toEqual({ mode: 'new', worktreeName: '/work/my checkout' });
+    expect(validatePayloads[1]).toEqual({ mode: 'new', worktreeName: 'my-checkout' });
+  });
 });
 
 describe('worktreeManager remote deletion ordering', () => {

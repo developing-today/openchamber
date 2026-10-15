@@ -3,6 +3,7 @@ import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { MergedWorktreeCleanupSettings } from './MergedWorktreeCleanupSettings';
+import { AutoCreateWorktreeSettings } from './AutoCreateWorktreeSettings';
 import { SessionWorkSettings } from './SessionWorkSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
@@ -61,6 +62,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
                 {!isVSCode && <OpenChamberToolsSettings />}
                 <SessionRetentionSettings />
+                {!isVSCode && <AutoCreateWorktreeSettings />}
                 {!isVSCode && <MergedWorktreeCleanupSettings />}
                 <AppLinkSecuritySettings />
                 {isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp() && <PasskeySettings />}
@@ -244,6 +246,7 @@ const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ ru
             <DefaultsSettings key={runtimeEndpointEpoch} />
             <SessionWorkSettings />
             <SessionRetentionSettings />
+            {!isVSCodeRuntime() && <AutoCreateWorktreeSettings />}
             {!isVSCodeRuntime() && <MergedWorktreeCleanupSettings />}
         </>
     );

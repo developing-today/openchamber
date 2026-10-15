@@ -199,6 +199,7 @@ import { useMessageHistory } from './composer/state/useMessageHistory';
 import { useComposerDraft } from './composer/state/useComposerDraft';
 import { useDictationOrigin } from './composer/state/useDictationOrigin';
 import { useDraftTarget } from './composer/state/useDraftTarget';
+import { shouldAutoCreateDraftWorktree, startAutoDraftWorktree } from '@/lib/worktrees/autoDraftWorktree';
 import { useMobileComposerShell } from './composer/state/useMobileComposerShell';
 import { useMobileViewportPin } from './composer/state/useMobileViewportPin';
 import { MobileCommentComposer } from './composer/comment/MobileCommentComposer';
@@ -2201,6 +2202,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
+        // Auto-create worktree: the draft's first prompt runs in a worktree of
+        // its own. Started only now, when nothing above can still cancel the
+        // send; the draft materialization waits for it.
+        if (
+            capturedDraftSnapshot
+            && !capturedTarget
+            && !isBtwActive
+            && showDraftTargetSelectors
+            && selectedDraftProject
+            && shouldAutoCreateDraftWorktree({
+                enabled: useConfigStore.getState().settingsAutoCreateWorktree,
+                draft: capturedDraftSnapshot,
+                projectPath: selectedDraftProject.path,
+                isGitRepo: selectedDraftProjectIsGitRepo,
+            })
+        ) {
+            capturedDraftSnapshot.pendingWorktreeRequestId = startAutoDraftWorktree({
+                project: { id: selectedDraftProject.id, path: selectedDraftProject.path },
+                prompt: primaryText,
+                model: `${providerIdToSend}/${modelIdToSend}`,
+                typedName: capturedDraftSnapshot.autoWorktreeName,
+                fallbackDirectory: capturedDraftSnapshot.directoryOverride ?? selectedDraftProject.path,
+            });
+        }
+
         const sendPromise = sendMessage(
             primaryText,
             providerIdToSend,
@@ -3649,6 +3675,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const {
         projects: draftProjects,
         selectedDraftProject,
+        selectedDraftProjectIsGitRepo,
         draftProjectLabel,
         selectedDraftDirectory,
         selectedDraftBranchLabel,

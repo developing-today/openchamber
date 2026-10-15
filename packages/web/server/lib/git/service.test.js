@@ -1197,6 +1197,39 @@ describe('worktree root resolution', () => {
     }
   });
 
+  it('creates a worktree at an exact absolute path when the name starts with /, and refuses an existing one', async () => {
+    if (!canRunGit()) return;
+    const previousDataHome = process.env.XDG_DATA_HOME;
+    const parent = createTempDir();
+    process.env.XDG_DATA_HOME = path.join(parent, 'data');
+    try {
+      const repo = path.join(parent, 'repo');
+      fs.mkdirSync(repo);
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), 'initial\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const target = path.join(parent, 'elsewhere', 'My Exact Tree');
+      const created = await createWorktree(repo, { mode: 'new', worktreeName: target });
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).status,
+        { timeout: 20_000 },
+      ).not.toBe('pending');
+      expect(fs.realpathSync(created.path)).toBe(fs.realpathSync(target));
+      expect(created.branch).toBe('openchamber/My-Exact-Tree');
+      expect(fs.readFileSync(path.join(target, 'README.md'), 'utf8')).toBe('initial\n');
+
+      await expect(createWorktree(repo, { mode: 'new', worktreeName: target })).rejects.toThrow(/already exists/);
+      await removeWorktree(repo, { directory: created.path });
+    } finally {
+      if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousDataHome;
+    }
+  });
+
   it('creates and removes a managed worktree from a bare repository project directory', async () => {
     if (!canRunGit()) return;
     const previousDataHome = process.env.XDG_DATA_HOME;

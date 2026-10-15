@@ -10,6 +10,10 @@ import {
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
 } from '../openchamber-control/actions.js';
+import { SESSION_EXTRA_PARAMETERS } from '../openchamber-control/session-actions.js';
+import { PROVIDER_PARAMETERS } from '../openchamber-control/provider-actions.js';
+import { CONFIG_PARAMETERS } from '../openchamber-control/config-actions.js';
+import { INTEGRATION_PARAMETERS } from '../openchamber-control/integration-actions.js';
 import { createCallbackAddress } from './callback-address.js';
 
 const TOOL_SCHEMA_VERSION = 1;
@@ -61,7 +65,11 @@ const ALL_PARAMETER_PROPERTIES = {
   create: { type: 'boolean', description: 'projects.add: create the directory first if it does not exist' },
   projectLabel: { type: 'string', description: 'projects.add: display name for the project; defaults to the directory\'s own name' },
   sessionId: { type: 'string' },
-  messageId: { type: 'string', description: 'Optional fork boundary message ID' },
+  messageId: { type: 'string', description: 'Message ID: the fork boundary for session.fork, the user message to retry for session.retry, the message to pin for session.pin' },
+  ...SESSION_EXTRA_PARAMETERS,
+  ...PROVIDER_PARAMETERS,
+  ...CONFIG_PARAMETERS,
+  ...INTEGRATION_PARAMETERS,
   link: {
     type: 'object',
     description: 'What session.link records, on any service',
@@ -78,10 +86,12 @@ const ALL_PARAMETER_PROPERTIES = {
   targetSessionId: { type: 'string', description: 'Scheduled task target; omit for a new session, empty on update clears it' },
   title: { type: 'string' },
   prompt: { type: 'string' },
-  model: { type: 'string', description: 'Model in provider/model format. When the user names no model: for session.create pick a suitable one from models.list favorites or recents (omit if there are none); for send and fork omit it — the session reuses its previous model' },
+  model: { type: 'string', description: 'Model in provider/model format. When the user names no model: for session.create pick a suitable one from models.list favorites or recents (omit if there are none); for send and fork omit it — the session reuses its previous model. Also the model for session.model, models.toggle, models.default and models.cost' },
   agent: { type: 'string', description: 'OpenCode agent name; new sessions default to the build agent and existing sessions keep their previous one. Set only when the user explicitly requests a different agent' },
   variant: { type: 'string', description: 'Model variant; use only when the user explicitly requests it' },
-  worktree: { type: 'string', description: 'New worktree name for session.create. Omit by default; use only when the user explicitly asks for an isolated worktree. Uncommitted changes do not carry over into a new worktree' },
+  worktree: { type: 'string', description: 'New worktree for session.create: a name created in the normal worktree location, or an absolute path when it starts with /. Without it (and without newWorktree false) session.create still makes a worktree, named from the prompt. Uncommitted changes do not carry over into a new worktree' },
+  newWorktree: { type: 'boolean', description: 'session.create makes a new worktree by default (named from the prompt when worktree is omitted). Set false to run the session in the directory itself, e.g. when the user wants the work in their current checkout or the task only reads' },
+  worktreeNameModel: { type: 'string', description: 'session.create: provider/model used to name the new worktree from the prompt; defaults to the session model, then the default model' },
   branch: { type: 'string', description: 'Branch name for the new worktree' },
   startRef: { type: 'string', description: 'Git ref used to create the new worktree' },
   setUpstream: { type: 'boolean', description: 'Make the new worktree branch track its upstream' },
@@ -95,14 +105,14 @@ const ALL_PARAMETER_PROPERTIES = {
   last: { type: 'boolean', description: 'Return only the last matching session message' },
   withStatus: { type: 'boolean', description: 'Include authoritative status in session.list' },
   role: { type: 'string', enum: ['all', 'user', 'assistant'], description: 'Message role filter' },
-  name: { type: 'string' },
+  name: { type: 'string', description: 'Scheduled task name; MCP server name for mcp.toggle; skill name for skills.toggle; display name of the model for provider.models.add' },
   daily: { type: 'string', description: 'Daily run time in HH:mm format' },
   weekly: { type: 'string', description: 'Comma-separated weekdays; 0=Sunday and 6=Saturday' },
   once: { type: 'string', description: 'One-time run date in YYYY-MM-DD format' },
   time: { type: 'string', description: 'Weekly or one-time run time in HH:mm format' },
   cron: { type: 'string', description: 'Cron expression' },
   timezone: { type: 'string', description: 'IANA timezone' },
-  disabled: { type: 'boolean', description: 'true disables and false enables; required for schedule.toggle' },
+  disabled: { type: 'boolean', description: 'true disables and false enables; required for schedule.toggle, providers.toggle, models.toggle, mcp.toggle and tools.toggle; skills.toggle blocks or unblocks the skill' },
   path: { type: 'string', description: 'File to show for file.open; absolute, or relative to the session directory' },
   url: { type: 'string', description: 'http(s) URL for browser.open' },
   selector: { type: 'string', description: 'CSS selector from a browser.snapshot result' },
@@ -146,7 +156,7 @@ const NOTIFY_PARAMETER_PROPERTIES = {
 // agent handed an issue to investigate never opened this tool and never
 // linked it. SESSION_LINK_GUIDANCE in ../session-knowledge/runtime.js states
 // the same rule in every session's context; change both together.
-const CONTROL_TOOL_DESCRIPTION = "When the user gives you an issue or a change under review (a pull or merge request) to work on, fix, investigate or review, when you open one for this work, and when the work resolves one, link it to this session with session.link as soon as you know it, so the user sees it with the session. Not one merely mentioned in passing. The tool also runs OpenChamber projects, sessions and scheduled tasks for the user. A session you create, send to or fork belongs to the user: they follow it in OpenChamber and talk to it themselves. Dispatch one when the user asks for it, even when the work relates to your current task; any agent, optionally in a new worktree. To delegate part of your own task and get the answer yourself, use the subagent tool instead. A dispatch returns at once. Set returnResult when the user wants the outcome back or your next step needs it: the session's final answer then arrives in this session as a message when it finishes, and you continue from there. Without it, the session is the user's to follow and you move on. To see how a session went, read it with session.messages (lastAssistant for the final answer); session.send always starts a new prompt. One action per call; scope with projectId or directory, or leave both out for this session's directory. projects.add and projects.remove add or remove a configured project; removing one only drops the configured entry, the checkout itself is untouched. Deleting sessions and worktrees is not available.";
+const CONTROL_TOOL_DESCRIPTION = "When the user gives you an issue or a change under review (a pull or merge request) to work on, fix, investigate or review, when you open one for this work, and when the work resolves one, link it to this session with session.link as soon as you know it, so the user sees it with the session. Not one merely mentioned in passing. The tool also runs OpenChamber projects, sessions and scheduled tasks for the user. A session you create, send to or fork belongs to the user: they follow it in OpenChamber and talk to it themselves. Dispatch one when the user asks for it, even when the work relates to your current task; any agent, in a new worktree by default. To delegate part of your own task and get the answer yourself, use the subagent tool instead. A dispatch returns at once. Set returnResult when the user wants the outcome back or your next step needs it: the session's final answer then arrives in this session as a message when it finishes, and you continue from there. Without it, the session is the user's to follow and you move on. To see how a session went, read it with session.messages (lastAssistant for the final answer); session.send always starts a new prompt. One action per call; scope with projectId or directory, or leave both out for this session's directory. session.create works in a new git worktree by default: pass worktree to name it, or newWorktree false to stay in the directory. projects.add and projects.remove add or remove a configured project; removing one only drops the configured entry, the checkout itself is untouched. It also manages an existing session (rename, model and effort, agent, goal, retry, abort, pin), OpenChamber settings, OpenCode config and reload, MCP servers, skills and tools, and providers and models; change these only when the user asks. Deleting sessions and worktrees is not available.";
 
 const WEB_TOOL_DESCRIPTION = "Look at and interact with a web page in OpenChamber's browser panel, so you can check your own work rather than describing what you expect. Use one action per call. Open a page, snapshot it to read its text and its interactive elements, then click, type or scroll using the selectors the snapshot returned; snapshots also report any errors the page logged. Pass a selector to browser.snapshot to read one part of a long page. browser.inspect returns computed styles when the question is how something renders. Set viewport to check a layout at mobile, tablet or desktop size. The page runs with the user's real logins, so treat what you see as their live session.";
 

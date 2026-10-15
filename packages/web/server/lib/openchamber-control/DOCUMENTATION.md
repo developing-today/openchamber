@@ -89,6 +89,22 @@ other.
   together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
+- `session.create` runs in a new git worktree by default (`resolveAutoWorktree`
+  in `service.js`): `worktree` names it (an absolute path when it starts with
+  `/`, created exactly there by `resolveCandidateDirectory` in
+  `../git/service.js`), `newWorktree: false` (or `worktree: false`) opts out,
+  and otherwise the name is generated from the prompt by
+  `../git/worktree-name.js` using `worktreeNameModel`, else the session's
+  `model`, else the project or global `defaultModel`, else OpenCode's small
+  model. A failed generation falls back to a random adjective-noun name, and a
+  directory that is not a git repository stays in place; the result carries
+  `autoWorktree: { mode, name?, naming?, model?, reason? }`. The same naming
+  helper backs `POST /api/git/worktrees/generate-name`, which the composer's
+  auto-create switch calls.
+- Action modules (`session-actions.js`, `config-actions.js`,
+  `integration-actions.js`, `provider-actions.js`) are passed in as
+  `actionModules` and dispatched by action name before the built-in actions;
+  their definitions are part of `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
 - `projects.add`/`projects.remove` are the only destructive-adjacent actions
   wired: `projects.add` mirrors `POST /api/openchamber/directory` exactly
   (`validateDirectoryPath`, `createProjectIdFromPath`, `persistSettings`), so

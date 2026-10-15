@@ -7,20 +7,30 @@
  * removes it entirely, parameters included, rather than leaving its inputs
  * visible in a shared schema.
  */
+import { SESSION_EXTRA_ACTION_DEFINITIONS } from './session-actions.js';
+import { PROVIDER_ACTION_DEFINITIONS } from './provider-actions.js';
+import { CONFIG_ACTION_DEFINITIONS } from './config-actions.js';
+import { INTEGRATION_ACTION_DEFINITIONS } from './integration-actions.js';
+
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'List configured projects; no parameters' },
   { action: 'projects.add', title: 'Add a project', description: 'Add directory as a configured project; creates it first if create is true. Adding an already-configured directory returns that project unchanged rather than duplicating it. projectLabel sets its display name; defaults to the directory\'s own name' },
   { action: 'projects.remove', title: 'Remove a project', description: 'Remove projectId from configured projects. Only the configured entry is removed — the checkout, its sessions, and its worktrees are left on disk' },
   { action: 'models.list', title: 'Show model preferences', description: 'Show default, favorite, and recent model preferences; no parameters' },
   { action: 'session.list', title: 'List sessions', description: 'List sessions; optional projectId or directory, limit (default 10), all, or withStatus' },
-  { action: 'session.create', title: 'Create a session', description: 'Create a session in the current directory by default; prompt is optional' },
+  { action: 'session.create', title: 'Create a session', description: 'Create a session; prompt is optional. Runs in a new git worktree by default, named from the prompt by the session model (worktreeNameModel overrides); pass worktree to name it (an absolute path when it starts with /) or newWorktree false to use the directory itself. A directory that is not a git repository stays in place' },
   { action: 'session.send', title: 'Send a prompt', description: 'Send a new prompt to sessionId; scope with projectId or directory' },
   { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId; messageId selects the boundary; prompt is optional' },
   { action: 'session.status', title: 'Check session status', description: 'Check sessionId status; directory defaults to the current session' },
   { action: 'session.messages', title: 'Read session messages', description: 'Read text-only messages and current sessionStatus for sessionId; directory and limit 10 are defaults' },
   { action: 'session.link', title: 'Link a change or issue to a session', description: 'Link a change under review (pull or merge request) or an issue, on any service, to a session; requires link, sessionId defaults to the current session. Each link is added beside the others; linking one that is already there updates its title instead of adding it twice. Links are only added; the user removes them' },
+  ...SESSION_EXTRA_ACTION_DEFINITIONS,
+  ...PROVIDER_ACTION_DEFINITIONS,
+  ...CONFIG_ACTION_DEFINITIONS,
+  ...INTEGRATION_ACTION_DEFINITIONS,
   { action: 'schedule.status', title: 'Check scheduler status', description: 'Check scheduler status; no parameters', agentExposed: false },
   { action: 'schedule.list', title: 'List scheduled tasks', description: 'List tasks and scheduler status; scope with projectId or directory' },
+  { action: 'schedule.get', title: 'View a scheduled task', description: 'Read one task by taskId, with its schedule, prompt, model and run state; scope with projectId or directory' },
   { action: 'schedule.create', title: 'Create a scheduled task', description: 'Create task; requires name, prompt, one schedule selector, and model unless targetSessionId is set. targetSessionId reuses a session; without model it keeps that session selection' },
   { action: 'schedule.update', title: 'Change a scheduled task', description: 'Change taskId in place, keeping its id and run state; pass only what changes: name, prompt, model, variant, agent, targetSessionId (empty clears it), a schedule selector, timezone, disabled' },
   { action: 'schedule.run', title: 'Run a scheduled task', description: 'Run taskId; scope with projectId or directory' },

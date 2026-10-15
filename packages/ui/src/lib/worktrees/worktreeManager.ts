@@ -238,8 +238,10 @@ const toCreatePayload = (args: {
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
 
-  const worktreeNameSeed = args.worktreeName ?? args.preferredName ?? '';
-  const worktreeName = slugifyWorktreeName(worktreeNameSeed);
+  const worktreeNameSeed = (args.worktreeName ?? args.preferredName ?? '').trim();
+  // A leading '/' asks the server for that exact checkout path, so it must
+  // reach the server unslugged.
+  const worktreeName = worktreeNameSeed.startsWith('/') ? worktreeNameSeed : slugifyWorktreeName(worktreeNameSeed);
 
   const branchNameSeed = args.branchName ?? (mode === 'new' ? args.preferredName : undefined) ?? '';
   const branchName = normalizeBranchName(branchNameSeed);

@@ -16,7 +16,7 @@ const settingsRegistry = createRequire(import.meta.url)('./settings-registry.jso
  * it must be a registry key, not a server-computed flag, not a device field
  * that only lives in the browser, and not one the desktop shell writes itself.
  */
-const isPersistableSettingsKey = (key) => {
+export const isPersistableSettingsKey = (key) => {
   const field = settingsRegistry.fields[key];
   if (!field) return false;
   if (field.computed || field.local) return false;

@@ -11,6 +11,7 @@ const WAIT_POLL_INTERVAL_MS = 500;
 // One service, both capabilities: which tool asked is the caller's concern.
 const CONTROL_ACTIONS = new Set(OPENCHAMBER_ALL_ACTIONS);
 const SCHEDULE_TASK_ID_ACTIONS = new Set([
+  'schedule.get',
   'schedule.update',
   'schedule.run',
   'schedule.delete',
@@ -224,6 +225,10 @@ export const createOpenChamberControlService = (dependencies) => {
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.
     archiveStore = null,
+    // Action modules (session-actions.js, config-actions.js, ...): each
+    // `{ actions: string[], execute(action, input, ctx) }`, dispatched by name
+    // ahead of the built-in actions below.
+    actionModules = [],
     // projects.add / projects.remove reuse the same validation, id scheme and
     // settings writer the `/api/openchamber/directory` route uses, so an
     // agent-added project is indistinguishable from one a human added through
@@ -233,6 +238,12 @@ export const createOpenChamberControlService = (dependencies) => {
     validateDirectoryPath = null,
     persistSettings = null,
     createProjectIdFromPath = null,
+    // session.create makes a worktree by default (see resolveAutoWorktree).
+    // Injectable for tests; the defaults load the git service lazily so a
+    // server that never creates a session never pays for the import.
+    isGitRepository = async (directory) => (await import('../git/index.js')).isGitRepository(directory),
+    generateWorktreeName = async (options) => (await import('../git/worktree-name.js')).generateWorktreeName(options),
+    randomWorktreeName = async () => (await import('../git/index.js')).generateOpenCodeRandomName(),
     createClient = OpenCode.make,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
@@ -540,6 +551,51 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
+  /**
+   * session.create makes a new worktree unless told otherwise: an agent that
+   * dispatches work into the user's checkout would otherwise edit the same
+   * files the user (or another session) is working in. The caller either
+   * names the worktree (`worktree`), opts out explicitly (`newWorktree:
+   * false`, or `worktree: false`), or gets one named from the prompt by the
+   * model chosen for the session (`worktreeNameModel` overrides it). A
+   * directory that is not a git repository cannot have a worktree, so there
+   * it silently stays in place; naming failures fall back to a random name.
+   */
+  const resolveAutoWorktree = async (input, payload) => {
+    if (input.newWorktree === false || input.worktree === false) return { mode: 'disabled' };
+    if (payload.worktree || input.pullRequest !== undefined) return { mode: 'explicit' };
+    let directory = payload.directory || null;
+    if (!directory && payload.projectId) {
+      directory = await sessionService.resolveDirectory({ projectId: payload.projectId });
+    }
+    if (!directory || !(await isGitRepository(directory))) {
+      return { mode: 'skipped', reason: 'not a git repository' };
+    }
+    const settings = await readSettingsFromDiskMigrated();
+    const project = sanitizeProjects(settings?.projects || []).find((entry) => (
+      (payload.projectId && entry.id === payload.projectId) || path.resolve(entry.path) === path.resolve(directory)
+    ));
+    const namingModel = asNonEmptyString(input.worktreeNameModel)
+      || payload.model
+      || asNonEmptyString(project?.defaultModel)
+      || asNonEmptyString(settings?.defaultModel)
+      || undefined;
+    const namingPrompt = payload.prompt || payload.title || '';
+    const generated = namingPrompt
+      ? await generateWorktreeName({ prompt: namingPrompt, model: namingModel, directory })
+      : '';
+    const name = generated || await randomWorktreeName();
+    const worktree = { name };
+    const branchName = asNonEmptyString(input.branch);
+    if (branchName) worktree.branchName = branchName;
+    const startRef = asNonEmptyString(input.startRef);
+    if (startRef) worktree.startRef = startRef;
+    payload.worktree = worktree;
+    const resolution = { mode: 'auto', name, naming: generated ? 'generated' : 'random' };
+    if (generated && namingModel) resolution.model = namingModel;
+    return resolution;
+  };
+
   const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
@@ -587,8 +643,13 @@ export const createOpenChamberControlService = (dependencies) => {
     }
     const startedAt = now();
     let result;
+    let worktreeResolution = null;
     if (action === 'session.create') {
+      worktreeResolution = await resolveAutoWorktree(input, payload);
       result = await sessionService.create(payload);
+      if (worktreeResolution.mode === 'auto' || worktreeResolution.mode === 'skipped') {
+        result = { ...result, autoWorktree: worktreeResolution };
+      }
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {
@@ -775,6 +836,27 @@ export const createOpenChamberControlService = (dependencies) => {
       if (!CONTROL_ACTIONS.has(action)) {
         throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
       }
+      const actionModule = actionModules.find((entry) => entry.actions.includes(action));
+      if (actionModule) {
+        return await actionModule.execute(action, input, {
+          contextDirectory,
+          contextSessionId: options.contextSessionId,
+          signal: options.signal,
+          getClient,
+          // Same precedence as session.send/fork: an explicit directory or
+          // project wins, then the session's own directory, then the caller's.
+          resolveSessionDirectory: async (scope = {}) => {
+            assertSingleScope(scope);
+            const explicitDirectory = asNonEmptyString(scope.directory);
+            if (explicitDirectory) return explicitDirectory;
+            const projectID = asNonEmptyString(scope.projectId);
+            if (projectID) return sessionService.resolveDirectory({ projectId: projectID });
+            const scopedSessionID = asNonEmptyString(scope.sessionId);
+            const sessionDirectory = scopedSessionID ? await resolveSessionDirectory(scopedSessionID) : null;
+            return sessionDirectory || asNonEmptyString(contextDirectory);
+          },
+        });
+      }
       if (action.startsWith('memory.')) {
         if (!agentMemoryActions) {
           throw new OpenChamberControlError('Agent memory is not available on this server', 503);
@@ -835,6 +917,11 @@ export const createOpenChamberControlService = (dependencies) => {
         switch (action) {
           case 'schedule.list':
             return { scheduler: await scheduledTaskService.status(), tasks: await scheduledTaskService.list(projectID) };
+          case 'schedule.get': {
+            const task = (await scheduledTaskService.list(projectID)).find((entry) => entry.id === taskID);
+            if (!task) throw new OpenChamberControlError(`Scheduled task not found: ${taskID}`, 404);
+            return { task };
+          }
           case 'schedule.create': {
             const result = await scheduledTaskService.upsert(projectID, buildScheduledTask(input));
             return { task: result.task, created: result.created };

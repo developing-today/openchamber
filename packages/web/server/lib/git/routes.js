@@ -1,4 +1,4 @@
-import { isPlainObject, isString } from '../shared/guards.js';
+import { asNonEmptyString, isPlainObject, isRecord, isString } from '../shared/guards.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { runAsUserAction } from '../environment/refresh-scope.js';
@@ -1508,6 +1508,22 @@ export function registerGitRoutes(app, {
       console.error('Failed to preview worktree:', error);
       res.status(500).json({ error: error.message || 'Failed to preview worktree' });
     }
+  });
+
+  // Names a worktree from a session's first prompt with the model the session
+  // will run on (or the one named). Always answers 200: an empty `name` means
+  // the caller should fall back to its own random name, so naming can never
+  // block creating the session.
+  app.post('/api/git/worktrees/generate-name', async (req, res) => {
+    const body = isRecord(req.body) ? req.body : {};
+    const { generateWorktreeName } = await import('./worktree-name.js');
+    // generateWorktreeName validates each field itself; non-strings are ignored.
+    const name = await generateWorktreeName({
+      prompt: body.prompt,
+      model: body.model,
+      directory: asNonEmptyString(req.query.directory) || body.directory,
+    });
+    res.json({ name });
   });
 
   app.get('/api/git/worktrees/bootstrap-status', async (req, res) => {

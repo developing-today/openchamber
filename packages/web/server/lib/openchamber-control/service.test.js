@@ -76,6 +76,64 @@ describe('OpenChamber control service', () => {
     }));
   });
 
+  it('dispatches module actions with a session-scoped directory resolver', async () => {
+    const execute = vi.fn(async (_action, input, ctx) => ({ directory: await ctx.resolveSessionDirectory(input) }));
+    const { service } = createService({ actionModules: [{ actions: ['session.rename'], execute }] });
+    await expect(service.execute('session.rename', { directory: '/explicit', title: 't' }, '/ctx')).resolves.toEqual({ directory: '/explicit' });
+    await expect(service.execute('session.rename', { projectId: 'project-1', title: 't' }, '/ctx')).resolves.toEqual({ directory: '/repo' });
+    await expect(service.execute('session.rename', { title: 't' }, '/ctx')).resolves.toEqual({ directory: '/ctx' });
+    await expect(service.execute('session.rename', { directory: '/a', projectId: 'project-1' }, '/ctx')).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('schedule.get returns one task by id and 404s an unknown one', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.list.mockResolvedValue([{ id: 'task-1', name: 'Daily' }]);
+    await expect(service.execute('schedule.get', { taskId: 'task-1' }, '/repo')).resolves.toEqual({ task: { id: 'task-1', name: 'Daily' } });
+    await expect(service.execute('schedule.get', { taskId: 'nope' }, '/repo')).rejects.toMatchObject({ statusCode: 404 });
+    await expect(service.execute('schedule.get', {}, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('session.create makes a worktree named from the prompt by the session model by default', async () => {
+    const generateWorktreeName = vi.fn(async () => 'add-csv-export');
+    const { service, sessionService } = createService({
+      isGitRepository: vi.fn(async () => true),
+      generateWorktreeName,
+      randomWorktreeName: vi.fn(async () => 'random-name'),
+    });
+    const result = await service.execute('session.create', { prompt: 'Add CSV export', model: 'anthropic/claude' }, '/repo');
+    expect(generateWorktreeName).toHaveBeenCalledWith({ prompt: 'Add CSV export', model: 'anthropic/claude', directory: '/repo' });
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({ worktree: { name: 'add-csv-export' } }));
+    expect(result.autoWorktree).toEqual({ mode: 'auto', name: 'add-csv-export', naming: 'generated', model: 'anthropic/claude' });
+  });
+
+  it('session.create names with worktreeNameModel, then the default model, and falls back to a random name', async () => {
+    const generateWorktreeName = vi.fn(async () => '');
+    const { service, sessionService } = createService({
+      isGitRepository: vi.fn(async () => true),
+      generateWorktreeName,
+      randomWorktreeName: vi.fn(async () => 'cosmic-dolphin'),
+    });
+    await service.execute('session.create', { prompt: 'x', worktreeNameModel: 'openai/mini' }, '/repo');
+    expect(generateWorktreeName.mock.calls[0][0].model).toBe('openai/mini');
+    await service.execute('session.create', { prompt: 'x' }, '/repo');
+    expect(generateWorktreeName.mock.calls[1][0].model).toBe('provider/model');
+    expect(sessionService.create.mock.calls[1][0].worktree).toEqual({ name: 'cosmic-dolphin' });
+  });
+
+  it('session.create stays in the directory when newWorktree is false, a name is given, or it is not a git repo', async () => {
+    const isGitRepository = vi.fn(async (dir) => dir === '/repo');
+    const generateWorktreeName = vi.fn(async () => 'n');
+    const { service, sessionService } = createService({ isGitRepository, generateWorktreeName, randomWorktreeName: vi.fn() });
+    await service.execute('session.create', { prompt: 'x', newWorktree: false }, '/repo');
+    expect(sessionService.create.mock.calls[0][0]).not.toHaveProperty('worktree');
+    await service.execute('session.create', { prompt: 'x', worktree: 'mine' }, '/repo');
+    expect(sessionService.create.mock.calls[1][0].worktree).toEqual({ name: 'mine' });
+    const skipped = await service.execute('session.create', { prompt: 'x' }, '/plain');
+    expect(sessionService.create.mock.calls[2][0]).not.toHaveProperty('worktree');
+    expect(skipped.autoWorktree).toEqual({ mode: 'skipped', reason: 'not a git repository' });
+    expect(generateWorktreeName).not.toHaveBeenCalled();
+  });
+
   it('rejects projects.add and projects.remove when the server has not wired the dependencies they need', async () => {
     const { service } = createService();
     await expect(service.execute('projects.add', { directory: '/repo2' })).rejects.toMatchObject({

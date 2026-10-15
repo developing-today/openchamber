@@ -2717,7 +2717,7 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsDefaultModel: edited ? state.settingsDefaultModel : defaults.defaultModel,
                             settingsDefaultVariant: edited ? state.settingsDefaultVariant : defaults.defaultVariant,
                             settingsDefaultAgent: edited ? state.settingsDefaultAgent : defaults.defaultAgent,
-                            settingsAutoCreateWorktree: defaults.autoCreateWorktree ?? false,
+                            settingsAutoCreateWorktree: edited ? state.settingsAutoCreateWorktree : defaults.autoCreateWorktree ?? false,
                             settingsGitmojiEnabled: defaults.gitmojiEnabled ?? false,
                             settingsDefaultFileViewerPreview: defaults.defaultFileViewerPreview ?? true,
                             settingsZenModel: defaults.zenModel,
@@ -3756,7 +3756,9 @@ export const useConfigStore = create<ConfigStore>()(
                  },
 
                 setSettingsAutoCreateWorktree: (enabled: boolean) => {
+                    recordOpenChamberDefaultsChange();
                     set({ settingsAutoCreateWorktree: enabled });
+                    updateDesktopSettings({ autoCreateWorktree: enabled }).catch(() => {});
                 },
 
                 setSettingsGitmojiEnabled: (enabled: boolean) => {

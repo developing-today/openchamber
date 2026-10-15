@@ -7,6 +7,8 @@ type Deferred = {
 const requests = new Map<string, Deferred>();
 // Requests resolved with `keep`: a draft that has not sent yet still finds the directory.
 const settled = new Map<string, string>();
+// Requests rejected with `keep`: a send that starts waiting late still gets the real reason.
+const failed = new Map<string, Error>();
 
 const createDeferred = (): Deferred => {
   let resolve!: (directory: string) => void;
@@ -36,18 +38,25 @@ export const resolvePendingDraftWorktreeRequest = (id: string, directory: string
   entry.resolve(directory);
 };
 
-export const rejectPendingDraftWorktreeRequest = (id: string, error: Error): void => {
+export const rejectPendingDraftWorktreeRequest = (id: string, error: Error, options?: { keep?: boolean }): void => {
   const entry = requests.get(id);
   if (!entry) {
     return;
   }
   requests.delete(id);
+  if (options?.keep) {
+    failed.set(id, error);
+    // Nobody may be waiting yet; the late waiter reads `failed` instead.
+    entry.promise.catch(() => undefined);
+  }
   entry.reject(error);
 };
 
 export const waitForPendingDraftWorktreeRequest = (id: string): Promise<string> => {
   const done = settled.get(id);
   if (done !== undefined) return Promise.resolve(done);
+  const error = failed.get(id);
+  if (error) return Promise.reject(error);
   const entry = requests.get(id);
   if (!entry) {
     return Promise.reject(new Error('Pending worktree request not found'));

@@ -155,6 +155,10 @@ import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { createProjectIdFromPath } from './lib/projects/project-id.js';
+import { createSessionExtraActions } from './lib/openchamber-control/session-actions.js';
+import { createProviderActions } from './lib/openchamber-control/provider-actions.js';
+import { createConfigActions } from './lib/openchamber-control/config-actions.js';
+import { createIntegrationActions } from './lib/openchamber-control/integration-actions.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1790,6 +1794,7 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
   broadcastUiNotification,
 });
 
+let requestSelfHandoff = null;
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1826,6 +1831,21 @@ const openChamberControlService = createOpenChamberControlService({
   validateDirectoryPath,
   persistSettings,
   createProjectIdFromPath,
+  actionModules: [
+    createSessionExtraActions({ sessionService: openChamberSessionService, sessionKnowledgeRuntime }),
+    createProviderActions({ readSettingsFromDiskMigrated, persistSettings }),
+    createConfigActions({
+      readSettingsFromDiskMigrated,
+      formatSettingsResponse,
+      sanitizeSettingsUpdate,
+      persistSettings,
+      refreshOpenCodeAfterConfigChange,
+      // Set inside main() once the self-handoff runtime exists, and only when
+      // this process owns its signals (a standalone server, not an embedder).
+      getRequestHandoff: () => requestSelfHandoff,
+    }),
+    createIntegrationActions({ readSettingsFromDiskMigrated, persistSettings }),
+  ],
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -2568,6 +2588,8 @@ async function main(options = {}) {
     apiOnly,
     log: console,
   });
+  // openchamber.restart (config-actions.js) restarts through the same handoff.
+  if (attachSignals) requestSelfHandoff = selfHandoffRuntime.requestHandoff;
 
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,

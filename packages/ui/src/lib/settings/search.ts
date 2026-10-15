@@ -600,6 +600,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['retention', 'archive', 'delete'],
   },
   {
+    id: 'sessions.auto-create-worktree',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.autoCreateWorktree.field.enable',
+    descriptionKey: 'settings.openchamber.autoCreateWorktree.field.enableInfo',
+    keywords: ['worktree', 'branch', 'new session', 'automatic', 'isolate', 'name'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.merged-worktree-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.mergedWorktreeCleanup.field.enable',

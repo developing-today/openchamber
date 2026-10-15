@@ -830,7 +830,7 @@ const getOpenCodeDataPath = () => {
 
 const pickRandom = (values) => values[Math.floor(Math.random() * values.length)];
 
-const generateOpenCodeRandomName = () => `${pickRandom(OPENCODE_ADJECTIVES)}-${pickRandom(OPENCODE_NOUNS)}`;
+export const generateOpenCodeRandomName = () => `${pickRandom(OPENCODE_ADJECTIVES)}-${pickRandom(OPENCODE_NOUNS)}`;
 
 const slugWorktreeName = (value) => {
   return String(value || '')
@@ -2004,6 +2004,23 @@ const resolveWorktreeNameCandidates = (baseName) => {
 };
 
 const resolveCandidateDirectory = async (worktreeRoot, preferredName, explicitBranchName, primaryWorktree) => {
+  // A name starting with '/' is an exact checkout path, not a name under the
+  // worktree root: it is created exactly there or not at all (no random
+  // suffix), since the caller asked for that specific place.
+  if (String(preferredName || '').startsWith('/')) {
+    const directory = path.resolve(preferredName);
+    if (await checkPathExists(directory)) {
+      throw new Error(`Worktree path already exists: ${directory}`);
+    }
+    const name = slugWorktreeName(path.basename(directory)) || generateOpenCodeRandomName();
+    if (explicitBranchName) {
+      return { name, directory, branch: explicitBranchName };
+    }
+    const branch = `openchamber/${name}`;
+    const branchExists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
+    return { name, directory, branch: branchExists.success ? `${branch}-${generateOpenCodeRandomName()}` : branch };
+  }
+
   const candidates = resolveWorktreeNameCandidates(preferredName);
 
   for (const name of candidates) {
@@ -5502,6 +5519,8 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
     mode === 'new' && preferredBranchName ? preferredBranchName : '',
     context.primaryWorktree
   );
+  // An absolute target may sit outside the worktree root made above.
+  await fsp.mkdir(path.dirname(candidate.directory), { recursive: true });
 
   if (preparedInput?.returnAfterDirectoryCreated === true && preparedInput?.contributorFork !== true) {
     await fsp.mkdir(candidate.directory, { recursive: false });

@@ -401,6 +401,8 @@ export type NewSessionDraftState = {
   directoryOverride: string | null
   /** Chosen with the composer's shield button; absent means the new session takes the default from Settings. */
   permissionMode?: PermissionMode
+  /** Typed next to the auto-create worktree switch: a name, or an absolute path when it starts with '/'. */
+  autoWorktreeName?: string
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
   preserveDirectoryOverride?: boolean
@@ -453,6 +455,7 @@ export type SessionUIState = {
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionMode: (mode: PermissionMode) => void
+  setDraftAutoWorktreeName: (name: string) => void
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
@@ -1632,6 +1635,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, permissionMode: mode } }
+    }),
+
+  setDraftAutoWorktreeName: (name) =>
+    set((s) => {
+      if (!s.newSessionDraft?.open) return s
+      return { newSessionDraft: { ...s.newSessionDraft, autoWorktreeName: name } }
     }),
 
   setDraftProjectContextPin: (kind, id, pinned) =>
