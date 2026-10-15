@@ -154,6 +154,7 @@ import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib
 import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { createProjectIdFromPath } from './lib/projects/project-id.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1821,6 +1822,10 @@ const openChamberControlService = createOpenChamberControlService({
   }),
   dispatchResults: dispatchResultsRuntime,
   archiveStore: openChamberSessionService.archiveStore,
+  fsPromises,
+  validateDirectoryPath,
+  persistSettings,
+  createProjectIdFromPath,
 });
 
 const ensureGlobalWatcherStarted = async () => {

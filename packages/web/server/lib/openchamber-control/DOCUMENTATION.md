@@ -89,8 +89,16 @@ other.
   together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
-- Destructive session/worktree deletion and project-path registration are not
-  part of the action contract.
+- `projects.add`/`projects.remove` are the only destructive-adjacent actions
+  wired: `projects.add` mirrors `POST /api/openchamber/directory` exactly
+  (`validateDirectoryPath`, `createProjectIdFromPath`, `persistSettings`), so
+  an agent-added project is indistinguishable from one added through the UI;
+  `projects.remove` only drops the configured entry via `persistSettings`,
+  which recomputes `activeProjectId` on its own — the checkout, its sessions
+  and its worktrees are left untouched. Both 503 when the server has not
+  wired `fsPromises`/`validateDirectoryPath`/`persistSettings`/
+  `createProjectIdFromPath`. Session and worktree deletion are still not part
+  of the action contract.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of

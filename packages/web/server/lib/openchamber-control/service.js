@@ -224,6 +224,15 @@ export const createOpenChamberControlService = (dependencies) => {
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.
     archiveStore = null,
+    // projects.add / projects.remove reuse the same validation, id scheme and
+    // settings writer the `/api/openchamber/directory` route uses, so an
+    // agent-added project is indistinguishable from one a human added through
+    // the UI. All three absent simply means those two actions are unavailable
+    // on this server (an older embedder that has not wired them yet).
+    fsPromises = null,
+    validateDirectoryPath = null,
+    persistSettings = null,
+    createProjectIdFromPath = null,
     createClient = OpenCode.make,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
@@ -275,6 +284,94 @@ export const createOpenChamberControlService = (dependencies) => {
       path: path.resolve(project.path),
       label: asNonEmptyString(project.label) || path.basename(project.path) || project.path,
     }));
+  };
+
+  const projectActionsUnavailable = !fsPromises || !validateDirectoryPath || !persistSettings || !createProjectIdFromPath;
+
+  // Mirrors `/api/openchamber/directory`: same validation, same id scheme,
+  // same settings writer, so an agent-added project is a configured project
+  // in every sense, not a parallel notion of one.
+  const addProject = async (input) => {
+    if (projectActionsUnavailable) {
+      throw new OpenChamberControlError('Adding projects is not available on this server', 503);
+    }
+    const requestedPath = asNonEmptyString(input.directory);
+    if (!requestedPath) {
+      throw new OpenChamberControlError('directory is required', 400);
+    }
+    if (input.create === true) {
+      await fsPromises.mkdir(path.resolve(requestedPath), { recursive: true });
+    }
+    const validated = await validateDirectoryPath(requestedPath);
+    if (!validated.ok) {
+      throw new OpenChamberControlError(validated.error, 400);
+    }
+    const resolvedPath = validated.directory;
+    const settings = await readSettingsFromDiskMigrated();
+    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+    const existing = existingProjects.find((project) => project.path === resolvedPath) || null;
+    const label = asNonEmptyString(input.projectLabel);
+
+    const nextProjects = existing
+      ? existingProjects
+      : [
+          ...existingProjects,
+          {
+            id: createProjectIdFromPath(resolvedPath),
+            path: resolvedPath,
+            ...(label ? { label } : {}),
+            addedAt: now(),
+            lastOpenedAt: now(),
+          },
+        ];
+
+    const entry = existing ?? nextProjects[nextProjects.length - 1];
+    await persistSettings({
+      projects: nextProjects,
+      activeProjectId: entry.id,
+      lastDirectory: resolvedPath,
+    });
+
+    return {
+      project: {
+        id: entry.id,
+        path: resolvedPath,
+        label: asNonEmptyString(entry.label) || path.basename(resolvedPath) || resolvedPath,
+      },
+      alreadyConfigured: Boolean(existing),
+    };
+  };
+
+  // Deliberately settings-only: the running sessions, worktrees and checkout
+  // that belonged to this project are left exactly where they were, the same
+  // boundary the control tool's description states for every action. Not
+  // setting activeProjectId here is deliberate too — persistSettings already
+  // falls back to the first remaining project (or clears it) on its own, so
+  // recomputing that here would just be a second, possibly stale, opinion.
+  const removeProject = async (input) => {
+    if (projectActionsUnavailable) {
+      throw new OpenChamberControlError('Removing projects is not available on this server', 503);
+    }
+    const projectID = asNonEmptyString(input.projectId);
+    if (!projectID) {
+      throw new OpenChamberControlError('projectId is required', 400);
+    }
+    const settings = await readSettingsFromDiskMigrated();
+    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+    const target = existingProjects.find((project) => project.id === projectID) || null;
+    if (!target) {
+      throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
+    }
+    const nextProjects = existingProjects.filter((project) => project.id !== projectID);
+    await persistSettings({ projects: nextProjects });
+
+    return {
+      removed: {
+        id: target.id,
+        path: path.resolve(target.path),
+        label: asNonEmptyString(target.label) || path.basename(target.path) || target.path,
+      },
+    };
   };
 
   // projectId and directory are two names for one scope. Accepting both let
@@ -717,6 +814,8 @@ export const createOpenChamberControlService = (dependencies) => {
         });
       }
       if (action === 'projects.list') return { projects: await projects() };
+      if (action === 'projects.add') return addProject(input);
+      if (action === 'projects.remove') return removeProject(input);
       if (action === 'models.list') return models();
       if (action === 'schedule.status') return scheduledTaskService.status();
       if (action.startsWith('schedule.')) {

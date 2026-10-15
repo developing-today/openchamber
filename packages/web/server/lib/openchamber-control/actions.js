@@ -9,6 +9,8 @@
  */
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'List configured projects; no parameters' },
+  { action: 'projects.add', title: 'Add a project', description: 'Add directory as a configured project; creates it first if create is true. Adding an already-configured directory returns that project unchanged rather than duplicating it. projectLabel sets its display name; defaults to the directory\'s own name' },
+  { action: 'projects.remove', title: 'Remove a project', description: 'Remove projectId from configured projects. Only the configured entry is removed — the checkout, its sessions, and its worktrees are left on disk' },
   { action: 'models.list', title: 'Show model preferences', description: 'Show default, favorite, and recent model preferences; no parameters' },
   { action: 'session.list', title: 'List sessions', description: 'List sessions; optional projectId or directory, limit (default 10), all, or withStatus' },
   { action: 'session.create', title: 'Create a session', description: 'Create a session in the current directory by default; prompt is optional' },

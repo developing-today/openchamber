@@ -76,6 +76,96 @@ describe('OpenChamber control service', () => {
     }));
   });
 
+  it('rejects projects.add and projects.remove when the server has not wired the dependencies they need', async () => {
+    const { service } = createService();
+    await expect(service.execute('projects.add', { directory: '/repo2' })).rejects.toMatchObject({
+      statusCode: 503,
+      message: 'Adding projects is not available on this server',
+    });
+    await expect(service.execute('projects.remove', { projectId: 'project-1' })).rejects.toMatchObject({
+      statusCode: 503,
+      message: 'Removing projects is not available on this server',
+    });
+  });
+
+  it('adds a project the same way the directory route does: validated, deduplicated by path, made active', async () => {
+    let storedProjects = [{ id: 'project-1', path: '/repo', label: 'Repo' }];
+    const persistSettings = vi.fn(async (changes) => {
+      if (changes.projects) storedProjects = changes.projects;
+      return { projects: storedProjects, activeProjectId: changes.activeProjectId };
+    });
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ projects: storedProjects })),
+      fsPromises: { mkdir: vi.fn(async () => {}) },
+      validateDirectoryPath: vi.fn(async (candidate) => ({ ok: true, directory: candidate })),
+      persistSettings,
+      createProjectIdFromPath: (p) => `project-id-of-${p}`,
+    });
+
+    const added = await service.execute('projects.add', { directory: '/repo2', projectLabel: 'Repo Two' });
+    expect(added).toEqual({
+      project: { id: 'project-id-of-/repo2', path: '/repo2', label: 'Repo Two' },
+      alreadyConfigured: false,
+    });
+    expect(persistSettings).toHaveBeenCalledWith(expect.objectContaining({
+      activeProjectId: 'project-id-of-/repo2',
+      lastDirectory: '/repo2',
+    }));
+
+    // Adding the same directory again is a no-op that reports the existing entry.
+    const addedAgain = await service.execute('projects.add', { directory: '/repo2' });
+    expect(addedAgain).toEqual({
+      project: { id: 'project-id-of-/repo2', path: '/repo2', label: 'Repo Two' },
+      alreadyConfigured: true,
+    });
+    expect(storedProjects).toHaveLength(2);
+  });
+
+  it('rejects projects.add when the directory fails validation, and requires directory at all', async () => {
+    const { service } = createService({
+      fsPromises: { mkdir: vi.fn() },
+      validateDirectoryPath: vi.fn(async () => ({ ok: false, error: 'Directory not found' })),
+      persistSettings: vi.fn(),
+      createProjectIdFromPath: (p) => p,
+    });
+    await expect(service.execute('projects.add', { directory: '/missing' })).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'Directory not found',
+    });
+    await expect(service.execute('projects.add', {})).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'directory is required',
+    });
+  });
+
+  it('removes a configured project by id, leaving its checkout untouched, and rejects an unknown id', async () => {
+    const persistSettings = vi.fn(async () => ({}));
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({
+        projects: [{ id: 'project-1', path: '/repo', label: 'Repo' }, { id: 'project-2', path: '/repo2', label: 'Repo Two' }],
+      })),
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(),
+      persistSettings,
+      createProjectIdFromPath: (p) => p,
+    });
+
+    await expect(service.execute('projects.remove', { projectId: 'project-2' })).resolves.toEqual({
+      removed: { id: 'project-2', path: '/repo2', label: 'Repo Two' },
+    });
+    expect(persistSettings).toHaveBeenCalledWith({ projects: [{ id: 'project-1', path: '/repo', label: 'Repo' }] });
+    expect(persistSettings.mock.calls[0][0]).not.toHaveProperty('activeProjectId');
+
+    await expect(service.execute('projects.remove', { projectId: 'does-not-exist' })).rejects.toMatchObject({
+      statusCode: 404,
+      message: 'Unknown project: does-not-exist',
+    });
+    await expect(service.execute('projects.remove', {})).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'projectId is required',
+    });
+  });
+
   it('maps schedule creation into the shared scheduled-task service', async () => {
     const { service, scheduledTaskService } = createService();
     scheduledTaskService.upsert.mockResolvedValue({ task: { id: 'task-1' }, created: true });

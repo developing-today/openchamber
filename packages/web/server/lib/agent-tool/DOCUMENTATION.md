@@ -141,7 +141,9 @@ both settings are `false`.
   per-request way to skip the environment proxy.
 - Inputs map to a fixed action and parameter allowlist. There is no arbitrary
   CLI, shell, route, or URL forwarding.
-- Session/worktree deletion and project-path registration are not exposed.
+- `projects.add`/`projects.remove` expose project registration itself —
+  adding/removing the configured entry only, via the same settings path the
+  UI's directory picker uses. Session/worktree deletion is still not exposed.
 - A cancelled turn aborts the session's in-flight actions. OpenCode 2 gives a
   plugin tool no abort signal and the plugin's request stays open, so the
   server tracks in-flight actions per session and `abortSession(sessionID)` is
