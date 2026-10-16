@@ -1,3 +1,22 @@
+<!--
+  developing-today/openchamber fork notice:
+  This fork tracks upstream openchamber/openchamber (branch main).
+  Latest upstream commit merged: 09494f3db599b9c81e0eecea86ba16e75cecf362 (fix(browser): agent clicks open pickers that react to mousedown or focus (#4703), v2.2.0-103-g09494f3db) via merge commit ca9aa8eb0.
+-->
+
+> [!NOTE]
+> **Fork Information (`developing-today/openchamber`):**
+> This repository is a fork of [OpenChamber](https://github.com/openchamber/openchamber) tracking upstream `main`.
+> - **Latest upstream commit merged**: `09494f3db599b9c81e0eecea86ba16e75cecf362` (`v2.2.0-103-g09494f3db`, merged via `ca9aa8eb0`).
+>
+> **High-Level Additions & Differences in this Fork:**
+> - **Model Pools UI & Recurring Schedules**: Settings section for managing OpenCode route pools (`experimental.model_routes`), target memberships, weights, and recurring time-based weight schedules (`ScheduleFields` / `ScheduleListEditor` with timezone, weekdays, and day-of-month windows).
+> - **Route Rules Interpreter & Timed Overrides**: Natural-language sentence routing ("Route by sentence") with support for timed windows, recurring schedule extraction, and active override display.
+> - **Plans & Usage Section**: Settings page (`Settings → Routing → Plans and usage`) for tracking user subscriptions, quota windows, renewal dates, cost tiers (`cheap`, `standard`, `frontier`), and ad-hoc usage experience notes.
+> - **Review & Update Action Buttons**: Direct launcher buttons with configurable trigger mode (prefill in composer vs. auto-send immediately) for `/routing-review` and `/plan-update`.
+> - **Control & Workspace Enhancements**: Worktree-by-default sessions, project control actions (`projects.add`/`projects.remove`), and fork-specific release update resolution.
+> - **MCPX Secret Management**: Native UI prompts for JIT secrets required by MCP servers across desktop, web, VS Code, and mobile.
+
 # <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> OpenChamber
 
 [![GitHub stars](https://img.shields.io/github/stars/openchamber/openchamber?style=flat&labelColor=100F0F&color=66800B)](https://github.com/openchamber/openchamber/stargazers)
