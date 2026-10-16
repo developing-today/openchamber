@@ -148,7 +148,7 @@ const PoolRow: React.FC<{
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1.5 text-left hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1.5 text-start hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="typography-ui-label font-medium text-foreground truncate">
             {route.name || id}
@@ -357,14 +357,14 @@ const PoolTelemetry: React.FC = () => {
         {t('settings.pools.telemetry.description', { hours: stats.windowHours ?? 24 })}
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full text-left typography-meta">
+        <table className="w-full text-start typography-meta">
           <thead>
             <tr className="text-muted-foreground">
-              <th className="py-1 pr-3 font-medium">{t('settings.pools.telemetry.target')}</th>
-              <th className="py-1 pr-3 font-medium">{t('settings.pools.telemetry.attempts')}</th>
-              <th className="py-1 pr-3 font-medium">{t('settings.pools.telemetry.failed')}</th>
-              <th className="py-1 pr-3 font-medium">{t('settings.pools.telemetry.firstToken')}</th>
-              <th className="py-1 pr-3 font-medium">{t('settings.pools.telemetry.hedgeWins')}</th>
+              <th className="py-1 pe-3 font-medium">{t('settings.pools.telemetry.target')}</th>
+              <th className="py-1 pe-3 font-medium">{t('settings.pools.telemetry.attempts')}</th>
+              <th className="py-1 pe-3 font-medium">{t('settings.pools.telemetry.failed')}</th>
+              <th className="py-1 pe-3 font-medium">{t('settings.pools.telemetry.firstToken')}</th>
+              <th className="py-1 pe-3 font-medium">{t('settings.pools.telemetry.hedgeWins')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/40">
@@ -372,11 +372,11 @@ const PoolTelemetry: React.FC = () => {
               const hedge = hedgeFor(row.providerID, row.modelID);
               return (
                 <tr key={`${row.providerID}/${row.modelID}`}>
-                  <td className="py-1 pr-3 text-foreground truncate">{`${row.providerID}/${row.modelID}`}</td>
-                  <td className="py-1 pr-3">{row.attempts}</td>
-                  <td className="py-1 pr-3">{`${row.failures}${row.timeouts > 0 ? ` (${row.timeouts} timeouts)` : ''}`}</td>
-                  <td className="py-1 pr-3">{row.avgFirstTokenMs === null ? '—' : `${row.avgFirstTokenMs}ms`}</td>
-                  <td className="py-1 pr-3">{hedge ? hedgeRate(hedge) : '—'}</td>
+                  <td className="py-1 pe-3 text-foreground truncate">{`${row.providerID}/${row.modelID}`}</td>
+                  <td className="py-1 pe-3">{row.attempts}</td>
+                  <td className="py-1 pe-3">{`${row.failures}${row.timeouts > 0 ? ` (${row.timeouts} timeouts)` : ''}`}</td>
+                  <td className="py-1 pe-3">{row.avgFirstTokenMs === null ? '—' : `${row.avgFirstTokenMs}ms`}</td>
+                  <td className="py-1 pe-3">{hedge ? hedgeRate(hedge) : '—'}</td>
                 </tr>
               );
             })}

@@ -39,7 +39,7 @@ const feeSchema = z.object({
   renewsOn: z.string().optional(),
 });
 
-export const planSchema = z.object({
+const planSchema = z.object({
   id: z.string(),
   providerID: z.string(),
   label: z.string(),
@@ -74,7 +74,7 @@ const poolPurposeSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const planNoteSchema = z.object({
+const planNoteSchema = z.object({
   id: z.string(),
   at: z.string(),
   kind: z.enum(NOTE_KINDS),
@@ -87,10 +87,10 @@ export const planNoteSchema = z.object({
 });
 
 export type PlanNote = z.infer<typeof planNoteSchema>;
-export type ModelTier = z.infer<typeof modelTierSchema>;
-export type PoolPurpose = z.infer<typeof poolPurposeSchema>;
+type ModelTier = z.infer<typeof modelTierSchema>;
+type PoolPurpose = z.infer<typeof poolPurposeSchema>;
 
-export const planStateSchema = z.object({
+const planStateSchema = z.object({
   plans: z.array(planSchema),
   models: z.record(z.string(), modelTierSchema),
   pools: z.record(z.string(), poolPurposeSchema),

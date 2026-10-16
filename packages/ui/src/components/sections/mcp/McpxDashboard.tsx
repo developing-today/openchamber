@@ -92,7 +92,7 @@ export const McpxDashboard: React.FC = () => {
             {status ? 'Daemon Online' : 'Checking'}
           </SettingsCardPill>
           <Button variant="outline" size="sm" onClick={() => void fetchStatus()} disabled={loading}>
-            <Icon name="refresh" className={`size-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+            <Icon name="refresh" className={`size-4 me-1 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
         </div>

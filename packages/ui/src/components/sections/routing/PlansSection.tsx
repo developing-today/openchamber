@@ -44,7 +44,7 @@ const listOf = (value: string) =>
     .map((item) => item.trim())
     .filter((item) => item !== '');
 
-export type ActionSendMode = 'prefill' | 'autosend';
+type ActionSendMode = 'prefill' | 'autosend';
 const ACTION_SEND_MODE_STORAGE_KEY = 'openchamber.routing.plans.actionSendMode';
 
 /** Starts a new chat and either prefills the command or sends it immediately. */
