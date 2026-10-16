@@ -218,4 +218,37 @@ describe('createWorktreeWithDefaults remote source integration', () => {
     expect(createdPayloads[0].upstreamRemote).toBe('origin');
     expect(createdPayloads[0].upstreamBranch).toBe('openchamber/feature');
   });
+
+  const changeRequestSource = {
+    context: {
+      provider: 'github' as const,
+      instance: 'github.com',
+      directory: '/repo',
+      repositoryId: 'repo-1',
+      accountId: 'account-1',
+      bindingRevision: 1,
+      primaryRemote: 'origin',
+    },
+    project: { id: 'acme/app', owner: 'acme', name: 'app' },
+    number: 42,
+    expectedHeadSha: 'a'.repeat(40),
+    requestedRemoteName: 'pr-acme',
+  };
+
+  test('a new branch from a pull request leaves the start to the server and tracks like any new branch', async () => {
+    gitStatus = { current: 'main', tracking: 'origin/main', ahead: 0, behind: 15 };
+
+    await createWorktreeWithDefaults(project, baseArgs({ changeRequestSource }));
+
+    expect(createdPayloads[0].startRef).toBe(undefined);
+    expect(createdPayloads[0].setUpstream).toBe(true);
+    expect(createdPayloads[0].upstreamBranch).toBe('openchamber/feature');
+  });
+
+  test('checking out a pull request\'s branch gets no start and no upstream from the client', async () => {
+    await createWorktreeWithDefaults(project, baseArgs({ mode: 'existing', existingBranch: 'remotes/pr-acme/fix', changeRequestSource }));
+
+    expect(createdPayloads[0].startRef).toBe(undefined);
+    expect(createdPayloads[0].setUpstream).toBe(undefined);
+  });
 });

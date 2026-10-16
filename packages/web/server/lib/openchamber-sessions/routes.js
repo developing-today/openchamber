@@ -1,4 +1,4 @@
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean } from '../shared/guards.js';
 import express from 'express';
 import {
   createWorktree as createWorktreeDefault,
@@ -23,6 +23,12 @@ import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
+import {
+  branchesOffPullRequestsByDefault,
+  resolveRemoteDefaultStartRef,
+  resolveWorktreeStartFrom,
+} from '../git/worktree-start-ref.js';
+import { branchTemplateFrom, defaultBranchName, localBranchNames } from '../git/branch-name-template.js';
 
 const asList = (value) => (Array.isArray(value) ? value : []);
 
@@ -391,9 +397,11 @@ const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
 const WORKTREE_BOOTSTRAP_POLL_MS = 150;
 
 /**
- * A worktree from a pull or merge request: its number, and the folder and
- * branch names when the caller chose them. The head, the fork and its remote
- * come from the provider; a start ref or upstream would contradict them.
+ * A worktree from a pull or merge request: its number, the folder and branch
+ * names when the caller chose them, and `branchOff` when the caller said
+ * whether to start a new branch from the head instead of checking out the
+ * request's branch. The head, the fork and its remote come from the
+ * provider; a start ref or upstream would contradict them.
  */
 const resolvePullRequestInput = (payload) => {
   if (payload?.pullRequest === undefined) return null;
@@ -401,9 +409,13 @@ const resolvePullRequestInput = (payload) => {
     throw new OpenChamberControlError('pullRequest must be a pull or merge request number, such as 42', 400);
   }
   if (payload.worktree?.startRef !== undefined || payload.setUpstream !== undefined) {
-    throw new OpenChamberControlError('pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream', 400);
+    throw new OpenChamberControlError('pullRequest starts from the pull request\'s head; do not combine it with startRef or setUpstream', 400);
+  }
+  if (payload.branchOff !== undefined && !isBoolean(payload.branchOff)) {
+    throw new OpenChamberControlError('branchOff must be true or false', 400);
   }
   const input = { number: payload.pullRequest };
+  if (payload.branchOff !== undefined) input.branchOff = payload.branchOff;
   const name = asNonEmptyString(payload.worktree?.name);
   if (name) input.name = name;
   const branchName = asNonEmptyString(payload.worktree?.branchName);
@@ -856,6 +868,31 @@ export const createOpenChamberSessionService = (dependencies) => {
     if (payload?.worktree && !worktreeInput && !pullRequestInput) {
       throw new OpenChamberControlError('worktree.name is required when worktree is provided', 400);
     }
+    // What the caller left out comes from Settings: where a new branch starts,
+    // what it is called, and whether a pull request is checked out or branched off.
+    // The branch this call named itself, which may take the next free name.
+    let nameDefaultBranch = null;
+    if (worktreeInput || pullRequestInput) {
+      const settings = await readSettingsFromDiskMigrated();
+      if (pullRequestInput) {
+        if (pullRequestInput.branchOff === undefined) pullRequestInput.branchOff = branchesOffPullRequestsByDefault(settings);
+        if (pullRequestInput.branchOff && !pullRequestInput.branchName) {
+          pullRequestInput.branchTemplate = branchTemplateFrom(settings, 'pull-request');
+          pullRequestInput.existingBranches = localBranchNames(await getBranches(resolvedDirectory.directory, { remote: 'local' }));
+        }
+      }
+      if (worktreeInput && (!worktreeInput.startRef || !worktreeInput.branchName)) {
+        const branches = await getBranches(resolvedDirectory.directory, { remote: 'local' });
+        if (!worktreeInput.startRef && resolveWorktreeStartFrom(settings, 'agent') === 'remote-default') {
+          const startRef = resolveRemoteDefaultStartRef(branches);
+          if (startRef) worktreeInput.startRef = startRef;
+        }
+        if (!worktreeInput.branchName) {
+          nameDefaultBranch = (current) => defaultBranchName(settings, current, worktreeInput.name);
+          worktreeInput.branchName = nameDefaultBranch(branches);
+        }
+      }
+    }
 
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
 
@@ -897,10 +934,16 @@ export const createOpenChamberSessionService = (dependencies) => {
         parentDirectory: resolvedDirectory.directory,
         parentRemoteName,
       });
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, {
-        bootstrapStore: worktreeBootstrapStore,
-        hydrateCheckout,
-      });
+      const createOptions = { bootstrapStore: worktreeBootstrapStore, hydrateCheckout };
+      try {
+        worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, createOptions);
+      } catch (error) {
+        // Two calls naming the same task at once both read the branch list
+        // before either made its branch; the later one takes the next free name.
+        if (!nameDefaultBranch || !/Branch already exists/.test(error instanceof Error ? error.message : '')) throw error;
+        worktreeInput.branchName = nameDefaultBranch(await getBranches(resolvedDirectory.directory, { remote: 'local' }));
+        worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, createOptions);
+      }
       sessionDirectory = worktree.path;
       await waitForWorktreeBootstrapReady({
         directory: sessionDirectory,
@@ -1118,6 +1161,8 @@ export const createOpenChamberSessionService = (dependencies) => {
     hydrateCheckout: hydrateWorktreeCheckout,
     // The move is global in v2: no directory header, the session id names it.
     moveSession: (sessionID, directory) => clientFor(undefined).session.move({ sessionID, directory }),
+    readStartFrom: async () => resolveWorktreeStartFrom(await readSettingsFromDiskMigrated(), 'agent'),
+    nameBranch: async (root, name) => defaultBranchName(await readSettingsFromDiskMigrated(), await getBranches(root, { remote: 'local' }), name),
   });
 
   /**

@@ -2245,6 +2245,73 @@ describe('createWorktree', () => {
     }
   }, 30_000);
 
+  it('starts from a stale remote-tracking ref only with a notice when it cannot be refreshed', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const { repository } = createRepositoryWithRemote({ defaultBranch: 'main' });
+      runGit(repository, ['remote', 'set-url', 'origin', '/nonexistent/openchamber-unreachable.git']);
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/stale-default',
+        worktreeName: 'stale-default',
+        startRef: 'remotes/origin/main',
+      });
+
+      expect(created.sourceFetchFailed).toBe(true);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+
+  it('refuses a new branch whose start is not the expected head, before anything exists', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const { repository } = createRepositoryWithRemote({ defaultBranch: 'main' });
+      const head = runGit(repository, ['rev-parse', 'remotes/origin/main']).trim();
+
+      for (const returnAfterDirectoryCreated of [false, true]) {
+        await expect(createWorktree(repository, {
+          mode: 'new',
+          branchName: 'openchamber/moved-head',
+          worktreeName: 'moved-head',
+          startRef: 'remotes/origin/main',
+          expectedRevision: 'f'.repeat(40),
+          returnAfterDirectoryCreated,
+        })).rejects.toMatchObject({ status: 409, code: 'CHANGE_REQUEST_HEAD_CHANGED' });
+      }
+      expect(runGit(repository, ['branch', '--list', 'openchamber/moved-head']).trim()).toBe('');
+      expect(runGit(repository, ['worktree', 'list']).trim().split('\n')).toHaveLength(1);
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/expected-head',
+        worktreeName: 'expected-head',
+        startRef: 'remotes/origin/main',
+        expectedRevision: head,
+      });
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(head);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+
   const withDataHome = async (run) => {
     const previousXdgDataHome = process.env.XDG_DATA_HOME;
     process.env.XDG_DATA_HOME = createTempDir();

@@ -202,6 +202,7 @@ import { useComposerDraft } from './composer/state/useComposerDraft';
 import { useDictationOrigin } from './composer/state/useDictationOrigin';
 import { useDraftTarget } from './composer/state/useDraftTarget';
 import { shouldAutoCreateDraftWorktree, startAutoDraftWorktree } from '@/lib/worktrees/autoDraftWorktree';
+import { selectWorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
 import { useMobileComposerShell } from './composer/state/useMobileComposerShell';
 import { useMobileViewportPin } from './composer/state/useMobileViewportPin';
 import { MobileCommentComposer } from './composer/comment/MobileCommentComposer';
@@ -700,7 +701,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [getLargeTextPasteScope]);
     const { expanded: persistedExpandedInput, setExpanded: setExpandedInput } = useChatColumnExpandedInput();
     const isExpandedInput = !isBtwActive && persistedExpandedInput;
-    const { git: runtimeGit, vscode: vscodeApi, linear: runtimeLinear } = useRuntimeAPIs();
+    const { git: runtimeGit, vscode: vscodeApi, linear: runtimeLinear, sourceControl: runtimeSourceControl } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
@@ -2226,11 +2227,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 isGitRepo: selectedDraftProjectIsGitRepo,
             })
         ) {
+            const autoWorktreeSource = capturedDraftSnapshot.autoWorktreeSource;
             capturedDraftSnapshot.pendingWorktreeRequestId = startAutoDraftWorktree({
                 project: { id: selectedDraftProject.id, path: selectedDraftProject.path },
                 prompt: primaryText,
                 model: `${providerIdToSend}/${modelIdToSend}`,
                 typedName: capturedDraftSnapshot.autoWorktreeName,
+                // A source picked in another project names branches this one does not have.
+                source: autoWorktreeSource?.projectId === selectedDraftProject.id ? autoWorktreeSource.source : undefined,
+                startFrom: selectWorktreeStartFrom(useConfigStore.getState(), 'autoCreate'),
+                branchTemplates: {
+                    worktree: useConfigStore.getState().settingsWorktreeBranchTemplate,
+                    pullRequest: useConfigStore.getState().settingsPullRequestBranchTemplate,
+                },
+                sourceControl: runtimeSourceControl,
                 fallbackDirectory: capturedDraftSnapshot.directoryOverride ?? selectedDraftProject.path,
             });
         }

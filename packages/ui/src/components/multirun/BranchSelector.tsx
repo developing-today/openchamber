@@ -14,6 +14,8 @@ import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { resolveRemoteDefaultStartRef, selectWorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useI18n } from '@/lib/i18n';
 
 interface BranchSelectorProps {
@@ -112,8 +114,12 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     () => [...localBranches, ...remoteBranches.map(b => `remotes/${b}`)],
     [localBranches, remoteBranches],
   );
+  const branchState = useGitBranches(directory);
+  const startFrom = useConfigStore((state) => selectWorktreeStartFrom(state, 'parallel'));
+  const remoteDefault = startFrom === 'remote-default' && branchState ? resolveRemoteDefaultStartRef(branchState) : null;
 
-  // Resolve default source branch (same priority as NewWorktreeDialog)
+  // The Settings start for Run in parallel: the default remote's default
+  // branch when chosen and listed, else the same priority as NewWorktreeDialog.
   React.useEffect(() => {
     if (disabled || isLoading || allBranches.length === 0) return;
     if (value && allBranches.includes(value)) return;
@@ -126,7 +132,9 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         const rootBranch = directory ? await getRootBranch(directory).catch(() => null) : null;
         if (cancelled) return;
 
-        const sourceBranch = resolveDefaultSourceBranch({ branches: allBranches, rootBranch });
+        const sourceBranch = remoteDefault && allBranches.includes(remoteDefault)
+          ? remoteDefault
+          : resolveDefaultSourceBranch({ branches: allBranches, rootBranch });
 
         if (cancelled || (currentValue && allBranches.includes(currentValue))) return;
 
@@ -142,7 +150,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [allBranches, directory, disabled, isLoading, onChange, value]);
+  }, [allBranches, directory, disabled, isLoading, onChange, remoteDefault, value]);
 
   const isDisabled = disabled || !isGitRepository || isLoading;
 

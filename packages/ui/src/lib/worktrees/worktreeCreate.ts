@@ -3,6 +3,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktree } from '@/lib/worktrees/worktreeManager';
 import { getRootBranch, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
+import { resolveRemoteDefaultStartRef, type WorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
 
 export class WorktreeRequiresGitRepositoryError extends Error {
   constructor() {
@@ -96,7 +97,9 @@ const withWorktreeUpstreamDefaults = async (
   args: CreateWorktreeArgs,
   options?: { resolvedRootTrackingRemote?: string | null }
 ): Promise<CreateWorktreeArgs> => {
-  if (args.changeRequestSource) return args;
+  // Checking out a change request's branch never tracks anything the caller
+  // picks; a new branch from its head tracks the same remote as any other.
+  if (args.changeRequestSource && args.mode === 'existing') return args;
   const localBranch = resolveLocalBranchName(args);
   const resolvedRemote = options?.resolvedRootTrackingRemote;
   const defaults = resolvedRemote === undefined
@@ -133,7 +136,8 @@ export const withWorktreeRemoteStartRef = async (
   project: ProjectRef,
   args: CreateWorktreeArgs
 ): Promise<CreateWorktreeArgs> => {
-  if (args.mode === 'existing') {
+  // The server starts a change request's worktree at its head.
+  if (args.mode === 'existing' || args.changeRequestSource) {
     return args;
   }
   const rawStartRef = String(args.startRef || '').trim();
@@ -165,6 +169,22 @@ export const withWorktreeRemoteStartRef = async (
   }
 
   return { ...args, startRef: `remotes/${tracking.remote}/${tracking.branch}` };
+};
+
+/**
+ * The start ref the Settings default (`worktreeStartFrom`) names, read from
+ * local refs only. Undefined means the project root's branch, which
+ * `withWorktreeRemoteStartRef` already starts from; a repository whose remotes
+ * name no default branch gets that too. A failed read throws, so a worktree
+ * never quietly starts somewhere else.
+ */
+export const resolveDefaultWorktreeStartRef = async (
+  projectDirectory: string,
+  startFrom: WorktreeStartFrom,
+): Promise<string | undefined> => {
+  if (startFrom !== 'remote-default') return undefined;
+  const branches = await getGitBranches(projectDirectory, { remote: 'local' });
+  return resolveRemoteDefaultStartRef(branches) ?? undefined;
 };
 
 export const createWorktreeWithDefaults = async (

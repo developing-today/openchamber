@@ -49,6 +49,7 @@ import { useKeybind } from '@/hooks/useKeybind';
 import type { Theme } from '@/types/theme';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
+import { AutoWorktreeSourcePicker } from './AutoWorktreeSourcePicker';
 
 interface BranchOption {
     value: string;
@@ -104,12 +105,15 @@ function WorktreeCreateActions({ onQuick, onCustom, className }: {
 }
 
 /**
- * The draft's auto-create worktree switch and its optional name. Shown only
- * while the draft is aimed at the project root, where the switch applies; it
- * reads the stores itself so the memoized selectors do not re-render with it.
+ * The draft's auto-create worktree switch, its optional name and where the
+ * worktree starts. Shown only while the draft is aimed at the project root,
+ * where the switch applies; it reads the stores itself so the memoized
+ * selectors do not re-render with it.
  */
-function AutoWorktreeControl({ projectPath, className }: {
+function AutoWorktreeControl({ projectId, projectPath, isMobile, className }: {
+    projectId: string;
     projectPath: string;
+    isMobile: boolean;
     className?: string;
 }) {
     const { t } = useI18n();
@@ -121,7 +125,7 @@ function AutoWorktreeControl({ projectPath, className }: {
     if (!shouldAutoCreateDraftWorktree({ enabled: true, draft, projectPath, isGitRepo: true })) return null;
 
     return (
-        <div className={cn('flex min-w-0 items-center gap-1.5', className)}>
+        <div className={cn('flex min-w-0 flex-wrap items-center gap-1.5', className)}>
             <Tooltip>
                 <TooltipTrigger asChild>
                     <span className="inline-flex shrink-0 items-center gap-1.5 typography-ui-label text-muted-foreground">
@@ -149,6 +153,7 @@ function AutoWorktreeControl({ projectPath, className }: {
                     className="w-44 min-w-0"
                 />
             ) : null}
+            {enabled ? <AutoWorktreeSourcePicker projectId={projectId} projectPath={projectPath} isMobile={isMobile} /> : null}
         </div>
     );
 }
@@ -542,7 +547,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     </SelectContent>
                 </Select>
             ) : null}
-            {showBranchSelector ? <AutoWorktreeControl projectPath={selectedProject.path} /> : null}
+            {showBranchSelector ? <AutoWorktreeControl projectId={selectedProject.id} projectPath={selectedProject.path} isMobile={false} /> : null}
         </div>
     );
 }
@@ -747,7 +752,7 @@ export function MobileDraftTargetSheets(
                                         onQuick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}
                                         onCustom={onCreateCustomWorktree ? () => { onOpenPickerChange(null); onCreateCustomWorktree(); } : undefined}
                                     />
-                                    <AutoWorktreeControl projectPath={selectedProject.path} className="px-2 py-1.5" />
+                                    <AutoWorktreeControl projectId={selectedProject.id} projectPath={selectedProject.path} isMobile className="px-2 py-1.5" />
                                     <div className="my-1 h-px bg-border" />
                                     <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
                                         {t('chat.chatInput.worktrees')}

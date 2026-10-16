@@ -4,7 +4,10 @@ import {
   generateAutoWorktreeName,
   parseAutoWorktreeName,
   shouldAutoCreateDraftWorktree,
+  branchNameFor,
   toAutoWorktreeCreateArgs,
+  toPullRequestBranchOffArgs,
+  toPullRequestWorktreeArgs,
 } from './autoDraftWorktree';
 
 const projectDraft = {
@@ -28,13 +31,77 @@ describe('parseAutoWorktreeName', () => {
 });
 
 describe('toAutoWorktreeCreateArgs', () => {
-  test('a name is the branch and the directory name, like Quick worktree', () => {
-    expect(toAutoWorktreeCreateArgs({ kind: 'name', name: 'fix-login' }))
-      .toEqual({ preferredName: 'fix-login', branchName: 'fix-login', worktreeName: 'fix-login' });
+  test('a name is the directory name, like Quick worktree, beside the branch it was given', () => {
+    expect(toAutoWorktreeCreateArgs({ kind: 'name', name: 'fix-login' }, 'dp/fix-login'))
+      .toEqual({ preferredName: 'fix-login', branchName: 'dp/fix-login', worktreeName: 'fix-login' });
   });
 
-  test('a path is passed only as the worktree name, so it never becomes a branch', () => {
-    expect(toAutoWorktreeCreateArgs({ kind: 'path', path: '/work/fix-login' })).toEqual({ worktreeName: '/work/fix-login' });
+  test('a path is the checkout itself and never the branch', () => {
+    expect(toAutoWorktreeCreateArgs({ kind: 'path', path: '/work/fix-login' }, 'fix-login'))
+      .toEqual({ worktreeName: '/work/fix-login', branchName: 'fix-login' });
+  });
+});
+
+describe('branchNameFor', () => {
+  test('fills the template with the name, or a path\'s last segment, and steps past branches that exist', () => {
+    const existing = new Set(['csv-export', 'csv-export-from-pr-42']);
+    expect(branchNameFor({ kind: 'name', name: 'csv-export' }, '{name}', existing)).toBe('csv-export-2');
+    expect(branchNameFor({ kind: 'path', path: '/work/review' }, 'dp/{name}', existing)).toBe('dp/review');
+    expect(branchNameFor({ kind: 'name', name: 'csv-export' }, '{name}-from-pr-{pr}', existing, { pr: 42, head: 'fix' }))
+      .toBe('csv-export-from-pr-42-2');
+    expect(branchNameFor({ kind: 'name', name: 'fix login' }, '{name}', existing)).toBe('fix-login');
+  });
+});
+
+describe('toPullRequestWorktreeArgs', () => {
+  const config = {
+    existingBranch: 'remotes/pr-octo/fix-login',
+    expectedRevision: 'abc1234',
+    changeRequestSource: {
+      context: {
+        provider: 'github' as const,
+        instance: 'github.com',
+        directory: '/repo',
+        repositoryId: 'repo-1',
+        accountId: 'account-1',
+        bindingRevision: 1,
+        primaryRemote: 'origin',
+      },
+      project: { id: 'acme/app', owner: 'acme', name: 'app' },
+      number: 42,
+      expectedHeadSha: 'abc1234',
+      requestedRemoteName: 'pr-octo',
+    },
+    sourceLabel: 'fix-login',
+  };
+
+  test('checks out the pull request\'s own branch in a folder named after it', () => {
+    expect(toPullRequestWorktreeArgs(config, { kind: 'generate' })).toEqual({
+      mode: 'existing',
+      preferredName: 'fix-login',
+      branchName: 'fix-login',
+      worktreeName: 'fix-login',
+      existingBranch: 'remotes/pr-octo/fix-login',
+      expectedRevision: 'abc1234',
+      changeRequestSource: config.changeRequestSource,
+    });
+  });
+
+  test('branching off names a new branch like any auto-created worktree and leaves the start to the server', () => {
+    expect(toPullRequestBranchOffArgs(config, { kind: 'name', name: 'follow-up' }, 'follow-up-from-pr-42')).toEqual({
+      mode: 'new',
+      preferredName: 'follow-up',
+      branchName: 'follow-up-from-pr-42',
+      worktreeName: 'follow-up',
+      changeRequestSource: config.changeRequestSource,
+    });
+  });
+
+  test('a typed name or path names only the folder; the branch stays the pull request\'s', () => {
+    expect(toPullRequestWorktreeArgs(config, { kind: 'name', name: 'review-42' }))
+      .toMatchObject({ branchName: 'fix-login', worktreeName: 'review-42', existingBranch: 'remotes/pr-octo/fix-login' });
+    expect(toPullRequestWorktreeArgs(config, { kind: 'path', path: '/work/review-42' }))
+      .toMatchObject({ branchName: 'fix-login', worktreeName: '/work/review-42' });
   });
 });
 

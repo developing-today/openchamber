@@ -153,3 +153,68 @@ describe('worktree creation from a change request', () => {
     });
   });
 });
+
+describe('a new branch from a change request', () => {
+  const sameRepository = {
+    ...resolvedSource,
+    sourceProject: sourceRequest.project,
+    headRef: 'refs/heads/feature/login',
+    endpoint: 'https://github.com/acme/app.git',
+    classification: 'same-repository',
+  };
+  const branchOffRequest = { mode: 'new', branchName: 'follow-up', worktreeName: 'follow-up', changeRequestSource: sourceRequest };
+  const remotes = (entries) => vi.fn(async () => entries.map(([name, fetchUrl]) => ({ name, fetchUrl, pushUrl: fetchUrl })));
+
+  it('starts a plain new branch at the head of the request\'s branch on the primary remote, with no transfer', async () => {
+    const { libraries, dependencies, creation } = setup({
+      dependencies: { resolveChangeRequestSource: vi.fn(async () => sameRepository) },
+      libraries: { getRepositoryRemoteUrls: remotes([['origin', 'git@github.com:acme/app.git'], ['backup', 'https://github.com/acme/app']]) },
+    });
+
+    await creation.create('/repo', branchOffRequest);
+
+    expect(dependencies.networkOperations.transferContributorHead).not.toHaveBeenCalled();
+    const [, input, options] = libraries.createWorktree.mock.calls[0];
+    expect(input).toMatchObject({
+      mode: 'new', branchName: 'follow-up', worktreeName: 'follow-up',
+      startRef: 'remotes/origin/feature/login', expectedRevision: 'a'.repeat(40),
+    });
+    expect(input.changeRequestSource).toBeUndefined();
+    expect(input.contributorFork).toBeUndefined();
+    expect(options.contributorSource).toBeNull();
+  });
+
+  it('uses another remote of the request\'s repository when the primary one is a fork', async () => {
+    const { libraries, creation } = setup({
+      dependencies: { resolveChangeRequestSource: vi.fn(async () => sameRepository) },
+      libraries: { getRepositoryRemoteUrls: remotes([['origin', 'https://github.com/me/app.git'], ['upstream', 'https://github.com/ACME/app']]) },
+    });
+
+    await expect(creation.validationInput('/repo', branchOffRequest)).resolves.toMatchObject({
+      mode: 'new', branchName: 'follow-up', startRef: 'remotes/upstream/feature/login', changeRequestSource: undefined,
+    });
+    await creation.create('/repo', branchOffRequest);
+    expect(libraries.createWorktree.mock.calls[0][1].startRef).toBe('remotes/upstream/feature/login');
+  });
+
+  it('refuses when no remote points at the request\'s repository, and creates nothing', async () => {
+    const { libraries, creation } = setup({
+      dependencies: { resolveChangeRequestSource: vi.fn(async () => sameRepository) },
+      libraries: { getRepositoryRemoteUrls: remotes([['origin', 'https://github.com/me/app.git']]) },
+    });
+
+    await expect(creation.create('/repo', branchOffRequest)).rejects.toMatchObject({ status: 409, code: 'CHANGE_REQUEST_REMOTE_MISSING' });
+    expect(libraries.createWorktree).not.toHaveBeenCalled();
+  });
+
+  it('refuses a fork\'s request, which can only be checked out, and creates nothing', async () => {
+    const { libraries, dependencies, creation } = setup();
+
+    await expect(creation.create('/repo', branchOffRequest)).rejects.toMatchObject({
+      status: 409, code: 'CHANGE_REQUEST_BRANCH_OFF_FORK',
+    });
+    await expect(creation.validationInput('/repo', branchOffRequest)).rejects.toMatchObject({ status: 409 });
+    expect(dependencies.networkOperations.transferContributorHead).not.toHaveBeenCalled();
+    expect(libraries.createWorktree).not.toHaveBeenCalled();
+  });
+});

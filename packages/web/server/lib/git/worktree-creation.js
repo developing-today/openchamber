@@ -6,6 +6,11 @@
  * asked for: the head is resolved and transferred here, never taken from the
  * caller, and a contributor fork gets its named remote, provenance and no
  * upstream.
+ *
+ * `mode: 'existing'` with a change request checks out the request's branch.
+ * `mode: 'new'` starts a new branch from its head instead, and only for a
+ * request from this repository: a fork's head would reach the checkout
+ * without the contributor pipeline's trust check and push safety.
  */
 
 import { forkRemoteName } from './contributor-remote.js';
@@ -42,6 +47,62 @@ const worktreeInputForSource = (input, source) => ({
   expectedRevision: source.headSha,
 });
 
+// Host and path of a remote URL without user, scheme or `.git`, so the https
+// and ssh forms of one repository compare equal.
+const repositoryLocation = (value) => {
+  const raw = String(value || '').trim();
+  const scp = raw.includes('://') ? null : raw.match(/^(?:[^@\s]+@)?([^:/\s]+):(?!\/)(.+)$/);
+  let host = '';
+  let path = '';
+  if (scp) {
+    [, host, path] = scp;
+  } else {
+    try {
+      const url = new URL(raw);
+      host = url.hostname;
+      path = url.pathname;
+    } catch {
+      return null;
+    }
+  }
+  const cleaned = path.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '').toLowerCase();
+  return host && cleaned ? `${host.toLowerCase()}/${cleaned}` : null;
+};
+
+/**
+ * A new branch from a change request starts at the head of its branch on a
+ * remote of this repository that points at the request's repository: the
+ * primary remote when it does, else another (a fork checkout branching off an
+ * upstream request finds `upstream`). The ref is fetched as any remote start
+ * ref is, and the resolved revision makes a head that moved since the request
+ * was read fail the creation.
+ */
+const branchOffInput = (input, source, remotes) => {
+  if (source.classification !== 'same-repository') {
+    throw new WorktreeCreationError(
+      'A new branch can start only from a pull or merge request in this repository. Check out a fork\'s request instead.',
+      409,
+      'CHANGE_REQUEST_BRANCH_OFF_FORK',
+    );
+  }
+  const location = repositoryLocation(source.endpoint);
+  const matching = remotes.filter((remote) => location && repositoryLocation(remote.fetchUrl) === location);
+  const remote = matching.find((entry) => entry.name === source.context.primaryRemote) ?? matching[0];
+  if (!remote) {
+    throw new WorktreeCreationError(
+      `No remote of this repository points at ${source.sourceProject?.id ?? 'the request\'s repository'}. Add one to start a new branch from this request.`,
+      409,
+      'CHANGE_REQUEST_REMOTE_MISSING',
+    );
+  }
+  return {
+    ...input,
+    changeRequestSource: undefined,
+    startRef: `remotes/${remote.name}/${source.headRef.slice('refs/heads/'.length)}`,
+    expectedRevision: source.headSha,
+  };
+};
+
 export const createWorktreeCreation = ({
   getGitLibraries,
   networkOperations,
@@ -66,14 +127,24 @@ export const createWorktreeCreation = ({
     return Object.freeze({ ...source, requestedRemoteName: primary.name, remoteUrl: primary.fetchUrl });
   };
 
-  /** The input `validateWorktreeCreate` checks: a change request becomes the server-resolved remote and head. */
-  const validationInput = async (directory, input) => {
-    if (!input.changeRequestSource) return input;
+  const resolveSource = async (directory, input) => {
     if (!(resolveChangeRequestSource instanceof Function)) {
       throw new WorktreeCreationError('Contributor worktrees are unavailable', 501, 'RUNTIME_UNSUPPORTED');
     }
-    const source = await changeRequestSourceOnRepository(directory, await resolveChangeRequestSource(input.changeRequestSource));
-    return worktreeInputForSource(input, source);
+    return changeRequestSourceOnRepository(directory, await resolveChangeRequestSource(input.changeRequestSource));
+  };
+
+  const resolveBranchOffInput = async (directory, input) => {
+    const source = await resolveSource(directory, input);
+    const { getRepositoryRemoteUrls } = await getGitLibraries();
+    return branchOffInput(input, source, await getRepositoryRemoteUrls(directory));
+  };
+
+  /** The input `validateWorktreeCreate` checks: a change request becomes the server-resolved remote and head. */
+  const validationInput = async (directory, input) => {
+    if (!input.changeRequestSource) return input;
+    if (input.mode === 'new') return resolveBranchOffInput(directory, input);
+    return worktreeInputForSource(input, await resolveSource(directory, input));
   };
 
   /**
@@ -155,7 +226,9 @@ export const createWorktreeCreation = ({
     }
     let input = requestInput || {};
     let source = null;
-    if (input.changeRequestSource) {
+    if (input.changeRequestSource && input.mode === 'new') {
+      input = await resolveBranchOffInput(directory, input);
+    } else if (input.changeRequestSource) {
       ({ source, input } = await transferChangeRequestHead(directory, input));
     }
     const bindingRead = getSourceControlBinding instanceof Function

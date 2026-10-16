@@ -5278,6 +5278,7 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
     }
 
     worktreeAddArgs.push('-b', localBranch, candidate.directory);
+    createdLocalBranch = true;
     if (startRef && startRef !== 'HEAD') {
       worktreeAddArgs.push(startRef);
     }
@@ -5523,6 +5524,22 @@ const preparePublishedLocalBranchSource = async (context, input, startRef) => {
   };
 };
 
+/**
+ * A new branch from a change request's head (`expectedRevision`) must start at
+ * that head. A head that moved since it was read, or a start ref that could
+ * not be refreshed, fails here, before anything exists on disk.
+ */
+const assertStartRefRevision = async (primaryWorktree, input) => {
+  const expected = String(input?.expectedRevision || '').trim().toLowerCase();
+  if (!expected) return;
+  const resolved = await runGitCommand(primaryWorktree, ['rev-parse', '--verify', '--quiet', `${normalizeStartRef(input.startRef)}^{commit}`]);
+  if (!resolved.success || String(resolved.stdout || '').trim().toLowerCase() !== expected) {
+    throw Object.assign(new Error('The pull or merge request\'s head changed since it was read; pick it again'), {
+      code: 'CHANGE_REQUEST_HEAD_CHANGED', status: 409,
+    });
+  }
+};
+
 const prepareWorktreeCreateSource = async (context, input = {}) => {
   if (input?.mode === 'existing') {
     return { input, sourceFetchFailed: false };
@@ -5562,8 +5579,10 @@ const prepareWorktreeCreateSource = async (context, input = {}) => {
     if (!refExists.success) {
       throw error;
     }
+    // The local copy may be stale (a remote whose default branch was renamed
+    // keeps the old one); the worktree still starts there, and the user is told.
     console.warn(`Worktree create: failed to refresh ${remoteStartRef.remote}/${remoteStartRef.branch}, proceeding with the existing remote-tracking ref`);
-    return { input, sourceFetchFailed: false };
+    return { input, ...sourceFetchFailure(error) };
   }
 };
 
@@ -5586,6 +5605,7 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
   }
   const prepared = await prepareWorktreeCreateSource(context, input);
   const preparedInput = prepared.input;
+  if (mode === 'new') await assertStartRefRevision(context.primaryWorktree, preparedInput);
   const changeRequestLocalBranch = mode === 'existing'
     ? await prepareChangeRequestLocalBranch(context.primaryWorktree, preparedInput)
     : null;

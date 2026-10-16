@@ -10,7 +10,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { checkIsGitRepository } from '@/lib/gitApi';
+import { checkIsGitRepository, getGitBranches } from '@/lib/gitApi';
+import { branchNameFromTemplate, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -20,7 +21,8 @@ import {
   removeProjectWorktree,
   type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
-import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
+import { createWorktreeWithDefaults, resolveDefaultWorktreeStartRef } from '@/lib/worktrees/worktreeCreate';
+import { selectWorktreeStartFrom, type WorktreeStartPlace } from '@/lib/worktrees/worktreeStartSource';
 import {
   createPendingDraftWorktreeRequest,
   rejectPendingDraftWorktreeRequest,
@@ -66,21 +68,33 @@ export const resolveProjectRef = (directory: string): ProjectRef | null => {
   return project ? { id: project.id, path: project.path } : null;
 };
 
+/**
+ * A worktree named `preferredName` (random when absent). Its branch is that
+ * name, or with `templated` the Settings branch template filled with it,
+ * suffixed when a local branch already has the result.
+ */
 export const createQuickWorktree = async (
   project: ProjectRef,
-  options: { preferredName?: string; startRef?: string } = {},
+  options: { preferredName?: string; startRef?: string; templated?: boolean } = {},
 ) => {
   const preferredName = options.preferredName ?? generateBranchName();
+  const branchName = options.templated ? await templatedBranchName(project.path, preferredName) : preferredName;
   const setupCommands = await resolveWorktreeSetupCommands(project);
   return createWorktreeWithDefaults(project, {
     preferredName,
     mode: 'new',
-    branchName: preferredName,
+    branchName,
     worktreeName: preferredName,
     startRef: options.startRef,
     setupCommands,
     returnAfterDirectoryCreated: true,
   });
+};
+
+const templatedBranchName = async (projectDirectory: string, name: string): Promise<string> => {
+  const branches = await getGitBranches(projectDirectory, { remote: 'local' });
+  const local = new Set(branches.all.filter((branch) => !branch.startsWith('remotes/')));
+  return uniqueBranchName(branchNameFromTemplate(useConfigStore.getState().settingsWorktreeBranchTemplate, { name }), local);
 };
 
 // Track if a worktree creation flow is already running
@@ -240,10 +254,11 @@ const createInstantWorktreeDraft = async (options?: {
     }
 
     const preferredName = generateBranchName();
+    const startRef = await resolveDefaultWorktreeStartRef(projectRef.path, selectWorktreeStartFrom(useConfigStore.getState(), 'quick'));
 
     // A preview path has no bootstrap state yet. Selecting it lets background
     // OpenCode reads initialize an instance before the worktree exists.
-    const metadata = await createQuickWorktree(projectRef, { preferredName });
+    const metadata = await createQuickWorktree(projectRef, { preferredName, startRef, templated: true });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);
     useSessionUIStore.getState().overrideNewSessionDraftTarget({
@@ -294,12 +309,20 @@ export async function createWorktreeDraft(options?: { initialPrompt?: string; ti
 /**
  * Create a worktree session for a new branch name.
  * Callers can still use startPoint for metadata or follow-up git operations.
+ * Without one, the worktree starts where Settings say for `options.place`,
+ * else from the project root's branch.
  */
 export async function createWorktreeSessionForNewBranch(
   projectDirectory: string,
   preferredBranchName: string,
   startPoint?: string,
   options?: {
+    /**
+     * Where the worktree is made: its start follows Settings for that place
+     * when no start point is given, and its branch follows the Settings
+     * branch template.
+     */
+    place?: WorktreeStartPlace;
     kind?: 'pr' | 'standard';
     worktreeName?: string;
     setUpstream?: boolean;
@@ -318,7 +341,6 @@ export async function createWorktreeSessionForNewBranch(
   isCreatingWorktreeSession = true;
 
   try {
-    const start = startPoint?.trim() || 'HEAD';
     const base = preferredBranchName?.trim();
     if (!base) {
       throw new Error('Branch name is required');
@@ -348,10 +370,14 @@ export async function createWorktreeSessionForNewBranch(
     const setupCommands = await resolveWorktreeSetupCommands(projectRef);
     const rootBranch = await getRootBranch(projectRef.path);
     try {
+      const start = startPoint?.trim()
+        || (options?.place ? await resolveDefaultWorktreeStartRef(projectRef.path, selectWorktreeStartFrom(useConfigStore.getState(), options.place)) : undefined)
+        || 'HEAD';
+      const branchName = options?.place ? await templatedBranchName(projectRef.path, base) : base;
       const metadata = await createWorktreeWithDefaults(projectRef, {
         preferredName: base,
         mode: 'new',
-        branchName: base,
+        branchName,
         worktreeName: options?.worktreeName || base,
         startRef: start,
         setUpstream: options?.setUpstream,
@@ -364,7 +390,8 @@ export async function createWorktreeSessionForNewBranch(
       });
       const createdMetadata = {
         ...metadata,
-        createdFromBranch: options?.createdFromBranch || rootBranch || start,
+        // Integrate commits moves work onto this local branch: `main` for `remotes/origin/main`.
+        createdFromBranch: options?.createdFromBranch || (start === 'HEAD' ? rootBranch || start : start.replace(/^remotes\/[^/]+\//, '')),
         kind,
       };
 
@@ -379,7 +406,7 @@ export async function createWorktreeSessionForNewBranch(
 
       initializeSessionForWorktree(session.id, createdMetadata);
 
-      return { id: session.id, branch: metadata.branch || base, path: metadata.path };
+      return { id: session.id, branch: metadata.branch || branchName, path: metadata.path };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create worktree session';
       toast.error('Failed to create worktree', { description: message });

@@ -627,6 +627,33 @@ and the send path reading the same grammar.
   sent with, falling back to the random Quick-worktree name. A failed creation
   fails the send, so the prompt returns to the composer and the draft returns
   to the project root.
+  While the switch is on, `ui/AutoWorktreeSourcePicker.tsx` sits after the name
+  and says where the worktree starts: **Default** (Settings → Sessions, "New
+  worktrees start from", the default remote's default branch unless changed,
+  or the Auto-create worktree override under "Start by place"), a worktree's
+  branch, any other local or remote branch, or a pull request typed by number
+  in its search (offered only when the repository has a GitHub or GitLab read
+  context). It reuses the New worktree dialog's `NewWorktreeBranchPicker` with
+  the `inline` trigger. The pick lives on the draft as `autoWorktreeSource`
+  together with the project it was made in, so a draft moved to another
+  project falls back to the default; a new draft starts on the default,
+  because a remembered branch would quietly base later worktrees on a branch
+  that moved on. A pull request is checked when picked (open; whether it comes
+  from a fork; whether its branch is open in another worktree) and read again
+  at send. A **New branch** checkbox beside it starts on the Settings choice
+  for pull requests (`pullRequestWorktree`): off checks out the request's
+  branch the way the dialog does, so commits push to it, and a typed name
+  names only the folder; on starts a new branch from its head, named by the
+  pull request branch template. A new worktree's branch is the Settings
+  template filled with the worktree's name (`lib/worktrees/branchNameTemplate.ts`,
+  `{name}` and `{name}-from-pr-{pr}` by default), with `-2`, `-3`… past a
+  local branch that has it; the folder keeps the plain name. A fork's request can only be checked out and one whose
+  branch is open elsewhere can only be branched off, so the checkbox is fixed
+  for those. The start settings, each place with its own override
+  (`lib/worktrees/worktreeStartSource.ts`), also cover Quick worktree, the
+  dialog's initial **Based on**, Run in parallel's base branch, plans and
+  to-dos sent to a worktree, and worktrees an agent creates
+  (`packages/web/server/lib/openchamber-control/DOCUMENTATION.md`).
 - `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
   mention picker after its IME guard.
 

@@ -42,6 +42,7 @@ import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
 import { noteDraftSendWaiting, waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
+import type { WorktreeStartSource } from "@/lib/worktrees/worktreeStartSource"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
@@ -408,6 +409,11 @@ export type NewSessionDraftState = {
   permissionMode?: PermissionMode
   /** Typed next to the auto-create worktree switch: a name, or an absolute path when it starts with '/'. */
   autoWorktreeName?: string
+  /**
+   * Picked next to the auto-create worktree switch, for the project it was picked in. Absent, or
+   * picked in another project, means the Settings default (`worktreeStartFrom`).
+   */
+  autoWorktreeSource?: { projectId: string; source: WorktreeStartSource } | null
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
   preserveDirectoryOverride?: boolean
@@ -456,6 +462,7 @@ export type SessionUIState = {
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionMode: (mode: PermissionMode) => void
   setDraftAutoWorktreeName: (name: string) => void
+  setDraftAutoWorktreeSource: (source: { projectId: string; source: WorktreeStartSource } | null) => void
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
@@ -1646,6 +1653,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, autoWorktreeName: name } }
+    }),
+
+  setDraftAutoWorktreeSource: (source) =>
+    set((s) => {
+      if (!s.newSessionDraft?.open) return s
+      return { newSessionDraft: { ...s.newSessionDraft, autoWorktreeSource: source } }
     }),
 
   setDraftProjectContextPin: (kind, id, pinned) =>

@@ -101,13 +101,21 @@ other.
 - Send and fork dispatches without an explicit model/agent/variant reuse the
   target session's last user-message selection before falling back to the
   configured defaults; only session creation resolves defaults directly.
-- `session.create` with `pullRequest` passes the number, and `worktree` and
-  `branch` as folder and local-branch names, to the session service, which
-  creates the worktree through the injected `createChangeRequestWorktree`
-  (the Git routes' contributor pipeline) before any session exists. A
-  malformed number, or `startRef`/`setUpstream` beside it, is a 400; a
-  server without that pipeline answers 501 and never makes a plain branch
-  worktree instead; a provider or transfer refusal keeps its status and
+- `session.create` with `pullRequest` passes the number, `worktree` and
+  `branch` as folder and local-branch names, and `branchOff` when given, to
+  the session service, which creates the worktree through the injected
+  `createChangeRequestWorktree` (the Git routes' contributor pipeline) before
+  any session exists. It checks out the request's branch, or with `branchOff`
+  starts a new branch from its head; without `branchOff` the profile setting
+  `pullRequestWorktree` decides. A new branch is `branch`, else the
+  `pullRequestBranchTemplate` (default `{name}-from-pr-{pr}`) filled with the
+  worktree name, the number and the head. Without `worktree`, the control
+  service names the worktree from the prompt as it does for any new worktree
+  (`resolvePullRequestWorktreeName`); a checked-out request's worktree is
+  named after its branch. A fork's request cannot be branched off (409).
+  A malformed number or `branchOff`, or `startRef`/`setUpstream` beside it, is
+  a 400; a server without that pipeline answers 501 and never makes a plain
+  branch worktree instead; a provider or transfer refusal keeps its status and
   message, and no session is created.
 - `session.moveToWorktree` moves a session into a new worktree of its
   repository and is the session service's `moveToWorktree`
@@ -122,6 +130,9 @@ other.
   `session.move`. A failure after the worktree exists removes it again and
   puts the changes back; when restoring fails too, the error names the stash
   so nothing is lost. A 409 means the changes did not apply on the start ref.
+  Without `startRef` the move starts from the repository's default branch
+  (its local copy first), or from the project root's HEAD when the `agent`
+  start setting is `project-root`.
 - Default agents resolve from the owning project before global settings and
   OpenCode defaults. Directory-based requests identify the project before
   creating a worktree; existing linked worktrees resolve through Git's primary
@@ -152,6 +163,27 @@ other.
   `autoWorktree: { mode, name?, naming?, model?, reason? }`. The same naming
   helper backs `POST /api/git/worktrees/generate-name`, which the composer's
   auto-create switch calls.
+- A worktree `session.create` makes, named or automatic, starts where the call's
+  `startRef` says. Without one the session service
+  (`../openchamber-sessions/routes.js`) follows the profile settings through
+  `resolveWorktreeStartFrom(settings, 'agent')` in `../git/worktree-start-ref.js`:
+  the `agent` entry of `worktreeStartFromOverrides`, else `worktreeStartFrom`,
+  else the default remote's default branch. `project-root` leaves the start
+  ref out, so the worktree starts from the project root's branch;
+  `remote-default` sets the default remote's default branch from local refs,
+  the same rule the UI applies. A repository whose remotes name no default
+  branch gets the project root's branch; a failed branch read fails the call.
+- A new worktree's branch, when the call names none, is the
+  `worktreeBranchTemplate` (default `{name}`) filled with the worktree name made
+  fit for a branch (a path's last segment for an exact `/path`; spaces and
+  characters git refuses become `-`), with `-2`, `-3`… when a local branch
+  already has it (`../git/branch-name-template.js`). When a parallel call took
+  that name between the branch read and the creation, `session.create` reads
+  the branches again and retries once with the next free name; a branch the
+  call named is never renamed. `session.create` and `session.moveToWorktree`
+  both name branches this way; before the template existed, an unnamed branch
+  was `openchamber/<name>`. A pull request branch-off without `branch` gets the
+  same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `provider-actions.js`) are passed in as
   `actionModules` and dispatched by action name before the built-in actions;

@@ -31,6 +31,8 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
  * @param {(directory: string, options: { remote: 'local' }) => Promise<{ all: string[], defaultBranches: Record<string, string> }>} dependencies.getBranches
  * @param {(directory: string) => Promise<{ root: string }>} dependencies.resolvePrimaryWorktreeRoot
  * @param {(sessionId: string, directory: string) => Promise<void>} dependencies.moveSession
+ * @param {() => Promise<string>} [dependencies.readStartFrom] where Settings start a worktree an agent makes
+ * @param {(root: string, name: string) => Promise<string>} [dependencies.nameBranch] the branch Settings give a worktree of that name
  * @param {(message: string, error: unknown) => void} [dependencies.warn]
  */
 export const createSessionWorktreeMover = (dependencies) => {
@@ -47,15 +49,19 @@ export const createSessionWorktreeMover = (dependencies) => {
     getBranches,
     resolvePrimaryWorktreeRoot,
     moveSession,
+    readStartFrom = async () => 'remote-default',
+    nameBranch = async (_root, name) => name,
     warn = (message, error) => console.warn(message, error instanceof Error ? error.message : String(error)),
   } = dependencies;
 
   /**
-   * The branch a task starts from when the caller named none: the remote's
-   * default branch as a local branch, else its remote-tracking ref, else a
-   * conventional name, else the primary checkout's HEAD.
+   * The branch a task starts from when the caller named none: the primary
+   * checkout's HEAD when Settings start agents' worktrees from the project
+   * root, else the remote's default branch as a local branch, else its
+   * remote-tracking ref, else a conventional name, else HEAD.
    */
   const resolveDefaultStartRef = async (root) => {
+    if (await readStartFrom() === 'project-root') return 'HEAD';
     const branches = await getBranches(root, { remote: 'local' });
     const local = new Set(branches.all);
     const remotes = Object.keys(branches.defaultBranches);
@@ -154,8 +160,7 @@ export const createSessionWorktreeMover = (dependencies) => {
       worktreeInput = { mode: 'existing', name, existingBranch, setUpstream: true };
     } else {
       startRef = asNonEmptyString(input?.startRef) || await resolveDefaultStartRef(root);
-      worktreeInput = { mode: 'new', name, startRef };
-      if (branchName) worktreeInput.branchName = branchName;
+      worktreeInput = { mode: 'new', name, startRef, branchName: branchName || await nameBranch(root, name) };
     }
 
     let worktree;

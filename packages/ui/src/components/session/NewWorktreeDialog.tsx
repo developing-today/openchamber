@@ -8,7 +8,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
+import { SettingsCheckboxRow, SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
 import { GuestAttachDialog } from '@/components/layout/GuestAttachDialog';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestAttachItems } from '@/hooks/useGuestSurfaces';
@@ -33,6 +33,14 @@ import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
 import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { branchNameFromTemplate, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
+import {
+  checkPullRequestSource,
+  pullRequestWorktreeChoices,
+  resolveRemoteDefaultStartRef,
+  selectWorktreeStartFrom,
+} from '@/lib/worktrees/worktreeStartSource';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
@@ -79,6 +87,10 @@ type LinkedItem =
     context: SourceControlReadContext;
     includeDiff: boolean;
     selection: ReferencePickerSelection;
+    /** A fork's PR can only be checked out. */
+    fromFork: boolean;
+    /** Its branch is checked out in another worktree, so only a new branch can start from it. */
+    headInUse: boolean;
   }
   | { kind: 'issue'; number: number; title: string; url: string; selection: ReferencePickerSelection }
   | { kind: 'linear'; identifier: string; title: string; url: string; selection: ReferencePickerSelection }
@@ -163,6 +175,8 @@ export function NewWorktreeDialog({
   const [linked, setLinked] = React.useState<LinkedItem | null>(null);
   const [existingBranch, setExistingBranch] = React.useState<ExistingBranchState>({ selectedBranch: '', worktreeName: '' });
   const [sourceBranch, setSourceBranch] = React.useState('');
+  // A linked PR: start a new branch from its head instead of checking out its branch.
+  const [prBranchOff, setPrBranchOff] = React.useState(false);
 
   // Use cached branches from Git store (instant if already fetched)
   const branches = useGitBranches(projectDirectory);
@@ -231,11 +245,16 @@ export function NewWorktreeDialog({
     [fallbackFolderName],
   );
   const initializedForCurrentOpen = React.useRef(false);
+  // This open's branch suggestion, before and after the step past local branches.
+  const branchSuggestion = React.useRef<{ base: string; value: string } | null>(null);
   // The item the dialog was opened with, until it is chosen.
   const pendingInitialSelection = React.useRef<ReferencePickerSelection | null>(null);
 
   const linkedPr = mode === 'from-item' && linked?.kind === 'pr' ? linked.pr : null;
   const linkedPrContext = mode === 'from-item' && linked?.kind === 'pr' ? linked.context : null;
+  const linkedPrChoices = mode === 'from-item' && linked?.kind === 'pr' ? pullRequestWorktreeChoices(linked) : null;
+  // A PR checked out brings its branch; branched off, it is only where the new branch starts.
+  const checksOutPr = Boolean(linkedPr) && !prBranchOff;
   const githubContext = useGitHubReadContext(open ? projectDirectory : null);
   // A GitLab project's items are merge requests: the PR-or-issue copy says so.
   const itemProvider = useRepositoryReferenceProvider(open ? projectDirectory : null);
@@ -249,10 +268,26 @@ export function NewWorktreeDialog({
   const branchName = mode === 'existing-branch' ? existingBranch.selectedBranch : draft.branchName;
   const worktreeName = mode === 'existing-branch' ? existingBranch.worktreeName : draft.worktreeName;
   const startsNewBranch = mode === 'new-branch' || (mode === 'from-item' && !linkedPr);
+  // The suggestion uses this open's own name, so toggling the PR choice swaps
+  // between the same two names, and steps past local branches like the others.
+  const prBranchName = (pr: PrWorktreeSource) => uniqueBranchName(
+    branchNameFromTemplate(pullRequestBranchTemplate, { name: fallbackFolderName, pr: pr.number, head: pr.head }),
+    new Set(localBranches),
+  );
 
-  // Start from the branch the project root is on, once branches are known.
+  // Start from the Settings default once branches are known: the default
+  // remote's default branch when chosen, else the branch the project root is on.
+  const startFrom = useConfigStore((state) => selectWorktreeStartFrom(state, 'dialog'));
+  const pullRequestMode = useConfigStore((state) => state.settingsPullRequestWorktree);
+  const branchTemplate = useConfigStore((state) => state.settingsWorktreeBranchTemplate);
+  const pullRequestBranchTemplate = useConfigStore((state) => state.settingsPullRequestBranchTemplate);
   React.useEffect(() => {
     if (!open || !branches?.all || !projectDirectory || sourceBranch) return;
+    const remoteDefault = startFrom === 'remote-default' ? resolveRemoteDefaultStartRef(branches) : null;
+    if (remoteDefault) {
+      setSourceBranch(remoteDefault);
+      return;
+    }
     let cancelled = false;
     void getRootBranch(projectDirectory).catch(() => null).then((rootBranch) => {
       if (cancelled) return;
@@ -262,7 +297,7 @@ export function NewWorktreeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, branches?.all, projectDirectory, sourceBranch]);
+  }, [open, branches, projectDirectory, sourceBranch, startFrom]);
 
   // Reset state on each open. Resetting on close would empty the form during
   // the close animation, causing visible flicker.
@@ -278,13 +313,28 @@ export function NewWorktreeDialog({
     pendingInitialSelection.current = initialSelection ?? null;
     setFallbackFolderName(uniqueSlug);
     setMode(initialSelection ? 'from-item' : 'new-branch');
-    setNewBranch({ branchName: uniqueSlug, worktreeName: uniqueSlug, isSyncingWorktreeName: true });
+    const suggestionBase = branchNameFromTemplate(branchTemplate, { name: uniqueSlug });
+    const suggestedBranch = uniqueBranchName(suggestionBase, new Set(localBranches));
+    branchSuggestion.current = { base: suggestionBase, value: suggestedBranch };
+    setNewBranch({ branchName: suggestedBranch, worktreeName: uniqueSlug, isSyncingWorktreeName: true });
     setItemBranch(EMPTY_DRAFT);
     setLinked(null);
     setExistingBranch({ selectedBranch: '', worktreeName: '' });
     setSourceBranch('');
+    setPrBranchOff(false);
     setValidation({ isValidating: false, branchError: null, worktreeError: null, touched: false });
-  }, [open, generateUniqueSlug, initialSelection]);
+  }, [open, generateUniqueSlug, initialSelection, branchTemplate, localBranches]);
+
+  // Branches can finish loading after the dialog opened: the suggestion steps
+  // past them too, as long as the user has not typed a branch name.
+  React.useEffect(() => {
+    const suggestion = branchSuggestion.current;
+    if (!open || !suggestion) return;
+    const next = uniqueBranchName(suggestion.base, new Set(localBranches));
+    if (next === suggestion.value) return;
+    branchSuggestion.current = { ...suggestion, value: next };
+    setNewBranch((prev) => (prev.branchName === suggestion.value ? { ...prev, branchName: next } : prev));
+  }, [open, localBranches]);
 
   // The folder follows the branch name until the user renames the folder.
   React.useEffect(() => {
@@ -319,13 +369,14 @@ export function NewWorktreeDialog({
         const prConfig = linkedPr && linkedPrContext
           ? resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {})
           : null;
+        const checkOutPr = prConfig && !prBranchOff ? prConfig : null;
         const validateArgs: CreateWorktreeArgs = {
-          mode: mode === 'existing-branch' || prConfig ? 'existing' : 'new',
+          mode: mode === 'existing-branch' || checkOutPr ? 'existing' : 'new',
           branchName: normalizedBranch,
           worktreeName: normalizedWorktree,
-          existingBranch: prConfig?.existingBranch ?? (mode === 'existing-branch' ? normalizedBranch : undefined),
+          existingBranch: checkOutPr?.existingBranch ?? (mode === 'existing-branch' ? normalizedBranch : undefined),
         };
-        if (prConfig?.expectedRevision) validateArgs.expectedRevision = prConfig.expectedRevision;
+        if (checkOutPr?.expectedRevision) validateArgs.expectedRevision = checkOutPr.expectedRevision;
         if (prConfig?.changeRequestSource) validateArgs.changeRequestSource = prConfig.changeRequestSource;
         const result = await validateWorktreeCreate(projectRef, validateArgs);
         if (abortController.signal.aborted) return;
@@ -357,6 +408,7 @@ export function NewWorktreeDialog({
     worktreeName,
     linkedPr,
     linkedPrContext,
+    prBranchOff,
     branches?.branches,
     validation.touched,
     validationAbortController,
@@ -433,6 +485,18 @@ export function NewWorktreeDialog({
           // and checks it is still the revision the picker showed.
           const prConfig = resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {});
           sourceLabel = prConfig.sourceLabel;
+          // The server starts the new branch at the head it resolves from the PR.
+          if (prBranchOff) {
+            return {
+              preferredName: normalizedBranch || normalizedWorktree,
+              mode: 'new',
+              branchName: normalizedBranch,
+              worktreeName: normalizedWorktree,
+              setupCommands: resolvedSetupCommands,
+              returnAfterDirectoryCreated: true,
+              changeRequestSource: prConfig.changeRequestSource,
+            };
+          }
           return {
             preferredName: normalizedBranch || normalizedWorktree,
             mode: 'existing',
@@ -533,35 +597,67 @@ export function NewWorktreeDialog({
       return null;
     }
 
-    // A PR's branch can live in one worktree only.
-    if (projectRef) {
-      const failure = (message: string): ReferencePickerConfirmFailure => ({ failedKeys: [referencePickerItemKey(choice)], message });
-      try {
-        const result = await validateWorktreeCreate(projectRef, { mode: 'new', branchName: reference.head, worktreeName: reference.head });
-        if (result.errors.some((entry) => entry.code === 'branch_in_use')) {
-          return failure(t('session.githubIntegration.validation.branchAlreadyCheckedOut'));
-        }
-      } catch {
-        return failure(t('session.githubIntegration.validation.failed'));
-      }
-    }
+    // The PR is read again: a GitLab list leaves out where a merge request's
+    // branch lives, which decides whether it can be branched off. Its branch
+    // can live in one worktree only, and a fork's PR can only be checked out;
+    // a PR with neither way left is refused here.
+    const failure = (message: string): ReferencePickerConfirmFailure => ({ failedKeys: [referencePickerItemKey(choice)], message });
     if (!githubContext || githubContext === 'missing') {
-      return { failedKeys: [referencePickerItemKey(choice)], message: tItem('session.newWorktree.error.changeRequestAuthorityMissing') };
+      return failure(tItem('session.newWorktree.error.changeRequestAuthorityMissing'));
     }
+    const label = githubContext.provider === 'gitlab'
+      ? formatChangeRequestReference('gitlab', reference.number)
+      : t('session.newWorktree.prNumber', { number: reference.number });
+    let headOwner = reference.headRepo?.owner ?? null;
+    let check: Awaited<ReturnType<typeof checkPullRequestSource>>;
+    try {
+      check = await checkPullRequestSource({
+        context: githubContext,
+        number: reference.number,
+        mode: pullRequestMode,
+        readChangeRequest: async (context, number) => {
+          const { changeRequest } = await sourceControl.changeRequestContext(context, number, {
+            includeDiff: false,
+            includeCIDetails: false,
+            project: { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo },
+          });
+          headOwner = changeRequest?.headProject?.owner ?? headOwner;
+          return changeRequest;
+        },
+        isBranchInUse: async (branch) => (projectRef
+          ? (await validateWorktreeCreate(projectRef, { mode: 'new', branchName: branch, worktreeName: branch }))
+            .errors.some((entry) => entry.code === 'branch_in_use')
+          : false),
+      });
+    } catch {
+      return failure(t('session.githubIntegration.validation.failed'));
+    }
+    if (!check.ok) {
+      return failure(check.reason === 'not-found'
+        ? t('chat.chatInput.autoWorktree.source.notFound', { reference: label })
+        : check.reason === 'not-open'
+          ? t('chat.chatInput.autoWorktree.source.notOpen', { reference: label })
+          : t('session.githubIntegration.validation.branchAlreadyCheckedOut'));
+    }
+    const { fromFork, headInUse, branchOff } = check.source;
     const pr: PrWorktreeSource & { title: string; url: string } = {
       number: reference.number,
       title: reference.title,
       url: reference.url,
       head: reference.head,
       headSha: reference.headSha,
-      headProject: reference.headRepo ? { owner: reference.headRepo.owner } : null,
+      headProject: headOwner ? { owner: headOwner } : null,
       project: {
         id: reference.projectId ?? `${reference.sourceRepo.owner}/${reference.sourceRepo.repo}`,
         owner: reference.sourceRepo.owner,
         name: reference.sourceRepo.repo,
       },
     };
-    linkItem({ kind: 'pr', pr, context: githubContext, includeDiff: choice.includeDiff, selection: choice }, reference.head);
+    setPrBranchOff(branchOff);
+    linkItem(
+      { kind: 'pr', pr, context: githubContext, includeDiff: choice.includeDiff, selection: choice, fromFork, headInUse },
+      branchOff ? prBranchName(pr) : reference.head,
+    );
     return null;
   };
 
@@ -589,6 +685,16 @@ export function NewWorktreeDialog({
   const handleClearLinkedItem = () => {
     setLinked(null);
     setItemBranch(EMPTY_DRAFT);
+    setPrBranchOff(false);
+  };
+
+  // Switching between checking out the PR and branching off it swaps the branch name with it.
+  const handlePrBranchOffChange = (branchOff: boolean) => {
+    if (!linkedPr) return;
+    setPrBranchOff(branchOff);
+    const branch = branchOff ? prBranchName(linkedPr) : linkedPr.head;
+    setItemBranch({ branchName: branch, worktreeName: folderNameForBranch(branch), isSyncingWorktreeName: true });
+    setValidation(prev => ({ ...prev, touched: false, branchError: null, worktreeError: null }));
   };
 
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
@@ -758,8 +864,8 @@ export function NewWorktreeDialog({
       onChange={(e) => setDraft((prev) => ({ ...prev, branchName: e.target.value }))}
       onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
       onKeyDown={handleCreateKeyDown}
-      // A PR brings its branch; with nothing chosen yet there is no name to give.
-      disabled={mode === 'from-item' && (!linked || Boolean(linkedPr))}
+      // A checked-out PR brings its branch; with nothing chosen yet there is no name to give.
+      disabled={mode === 'from-item' && (!linked || checksOutPr)}
       placeholder={t('session.newWorktree.branchNamePlaceholder')}
       className={cn('h-8', validation.touched && validation.branchError && 'border-destructive')}
     />
@@ -768,6 +874,7 @@ export function NewWorktreeDialog({
   const baseBranchControl = (
     <NewWorktreeBranchPicker
       value={startsNewBranch ? sourceBranch : ''}
+      valueLabel={linkedPr && prBranchOff ? linkedPr.head : undefined}
       placeholder={startsNewBranch ? t('session.newWorktree.selectSourceBranchPlaceholder') : t('session.newWorktree.baseBranchNotApplicable')}
       title={t('session.newWorktree.selectSourceBranch')}
       localBranches={localBranches}
@@ -811,10 +918,26 @@ export function NewWorktreeDialog({
     </div>
   );
 
+  // Always there under the item, so choosing a PR moves nothing; it can change
+  // only when the PR allows both ways.
+  const prBranchOffControl = (
+    <SettingsCheckboxRow
+      checked={Boolean(linkedPr) && prBranchOff}
+      onChange={handlePrBranchOffChange}
+      disabled={!linkedPrChoices?.checkOut || !linkedPrChoices.branchOff}
+      label={t('session.newWorktree.prBranchOff.label')}
+      info={t('session.newWorktree.prBranchOff.info')}
+    />
+  );
   const choiceBlocks = (
     <>
       {fieldBlock(t('session.newWorktree.start.title'), startOptions)}
-      {canLinkItems ? fieldBlock(tItem('session.newWorktree.item.title'), itemPicker) : null}
+      {canLinkItems ? fieldBlock(tItem('session.newWorktree.item.title'), (
+        <div className="flex flex-col gap-2">
+          {itemPicker}
+          {prBranchOffControl}
+        </div>
+      )) : null}
     </>
   );
   const branchBlocks = (
