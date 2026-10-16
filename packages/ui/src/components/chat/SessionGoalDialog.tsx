@@ -110,12 +110,14 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
   const canSave = !isCompleted && !cannotCheck && trimmedObjective.length > 0 && (!goal || objectiveChanged || budgetChanged);
 
   const handleSave = () => run(
-    () => setSessionGoal(sessionId, directory, {
-      objective: trimmedObjective,
-      tokenBudget: budgetValue,
-      // "Rewrite every goal" applies to a typed objective, not to a budget-only edit.
-      rewrite: rewriteAll && objectiveChanged ? resolveSessionWriterModel(sessionId) : null,
-    }, goal),
+    async () => {
+      await setSessionGoal(sessionId, directory, {
+        objective: trimmedObjective,
+        tokenBudget: budgetValue,
+        // "Rewrite every goal" applies to a typed objective, not to a budget-only edit.
+        rewrite: rewriteAll && objectiveChanged ? resolveSessionWriterModel(sessionId) : null,
+      }, goal);
+    },
     true,
   );
 

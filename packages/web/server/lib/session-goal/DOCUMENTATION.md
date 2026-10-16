@@ -110,8 +110,11 @@ progress check judges against. `spec-writer.js` owns it.
   logs a warning and keeps the objective as written. `createSessionGoal`
   returns `{ goal, spec }`; scheduled tasks and the sessions route pass the
   spec to `buildGoalIntroText(tokenBudget, spec)`, whose reminder then
-  carries it in an escaped `<goal-spec>` block. The UI builds the same text
-  for goals it arms, so the wording must stay identical on both sides.
+  carries it in an escaped `<goal-spec>` block. A slash command normally gets
+  no reminder; with a rewritten spec the reminder is admitted with
+  `resume: false` before the command, since the spec is not the command's own
+  text. The UI builds the same text for goals it arms, so the wording must
+  stay identical on both sides.
 
 ## Flow
 
@@ -304,9 +307,14 @@ sees only that final turn, so the report is its evidence.
   `briefAgent` puts the spec into the reminder when the message itself is not
   the spec.
 - Rewrite all in the UI: `setSessionGoal` takes `rewrite` with the session's
-  model. `sendMessage` passes it for unsettled armed goals (Plan "Run as goal",
-  fork as goal), and `SessionGoalDialog` when the typed objective changed. A
-  failed rewrite keeps the user's text and says so in a toast.
+  model and returns `rewrittenSpec`. `sendMessage` passes it for unsettled
+  armed goals (Plan "Run as goal", fork as goal), and `SessionGoalDialog` when
+  the typed objective changed. A failed rewrite keeps the user's text and says
+  so in a toast. `sendMessage` builds the goal reminder only after the goal is
+  saved, so a rewritten spec reaches the agent in the same message.
+- A writer request belongs to the composer it came from: switching the
+  composer to another session or draft closes the dialog, and a late choice is
+  dropped.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
   the server only, so it lives in the settings file like the walkthrough

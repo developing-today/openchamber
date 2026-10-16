@@ -1144,6 +1144,25 @@ describe('openchamber session routes', () => {
       .toBeLessThan(sessionCommandMock.mock.invocationCallOrder[0]);
     expect(response.body).toMatchObject({ goalEnabled: true, dispatchedAsCommand: true });
     expect(sessionPromptMock).not.toHaveBeenCalled();
+    // A plain command goal sends no reminder; the command is the objective.
+    expect(sessionSyntheticMock).not.toHaveBeenCalled();
+  });
+
+  it('tells the agent a rewritten goal spec before a slash command runs', async () => {
+    const createSessionGoal = vi.fn(async () => ({ goal: {}, spec: '## Objective\nShip LIN-123' }));
+    commandListMock.mockResolvedValue({ data: [{ name: 'issue--to-pr', description: 'Issue to PR' }] });
+
+    const { app } = createApp({ createSessionGoal });
+    await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: '/issue--to-pr LIN-123', model: 'openai/gpt-5.5', agent: 'build', goal: true })
+      .expect(200);
+
+    expect(sessionSyntheticMock).toHaveBeenCalledWith(expect.objectContaining({ resume: false }));
+    const [{ text }] = sessionSyntheticMock.mock.calls.at(-1);
+    expect(text).toContain('<goal-spec>\n## Objective\nShip LIN-123\n</goal-spec>');
+    expect(sessionSyntheticMock.mock.invocationCallOrder.at(-1))
+      .toBeLessThan(sessionCommandMock.mock.invocationCallOrder[0]);
   });
 
   it('admits standing project context ahead of a dispatched slash command', async () => {

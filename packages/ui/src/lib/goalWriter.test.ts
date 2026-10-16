@@ -106,7 +106,7 @@ describe('goal writer context', () => {
     const long = 'x'.repeat(1_400);
     const records = ['1', '2', '3', '4', '5'].flatMap((id) => [user(id, `${id}${long}`), assistant(id, long)]);
     const text = formatGoalWriterConversation(records);
-    expect(text.length).toBeLessThanOrEqual(12_000 + 4 * '\n\n---\n\n'.length);
+    expect(text.length).toBeLessThanOrEqual(12_000);
     expect(text).toContain(`1${long.slice(0, 20)}`);
     expect(text).toContain(`5${long.slice(0, 20)}`);
   });

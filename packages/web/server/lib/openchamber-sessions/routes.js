@@ -712,6 +712,15 @@ export const createOpenChamberSessionService = (dependencies) => {
         if (knowledge.text) {
           await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
         }
+        // A goal objective the writer rewrote is not the command's own text,
+        // so the agent is told the spec before the command runs.
+        if (goalSpec) {
+          await client.session.synthetic({
+            sessionID,
+            text: buildGoalIntroText(goalInput.tokenBudget, goalSpec),
+            resume: false,
+          });
+        }
         await client.session.command({
           sessionID,
           // OpenCode 2.0.8 renamed the command body field `command` to `name`.

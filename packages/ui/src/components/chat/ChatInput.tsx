@@ -322,6 +322,10 @@ const hasUserMessages = (sessionId: string, directory?: string) => {
     return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
 };
 
+const sameDraftIdentity = (a: ChatDraftIdentity | null, b: ChatDraftIdentity | null): boolean => (
+    a === null || b === null ? a === b : getChatDraftIdentityKey(a) === getChatDraftIdentityKey(b)
+);
+
 const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
     if (!projectLabel) return title;
     const projectIndex = title.indexOf(projectLabel);
@@ -1360,19 +1364,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
     // A send waiting on the goal writer: the dialog's request and the
-    // message it was written from, which the chosen send uses.
+    // message it was written from, which the chosen send uses. Both belong to
+    // the composer they were asked from: a choice made after the composer
+    // moved to another session or draft would send there instead.
     const [goalWriterRequest, setGoalWriterRequest] = React.useState<GoalSpecDialogRequest | null>(null);
     const goalWriterRequestIdRef = React.useRef(0);
-    const goalWriterPendingRef = React.useRef<{ message: string; delivery?: 'steer' } | null>(null);
+    const goalWriterPendingRef = React.useRef<{
+        message: string;
+        delivery?: 'steer';
+        identity: ChatDraftIdentity | null;
+    } | null>(null);
     const cancelGoalWriter = React.useCallback(() => {
         goalWriterPendingRef.current = null;
         setGoalWriterRequest(null);
     }, []);
+    React.useEffect(() => {
+        cancelGoalWriter();
+    }, [cancelGoalWriter, chatDraftIdentity]);
     const handleGoalWriterChoice = React.useCallback((choice: GoalSubmitChoice) => {
         const pending = goalWriterPendingRef.current;
         goalWriterPendingRef.current = null;
         setGoalWriterRequest(null);
-        if (!pending) return;
+        if (!pending || !sameDraftIdentity(pending.identity, currentChatDraftIdentityRef.current)) return;
         void handleSubmitRef.current({
             presetText: choice.kind === 'spec' && choice.sendMode === 'goal-as-message' ? choice.spec : pending.message,
             delivery: pending.delivery,
@@ -1839,7 +1852,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         goalTargetDirectory,
                     )
                     : selectedDraftProject && selectedDraftProject.kind !== 'chat' ? selectedDraftProject : null;
-                goalWriterPendingRef.current = { message: request, delivery: options?.delivery };
+                goalWriterPendingRef.current = { message: request, delivery: options?.delivery, identity: chatDraftIdentity };
                 goalWriterRequestIdRef.current += 1;
                 setGoalWriterRequest({
                     id: goalWriterRequestIdRef.current,

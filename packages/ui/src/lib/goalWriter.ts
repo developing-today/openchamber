@@ -162,6 +162,7 @@ export function buildGoalIntroReminder(tokenBudget: number | null, spec: string 
 const USER_FIELD_LIMIT = 1_500;
 const ASSISTANT_FIELD_LIMIT = 2_000;
 const CONVERSATION_CHAR_BUDGET = 12_000;
+const TURN_SEPARATOR = '\n\n---\n\n';
 const RECENT_TURNS = 4;
 const ITEM_CHAR_LIMIT = 400;
 
@@ -198,14 +199,16 @@ export function formatGoalWriterConversation(records: readonly MessageRecord[]):
   const recent = rest.slice(-RECENT_TURNS);
   const blocks = recent.map((turn) => render(turn, 'User'));
   const head = render(first, 'User (first request in this session)');
+  // The budget covers the separators too, so the result never exceeds it.
   let used = head.length;
   const kept: string[] = [];
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
-    if (used + blocks[index].length > CONVERSATION_CHAR_BUDGET) break;
-    used += blocks[index].length;
+    const cost = TURN_SEPARATOR.length + blocks[index].length;
+    if (used + cost > CONVERSATION_CHAR_BUDGET) break;
+    used += cost;
     kept.unshift(blocks[index]);
   }
-  return [head, ...kept].join('\n\n---\n\n');
+  return [head, ...kept].join(TURN_SEPARATOR);
 }
 
 export interface GoalWriterOpenItems {

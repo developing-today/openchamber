@@ -1913,6 +1913,11 @@ describe('goal objective directory scoping', () => {
 
   test('rewrite every goal sends an unsettled objective through the goal writer', async () => {
     const specRequests = [];
+    const sent = [];
+    opencodeClient.sendMessage = async (params) => {
+      sent.push(params);
+      return 'msg';
+    };
     const metadataFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
       if ((input instanceof Request ? input.url : String(input)).endsWith('/api/goals/spec')) {
@@ -1926,6 +1931,8 @@ describe('goal objective directory scoping', () => {
       await sendToWorktree('make the build green');
       expect(specRequests).toEqual([{ request: 'make the build green', directory: '/repo/worktree', providerID: 'provider-a', modelID: 'model-a' }]);
       expect(metadataWrites[0].patch.openchamber.goal.objective).toBe('Written spec');
+      // The agent is briefed with the spec that was saved, not the message.
+      expect(JSON.stringify(sent[0])).toContain('<goal-spec>\\nWritten spec\\n</goal-spec>');
 
       // A spec the writer already produced is not rewritten again.
       metadataWrites.length = 0;
