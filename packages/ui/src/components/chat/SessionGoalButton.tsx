@@ -9,6 +9,7 @@ import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 
 interface SessionGoalButtonProps {
   sessionId: string | null;
@@ -131,20 +132,93 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
 
 SessionGoalButton.displayName = 'SessionGoalButton';
 
+interface SessionGoalWriterButtonProps {
+  sessionId: string | null;
+  directory?: string;
+  draftOpen?: boolean;
+  footerIconButtonClass: string;
+  iconSizeClass: string;
+  withTooltip?: boolean;
+}
+
+// The goal writer switch, right of the target. On, an armed message is turned
+// into a goal spec by a model before it is sent; off, the message is the goal
+// as typed. It belongs to starting a goal, so it shows only while the session
+// has none. The choice is a saved setting (Settings → Chat → Goal).
+export const SessionGoalWriterButton: React.FC<SessionGoalWriterButtonProps> = React.memo(({
+  sessionId,
+  directory,
+  draftOpen = false,
+  footerIconButtonClass,
+  iconSizeClass,
+  withTooltip = false,
+}) => {
+  const { t } = useI18n();
+  const { goal, enabled } = useSessionGoal(sessionId ?? '', directory);
+  const writerEnabled = useUIStore((state) => state.sessionGoalWriterEnabled);
+  const rewriteAll = useUIStore((state) => state.sessionGoalRewriteAll);
+  const setWriterEnabled = useUIStore((state) => state.setSessionGoalWriterEnabled);
+  // Without a progress check no goal can start, so there is nothing to write.
+  const canCheck = useGoalCheckAvailable(directory, !isVSCodeRuntime() && enabled && !goal);
+
+  if (isVSCodeRuntime() || !enabled || goal || !canCheck || (!sessionId && !draftOpen)) {
+    return null;
+  }
+
+  // "Rewrite every goal" writes every spec whatever this switch says.
+  const on = writerEnabled || rewriteAll;
+  const label = rewriteAll
+    ? t('chat.goal.writer.button.forced')
+    : (writerEnabled ? t('chat.goal.writer.button.on') : t('chat.goal.writer.button.off'));
+
+  const button = (
+    <button
+      type="button"
+      className={cn(footerIconButtonClass, rewriteAll && 'opacity-50')}
+      style={on ? { color: 'var(--status-info)' } : undefined}
+      onClick={() => {
+        if (!rewriteAll) setWriterEnabled(!writerEnabled);
+      }}
+      // Same keyboard guard as the target: it is toggled mid-typing.
+      onMouseDown={(event) => event.preventDefault()}
+      onPointerDownCapture={(event) => {
+        if (event.pointerType === 'touch') event.preventDefault();
+      }}
+      aria-disabled={rewriteAll || undefined}
+      aria-label={label}
+      aria-pressed={on}
+      {...(withTooltip ? {} : { title: label })}
+    >
+      <Icon name={on ? 'sparkling-fill' : 'sparkling'} className={cn(iconSizeClass, 'text-current')} aria-hidden="true" />
+    </button>
+  );
+
+  return withTooltip ? (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+    </Tooltip>
+  ) : button;
+});
+
+SessionGoalWriterButton.displayName = 'SessionGoalWriterButton';
+
 interface SessionGoalObjectiveCounterProps {
   /** Current composer text length — the armed message becomes the objective. */
   length: number;
 }
 
 // Tiny hot-path leaf next to the target button: while goal mode is armed the
-// typed message becomes the objective, which the server clamps to 2000
-// chars — surface that limit during typing instead of truncating silently.
-// Renders null when not armed, so normal typing shows nothing.
+// typed message becomes the objective, which is capped at
+// SESSION_GOAL_OBJECTIVE_CHAR_LIMIT chars — surface that limit during typing
+// instead of truncating silently. Renders null when not armed, and when the
+// goal writer turns the message into a spec, which fits the limit by itself.
 export const SessionGoalObjectiveCounter: React.FC<SessionGoalObjectiveCounterProps> = React.memo(({ length }) => {
   const { t } = useI18n();
   const armed = useSessionGoalArmStore((state) => state.armed);
+  const writerOn = useUIStore((state) => state.sessionGoalWriterEnabled || state.sessionGoalRewriteAll);
 
-  if (!armed || length === 0) {
+  if (!armed || writerOn || length === 0) {
     return null;
   }
 

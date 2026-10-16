@@ -657,10 +657,11 @@ export const createOpenChamberSessionService = (dependencies) => {
       } catch {
       }
     }
+    let goalSpec = null;
     if (goalInput.enabled) {
       // v2 no longer publishes a command's template, so a slash command's goal
       // objective is the prompt the user typed rather than the expanded body.
-      await (createSessionGoalOverride || createSessionGoal)({
+      ({ spec: goalSpec } = await (createSessionGoalOverride || createSessionGoal)({
         baseUrl,
         authHeaders,
         sessionID,
@@ -675,7 +676,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         persistSessionGoal: async (goalSessionID, goalDirectory, goal) => {
           await writeMetadata(goalSessionID, { openchamber: { goal } }, goalDirectory);
         },
-      });
+      }));
     }
 
     const markGoalPartial = (error) => {
@@ -734,7 +735,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           // admitted after the prompt; v2 has no way to append to one message.
           await client.session.synthetic({
             sessionID,
-            text: buildGoalIntroText(goalInput.tokenBudget),
+            text: buildGoalIntroText(goalInput.tokenBudget, goalSpec),
             resume: false,
           });
         }

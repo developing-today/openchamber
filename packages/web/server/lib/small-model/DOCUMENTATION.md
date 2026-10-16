@@ -1,7 +1,8 @@
 # Small Model
 
 Background LLM calls for OpenChamber's own features — session titles, goal
-distillation, session assist, the changes walkthrough. Every call goes to the
+distillation and the goal writer (`../session-goal/spec-writer.js`), session
+assist, the changes walkthrough. Every call goes to the
 running OpenCode through `POST /api/experimental/generate`; OpenChamber never talks to a
 provider directly and never handles a provider credential.
 

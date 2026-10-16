@@ -576,6 +576,42 @@ export const SETTINGS_REGISTRY = {
   }),
   sessionGoalDefaultBudgetEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalDefaultBudgetEnabled', (v) => useUIStore.getState().setSessionGoalDefaultBudgetEnabled(v)) }),
   sessionGoalDefaultBudget: field({ scope: 'profile', parse: parsePositiveInteger, ui: uiStore('sessionGoalDefaultBudget', (v) => useUIStore.getState().setSessionGoalDefaultBudget(v)) }),
+  // The goal writer turns a message into a goal spec. Goal mode does not exist
+  // in VS Code, so neither do these.
+  sessionGoalWriterEnabled: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('sessionGoalWriterEnabled', (v) => useUIStore.getState().setSessionGoalWriterEnabled(v)),
+  }),
+  // `provider/model`; missing means the session's own model. Read by the server,
+  // which writes every spec, so no store holds it.
+  sessionGoalWriterModel: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseNonEmptyString }),
+  sessionGoalWriterReview: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('sessionGoalWriterReview', (v) => useUIStore.getState().setSessionGoalWriterReview(v)),
+  }),
+  sessionGoalWriterSendMode: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseOneOf(['with-message', 'goal-as-message']),
+    ui: uiStore('sessionGoalWriterSendMode', (v) => useUIStore.getState().setSessionGoalWriterSendMode(v)),
+  }),
+  // Also read by the server for the goals it creates (scheduled tasks, CLI).
+  sessionGoalRewriteAll: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('sessionGoalRewriteAll', (v) => useUIStore.getState().setSessionGoalRewriteAll(v)),
+  }),
+  sessionGoalAutoCreate: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseOneOf(['off', 'review', 'auto']),
+    ui: uiStore('sessionGoalAutoCreate', (v) => useUIStore.getState().setSessionGoalAutoCreate(v)),
+  }),
   summarizeLastMessage: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('summarizeLastMessage', (v) => useUIStore.getState().setSummarizeLastMessage(v)) }),
   summaryThreshold: field({ scope: 'profile', parse: parseIntegerAtLeast(0), ui: uiStore('summaryThreshold', (v) => useUIStore.getState().setSummaryThreshold(v)) }),
   summaryLength: field({ scope: 'profile', parse: parseIntegerAtLeast(10), ui: uiStore('summaryLength', (v) => useUIStore.getState().setSummaryLength(v)) }),

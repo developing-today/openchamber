@@ -85,7 +85,7 @@ import {
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
-import { wrapSystemReminder } from "@/lib/systemReminder"
+import { buildGoalIntroReminder } from "@/lib/goalWriter"
 import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
@@ -1814,20 +1814,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       const goalArm = inputMode !== "shell" && content.trim().length > 0
         ? useSessionGoalArmStore.getState().consume()
-        : { armed: false, objectiveOverride: null }
+        : { armed: false, objectiveOverride: null, settled: false, briefAgent: false }
       const goalArmed = goalArm.armed
       if (goalArmed) {
         // Teach the agent the goal protocol from turn one — without this it
         // only learns about goal mode from the first server continuation.
         const uiState = useUIStore.getState()
-        const budgetLine = uiState.sessionGoalDefaultBudgetEnabled
-          ? ` A token budget of ${uiState.sessionGoalDefaultBudget} tokens applies to this goal.`
-          : ""
-        const goalIntro = wrapSystemReminder(
-          "Goal mode is active for this session. The user message above defines the goal objective. "
-          + "Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. "
-          + "Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains."
-          + budgetLine,
+        const goalIntro = buildGoalIntroReminder(
+          uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null,
+          goalArm.briefAgent ? goalArm.objectiveOverride : null,
         )
         additionalParts = [...(additionalParts ?? []), { text: goalIntro, synthetic: true }]
       }
@@ -1844,10 +1839,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           const knownCommands = selectCommandsForDirectory(useCommandsStore.getState(), goalDirectory)
           objective = expandSlashCommandGoalObjective(content, knownCommands)
         }
+        // "Rewrite every goal" covers the run-as-goal flows too; the writer
+        // falls back to the model this message is sent with.
+        const rewrite = uiState.sessionGoalRewriteAll && !goalArm.settled
+          ? { providerID, modelID }
+          : null
         try {
-          await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
+          await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite }, null)
         } catch (error) {
-          useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride)
+          useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
+            settled: goalArm.settled,
+            briefAgent: goalArm.briefAgent,
+          })
           throw error
         }
       }

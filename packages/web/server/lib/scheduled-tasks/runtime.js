@@ -550,7 +550,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const runPrompt = async ({ client, sessionID, projectPath, task }) => {
+  const runPrompt = async ({ client, sessionID, projectPath, task, goalSpec = null }) => {
     const knowledge = await resolveKnowledge(sessionID, projectPath);
 
     // A v2 prompt carries a single authored text. Standing project context and
@@ -562,7 +562,7 @@ export const createScheduledTasksRuntime = (deps) => {
       await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
     }
     if (task.execution.goalEnabled) {
-      await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget), resume: false });
+      await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget, goalSpec), resume: false });
     }
 
     await client.session.prompt({
@@ -692,11 +692,12 @@ export const createScheduledTasksRuntime = (deps) => {
 
     const scheduledCommand = await resolveScheduledCommand({ client, projectPath: directory, task });
 
+    let goalSpec = null;
     if (task.execution.goalEnabled) {
       const commandObjective = scheduledCommand
         ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
         : null;
-      await createSessionGoal({
+      ({ spec: goalSpec } = await createSessionGoal({
         baseUrl,
         authHeaders,
         persistSessionGoal,
@@ -707,13 +708,13 @@ export const createScheduledTasksRuntime = (deps) => {
         providerID: selection.providerID ?? undefined,
         modelID: selection.modelID ?? undefined,
         onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
-      });
+      }));
     }
 
     if (scheduledCommand) {
       await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
     } else {
-      await runPrompt({ client, sessionID, projectPath: directory, task });
+      await runPrompt({ client, sessionID, projectPath: directory, task, goalSpec });
     }
 
     const finishedAt = Date.now();

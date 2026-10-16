@@ -652,6 +652,54 @@
     "sessionGoalDefaultBudget": {
       "scope": "profile"
     },
+    "sessionGoalWriterEnabled": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalWriterModel": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalWriterReview": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalWriterSendMode": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalRewriteAll": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalAutoCreate": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "summarizeLastMessage": {
       "scope": "profile"
     },

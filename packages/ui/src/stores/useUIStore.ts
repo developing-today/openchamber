@@ -65,6 +65,10 @@ export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
 export type AgentTerminalsPlacement = 'terminal-panel' | 'sidebar';
 export type SessionGoalChecker = 'classifier' | 'small-model';
+/** What an approved goal spec does on send: it rides along with the typed message, or it is the message. */
+export type SessionGoalWriterSendMode = 'with-message' | 'goal-as-message';
+/** Whether a session without a goal turns the next message into one: never, after review, or straight away. */
+export type SessionGoalAutoCreate = 'off' | 'review' | 'auto';
 
 const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 const DEFAULT_AGENT_TERMINALS_PLACEMENT: AgentTerminalsPlacement = 'terminal-panel';
@@ -960,6 +964,14 @@ interface UIStore {
   sessionGoalMaxAutoTurns: number;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
+  /** A model writes the goal spec from the armed message (the composer's sparkle switch). */
+  sessionGoalWriterEnabled: boolean;
+  /** Show the written spec for approval before sending; off sends it straight away. */
+  sessionGoalWriterReview: boolean;
+  sessionGoalWriterSendMode: SessionGoalWriterSendMode;
+  /** Every goal objective, from any entry point, goes through the goal writer. */
+  sessionGoalRewriteAll: boolean;
+  sessionGoalAutoCreate: SessionGoalAutoCreate;
   collapsibleThinkingBlocks: boolean;
   /** A collapsible reasoning block opens while its model thinks. Off: it stays folded to its header. */
   expandReasoningWhileStreaming: boolean;
@@ -1242,6 +1254,11 @@ interface UIStore {
   setSessionGoalMaxAutoTurns: (value: number) => void;
   setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudget: (value: number) => void;
+  setSessionGoalWriterEnabled: (value: boolean) => void;
+  setSessionGoalWriterReview: (value: boolean) => void;
+  setSessionGoalWriterSendMode: (value: SessionGoalWriterSendMode) => void;
+  setSessionGoalRewriteAll: (value: boolean) => void;
+  setSessionGoalAutoCreate: (value: SessionGoalAutoCreate) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setExpandReasoningWhileStreaming: (value: boolean) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -1467,6 +1484,11 @@ export const useUIStore = create<UIStore>()(
         sessionGoalMaxAutoTurns: DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS,
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
+        sessionGoalWriterEnabled: true,
+        sessionGoalWriterReview: true,
+        sessionGoalWriterSendMode: 'with-message',
+        sessionGoalRewriteAll: false,
+        sessionGoalAutoCreate: 'off',
         collapsibleThinkingBlocks: true,
         expandReasoningWhileStreaming: false,
         activityRenderMode: 'summary',
@@ -2513,6 +2535,26 @@ export const useUIStore = create<UIStore>()(
 
         setSessionGoalDefaultBudget: (value) => {
           set({ sessionGoalDefaultBudget: value });
+        },
+
+        setSessionGoalWriterEnabled: (value) => {
+          set({ sessionGoalWriterEnabled: value });
+        },
+
+        setSessionGoalWriterReview: (value) => {
+          set({ sessionGoalWriterReview: value });
+        },
+
+        setSessionGoalWriterSendMode: (value) => {
+          set({ sessionGoalWriterSendMode: value });
+        },
+
+        setSessionGoalRewriteAll: (value) => {
+          set({ sessionGoalRewriteAll: value });
+        },
+
+        setSessionGoalAutoCreate: (value) => {
+          set({ sessionGoalAutoCreate: value });
         },
 
         setCollapsibleThinkingBlocks: (value) => {
@@ -3567,6 +3609,11 @@ export const useUIStore = create<UIStore>()(
           sessionGoalMaxAutoTurns: state.sessionGoalMaxAutoTurns,
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
+          sessionGoalWriterEnabled: state.sessionGoalWriterEnabled,
+          sessionGoalWriterReview: state.sessionGoalWriterReview,
+          sessionGoalWriterSendMode: state.sessionGoalWriterSendMode,
+          sessionGoalRewriteAll: state.sessionGoalRewriteAll,
+          sessionGoalAutoCreate: state.sessionGoalAutoCreate,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           expandReasoningWhileStreaming: state.expandReasoningWhileStreaming,
           activityRenderMode: state.activityRenderMode,

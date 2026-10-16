@@ -20,6 +20,7 @@ import { clearSessionGoal, setSessionGoal } from '@/lib/sessionGoalActions';
 import { useI18n } from '@/lib/i18n';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useUIStore } from '@/stores/useUIStore';
+import { resolveSessionWriterModel } from '@/components/chat/goalWriterContext';
 
 interface SessionGoalDialogProps {
   open: boolean;
@@ -74,6 +75,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
   const [budgetEnabled, setBudgetEnabled] = React.useState(() => Boolean(goal?.tokenBudget));
   const [tokenBudget, setTokenBudget] = React.useState<number>(() => goal?.tokenBudget ?? 200_000);
   const [busy, setBusy] = React.useState(false);
+  const rewriteAll = useUIStore((state) => state.sessionGoalRewriteAll);
 
   // File-backed objectives fetch async — the content usually lands right
   // after the dialog opens. Late-seed the textarea only while it is still
@@ -108,7 +110,12 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
   const canSave = !isCompleted && !cannotCheck && trimmedObjective.length > 0 && (!goal || objectiveChanged || budgetChanged);
 
   const handleSave = () => run(
-    () => setSessionGoal(sessionId, directory, { objective: trimmedObjective, tokenBudget: budgetValue }, goal),
+    () => setSessionGoal(sessionId, directory, {
+      objective: trimmedObjective,
+      tokenBudget: budgetValue,
+      // "Rewrite every goal" applies to a typed objective, not to a budget-only edit.
+      rewrite: rewriteAll && objectiveChanged ? resolveSessionWriterModel(sessionId) : null,
+    }, goal),
     true,
   );
 
@@ -205,6 +212,9 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
           {cannotCheck && (
             <p className="typography-meta text-muted-foreground">{t('chat.goal.dialog.noSmallModel')}</p>
           )}
+          {rewriteAll && !isCompleted && !cannotCheck ? (
+            <p className="typography-meta text-muted-foreground">{t('chat.goal.writer.dialog.rewriteOnSave')}</p>
+          ) : null}
 
           <div className="flex items-center gap-2 pt-1">
             {goal && (

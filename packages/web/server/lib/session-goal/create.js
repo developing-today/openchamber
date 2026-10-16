@@ -1,11 +1,30 @@
 import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
+import { readGoalWriterSettings, writeGoalSpec } from './spec-writer.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
 
-export const buildGoalIntroText = (tokenBudget) => {
+const escapeXmlText = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+
+// The UI builds the same reminder for goals armed from the composer; keep the
+// wording identical on both sides.
+export const buildGoalIntroText = (tokenBudget, spec = null) => {
   const budgetLine = tokenBudget
     ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
     : '';
+  if (spec) {
+    return '<system-reminder>\n'
+      + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+      + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
+      + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
+      + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
+      + budgetLine
+      + '\n\n<goal-spec>\n'
+      + escapeXmlText(spec)
+      + '\n</goal-spec>\n</system-reminder>';
+  }
   return '<system-reminder>\n'
     + 'Goal mode is active for this session. The user message above defines the goal objective. '
     + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
@@ -56,6 +75,8 @@ export const createSessionGoal = async ({
   modelID,
   onWarning,
   persistSessionGoal,
+  goalWriterSettings = readGoalWriterSettings(),
+  writeSpec = writeGoalSpec,
 }) => {
   const warn = (message, error) => {
     if (typeof onWarning === 'function') {
@@ -64,8 +85,19 @@ export const createSessionGoal = async ({
     }
     console.warn(`[session-goal] ${message}:`, error?.message || error);
   };
+  const requested = String(objective ?? '').trim();
+  let spec = null;
+  if (goalWriterSettings?.rewriteAll && requested) {
+    try {
+      ({ spec } = await writeSpec({ request: requested, directory, providerID, modelID, settings: goalWriterSettings }));
+    } catch (error) {
+      // The goal still runs on what the user wrote; a missing writer model
+      // must not cost them the goal.
+      warn('goal spec rewrite failed, keeping the objective as written', error);
+    }
+  }
   const objectiveText = await fitObjective({
-    objective: String(objective ?? '').trim(),
+    objective: spec ?? requested,
     directory,
     sessionID,
     providerID,
@@ -106,5 +138,5 @@ export const createSessionGoal = async ({
     throw new Error('goal mode needs a session metadata store to save the goal in');
   }
   await persistSessionGoal(sessionID, directory, goal);
-  return goal;
+  return { goal, spec };
 };

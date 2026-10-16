@@ -79,7 +79,7 @@ const setup = ({ metadata = {}, knowledge = true } = {}) => {
     };
     objectives.set(sessionID, objective);
     await persistSessionGoal(sessionID, directory, goal);
-    return goal;
+    return { goal, spec: null };
   });
   const objectives = new Map();
   const readObjective = vi.fn(async (sessionID) => objectives.get(sessionID) ?? null);

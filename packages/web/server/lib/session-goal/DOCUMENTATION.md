@@ -79,6 +79,40 @@ before touching the filesystem). Rationale: metadata rides every
   OpenCode directly, so both implementations exist. `/btw` forks drop the goal
   with the rest of the inherited namespace.
 
+## Goal writer
+
+The goal writer turns a user's message into a goal spec: a clean, detailed
+objective of at most 5000 characters that the agent works from and the
+progress check judges against. `spec-writer.js` owns it.
+
+- Route: `POST /api/goals/spec` in `routes.js`, body `{ request,
+  conversation?, openItems?, directory?, providerID?, modelID? }`, answer
+  `{ spec, providerID, modelID }` naming the model that wrote it. A blank
+  request is `400` (`goal-spec-request-required`), an empty reply `502`
+  (`goal-spec-empty`); other errors keep the generate status. A client that
+  disconnects aborts the generation.
+- Prompt: `GOAL_SPEC_SYSTEM_PROMPT` asks for Markdown sections Objective,
+  Requirements, Constraints, Done when and Out of scope, faithful to the
+  request, with paths, commands and names kept verbatim. The user prompt holds
+  XML-escaped `<request>`, `<open_items>` and `<conversation>` blocks in that
+  order, so a prompt clipped at the tail loses conversation first. The reply
+  is cleaned by `normalizeGoalSpec`: think blocks dropped, a fence around the
+  whole reply removed, clamped to 5000 characters at a line break when one is
+  close.
+- Model: `sessionGoalWriterModel` (`provider/model`) when set, else the
+  session's own provider and model, else the normal small-model chain. All of
+  them go through `generateSmallModelText`, so the writer only reaches models
+  configured in OpenCode through `/api/experimental/generate`, the same
+  boundary as the small model.
+- Rewrite all: with `sessionGoalRewriteAll` on, `createSessionGoal` runs every
+  server-created objective (scheduled tasks, CLI `--goal`, the agent tool's
+  `goalAction: set`) through the writer before fitting it. A failed rewrite
+  logs a warning and keeps the objective as written. `createSessionGoal`
+  returns `{ goal, spec }`; scheduled tasks and the sessions route pass the
+  spec to `buildGoalIntroText(tokenBudget, spec)`, whose reminder then
+  carries it in an escaped `<goal-spec>` block. The UI builds the same text
+  for goals it arms, so the wording must stay identical on both sides.
+
 ## Flow
 
 1. `createSessionGoalRuntime` subscribes to the global SSE hub (same pattern
@@ -230,6 +264,54 @@ sees only that final turn, so the report is its evidence.
   disabled and the small model shows as chosen, matching the server.
   `useGoalCheckAvailable` (`hooks/useSessionGoal.ts`) gates arming a new goal
   on either checker being able to run.
+
+### Goal writer in the UI
+
+- `lib/goalWriter.ts` — `requestGoalSpec` (the route above; a failure comes
+  back with its reason, never as an empty spec), `planGoalWriter` (whether a
+  send stops for the writer), `buildGoalIntroReminder` (the goal-mode reminder,
+  byte-identical to `buildGoalIntroText`), and the context formatting for
+  "goal from next message".
+- `components/chat/SessionGoalButton.tsx` — `SessionGoalWriterButton`, the
+  sparkle switch right of the target (`sessionGoalWriterEnabled`, on by
+  default). It shows only while the session has no goal and a progress check
+  can run, and reads as on and locked while `sessionGoalRewriteAll` is on.
+- `components/chat/ChatInput.tsx` — `handleSubmit` asks `planGoalWriter`
+  before anything is taken from the composer. Eligible sends are plain text
+  in normal mode: no slash command, shell input, side question, queue flush,
+  or a send that auto-review would queue. Two triggers:
+  - `armed`: the target is armed and the switch or rewrite-all is on. The
+    writer reads the message only.
+  - `auto-create`: the session has no goal at all, it is idle, and
+    `sessionGoalAutoCreate` is `review` or `auto`. The writer also gets
+    `components/chat/goalWriterContext.ts`: the first request and the newest
+    turns of the loaded history, open project todos, session-pinned and
+    project-pinned plans whose checklist is not done, queued messages and
+    running subagent sessions. Every source is best effort; the message alone
+    still makes a goal.
+- `components/chat/GoalSpecDialog.tsx` — writes the spec (the session's
+  composer model is sent as the fallback model), then shows it for approval
+  when `sessionGoalWriterReview` is on (armed) or `sessionGoalAutoCreate` is
+  `review`. Choices: send the message with the spec as its goal, send the spec
+  as the message (`sessionGoalWriterSendMode` picks the primary one and the
+  one used without review), write again, or skip: an armed goal keeps the
+  message as typed, an automatic one sends without a goal. A failed write
+  always waits for the user, review or not. Closing the dialog leaves the
+  composer, queue and pending prompts untouched: the choice submits again with
+  a `goal` option, and only then is the arm set, right before `sendMessage`.
+- `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
+  produced or the user kept over it, so rewrite-all leaves it alone;
+  `briefAgent` puts the spec into the reminder when the message itself is not
+  the spec.
+- Rewrite all in the UI: `setSessionGoal` takes `rewrite` with the session's
+  model. `sendMessage` passes it for unsettled armed goals (Plan "Run as goal",
+  fork as goal), and `SessionGoalDialog` when the typed objective changed. A
+  failed rewrite keeps the user's text and says so in a toast.
+- `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
+  Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
+  the server only, so it lives in the settings file like the walkthrough
+  model), review, send mode, rewrite all, and goal from next message. None of
+  it exists in VS Code, which has no goal loop.
 
 ## Scheduled goals
 
