@@ -28,6 +28,7 @@ import {
   resolveRemoteDefaultStartRef,
   resolveWorktreeStartFrom,
 } from '../git/worktree-start-ref.js';
+import { branchTemplateFrom, defaultBranchName } from '../git/branch-name-template.js';
 
 const asList = (value) => (Array.isArray(value) ? value : []);
 
@@ -868,15 +869,20 @@ export const createOpenChamberSessionService = (dependencies) => {
       throw new OpenChamberControlError('worktree.name is required when worktree is provided', 400);
     }
     // What the caller left out comes from Settings: where a new branch starts,
-    // and whether a pull request is checked out or branched off.
-    if ((worktreeInput && !worktreeInput.startRef) || (pullRequestInput && pullRequestInput.branchOff === undefined)) {
+    // what it is called, and whether a pull request is checked out or branched off.
+    if (worktreeInput || pullRequestInput) {
       const settings = await readSettingsFromDiskMigrated();
-      if (pullRequestInput && pullRequestInput.branchOff === undefined) {
-        pullRequestInput.branchOff = branchesOffPullRequestsByDefault(settings);
+      if (pullRequestInput) {
+        if (pullRequestInput.branchOff === undefined) pullRequestInput.branchOff = branchesOffPullRequestsByDefault(settings);
+        if (pullRequestInput.branchOff) pullRequestInput.branchTemplate = branchTemplateFrom(settings, 'pull-request');
       }
-      if (worktreeInput && !worktreeInput.startRef && resolveWorktreeStartFrom(settings, 'agent') === 'remote-default') {
-        const startRef = resolveRemoteDefaultStartRef(await getBranches(resolvedDirectory.directory, { remote: 'local' }));
-        if (startRef) worktreeInput.startRef = startRef;
+      if (worktreeInput && (!worktreeInput.startRef || !worktreeInput.branchName)) {
+        const branches = await getBranches(resolvedDirectory.directory, { remote: 'local' });
+        if (!worktreeInput.startRef && resolveWorktreeStartFrom(settings, 'agent') === 'remote-default') {
+          const startRef = resolveRemoteDefaultStartRef(branches);
+          if (startRef) worktreeInput.startRef = startRef;
+        }
+        if (!worktreeInput.branchName) worktreeInput.branchName = defaultBranchName(settings, branches, worktreeInput.name);
       }
     }
 
@@ -1142,6 +1148,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     // The move is global in v2: no directory header, the session id names it.
     moveSession: (sessionID, directory) => clientFor(undefined).session.move({ sessionID, directory }),
     readStartFrom: async () => resolveWorktreeStartFrom(await readSettingsFromDiskMigrated(), 'agent'),
+    nameBranch: async (root, name) => defaultBranchName(await readSettingsFromDiskMigrated(), await getBranches(root, { remote: 'local' }), name),
   });
 
   /**

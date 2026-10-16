@@ -643,8 +643,11 @@ and the send path reading the same grammar.
   at send. A **New branch** checkbox beside it starts on the Settings choice
   for pull requests (`pullRequestWorktree`): off checks out the request's
   branch the way the dialog does, so commits push to it, and a typed name
-  names only the folder; on starts a new branch from its head, named like any
-  auto-created worktree. A fork's request can only be checked out and one whose
+  names only the folder; on starts a new branch from its head, named by the
+  pull request branch template. A new worktree's branch is the Settings
+  template filled with the worktree's name (`lib/worktrees/branchNameTemplate.ts`,
+  `{name}` and `{name}-from-pr-{pr}` by default), with `-2`, `-3`… past a
+  local branch that has it; the folder keeps the plain name. A fork's request can only be checked out and one whose
   branch is open elsewhere can only be branched off, so the checkbox is fixed
   for those. The start settings, each place with its own override
   (`lib/worktrees/worktreeStartSource.ts`), also cover Quick worktree, the

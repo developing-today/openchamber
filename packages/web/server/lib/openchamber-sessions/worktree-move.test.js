@@ -73,7 +73,7 @@ describe('moving a session into a new worktree', () => {
     expect(calls.map(([step]) => step)).toEqual([
       'createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'stashPush', 'stashApply', 'moveSession', 'stashDrop',
     ]);
-    expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'new', name: 'fix-login', startRef: 'main' }]);
+    expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'new', name: 'fix-login', startRef: 'main', branchName: 'fix-login' }]);
     expect(calls[1][1]).toEqual({ directory: WORKTREE.path, parentDirectory: ROOT, parentRemoteName: '' });
     // Applied by hash: a stash pushed in between would otherwise be the one applied.
     expect(calls[4]).toEqual(['stashApply', WORKTREE.path, STASH.hash]);

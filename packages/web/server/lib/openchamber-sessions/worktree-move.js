@@ -32,6 +32,7 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
  * @param {(directory: string) => Promise<{ root: string }>} dependencies.resolvePrimaryWorktreeRoot
  * @param {(sessionId: string, directory: string) => Promise<void>} dependencies.moveSession
  * @param {() => Promise<string>} [dependencies.readStartFrom] where Settings start a worktree an agent makes
+ * @param {(root: string, name: string) => Promise<string>} [dependencies.nameBranch] the branch Settings give a worktree of that name
  * @param {(message: string, error: unknown) => void} [dependencies.warn]
  */
 export const createSessionWorktreeMover = (dependencies) => {
@@ -49,6 +50,7 @@ export const createSessionWorktreeMover = (dependencies) => {
     resolvePrimaryWorktreeRoot,
     moveSession,
     readStartFrom = async () => 'remote-default',
+    nameBranch = async (_root, name) => name,
     warn = (message, error) => console.warn(message, error instanceof Error ? error.message : String(error)),
   } = dependencies;
 
@@ -158,8 +160,7 @@ export const createSessionWorktreeMover = (dependencies) => {
       worktreeInput = { mode: 'existing', name, existingBranch, setUpstream: true };
     } else {
       startRef = asNonEmptyString(input?.startRef) || await resolveDefaultStartRef(root);
-      worktreeInput = { mode: 'new', name, startRef };
-      if (branchName) worktreeInput.branchName = branchName;
+      worktreeInput = { mode: 'new', name, startRef, branchName: branchName || await nameBranch(root, name) };
     }
 
     let worktree;

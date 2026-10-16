@@ -612,6 +612,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.worktree-branch-template',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.autoCreateWorktree.branchName.worktree',
+    descriptionKey: 'settings.openchamber.autoCreateWorktree.branchName.info',
+    keywords: ['branch', 'name', 'template', 'prefix', 'worktree', 'naming'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.pull-request-branch-template',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.autoCreateWorktree.branchName.pullRequest',
+    descriptionKey: 'settings.openchamber.autoCreateWorktree.branchName.pullRequestVariables',
+    keywords: ['branch', 'name', 'template', 'pull request', 'pr', 'merge request', 'branch off', 'from-pr'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.pull-request-worktree',
     page: 'sessions',
     titleKey: 'settings.openchamber.autoCreateWorktree.pullRequest.title',

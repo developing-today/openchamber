@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_OPTION_STACK_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SettingsCheckboxRow,
@@ -8,7 +9,9 @@ import {
   SettingsRadioGroup,
   SettingsRadioOption,
   SettingsSection,
+  SettingsStackedField,
 } from '@/components/sections/shared/SettingsSection';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import {
@@ -19,6 +22,12 @@ import {
   type WorktreeStartFrom,
   type WorktreeStartPlace,
 } from '@/lib/worktrees/worktreeStartSource';
+import {
+  DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE,
+  DEFAULT_WORKTREE_BRANCH_TEMPLATE,
+  isBranchTemplate,
+  type BranchTemplateKind,
+} from '@/lib/worktrees/branchNameTemplate';
 import { useConfigStore } from '@/stores/useConfigStore';
 
 const START_FROM_LABEL_KEYS = {
@@ -53,8 +62,63 @@ const isWorktreeStartFrom = (value: string): value is WorktreeStartFrom => (
 );
 
 /**
+ * A branch name template. It is saved when the field is left with a usable
+ * template; an empty field restores the default, and an unusable one says why
+ * and keeps the saved template.
+ */
+const BranchTemplateField: React.FC<{
+  kind: BranchTemplateKind;
+  settingsItem: string;
+  label: string;
+  description: string;
+  value: string;
+  fallback: string;
+  onSave: (template: string) => void;
+}> = ({ kind, settingsItem, label, description, value, fallback, onSave }) => {
+  const { t } = useI18n();
+  const [draft, setDraft] = React.useState(value);
+  const [invalid, setInvalid] = React.useState(false);
+  React.useEffect(() => {
+    setDraft(value);
+    setInvalid(false);
+  }, [value]);
+
+  const commit = () => {
+    const template = draft.trim() || fallback;
+    if (!isBranchTemplate(template, kind)) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    setDraft(template);
+    if (template !== value) onSave(template);
+  };
+
+  return (
+    <SettingsStackedField settingsItem={settingsItem} label={label} description={description}>
+      <Input
+        className="h-8 min-w-0"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => { if (event.key === 'Enter') commit(); }}
+        placeholder={fallback}
+        aria-label={label}
+        aria-invalid={invalid}
+        spellCheck={false}
+      />
+      {/* A reserved line, so a message never moves the fields below it. */}
+      <p className="min-h-4 typography-meta text-[var(--status-error)]">
+        {invalid ? t('settings.openchamber.autoCreateWorktree.branchName.invalid') : null}
+      </p>
+    </SettingsStackedField>
+  );
+};
+
+/**
  * The same switch the new-session draft shows next to its branch selector,
- * where new worktrees start, per place, and how a pull request becomes one.
+ * where new worktrees start, per place, how their branches are named, and how
+ * a pull request becomes one.
  */
 export const AutoCreateWorktreeSettings: React.FC = () => {
   const { t } = useI18n();
@@ -66,6 +130,10 @@ export const AutoCreateWorktreeSettings: React.FC = () => {
   const setOverride = useConfigStore((state) => state.setSettingsWorktreeStartFromOverride);
   const pullRequestMode = useConfigStore((state) => state.settingsPullRequestWorktree);
   const setPullRequestMode = useConfigStore((state) => state.setSettingsPullRequestWorktree);
+  const branchTemplate = useConfigStore((state) => state.settingsWorktreeBranchTemplate);
+  const setBranchTemplate = useConfigStore((state) => state.setSettingsWorktreeBranchTemplate);
+  const pullRequestBranchTemplate = useConfigStore((state) => state.settingsPullRequestBranchTemplate);
+  const setPullRequestBranchTemplate = useConfigStore((state) => state.setSettingsPullRequestBranchTemplate);
 
   return (
     <SettingsSection title={t('settings.openchamber.autoCreateWorktree.title')}>
@@ -142,6 +210,30 @@ export const AutoCreateWorktreeSettings: React.FC = () => {
               />
             ))}
           </SettingsRadioGroup>
+        </SettingsControlGroup>
+        <SettingsControlGroup
+          title={t('settings.openchamber.autoCreateWorktree.branchName.title')}
+          info={t('settings.openchamber.autoCreateWorktree.branchName.info')}
+          contentClassName={SETTINGS_FIELDS_STACK_CLASS}
+        >
+          <BranchTemplateField
+            kind="worktree"
+            settingsItem="sessions.worktree-branch-template"
+            label={t('settings.openchamber.autoCreateWorktree.branchName.worktree')}
+            description={t('settings.openchamber.autoCreateWorktree.branchName.worktreeVariables')}
+            value={branchTemplate}
+            fallback={DEFAULT_WORKTREE_BRANCH_TEMPLATE}
+            onSave={setBranchTemplate}
+          />
+          <BranchTemplateField
+            kind="pull-request"
+            settingsItem="sessions.pull-request-branch-template"
+            label={t('settings.openchamber.autoCreateWorktree.branchName.pullRequest')}
+            description={t('settings.openchamber.autoCreateWorktree.branchName.pullRequestVariables')}
+            value={pullRequestBranchTemplate}
+            fallback={DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE}
+            onSave={setPullRequestBranchTemplate}
+          />
         </SettingsControlGroup>
       </div>
     </SettingsSection>

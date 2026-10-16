@@ -2236,6 +2236,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 // A source picked in another project names branches this one does not have.
                 source: autoWorktreeSource?.projectId === selectedDraftProject.id ? autoWorktreeSource.source : undefined,
                 startFrom: selectWorktreeStartFrom(useConfigStore.getState(), 'autoCreate'),
+                branchTemplates: {
+                    worktree: useConfigStore.getState().settingsWorktreeBranchTemplate,
+                    pullRequest: useConfigStore.getState().settingsPullRequestBranchTemplate,
+                },
                 sourceControl: runtimeSourceControl,
                 fallbackDirectory: capturedDraftSnapshot.directoryOverride ?? selectedDraftProject.path,
             });

@@ -106,9 +106,13 @@ other.
   the session service, which creates the worktree through the injected
   `createChangeRequestWorktree` (the Git routes' contributor pipeline) before
   any session exists. It checks out the request's branch, or with `branchOff`
-  starts a new branch from its head, named `branch`, else `worktree`, else
-  `pr-<number>-<head>`; without `branchOff` the profile setting
-  `pullRequestWorktree` decides. A fork's request cannot be branched off (409).
+  starts a new branch from its head; without `branchOff` the profile setting
+  `pullRequestWorktree` decides. A new branch is `branch`, else the
+  `pullRequestBranchTemplate` (default `{name}-from-pr-{pr}`) filled with the
+  worktree name, the number and the head. Without `worktree`, the control
+  service names the worktree from the prompt as it does for any new worktree
+  (`resolvePullRequestWorktreeName`); a checked-out request's worktree is
+  named after its branch. A fork's request cannot be branched off (409).
   A malformed number or `branchOff`, or `startRef`/`setUpstream` beside it, is
   a 400; a server without that pipeline answers 501 and never makes a plain
   branch worktree instead; a provider or transfer refusal keeps its status and
@@ -169,6 +173,12 @@ other.
   `remote-default` sets the default remote's default branch from local refs,
   the same rule the UI applies. A repository whose remotes name no default
   branch gets the project root's branch; a failed branch read fails the call.
+- A new worktree's branch, when the call names none, is the
+  `worktreeBranchTemplate` (default `{name}`) filled with the worktree name, a
+  path's last segment for an exact `/path`, with `-2`, `-3`… when a local
+  branch already has it (`../git/branch-name-template.js`). `session.create`
+  and `session.moveToWorktree` both name branches this way; before the
+  template existed, an unnamed branch was `openchamber/<name>`.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `provider-actions.js`) are passed in as
   `actionModules` and dispatched by action name before the built-in actions;

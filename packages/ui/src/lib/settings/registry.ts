@@ -35,6 +35,7 @@ import {
   WORKTREE_START_PLACES,
   type WorktreeStartFromOverrides,
 } from '@/lib/worktrees/worktreeStartSource';
+import { isBranchTemplate } from '@/lib/worktrees/branchNameTemplate';
 import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
@@ -193,6 +194,8 @@ const parseMonoFont: SettingsParser<MonoFontOption> = parseGuarded(isMonoFontOpt
 const parseWorktreeStartFromOverrides: SettingsParser<WorktreeStartFromOverrides> = fromSchema(
   z.partialRecord(z.enum(WORKTREE_START_PLACES), z.enum(WORKTREE_START_FROM_OPTIONS)),
 );
+const parseWorktreeBranchTemplate: SettingsParser<string> = fromSchema(z.string().refine((value) => isBranchTemplate(value, 'worktree')));
+const parsePullRequestBranchTemplate: SettingsParser<string> = fromSchema(z.string().refine((value) => isBranchTemplate(value, 'pull-request')));
 const parseInputHistoryScope: SettingsParser<InputHistoryScope> = fromSchema(z.string().refine(isInputHistoryScope));
 const parseInputHistoryLimit: SettingsParser<number> = fromSchema(z.number().refine(isInputHistoryLimit));
 const parseMobileKeyboardModeValue = mapParser(parseTrimmedString, (value) => normalizeMobileKeyboardMode(value, undefined));
@@ -468,6 +471,8 @@ export const SETTINGS_REGISTRY = {
   worktreeStartFrom: field({ scope: 'profile', parse: parseOneOf(WORKTREE_START_FROM_OPTIONS), ui: configField('settingsWorktreeStartFrom') }),
   worktreeStartFromOverrides: field({ scope: 'profile', parse: parseWorktreeStartFromOverrides, ui: configField('settingsWorktreeStartFromOverrides') }),
   pullRequestWorktree: field({ scope: 'profile', parse: parseOneOf(PULL_REQUEST_WORKTREE_MODES), ui: configField('settingsPullRequestWorktree') }),
+  worktreeBranchTemplate: field({ scope: 'profile', parse: parseWorktreeBranchTemplate, ui: configField('settingsWorktreeBranchTemplate') }),
+  pullRequestBranchTemplate: field({ scope: 'profile', parse: parsePullRequestBranchTemplate, ui: configField('settingsPullRequestBranchTemplate') }),
   sessionTabsEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'vscode'], parse: parseBoolean, ui: uiStore('sessionTabsEnabled', (v) => useUIStore.getState().setSessionTabsEnabled(v)) }),
   allowPromptingSubagentSessions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('allowPromptingSubagentSessions', (v) => useUIStore.getState().setAllowPromptingSubagentSessions(v)) }),
 

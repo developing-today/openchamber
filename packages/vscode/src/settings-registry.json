@@ -465,6 +465,12 @@
     "pullRequestWorktree": {
       "scope": "profile"
     },
+    "worktreeBranchTemplate": {
+      "scope": "profile"
+    },
+    "pullRequestBranchTemplate": {
+      "scope": "profile"
+    },
     "sessionTabsEnabled": {
       "scope": "profile",
       "surfaces": [

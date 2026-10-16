@@ -6,6 +6,7 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { branchesOffPullRequestsByDefault } from '../git/worktree-start-ref.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -593,15 +594,50 @@ export const createOpenChamberControlService = (dependencies) => {
    */
   const resolveAutoWorktree = async (input, payload) => {
     if (input.newWorktree === false || input.worktree === false) return { mode: 'disabled' };
-    if (payload.worktree || input.pullRequest !== undefined) return { mode: 'explicit' };
-    let directory = payload.directory || null;
-    if (!directory && payload.projectId) {
-      directory = await sessionService.resolveDirectory({ projectId: payload.projectId });
-    }
+    if (input.pullRequest !== undefined) return resolvePullRequestWorktreeName(input, payload);
+    if (payload.worktree) return { mode: 'explicit' };
+    const directory = await payloadDirectory(payload);
     if (!directory || !(await isGitRepository(directory))) {
       return { mode: 'skipped', reason: 'not a git repository' };
     }
     const settings = await readSettingsFromDiskMigrated();
+    const { name, resolution } = await nameWorktree(input, payload, directory, settings);
+    const worktree = { name };
+    const branchName = asNonEmptyString(input.branch);
+    if (branchName) worktree.branchName = branchName;
+    const startRef = asNonEmptyString(input.startRef);
+    if (startRef) worktree.startRef = startRef;
+    payload.worktree = worktree;
+    return resolution;
+  };
+
+  const payloadDirectory = async (payload) => {
+    if (payload.directory) return payload.directory;
+    return payload.projectId ? sessionService.resolveDirectory({ projectId: payload.projectId }) : null;
+  };
+
+  /**
+   * A worktree checking out a pull request is named after its branch. One
+   * starting a new branch from it (`branchOff`, else the user's Settings) is
+   * named from the prompt like any other worktree an agent makes, unless the
+   * call names it; the session service then names the branch from it by the
+   * pull request branch template.
+   */
+  const resolvePullRequestWorktreeName = async (input, payload) => {
+    if (payload.worktree?.name) return { mode: 'explicit' };
+    const settings = await readSettingsFromDiskMigrated();
+    const branchOff = isBoolean(input.branchOff) ? input.branchOff : branchesOffPullRequestsByDefault(settings);
+    if (!branchOff) return { mode: 'explicit' };
+    const directory = await payloadDirectory(payload);
+    if (!directory) return { mode: 'explicit' };
+    const { name, resolution } = await nameWorktree(input, payload, directory, settings);
+    payload.worktree = { ...payload.worktree, name };
+    payload.branchOff = true;
+    return resolution;
+  };
+
+  /** A name from the prompt by the naming model, else a random one. */
+  const nameWorktree = async (input, payload, directory, settings) => {
     const project = sanitizeProjects(settings?.projects || []).find((entry) => (
       (payload.projectId && entry.id === payload.projectId) || path.resolve(entry.path) === path.resolve(directory)
     ));
@@ -615,15 +651,9 @@ export const createOpenChamberControlService = (dependencies) => {
       ? await generateWorktreeName({ prompt: namingPrompt, model: namingModel, directory })
       : '';
     const name = generated || await randomWorktreeName();
-    const worktree = { name };
-    const branchName = asNonEmptyString(input.branch);
-    if (branchName) worktree.branchName = branchName;
-    const startRef = asNonEmptyString(input.startRef);
-    if (startRef) worktree.startRef = startRef;
-    payload.worktree = worktree;
     const resolution = { mode: 'auto', name, naming: generated ? 'generated' : 'random' };
     if (generated && namingModel) resolution.model = namingModel;
-    return resolution;
+    return { name, resolution };
   };
 
   const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId) => {

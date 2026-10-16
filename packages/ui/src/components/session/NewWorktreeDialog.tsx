@@ -33,6 +33,7 @@ import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
 import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { renderBranchName } from '@/lib/worktrees/branchNameTemplate';
 import {
   checkPullRequestSource,
   pullRequestWorktreeChoices,
@@ -265,12 +266,18 @@ export function NewWorktreeDialog({
   const branchName = mode === 'existing-branch' ? existingBranch.selectedBranch : draft.branchName;
   const worktreeName = mode === 'existing-branch' ? existingBranch.worktreeName : draft.worktreeName;
   const startsNewBranch = mode === 'new-branch' || (mode === 'from-item' && !linkedPr);
-  const prBranchName = (pr: PrWorktreeSource) => `pr-${pr.number}-${generateBranchSlug()}`;
+  const prBranchName = (pr: PrWorktreeSource) => renderBranchName(pullRequestBranchTemplate, {
+    name: generateBranchSlug(),
+    pr: pr.number,
+    head: pr.head,
+  });
 
   // Start from the Settings default once branches are known: the default
   // remote's default branch when chosen, else the branch the project root is on.
   const startFrom = useConfigStore((state) => selectWorktreeStartFrom(state, 'dialog'));
   const pullRequestMode = useConfigStore((state) => state.settingsPullRequestWorktree);
+  const branchTemplate = useConfigStore((state) => state.settingsWorktreeBranchTemplate);
+  const pullRequestBranchTemplate = useConfigStore((state) => state.settingsPullRequestBranchTemplate);
   React.useEffect(() => {
     if (!open || !branches?.all || !projectDirectory || sourceBranch) return;
     const remoteDefault = startFrom === 'remote-default' ? resolveRemoteDefaultStartRef(branches) : null;
@@ -303,14 +310,14 @@ export function NewWorktreeDialog({
     pendingInitialSelection.current = initialSelection ?? null;
     setFallbackFolderName(uniqueSlug);
     setMode(initialSelection ? 'from-item' : 'new-branch');
-    setNewBranch({ branchName: uniqueSlug, worktreeName: uniqueSlug, isSyncingWorktreeName: true });
+    setNewBranch({ branchName: renderBranchName(branchTemplate, { name: uniqueSlug }), worktreeName: uniqueSlug, isSyncingWorktreeName: true });
     setItemBranch(EMPTY_DRAFT);
     setLinked(null);
     setExistingBranch({ selectedBranch: '', worktreeName: '' });
     setSourceBranch('');
     setPrBranchOff(false);
     setValidation({ isValidating: false, branchError: null, worktreeError: null, touched: false });
-  }, [open, generateUniqueSlug, initialSelection]);
+  }, [open, generateUniqueSlug, initialSelection, branchTemplate]);
 
   // The folder follows the branch name until the user renames the folder.
   React.useEffect(() => {

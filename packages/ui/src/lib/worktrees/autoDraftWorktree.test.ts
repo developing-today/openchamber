@@ -4,6 +4,7 @@ import {
   generateAutoWorktreeName,
   parseAutoWorktreeName,
   shouldAutoCreateDraftWorktree,
+  branchNameFor,
   toAutoWorktreeCreateArgs,
   toPullRequestBranchOffArgs,
   toPullRequestWorktreeArgs,
@@ -30,13 +31,25 @@ describe('parseAutoWorktreeName', () => {
 });
 
 describe('toAutoWorktreeCreateArgs', () => {
-  test('a name is the branch and the directory name, like Quick worktree', () => {
-    expect(toAutoWorktreeCreateArgs({ kind: 'name', name: 'fix-login' }))
-      .toEqual({ preferredName: 'fix-login', branchName: 'fix-login', worktreeName: 'fix-login' });
+  test('a name is the directory name, like Quick worktree, beside the branch it was given', () => {
+    expect(toAutoWorktreeCreateArgs({ kind: 'name', name: 'fix-login' }, 'dp/fix-login'))
+      .toEqual({ preferredName: 'fix-login', branchName: 'dp/fix-login', worktreeName: 'fix-login' });
   });
 
-  test('a path is passed only as the worktree name, so it never becomes a branch', () => {
-    expect(toAutoWorktreeCreateArgs({ kind: 'path', path: '/work/fix-login' })).toEqual({ worktreeName: '/work/fix-login' });
+  test('a path is the checkout itself and never the branch', () => {
+    expect(toAutoWorktreeCreateArgs({ kind: 'path', path: '/work/fix-login' }, 'fix-login'))
+      .toEqual({ worktreeName: '/work/fix-login', branchName: 'fix-login' });
+  });
+});
+
+describe('branchNameFor', () => {
+  test('fills the template with the name, or a path\'s last segment, and steps past branches that exist', () => {
+    const existing = new Set(['csv-export', 'csv-export-from-pr-42']);
+    expect(branchNameFor({ kind: 'name', name: 'csv-export' }, '{name}', existing)).toBe('csv-export-2');
+    expect(branchNameFor({ kind: 'path', path: '/work/review' }, 'dp/{name}', existing)).toBe('dp/review');
+    expect(branchNameFor({ kind: 'name', name: 'csv-export' }, '{name}-from-pr-{pr}', existing, { pr: 42, head: 'fix' }))
+      .toBe('csv-export-from-pr-42-2');
+    expect(branchNameFor({ kind: 'name', name: 'fix login' }, '{name}', existing)).toBe('fix-login');
   });
 });
 
@@ -75,10 +88,10 @@ describe('toPullRequestWorktreeArgs', () => {
   });
 
   test('branching off names a new branch like any auto-created worktree and leaves the start to the server', () => {
-    expect(toPullRequestBranchOffArgs(config, { kind: 'name', name: 'follow-up' })).toEqual({
+    expect(toPullRequestBranchOffArgs(config, { kind: 'name', name: 'follow-up' }, 'follow-up-from-pr-42')).toEqual({
       mode: 'new',
       preferredName: 'follow-up',
-      branchName: 'follow-up',
+      branchName: 'follow-up-from-pr-42',
       worktreeName: 'follow-up',
       changeRequestSource: config.changeRequestSource,
     });

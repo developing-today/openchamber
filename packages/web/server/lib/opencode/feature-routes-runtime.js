@@ -1,4 +1,5 @@
 import { registerFsRoutes } from '../fs/routes.js';
+import { DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE, renderBranchName, worktreeNameForBranch } from '../git/branch-name-template.js';
 import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
@@ -185,10 +186,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
    * the project's own account and creates the worktree through the Git
    * routes' contributor pipeline. It checks out the request's branch, or with
    * `branchOff` starts a new branch from its head. `branchName` defaults to
-   * the head branch, or for a new branch to `name`, else `pr-<number>-<head>`;
-   * `name` defaults to the branch.
+   * the head branch, or for a new branch to `branchTemplate` filled with
+   * `name` (else the head branch), the number and the head; `name` defaults to
+   * the branch.
    */
-  const createChangeRequestWorktree = async ({ directory, number, name, branchName, branchOff = false }) => {
+  const createChangeRequestWorktree = async ({ directory, number, name, branchName, branchOff = false, branchTemplate = DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE }) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -196,9 +198,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       });
     }
     const { headBranch, sourceRequest } = await walkthroughBindingService.resolveChangeRequestWorktreeSource({ directory, number });
-    // An absolute folder path is no branch name.
-    const nameAsBranch = name && !name.startsWith('/') ? name : null;
-    const branch = branchName || (branchOff ? nameAsBranch || `pr-${number}-${headBranch}` : headBranch);
+    const branch = branchName || (branchOff
+      ? renderBranchName(branchTemplate, { name: name ? worktreeNameForBranch(name) : headBranch, pr: number, head: headBranch })
+      : headBranch);
     return gitWorktreeCreation.createWorktree(directory, {
       mode: branchOff ? 'new' : 'existing',
       branchName: branch,

@@ -36,6 +36,7 @@ import {
     type WorktreeStartFromOverrides,
     type WorktreeStartPlace,
 } from "@/lib/worktrees/worktreeStartSource";
+import { DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE, DEFAULT_WORKTREE_BRANCH_TEMPLATE } from "@/lib/worktrees/branchNameTemplate";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
 import { readCachedCatalog, shouldHoldFirstLoadAgainstCache, writeCachedCatalogWhenSettled, type CachedCatalog } from "./configCatalogCache";
@@ -63,6 +64,8 @@ interface OpenChamberDefaults {
     worktreeStartFrom?: WorktreeStartFrom;
     worktreeStartFromOverrides?: WorktreeStartFromOverrides;
     pullRequestWorktree?: PullRequestWorktreeMode;
+    worktreeBranchTemplate?: string;
+    pullRequestBranchTemplate?: string;
     gitmojiEnabled?: boolean;
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
@@ -150,6 +153,8 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         worktreeStartFrom: data.worktreeStartFrom,
         worktreeStartFromOverrides: data.worktreeStartFromOverrides,
         pullRequestWorktree: data.pullRequestWorktree,
+        worktreeBranchTemplate: data.worktreeBranchTemplate,
+        pullRequestBranchTemplate: data.pullRequestBranchTemplate,
         gitmojiEnabled: data.gitmojiEnabled,
         defaultFileViewerPreview: data.defaultFileViewerPreview,
         zenModel: zenModel.length > 0 ? zenModel : undefined,
@@ -1465,6 +1470,8 @@ interface ConfigStore {
     settingsWorktreeStartFrom: WorktreeStartFrom;
     settingsWorktreeStartFromOverrides: WorktreeStartFromOverrides;
     settingsPullRequestWorktree: PullRequestWorktreeMode;
+    settingsWorktreeBranchTemplate: string;
+    settingsPullRequestBranchTemplate: string;
     settingsGitmojiEnabled: boolean;
     settingsDefaultFileViewerPreview: boolean;
     settingsZenModel: string | undefined;
@@ -1572,6 +1579,8 @@ interface ConfigStore {
     /** `null` makes the place follow the default again. */
     setSettingsWorktreeStartFromOverride: (place: WorktreeStartPlace, startFrom: WorktreeStartFrom | null) => void;
     setSettingsPullRequestWorktree: (mode: PullRequestWorktreeMode) => void;
+    setSettingsWorktreeBranchTemplate: (template: string) => void;
+    setSettingsPullRequestBranchTemplate: (template: string) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;
     setSettingsZenModel: (model: string | undefined) => void;
@@ -1765,6 +1774,8 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsWorktreeStartFrom: DEFAULT_WORKTREE_START_FROM,
                 settingsWorktreeStartFromOverrides: {},
                 settingsPullRequestWorktree: 'check-out',
+                settingsWorktreeBranchTemplate: DEFAULT_WORKTREE_BRANCH_TEMPLATE,
+                settingsPullRequestBranchTemplate: DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE,
                 settingsGitmojiEnabled: false,
                 settingsDefaultFileViewerPreview: true,
                 settingsZenModel: undefined,
@@ -2747,6 +2758,8 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsWorktreeStartFrom: edited ? state.settingsWorktreeStartFrom : defaults.worktreeStartFrom ?? DEFAULT_WORKTREE_START_FROM,
                             settingsWorktreeStartFromOverrides: edited ? state.settingsWorktreeStartFromOverrides : defaults.worktreeStartFromOverrides ?? {},
                             settingsPullRequestWorktree: edited ? state.settingsPullRequestWorktree : defaults.pullRequestWorktree ?? 'check-out',
+                            settingsWorktreeBranchTemplate: edited ? state.settingsWorktreeBranchTemplate : defaults.worktreeBranchTemplate ?? DEFAULT_WORKTREE_BRANCH_TEMPLATE,
+                            settingsPullRequestBranchTemplate: edited ? state.settingsPullRequestBranchTemplate : defaults.pullRequestBranchTemplate ?? DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE,
                             settingsGitmojiEnabled: defaults.gitmojiEnabled ?? false,
                             settingsDefaultFileViewerPreview: defaults.defaultFileViewerPreview ?? true,
                             settingsZenModel: defaults.zenModel,
@@ -3811,6 +3824,18 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ pullRequestWorktree: mode }).catch(() => {});
                 },
 
+                setSettingsWorktreeBranchTemplate: (template: string) => {
+                    recordOpenChamberDefaultsChange();
+                    set({ settingsWorktreeBranchTemplate: template });
+                    updateDesktopSettings({ worktreeBranchTemplate: template }).catch(() => {});
+                },
+
+                setSettingsPullRequestBranchTemplate: (template: string) => {
+                    recordOpenChamberDefaultsChange();
+                    set({ settingsPullRequestBranchTemplate: template });
+                    updateDesktopSettings({ pullRequestBranchTemplate: template }).catch(() => {});
+                },
+
                 setSettingsGitmojiEnabled: (enabled: boolean) => {
                     set({ settingsGitmojiEnabled: enabled });
                 },
@@ -4402,6 +4427,8 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsWorktreeStartFrom: state.settingsWorktreeStartFrom,
                     settingsWorktreeStartFromOverrides: state.settingsWorktreeStartFromOverrides,
                     settingsPullRequestWorktree: state.settingsPullRequestWorktree,
+                    settingsWorktreeBranchTemplate: state.settingsWorktreeBranchTemplate,
+                    settingsPullRequestBranchTemplate: state.settingsPullRequestBranchTemplate,
                     settingsGitmojiEnabled: state.settingsGitmojiEnabled,
                     settingsDefaultFileViewerPreview: state.settingsDefaultFileViewerPreview,
                     settingsZenModel: state.settingsZenModel,

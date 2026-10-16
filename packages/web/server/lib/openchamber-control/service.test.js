@@ -134,6 +134,20 @@ describe('OpenChamber control service', () => {
     expect(generateWorktreeName).not.toHaveBeenCalled();
   });
 
+  it('session.create names a new branch from a pull request from the prompt, and leaves a checkout to its branch', async () => {
+    const generateWorktreeName = vi.fn(async () => 'csv-export');
+    const { service, sessionService } = createService({ generateWorktreeName });
+    const result = await service.execute('session.create', { prompt: 'Add CSV export', model: 'anthropic/claude', pullRequest: 42, branchOff: true }, '/repo');
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({
+      pullRequest: 42, branchOff: true, worktree: { name: 'csv-export' },
+    }));
+    expect(result.autoWorktree).toMatchObject({ mode: 'auto', name: 'csv-export', naming: 'generated' });
+
+    await service.execute('session.create', { prompt: 'Review it', pullRequest: 43 }, '/repo');
+    expect(sessionService.create.mock.calls[1][0].worktree).toEqual({});
+    expect(generateWorktreeName).toHaveBeenCalledTimes(1);
+  });
+
   it('session.create passes branchOff with a pull request to the session service', async () => {
     const { service, sessionService } = createService({ isGitRepository: vi.fn(async () => true) });
     await service.execute('session.create', { prompt: 'Follow up', pullRequest: 42, branchOff: true, worktree: 'follow-up' }, '/repo');

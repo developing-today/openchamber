@@ -933,7 +933,7 @@ describe('openchamber session routes', () => {
     await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'side-task', startRef: 'feature' } }).expect(200);
 
     expect(createWorktreeMock.mock.calls.map(([, input]) => input.startRef)).toEqual(['remotes/origin/main', 'feature']);
-    expect(getBranches).toHaveBeenCalledExactlyOnceWith('/repo/app', { remote: 'local' });
+    expect(getBranches).toHaveBeenCalledWith('/repo/app', { remote: 'local' });
 
     createWorktreeMock.mockClear();
     const projectRoot = createApp({
@@ -946,7 +946,32 @@ describe('openchamber session routes', () => {
     });
     await request(projectRoot.app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'side-task' } }).expect(200);
     expect(createWorktreeMock.mock.calls[0][1]).not.toHaveProperty('startRef');
-    expect(getBranches).toHaveBeenCalledTimes(1);
+  });
+
+  it('names a new worktree\'s branch by the Settings template, past branches that exist', async () => {
+    const getBranches = vi.fn(async () => ({ all: ['main', 'dp/side-task', 'remotes/origin/dp/other'], defaultBranches: {} }));
+    const { app } = createApp({
+      getBranches,
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }], worktreeBranchTemplate: 'dp/{name}' }),
+    });
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'side-task' } }).expect(200);
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: '/work/other' } }).expect(200);
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'mine', branchName: 'chosen' } }).expect(200);
+
+    expect(createWorktreeMock.mock.calls.map(([, input]) => input.branchName)).toEqual(['dp/side-task-2', 'dp/other', 'chosen']);
+  });
+
+  it('gives a new branch from a pull request the pull request branch template', async () => {
+    const createChangeRequestWorktree = vi.fn(async () => ({ name: 'follow-up', branch: 'follow-up', path: '/repo/worktrees/follow-up' }));
+    const { app } = createApp({
+      createChangeRequestWorktree,
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }], pullRequestBranchTemplate: '{name}-off-{pr}' }),
+    });
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', pullRequest: 42, branchOff: true, worktree: { name: 'follow-up' } }).expect(200);
+
+    expect(createChangeRequestWorktree).toHaveBeenCalledExactlyOnceWith({
+      directory: '/repo/app', number: 42, name: 'follow-up', branchOff: true, branchTemplate: '{name}-off-{pr}',
+    });
   });
 
   it('refuses a pull request it cannot make a worktree for and creates no session', async () => {

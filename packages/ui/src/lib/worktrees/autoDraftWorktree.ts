@@ -19,7 +19,7 @@
 import { z } from 'zod';
 
 import { resolvePrWorktreeConfig } from '@/components/session/prWorktreeConfig';
-import type { SourceControlAPI } from '@/lib/api/types';
+import type { GitBranch, SourceControlAPI } from '@/lib/api/types';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { getGitBranches } from '@/lib/gitApi';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
@@ -38,6 +38,7 @@ import {
   WorktreeRequiresGitRepositoryError,
 } from '@/lib/worktrees/worktreeCreate';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { renderBranchName, uniqueBranchName, worktreeNameForBranch } from '@/lib/worktrees/branchNameTemplate';
 import type { WorktreeStartFrom, WorktreeStartSource } from '@/lib/worktrees/worktreeStartSource';
 import { useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
 
@@ -58,17 +59,35 @@ export const parseAutoWorktreeName = (typed: string | undefined): AutoWorktreeTa
 };
 
 /**
- * A plain name is the branch and the directory under the worktree root, like
- * Quick worktree. An exact path names only the checkout; the server picks the
- * branch from its last segment.
+ * A plain name is the directory under the worktree root, like Quick worktree;
+ * an exact path is the checkout itself. The branch is named from either by a
+ * Settings template (`branchNameFor`).
  */
 export const toAutoWorktreeCreateArgs = (
   target: Exclude<AutoWorktreeTarget, { kind: 'generate' }>,
+  branchName: string,
 ): Pick<CreateWorktreeArgs, 'preferredName' | 'branchName' | 'worktreeName'> => (
   target.kind === 'path'
-    ? { worktreeName: target.path }
-    : { preferredName: target.name, branchName: target.name, worktreeName: target.name }
+    ? { worktreeName: target.path, branchName }
+    : { preferredName: target.name, branchName, worktreeName: target.name }
 );
+
+/**
+ * The branch for a named worktree: the template filled with its name (a path's
+ * last segment), spaces turned into dashes, and a `-2`, `-3`… suffix when a
+ * local branch already has the name, so two prompts that name the same task
+ * still get two branches.
+ */
+export const branchNameFor = (
+  target: Exclude<AutoWorktreeTarget, { kind: 'generate' }>,
+  template: string,
+  localBranches: ReadonlySet<string>,
+  pullRequest?: { pr: number; head: string },
+): string => {
+  const name = worktreeNameForBranch(target.kind === 'path' ? target.path : target.name);
+  const rendered = renderBranchName(template, { name, ...pullRequest }).trim().replace(/\s+/g, '-');
+  return uniqueBranchName(rendered, localBranches);
+};
 
 /**
  * A pull request worktree checks out the request's own branch, as the New
@@ -92,15 +111,16 @@ export const toPullRequestWorktreeArgs = (
 };
 
 /**
- * A new branch from a pull request's head is named like any auto-created
- * worktree; the server starts it at the head it resolves from the request.
+ * A new branch from a pull request's head is named by the pull request branch
+ * template; the server starts it at the head it resolves from the request.
  */
 export const toPullRequestBranchOffArgs = (
   config: ReturnType<typeof resolvePrWorktreeConfig>,
   target: Exclude<AutoWorktreeTarget, { kind: 'generate' }>,
+  branchName: string,
 ): CreateWorktreeArgs => ({
   mode: 'new',
-  ...toAutoWorktreeCreateArgs(target),
+  ...toAutoWorktreeCreateArgs(target, branchName),
   changeRequestSource: config.changeRequestSource,
 });
 
@@ -159,13 +179,15 @@ const resolveNamedTarget = async (
   return { kind: 'name', name: generated || generateBranchName() };
 };
 
-const pullRequestWorktreeArgs = async (
-  project: ProjectRef,
-  source: Extract<WorktreeStartSource, { kind: 'pull-request' }>,
-  target: AutoWorktreeTarget,
-  sourceControl: Pick<SourceControlAPI, 'changeRequestContext'>,
-  generateName: () => Promise<string>,
-): Promise<CreateWorktreeArgs> => {
+const pullRequestWorktreeArgs = async ({ source, target, sourceControl, generateName, branches, template }: {
+  source: Extract<WorktreeStartSource, { kind: 'pull-request' }>;
+  target: AutoWorktreeTarget;
+  sourceControl: Pick<SourceControlAPI, 'changeRequestContext'>;
+  generateName: () => Promise<string>;
+  /** Local branches only: they decide whether the request's branch is already here. */
+  branches: GitBranch;
+  template: string;
+}): Promise<CreateWorktreeArgs> => {
   const { changeRequest } = await sourceControl.changeRequestContext(source.context, source.number, {
     includeDiff: false,
     includeCIDetails: false,
@@ -175,20 +197,21 @@ const pullRequestWorktreeArgs = async (
       reference: formatChangeRequestReference(source.context.provider, source.number),
     }));
   }
-  // Only local branches decide whether the request's branch is already here.
-  const branches = await getGitBranches(project.path, { remote: 'local' });
   const config = resolvePrWorktreeConfig(changeRequest, source.context, branches.branches ?? {});
-  return source.branchOff
-    ? toPullRequestBranchOffArgs(config, await resolveNamedTarget(target, generateName))
-    : toPullRequestWorktreeArgs(config, target);
+  if (!source.branchOff) return toPullRequestWorktreeArgs(config, target);
+  const named = await resolveNamedTarget(target, generateName);
+  const branchName = branchNameFor(named, template, localBranchNames(branches), { pr: source.number, head: config.sourceLabel });
+  return toPullRequestBranchOffArgs(config, named, branchName);
 };
+
+const localBranchNames = (branches: GitBranch): Set<string> => new Set(branches.all.filter((name) => !name.startsWith('remotes/')));
 
 /**
  * Starts the worktree for a draft that is about to send and returns the
  * pending request the draft now waits on. The live draft is marked too, so the
  * target selector shows the worktree being made and cannot be changed under it.
  */
-export const startAutoDraftWorktree = ({ project, prompt, model, typedName, source, startFrom, sourceControl, fallbackDirectory }: {
+export const startAutoDraftWorktree = ({ project, prompt, model, typedName, source, startFrom, branchTemplates, sourceControl, fallbackDirectory }: {
   project: ProjectRef;
   prompt: string;
   /** `providerID/modelID` the first prompt is sent with; it also names the worktree. */
@@ -197,6 +220,8 @@ export const startAutoDraftWorktree = ({ project, prompt, model, typedName, sour
   /** Picked beside the switch for this project; undefined means the Settings default. */
   source: WorktreeStartSource | undefined;
   startFrom: WorktreeStartFrom;
+  /** Settings templates that name the new branch. */
+  branchTemplates: { worktree: string; pullRequest: string };
   /** Reads a pull request source as it is now. */
   sourceControl: Pick<SourceControlAPI, 'changeRequestContext'>;
   /** Where the draft pointed before, restored when no worktree could be made. */
@@ -209,13 +234,18 @@ export const startAutoDraftWorktree = ({ project, prompt, model, typedName, sour
     try {
       const target = parseAutoWorktreeName(typedName);
       const generateName = () => generateAutoWorktreeName(project.path, prompt, model);
-      const args: CreateWorktreeArgs = source?.kind === 'pull-request'
-        ? await pullRequestWorktreeArgs(project, source, target, sourceControl, generateName)
-        : {
+      const branches = await getGitBranches(project.path, { remote: 'local' });
+      let args: CreateWorktreeArgs;
+      if (source?.kind === 'pull-request') {
+        args = await pullRequestWorktreeArgs({ source, target, sourceControl, generateName, branches, template: branchTemplates.pullRequest });
+      } else {
+        const named = await resolveNamedTarget(target, generateName);
+        args = {
           mode: 'new',
-          ...toAutoWorktreeCreateArgs(await resolveNamedTarget(target, generateName)),
+          ...toAutoWorktreeCreateArgs(named, branchNameFor(named, branchTemplates.worktree, localBranchNames(branches))),
           startRef: source?.kind === 'ref' ? source.ref : await resolveDefaultWorktreeStartRef(project.path, startFrom),
         };
+      }
       const setupCommands = await resolveWorktreeSetupCommands(project);
       const metadata = await createWorktreeWithDefaults(project, {
         ...args,

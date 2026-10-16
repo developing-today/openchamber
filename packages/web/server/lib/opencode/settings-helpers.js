@@ -7,6 +7,7 @@ import {
   WORKTREE_START_FROM_VALUES,
   sanitizeWorktreeStartFromOverrides,
 } from '../git/worktree-start-ref.js';
+import { isBranchTemplate } from '../git/branch-name-template.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
@@ -729,6 +730,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (PULL_REQUEST_WORKTREE_MODES.includes(candidate.pullRequestWorktree)) {
       result.pullRequestWorktree = candidate.pullRequestWorktree;
+    }
+    if (isBranchTemplate(candidate.worktreeBranchTemplate, 'worktree')) {
+      result.worktreeBranchTemplate = candidate.worktreeBranchTemplate;
+    }
+    if (isBranchTemplate(candidate.pullRequestBranchTemplate, 'pull-request')) {
+      result.pullRequestBranchTemplate = candidate.pullRequestBranchTemplate;
     }
     if (typeof candidate.gitmojiEnabled === 'boolean') {
       result.gitmojiEnabled = candidate.gitmojiEnabled;
