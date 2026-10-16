@@ -245,6 +245,8 @@ export function NewWorktreeDialog({
     [fallbackFolderName],
   );
   const initializedForCurrentOpen = React.useRef(false);
+  // This open's branch suggestion, before and after the step past local branches.
+  const branchSuggestion = React.useRef<{ base: string; value: string } | null>(null);
   // The item the dialog was opened with, until it is chosen.
   const pendingInitialSelection = React.useRef<ReferencePickerSelection | null>(null);
 
@@ -311,7 +313,9 @@ export function NewWorktreeDialog({
     pendingInitialSelection.current = initialSelection ?? null;
     setFallbackFolderName(uniqueSlug);
     setMode(initialSelection ? 'from-item' : 'new-branch');
-    const suggestedBranch = uniqueBranchName(branchNameFromTemplate(branchTemplate, { name: uniqueSlug }), new Set(localBranches));
+    const suggestionBase = branchNameFromTemplate(branchTemplate, { name: uniqueSlug });
+    const suggestedBranch = uniqueBranchName(suggestionBase, new Set(localBranches));
+    branchSuggestion.current = { base: suggestionBase, value: suggestedBranch };
     setNewBranch({ branchName: suggestedBranch, worktreeName: uniqueSlug, isSyncingWorktreeName: true });
     setItemBranch(EMPTY_DRAFT);
     setLinked(null);
@@ -320,6 +324,17 @@ export function NewWorktreeDialog({
     setPrBranchOff(false);
     setValidation({ isValidating: false, branchError: null, worktreeError: null, touched: false });
   }, [open, generateUniqueSlug, initialSelection, branchTemplate, localBranches]);
+
+  // Branches can finish loading after the dialog opened: the suggestion steps
+  // past them too, as long as the user has not typed a branch name.
+  React.useEffect(() => {
+    const suggestion = branchSuggestion.current;
+    if (!open || !suggestion) return;
+    const next = uniqueBranchName(suggestion.base, new Set(localBranches));
+    if (next === suggestion.value) return;
+    branchSuggestion.current = { ...suggestion, value: next };
+    setNewBranch((prev) => (prev.branchName === suggestion.value ? { ...prev, branchName: next } : prev));
+  }, [open, localBranches]);
 
   // The folder follows the branch name until the user renames the folder.
   React.useEffect(() => {
