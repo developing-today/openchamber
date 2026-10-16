@@ -3,6 +3,7 @@ import { settingsDict } from './ko.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -134,6 +135,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ko,
   ...referencePickerI18n.ko,
   ...sessionMenuHintsI18n.ko,
+  ...sidebarLayoutI18n.ko,
   ...projectKnowledgeI18n.ko,
   ...linearPanelI18n.ko,
   ...routingI18n.ko,

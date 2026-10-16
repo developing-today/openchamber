@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
-import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, sectionDragId, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarRow, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { DEFAULT_SIDEBAR_LAYOUT, normalizeSectionOrder } from '@/stores/sidebarLayout';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
@@ -753,5 +754,118 @@ describe('buildSessionSidebarRowModel', () => {
     input.authoritativeSections = [authoritative];
 
     expect(buildSessionSidebarRowModel(input).sessionById.get('hidden')?.id).toBe('hidden');
+  });
+
+  describe('sidebar layout', () => {
+    const headerKeys = (rows: readonly SessionSidebarRow[]): string[] => rows.flatMap((row) => (
+      row.kind === 'activity-header' ? [row.activityKey] : row.kind === 'project-header' ? [`project:${row.section.project.id}`] : []
+    ));
+    const chatGroup = () => group([node('chat-1'), node('chat-2')], { id: 'managed-chats', directory: '/chats', folderScopeKey: '/chats' });
+    const secondProject: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([], { directory: '/other', folderScopeKey: '/other' })] };
+
+    test('by default draws the attention zones, with their counts, then In work, Chats and the projects', () => {
+      const input = args([project([group([node('plain')])])]);
+      input.sectionOrder = DEFAULT_SIDEBAR_LAYOUT.sectionOrder;
+      input.chatGroup = chatGroup();
+      input.workItems = [timelineItem('working')];
+      input.attentionItems = new Map([
+        ['questions', [timelineItem('asking')]],
+        ['errors', [timelineItem('failed-1'), timelineItem('failed-2')]],
+      ]);
+      input.zoneSessionIds = new Set(['working', 'asking', 'failed-1', 'failed-2']);
+
+      const rows = buildSessionSidebarRowModel(input).rows;
+      expect(headerKeys(rows)).toEqual(['questions', 'errors', 'work', 'chats', 'project:project-a']);
+      expect(rows.flatMap((row) => row.kind === 'activity-header' && row.count !== undefined ? [`${row.activityKey}=${row.count}`] : []))
+        .toEqual(['questions=1', 'errors=2']);
+    });
+
+    test('a custom section order moves zones and the projects', () => {
+      const input = args([project([group([node('plain')])])]);
+      input.chatGroup = chatGroup();
+      input.workItems = [timelineItem('working')];
+      input.sectionOrder = normalizeSectionOrder(['projects', 'work', 'chats']);
+
+      const model = buildSessionSidebarRowModel(input);
+      expect(headerKeys(model.rows)).toEqual(['project:project-a', 'work', 'chats']);
+      expect(model.sectionHeaders.map((header) => `${header.key}:${header.dragId}`))
+        .toEqual(['projects:project-a', 'work:zone:work', 'chats:zone:chats']);
+    });
+
+    test('any section can go anywhere: Other blocked above In work, each attention zone above it', () => {
+      const input = args([project([group([])])]);
+      input.sectionOrder = normalizeSectionOrder(['approvals', 'questions', 'errors', 'stopped', 'other-blocked', 'work', 'projects']);
+      input.workItems = [timelineItem('working')];
+      input.attentionItems = new Map([
+        ['other-blocked', [timelineItem('other')]],
+        ['stopped', [timelineItem('stop')]],
+        ['approvals', [timelineItem('approve')]],
+        ['errors', [timelineItem('fail')]],
+        ['questions', [timelineItem('ask')]],
+      ]);
+
+      expect(headerKeys(buildSessionSidebarRowModel(input).rows))
+        .toEqual(['approvals', 'questions', 'errors', 'stopped', 'other-blocked', 'work', 'project:project-a']);
+    });
+
+    test('zones of other sessions open on a page of seven', () => {
+      const input = args([project([group([])])]);
+      input.attentionItems = new Map([['other-errors', Array.from({ length: 9 }, (_, index) => timelineItem(`e${index}`))]]);
+      const model = buildSessionSidebarRowModel(input);
+
+      expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(7);
+      const control = model.rows.find((row) => row.kind === 'show-control');
+      expect(control?.kind === 'show-control' && control.containerKey).toBe('activity:other-errors');
+    });
+
+    test('in List, Chats as a group sit among the projects at their index, under one heading', () => {
+      const input = args([project([group([])]), secondProject]);
+      input.viewMode = 'timeline';
+      input.chatGroup = chatGroup();
+      input.workItems = [timelineItem('working')];
+      input.timelineItems = [timelineItem('a'), timelineItem('b', { projectId: 'project-b' })];
+      input.timelineLayout = { chats: 'group', projectGroups: true, compactRows: false, chatsGroupIndex: 1 };
+
+      const model = buildSessionSidebarRowModel(input);
+      expect(headerKeys(model.rows)).toEqual(['work', 'all', 'project:project-a', 'chats', 'project:project-b']);
+      expect(model.sectionHeaders.map((header) => `${header.key}:${header.dragId}`)).toEqual(['work:zone:work', `projects:${sectionDragId('all')}`]);
+
+      input.collapsedActivities = new Set(['all']);
+      expect(headerKeys(buildSessionSidebarRowModel(input).rows)).toEqual(['work', 'all']);
+    });
+
+    test('in List without project groups, one combined list holds every session given to it', () => {
+      const input = args([project([group([])]), secondProject]);
+      input.viewMode = 'timeline';
+      input.chatGroup = chatGroup();
+      input.timelineItems = [timelineItem('a'), timelineItem('chat-1', { projectId: null }), timelineItem('b', { projectId: 'project-b' })];
+      input.timelineLayout = { chats: 'group', projectGroups: false, compactRows: false, chatsGroupIndex: 0 };
+
+      const rows = buildSessionSidebarRowModel(input).rows;
+      expect(headerKeys(rows)).toEqual(['all']);
+      expect(rows.flatMap((row) => (row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`] : [])))
+        .toEqual(['timeline-mixed:a', 'timeline-mixed:chat-1', 'timeline-mixed:b']);
+    });
+
+    test('in List with one line per session, rows under projects and in zones are one line', () => {
+      const input = args([project([group([])])]);
+      input.viewMode = 'timeline';
+      input.timelineItems = [timelineItem('a')];
+      input.workItems = [timelineItem('working')];
+      input.timelineLayout = { chats: 'section', projectGroups: true, compactRows: true, chatsGroupIndex: 0 };
+
+      expect(buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`] : [])))
+        .toEqual(['mixed-flat:working', 'timeline-chat:a']);
+    });
+
+    test('lists top-level session rows in drawn order for navigation, with the list each sits in', () => {
+      const child: SessionNode = { session: session('child', 'parent'), children: [], worktree: null };
+      const input = args([project([group([node('parent', [child]), node('plain')])])]);
+      input.workItems = [timelineItem('parent')];
+      input.expandedParents = new Set(['project:active:parent']);
+
+      expect(buildSessionSidebarRowModel(input).navigationEntries.map((entry) => `${entry.containerKey}>${entry.sessionId}`))
+        .toEqual(['activity:work>parent', 'project-a:main>parent', 'project-a:main>plain']);
+    });
   });
 });

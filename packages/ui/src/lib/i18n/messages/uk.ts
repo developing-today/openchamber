@@ -3,6 +3,7 @@ import { settingsDict } from './uk.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -144,6 +145,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.uk,
   ...referencePickerI18n.uk,
   ...sessionMenuHintsI18n.uk,
+  ...sidebarLayoutI18n.uk,
   ...projectKnowledgeI18n.uk,
   ...linearPanelI18n.uk,
   ...routingI18n.uk,

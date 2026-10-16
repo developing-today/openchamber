@@ -18,9 +18,12 @@ type Props = {
   /** One-line rows (tree rows, Chats, the Tree view's Pinned and In work):
       title and meta on one line, no branch line. */
   compact?: boolean;
-  /** Set in Pinned and In work, where projects mix: the second line opens
-      with this project's icon. Rows under their project header pass null. */
+  /** Set in the zones and the combined list, where projects mix: the second
+      line opens with this project's icon, a one-line row's title with it.
+      Rows under their project header pass null. */
   project: TimelineRowProject | null;
+  /** A chat where projects mix: the chat mark stands where a project's icon would. */
+  chat?: boolean;
   /** The project's name, spoken and shown on hover for its icon. */
   projectLabel: string | null;
   title: React.ReactNode;
@@ -98,6 +101,7 @@ const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string
 export const SessionTimelineRowBody: React.FC<Props> = ({
   compact = false,
   project,
+  chat = false,
   projectLabel,
   title,
   titleClassName,
@@ -135,8 +139,12 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   const titleLine = (
     <div dir="auto" className={cn('oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
   );
+  const originMark = project
+    ? <TimelineProjectIcon project={project} label={projectLabel} />
+    : chat ? <Icon name="chat-4" className="h-3 w-3 flex-shrink-0 text-muted-foreground/75" /> : null;
   if (compact) {
     return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
+      {originMark}
       {titleLine}
       {meta}
     </div>;
@@ -153,7 +161,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         does not shift when a branch or a badge arrives and the virtualizer's
         per-kind size estimate stays exact. */}
     <div className="flex h-4 w-full min-w-0 items-center gap-1">
-      {project ? <TimelineProjectIcon project={project} label={projectLabel} /> : null}
+      {originMark}
       {metaLineLead ?? (branchLabel ? (
         <>
           {spaceMark

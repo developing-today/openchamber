@@ -114,7 +114,7 @@ describe('useSessionDisplayStore animated activity', () => {
       await useSessionDisplayStore.persist.rehydrate();
       expect(useSessionDisplayStore.getState().animatedActivityIndicators).toBe(false);
       expect(useSessionDisplayStore.getState().sidebarViewMode).toBe('timeline');
-      expect(useSessionDisplayStore.persist.getOptions().version).toBe(10);
+      expect(useSessionDisplayStore.persist.getOptions().version).toBe(11);
       useSessionDisplayStore.getState().setAnimatedActivityIndicators(true);
       const enabledSnapshot = stored;
       useSessionDisplayStore.setState({ animatedActivityIndicators: false });
@@ -126,5 +126,35 @@ describe('useSessionDisplayStore animated activity', () => {
       useSessionDisplayStore.persist.setOptions({ storage: originalStorage });
       useSessionDisplayStore.setState(initialState);
     }
+  });
+});
+
+describe('useSessionDisplayStore sidebar layout', () => {
+  const merge = (persisted: Parameters<NonNullable<ReturnType<typeof useSessionDisplayStore.persist.getOptions>['merge']>>[0]) => {
+    const mergeOption = useSessionDisplayStore.persist.getOptions().merge;
+    if (!mergeOption) throw new Error('the store merges hydrated state');
+    return mergeOption(persisted, useSessionDisplayStore.getState());
+  };
+
+  test('starts on the default layout', () => {
+    expect(useSessionDisplayStore.getState().sidebarLayout.attention).toBe('separate');
+    expect(useSessionDisplayStore.getState().sidebarLayout.holdOpenSession).toBe(true);
+  });
+
+  test('leaves a missing layout to the default at hydration', () => {
+    const current = useSessionDisplayStore.getState();
+    expect(merge({ showChatsSection: false }).sidebarLayout).toBe(current.sidebarLayout);
+  });
+
+  test('keeps what it understands of a stored layout and defaults the rest', () => {
+    const merged = merge({ sidebarLayout: { attention: 'blocked', afterLeave: 'teleport', sectionOrder: ['projects', 'nope', 'chats'] } });
+    expect(merged.sidebarLayout.attention).toBe('blocked');
+    expect(merged.sidebarLayout.afterLeave).toBe('hold');
+    expect(merged.sidebarLayout.sectionOrder.filter((key) => key === 'projects' || key === 'chats')).toEqual(['projects', 'chats']);
+  });
+
+  test('drops a stored layout that is not a layout', () => {
+    const current = useSessionDisplayStore.getState();
+    expect(merge({ sidebarLayout: 'tree' }).sidebarLayout).toBe(current.sidebarLayout);
   });
 });

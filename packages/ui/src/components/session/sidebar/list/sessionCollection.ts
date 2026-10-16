@@ -256,6 +256,8 @@ type UseSessionProjectCollectionArgs = {
   knownDirectories: Set<string>;
   isVSCode: boolean;
   isVisible: boolean;
+  /** The open session's rank while the sidebar holds it in place (`zones/openSessionHold.ts`). */
+  heldRank?: { sessionId: string; rank: number } | null;
 };
 
 // The collection owns the global-first/live-gap merge and lifecycle ordering.
@@ -265,16 +267,26 @@ export const useSessionProjectCollection = ({
   knownDirectories,
   isVSCode,
   isVisible,
+  heldRank = null,
 }: UseSessionProjectCollectionArgs) => {
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const globalStructure = useGlobalSessionsStore((state) => state.structure);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
-  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
+  const liveSessionOrderRanks = useSessionOrderingStore(React.useCallback(
     (state) => isVisible ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
     [isVisible],
   ));
+  const heldSessionId = heldRank?.sessionId;
+  const heldRankValue = heldRank?.rank;
+  // The live ranks stay as they are; only this view orders the held session
+  // by the rank it had when the hold began.
+  const sessionOrderRanks = React.useMemo(() => (
+    heldSessionId !== undefined && heldRankValue !== undefined
+      ? new Map(liveSessionOrderRanks).set(heldSessionId, heldRankValue)
+      : liveSessionOrderRanks
+  ), [heldRankValue, heldSessionId, liveSessionOrderRanks]);
   const globalSessionIds = React.useMemo(
     () => new Set(globalActiveSessions.map((session) => session.id)),
     [globalActiveSessions],
@@ -328,6 +340,7 @@ export const useSessionProjectCollection = ({
     pinnedSessionIds,
     sessionOrderRanks,
     sessions,
+    sessionById,
     rootSessions: structure.rootSessions,
   };
 };

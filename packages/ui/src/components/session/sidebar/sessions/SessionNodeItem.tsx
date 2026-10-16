@@ -46,7 +46,7 @@ import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContain
 import { useSessionRowMenuState } from './useSessionRowMenuState';
 import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from './sessionSubtreeActions';
 import type { SessionNode } from '../types';
-import { hasTreeSlotContext, isTwoLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
+import { hasTreeSlotContext, isMixedZoneContext, isTwoLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -406,7 +406,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   );
   // Flat rows: no tree gutter, live state on the right. Chats and the Tree
   // view's Pinned and In work rows keep it on one line.
-  const isOneLineTimelineRow = renderContext === 'timeline-chat' || renderContext === 'tree-chat' || renderContext === 'mixed-compact';
+  const isOneLineTimelineRow = renderContext === 'timeline-chat' || renderContext === 'tree-chat' || renderContext === 'mixed-compact' || renderContext === 'mixed-flat';
   const isTimelineRow = isTwoLineTimelineContext(renderContext) || isOneLineTimelineRow;
   // The Tree view's one-line Chats, Pinned and In work rows never expand, but
   // they keep the tree's slot and geometry, so their state reads down the
@@ -414,18 +414,20 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const hasTreeSlot = hasTreeSlotContext(renderContext);
   // While the Pinned section is shown it holds every pinned zone session, and
   // its header already says they are pinned; In work then has none of them.
-  const isZoneRow = renderContext === 'timeline-mixed' || renderContext === 'mixed-compact';
+  const isZoneRow = isMixedZoneContext(renderContext);
   const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
   const hidePinnedMarker = isZoneRow && pinnedSectionShown;
-  // Two-line rows in Pinned and In work show the project's own icon; the row
-  // reads exactly that one project record, and `find` keeps the reference
-  // stable between renders.
+  // List rows in the zones and the combined list show the project's own icon
+  // (a chat its chat mark); the row reads exactly that one project record,
+  // and `find` keeps the reference stable between renders.
+  const showsProjectMark = renderContext === 'timeline-mixed' || renderContext === 'mixed-flat';
   const timelineProject = useProjectsStore(
     React.useCallback((state) => {
-      if (renderContext !== 'timeline-mixed' || !projectId) return null;
+      if (!showsProjectMark || !projectId) return null;
       return state.projects.find((entry) => entry.id === projectId) ?? null;
-    }, [renderContext, projectId]),
+    }, [showsProjectMark, projectId]),
   );
+  const showsChatMark = showsProjectMark && !projectId && isChatDirectoryPath(session.directory);
   const tooltipProjectLabel = secondaryMeta?.projectLabel
     ?? (projectLabelFromStore ? formatProjectLabel(projectLabelFromStore) : null);
   // A null branchLabel on an explicit secondaryMeta is a deliberate filter
@@ -941,6 +943,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           <SessionTimelineRowBody
             compact={isOneLineTimelineRow}
             project={timelineProject}
+            chat={showsChatMark}
             projectLabel={tooltipProjectLabel}
             title={renameForm}
             titleClassName="text-foreground"
@@ -1675,6 +1678,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     <SessionTimelineRowBody
       compact={!isTwoLineTimelineContext(renderContext)}
       project={timelineProject}
+      chat={showsChatMark}
       projectLabel={tooltipProjectLabel}
       title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
       // A finished turn nobody has seen and a request waiting on the user

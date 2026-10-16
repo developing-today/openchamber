@@ -5,6 +5,7 @@ import {
   MouseSensor,
   TouchSensor,
   closestCenter,
+  type CollisionDetection,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -34,7 +35,11 @@ import type { SessionGroup } from '../types';
 import { SessionSidebarRows } from '../SessionSidebarRows';
 import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader } from '../sessionSidebarHeaderPresentation';
-import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
+import { resolveSessionSidebarStickyHeader, sectionDragId, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
+import type { SidebarLayout } from '@/stores/sidebarLayout';
+import { reorderProjectHeadersWithChats, reorderSectionsByDrop } from '../zones/sectionDrag';
+import { saveSidebarLayout } from '../zones/saveSidebarLayout';
+import { settleSidebarReveal, useSidebarRevealRequest } from '../zones/sidebarReveal';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
 import type { ProjectSection } from './sessionProjectRender';
@@ -81,6 +86,10 @@ type GroupActions = Pick<SessionGroupSectionProps,
 
 type SessionProjectScrollerModel = {
   rowModel: SessionSidebarRowModel;
+  /** The section order a dragged section header is saved into. */
+  sidebarLayout: Pick<SidebarLayout, 'sectionOrder'>;
+  /** Section headers can be dragged to reorder the sections (not in VS Code). */
+  sectionDragEnabled: boolean;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
   singleProjectMode: boolean;
@@ -145,8 +154,13 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   // project moves among projects, a worktree among its own project's
   // worktrees. Mixing them shifted worktree headers under a dragged project
   // and let it drop on a worktree, which moved nothing.
-  const [activeDrag, setActiveDrag] = React.useState<{ kind: 'project' } | { kind: 'group'; projectId: string | null } | null>(null);
-  const isProjectDragging = activeDrag?.kind === 'project';
+  // A section header moves among the section headers, the projects taking
+  // part through their first header; with Chats among the List view's
+  // projects, its header and the project headers move among each other.
+  const [activeDrag, setActiveDrag] = React.useState<
+    { kind: 'project' } | { kind: 'group'; projectId: string | null } | { kind: 'section' } | { kind: 'chats-group' } | null
+  >(null);
+  const isHeaderDragging = activeDrag !== null && activeDrag.kind !== 'group';
   const scrollContainerRef = React.useRef<HTMLElement | null>(null);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -281,41 +295,45 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
 
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
     if (row.kind === 'activity-header') {
-      return <CrossfadeZoneHeader
-        className="sticky top-0 z-20 bg-sidebar"
-        data-sidebar-sticky-header="true"
-      >
-        <SessionSidebarActivityHeader
-          activityKey={row.activityKey}
-          collapsed={row.collapsed}
-          forceExpanded={row.forceExpanded}
-          alwaysShowActions={view.alwaysShowActions}
-          onToggle={() => {
-            // Collapsing a zone forgets its Show more state: reopening it
-            // starts from the default reveal, like a group or project.
-            if (!row.collapsed) {
-              const containerKey = `activity:${row.activityKey}`;
-              actions.group.resetGroupSessionLimit(containerKey);
-              model.state.setVisibleActivityCountByKey((current) => {
-                if (!current.has(containerKey)) return current;
-                const next = new Map(current);
-                next.delete(containerKey);
+      return <SortableGroupItem id={sectionDragId(row.activityKey)} disabled={!model.sectionDragEnabled || row.forceExpanded || model.state.editingId !== null}>
+        {(dragHandleProps) => <CrossfadeZoneHeader
+          className="sticky top-0 z-20 bg-sidebar"
+          data-sidebar-sticky-header="true"
+        >
+          <SessionSidebarActivityHeader
+            activityKey={row.activityKey}
+            collapsed={row.collapsed}
+            forceExpanded={row.forceExpanded}
+            alwaysShowActions={view.alwaysShowActions}
+            count={row.count}
+            dragHandleProps={model.sectionDragEnabled && !row.forceExpanded ? dragHandleProps : undefined}
+            onToggle={() => {
+              // Collapsing a zone forgets its Show more state: reopening it
+              // starts from the default reveal, like a group or project.
+              if (!row.collapsed) {
+                const containerKey = `activity:${row.activityKey}`;
+                actions.group.resetGroupSessionLimit(containerKey);
+                model.state.setVisibleActivityCountByKey((current) => {
+                  if (!current.has(containerKey)) return current;
+                  const next = new Map(current);
+                  next.delete(containerKey);
+                  return next;
+                });
+              }
+              model.state.setCollapsedActivityKeys((current) => {
+                const next = new Set(current);
+                if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
                 return next;
               });
-            }
-            model.state.setCollapsedActivityKeys((current) => {
-              const next = new Set(current);
-              if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
-              return next;
-            });
-          }}
-          onNewChat={() => {
-            useUIStore.getState().closeMainSurfaces();
-            if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
-            actions.openNewSessionDraft({ selectedProjectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });
-          }}
-        />
-      </CrossfadeZoneHeader>;
+            }}
+            onNewChat={() => {
+              useUIStore.getState().closeMainSurfaces();
+              if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
+              actions.openNewSessionDraft({ selectedProjectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });
+            }}
+          />
+        </CrossfadeZoneHeader>}
+      </SortableGroupItem>;
     }
     if (row.kind === 'project-header') {
       const project = row.section.project;
@@ -471,21 +489,78 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     </div>;
   }, [actions, deleteFolder, files, model, openProjectFolder, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
-  const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => {
-    if (row.kind === 'project-header') return activeDrag?.kind === 'group' ? [] : [row.section.project.id];
-    if (row.kind !== 'group-header') return [];
-    if (activeDrag?.kind === 'project') return [];
-    if (activeDrag?.kind === 'group' && row.projectId !== activeDrag.projectId) return [];
-    return [row.groupKey];
-  }), [activeDrag, model.rowModel.rows]);
+  const chatsDragId = sectionDragId('chats');
+  // Chats sit among the List view's projects when their header is drawn but
+  // is not a section of its own.
+  const chatsAmongProjects = React.useMemo(() => (
+    !model.rowModel.sectionHeaders.some((header) => header.key === 'chats')
+    && model.rowModel.rows.some((row) => row.kind === 'activity-header' && row.activityKey === 'chats')
+  ), [model.rowModel.rows, model.rowModel.sectionHeaders]);
+  const sectionDragIds = React.useMemo(
+    () => model.rowModel.sectionHeaders.map((header) => header.dragId),
+    [model.rowModel.sectionHeaders],
+  );
+  const structuralIds = React.useMemo(() => {
+    if (activeDrag?.kind === 'section') return sectionDragIds;
+    return model.rowModel.rows.flatMap((row) => {
+      if (row.kind === 'activity-header') {
+        return row.activityKey === 'chats' && chatsAmongProjects && (activeDrag?.kind === 'project' || activeDrag?.kind === 'chats-group')
+          ? [chatsDragId]
+          : [];
+      }
+      if (row.kind === 'project-header') return activeDrag?.kind === 'group' ? [] : [row.section.project.id];
+      if (row.kind !== 'group-header') return [];
+      if (activeDrag?.kind === 'project' || activeDrag?.kind === 'chats-group') return [];
+      if (activeDrag?.kind === 'group' && row.projectId !== activeDrag.projectId) return [];
+      return [row.groupKey];
+    });
+  }, [activeDrag, chatsAmongProjects, chatsDragId, model.rowModel.rows, sectionDragIds]);
   const projectDragIds = React.useMemo(() => new Set(model.sectionsForRender.map((section) => section.project.id)), [model.sectionsForRender]);
+  // A dragged section header or Chats among the projects can only land on a
+  // header of its own sort: every row registers as a drop target (sessions
+  // drop into folders), and the nearest one is often a session row.
+  const collisionDetection = React.useCallback<CollisionDetection>((args) => {
+    if (activeDrag?.kind !== 'section' && activeDrag?.kind !== 'chats-group') return closestCenter(args);
+    const sortedIds = new Set(structuralIds);
+    return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((container) => sortedIds.has(String(container.id))) });
+  }, [activeDrag, structuralIds]);
+
+  // Done with "move and show where it went": scroll to the session's row
+  // outside the zones, opening its project first when it is collapsed.
+  const revealRequest = useSidebarRevealRequest();
+  const [revealIndex, setRevealIndex] = React.useState<{ index: number; nonce: number } | null>(null);
+  React.useEffect(() => {
+    if (!revealRequest) return;
+    const rows = model.rowModel.rows;
+    const sessionRowIndex = (zoneRows: boolean) => rows.findIndex((row) => (
+      row.kind === 'session' && row.node.session.id === revealRequest.sessionId && row.key.startsWith('activity:') === zoneRows
+    ));
+    const index = sessionRowIndex(false);
+    if (index >= 0) {
+      setRevealIndex({ index, nonce: revealRequest.nonce });
+      settleSidebarReveal(revealRequest);
+      return;
+    }
+    const projectHeaderIndex = revealRequest.projectId
+      ? rows.findIndex((row) => row.kind === 'project-header' && row.section.project.id === revealRequest.projectId)
+      : -1;
+    const projectHeader = rows[projectHeaderIndex];
+    if (projectHeader?.kind === 'project-header' && projectHeader.collapsed && revealRequest.projectId) {
+      // The project opens; the next rows hold the session's row.
+      actions.toggleProject(revealRequest.projectId);
+      return;
+    }
+    // Behind Show more or not listed: its project's header is as close as it gets.
+    if (projectHeaderIndex >= 0) setRevealIndex({ index: projectHeaderIndex, nonce: revealRequest.nonce });
+    settleSidebarReveal(revealRequest);
+  }, [actions, model.rowModel.rows, revealRequest]);
   const zoneLayoutKey = React.useMemo(() => model.rowModel.stickyHeaders
     .map(({ kind, id, rowIndex }) => `${kind}:${id}:${rowIndex}`)
     .join('\u0001'), [model.rowModel.stickyHeaders]);
 
   return <div className="relative flex min-h-0 flex-1">
     <CrossfadeZoneHeaders
-      suspended={isProjectDragging}
+      suspended={isHeaderDragging}
       layoutKey={zoneLayoutKey}
       scrollRef={scrollContainerRef}
     >
@@ -494,10 +569,18 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         ref={setScrollContainer} useScrollShadow hideTopScrollShadow scrollShadowSize={40}
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 ps-2.5 pe-2 [overflow-anchor:none]"
       >
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => {
+        <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={(event) => {
           const activeId = String(event.active.id);
           if (projectDragIds.has(activeId)) {
             setActiveDrag({ kind: 'project' });
+            return;
+          }
+          if (activeId === chatsDragId && chatsAmongProjects) {
+            setActiveDrag({ kind: 'chats-group' });
+            return;
+          }
+          if (sectionDragIds.includes(activeId)) {
+            setActiveDrag({ kind: 'section' });
             return;
           }
           const groupRow = model.rowModel.rows.find((row): row is Extract<SessionSidebarRow, { kind: 'group-header' }> => row.kind === 'group-header' && row.groupKey === activeId);
@@ -524,6 +607,26 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           if (view.hasSessionSearchQuery || model.state.editingId !== null || event.active.id === event.over.id) return;
           const activeId = String(event.active.id);
           const overId = String(event.over.id);
+          if (activeDrag?.kind === 'section') {
+            const keyOf = (id: string) => model.rowModel.sectionHeaders.find((header) => header.dragId === id)?.key;
+            const activeKey = keyOf(activeId);
+            const overKey = keyOf(overId);
+            if (!activeKey || !overKey) return;
+            const drawnKeys = model.rowModel.sectionHeaders.map((header) => header.key);
+            saveSidebarLayout({ sectionOrder: reorderSectionsByDrop(model.sidebarLayout.sectionOrder, drawnKeys, activeKey, overKey) });
+            return;
+          }
+          if (chatsAmongProjects && (activeId === chatsDragId || overId === chatsDragId)) {
+            const headerIds = model.rowModel.rows.flatMap((row) => {
+              if (row.kind === 'project-header') return [row.section.project.id];
+              return row.kind === 'activity-header' && row.activityKey === 'chats' ? [chatsDragId] : [];
+            });
+            const result = reorderProjectHeadersWithChats(headerIds, chatsDragId, activeId, overId);
+            if (!result) return;
+            if (result.projectMove && view.projectSortOrder === 'manual') actions.reorderProjects(result.projectMove.from, result.projectMove.to);
+            saveSidebarLayout({ chatsGroupIndex: result.chatsIndex });
+            return;
+          }
           const projectIds = model.sectionsForRender.map((section) => section.project.id);
           const projectFrom = projectIds.indexOf(activeId);
           const projectTo = projectIds.indexOf(overId);
@@ -543,7 +646,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           actions.setGroupOrderByProject((current) => new Map(current).set(projectId, arrayMove(section.groups, from, to).map((group) => group.id)));
         }}>
           <SortableContext items={structuralIds} strategy={verticalListSortingStrategy}>
-            <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} />
+            <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} revealIndex={revealIndex} />
           </SortableContext>
         </DndContext>
       </ScrollableOverlay>

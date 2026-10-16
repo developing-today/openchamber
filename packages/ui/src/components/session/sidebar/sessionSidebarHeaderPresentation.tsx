@@ -1,33 +1,64 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { ACTIVITY_TITLE_KEY } from './sessionSidebarActivityTitles';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
+import type { SortableDragHandleProps } from './projects/sortableItems';
 
-const ACTIVITY_ICON = { pinned: 'pushpin', work: 'eye', chats: 'chat-4' } as const;
-const ACTIVITY_TITLE_KEY = {
-  pinned: 'sessions.sidebar.activity.pinnedTitle',
-  work: 'sessions.sidebar.work.title',
-  chats: 'sessions.sidebar.activity.chatsTitle',
-} as const;
+const ACTIVITY_ICON = {
+  chats: 'chat-4',
+  pinned: 'pushpin',
+  work: 'eye',
+  approvals: 'shield',
+  questions: 'question',
+  blocked: 'alert',
+  attention: 'alarm-warning',
+  pending: 'time',
+  errors: 'error-warning',
+  stopped: 'stop',
+  'other-approvals': 'shield',
+  'other-questions': 'question',
+  'other-blocked': 'alert',
+  'other-attention': 'alarm-warning',
+  'other-errors': 'error-warning',
+  'other-stopped': 'stop',
+  'other-active': 'pulse',
+  all: 'list-unordered',
+} satisfies Record<SessionSidebarActivityKey, IconName>;
+
 
 export const SessionSidebarActivityHeader: React.FC<{
   activityKey: SessionSidebarActivityKey;
   collapsed: boolean;
   forceExpanded: boolean;
   alwaysShowActions: boolean;
+  /** Sessions in the zone, shown after its title; attention zones only. */
+  count?: number;
+  /** Set while the header can be dragged to reorder the sections. */
+  dragHandleProps?: SortableDragHandleProps;
   onToggle: () => void;
   onNewChat: () => void;
-}> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
+}> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, count, dragHandleProps, onToggle, onNewChat }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
   // One header in both views, so zones line up with the project headers.
   return <div className="relative group/chats -ms-2.5 -me-2">
     <button
       type="button"
+      ref={dragHandleProps?.setActivatorNodeRef}
+      {...dragHandleProps?.listeners}
+      // Enter and Space keep opening and closing the zone; the menu's
+      // Section order moves it from the keyboard.
+      onKeyDown={undefined}
       onClick={forceExpanded ? undefined : onToggle}
       disabled={forceExpanded}
-      className={cn('group flex w-full items-center gap-1.5 py-1 ps-4 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', chats ? 'pe-10' : 'pe-3.5')}
+      className={cn(
+        'group flex w-full items-center gap-1.5 py-1 ps-4 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+        chats ? 'pe-10' : 'pe-3.5',
+        dragHandleProps && 'cursor-grab active:cursor-grabbing',
+      )}
       aria-expanded={!collapsed}
     >
       <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
@@ -40,6 +71,7 @@ export const SessionSidebarActivityHeader: React.FC<{
       <span className="typography-ui-header font-semibold text-foreground">
         {t(ACTIVITY_TITLE_KEY[activityKey])}
       </span>
+      {count !== undefined ? <span className="typography-micro tabular-nums text-muted-foreground" dir="auto">{count}</span> : null}
     </button>
     {chats ? <button
       type="button"
