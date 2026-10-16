@@ -1,5 +1,5 @@
 import { registerFsRoutes } from '../fs/routes.js';
-import { DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE, renderBranchName, worktreeNameForBranch } from '../git/branch-name-template.js';
+import { DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE, branchNameFromTemplate, uniqueBranchName } from '../git/branch-name-template.js';
 import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
@@ -187,10 +187,18 @@ export const createFeatureRoutesRuntime = (dependencies) => {
    * routes' contributor pipeline. It checks out the request's branch, or with
    * `branchOff` starts a new branch from its head. `branchName` defaults to
    * the head branch, or for a new branch to `branchTemplate` filled with
-   * `name` (else the head branch), the number and the head; `name` defaults to
-   * the branch.
+   * `name` (else the head branch), the number and the head, past any of
+   * `existingBranches` that has it; `name` defaults to the branch.
    */
-  const createChangeRequestWorktree = async ({ directory, number, name, branchName, branchOff = false, branchTemplate = DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE }) => {
+  const createChangeRequestWorktree = async ({
+    directory,
+    number,
+    name,
+    branchName,
+    branchOff = false,
+    branchTemplate = DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE,
+    existingBranches = new Set(),
+  }) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -199,7 +207,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     }
     const { headBranch, sourceRequest } = await walkthroughBindingService.resolveChangeRequestWorktreeSource({ directory, number });
     const branch = branchName || (branchOff
-      ? renderBranchName(branchTemplate, { name: name ? worktreeNameForBranch(name) : headBranch, pr: number, head: headBranch })
+      ? uniqueBranchName(branchNameFromTemplate(branchTemplate, { name: name || headBranch, pr: number, head: headBranch }), existingBranches)
       : headBranch);
     return gitWorktreeCreation.createWorktree(directory, {
       mode: branchOff ? 'new' : 'existing',

@@ -38,7 +38,7 @@ import {
   WorktreeRequiresGitRepositoryError,
 } from '@/lib/worktrees/worktreeCreate';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
-import { renderBranchName, uniqueBranchName, worktreeNameForBranch } from '@/lib/worktrees/branchNameTemplate';
+import { branchNameFromTemplate, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
 import type { WorktreeStartFrom, WorktreeStartSource } from '@/lib/worktrees/worktreeStartSource';
 import { useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
 
@@ -73,10 +73,10 @@ export const toAutoWorktreeCreateArgs = (
 );
 
 /**
- * The branch for a named worktree: the template filled with its name (a path's
- * last segment), spaces turned into dashes, and a `-2`, `-3`… suffix when a
- * local branch already has the name, so two prompts that name the same task
- * still get two branches.
+ * The branch for a named worktree: the template filled with its name made fit
+ * for a branch (a path's last segment), and a `-2`, `-3`… suffix when a local
+ * branch already has the name, so two prompts that name the same task still
+ * get two branches.
  */
 export const branchNameFor = (
   target: Exclude<AutoWorktreeTarget, { kind: 'generate' }>,
@@ -84,9 +84,8 @@ export const branchNameFor = (
   localBranches: ReadonlySet<string>,
   pullRequest?: { pr: number; head: string },
 ): string => {
-  const name = worktreeNameForBranch(target.kind === 'path' ? target.path : target.name);
-  const rendered = renderBranchName(template, { name, ...pullRequest }).trim().replace(/\s+/g, '-');
-  return uniqueBranchName(rendered, localBranches);
+  const name = target.kind === 'path' ? target.path : target.name;
+  return uniqueBranchName(branchNameFromTemplate(template, { name, ...pullRequest }), localBranches);
 };
 
 /**

@@ -2245,7 +2245,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.issueNumber": "issue №{number}",
   "session.newWorktree.prNumber": "PR #{number}",
   "session.newWorktree.prBranchOff.label": "Почати з нього нову гілку",
-  "session.newWorktree.prBranchOff.info": "Вимкнено: worktree перемикається на гілку запиту, тож коміти надсилаються в неї. Запит із форку можна лише отримати, а запит, чия гілка відкрита в іншому worktree, може бути лише початком нової гілки.",
+  "session.newWorktree.prBranchOff.info": "Вимкнено: worktree перемикається на гілку запиту, тож коміти надсилаються в неї. На гілку запиту з форку можна лише перейти, а запит, чия гілка відкрита в іншому worktree, може бути лише початком нової гілки.",
   "session.newWorktree.includeDiffBadge": "+diff",
   "session.newWorktree.fromSource": "з {source}",
   "session.newWorktree.actions.cancel": "Скасувати",

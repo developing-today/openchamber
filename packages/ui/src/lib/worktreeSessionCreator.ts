@@ -11,7 +11,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { checkIsGitRepository, getGitBranches } from '@/lib/gitApi';
-import { renderBranchName, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
+import { branchNameFromTemplate, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -94,7 +94,7 @@ export const createQuickWorktree = async (
 const templatedBranchName = async (projectDirectory: string, name: string): Promise<string> => {
   const branches = await getGitBranches(projectDirectory, { remote: 'local' });
   const local = new Set(branches.all.filter((branch) => !branch.startsWith('remotes/')));
-  return uniqueBranchName(renderBranchName(useConfigStore.getState().settingsWorktreeBranchTemplate, { name }), local);
+  return uniqueBranchName(branchNameFromTemplate(useConfigStore.getState().settingsWorktreeBranchTemplate, { name }), local);
 };
 
 // Track if a worktree creation flow is already running

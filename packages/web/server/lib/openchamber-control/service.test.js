@@ -148,6 +148,20 @@ describe('OpenChamber control service', () => {
     expect(generateWorktreeName).toHaveBeenCalledTimes(1);
   });
 
+  it('session.create leaves a malformed branchOff to the session service, unnamed, even when Settings branch off', async () => {
+    const generateWorktreeName = vi.fn(async () => 'csv-export');
+    const { service, sessionService } = createService({
+      generateWorktreeName,
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ projects: [{ id: 'project-1', path: '/repo' }], pullRequestWorktree: 'branch-off' })),
+    });
+    await service.execute('session.create', { prompt: 'x', pullRequest: 42, branchOff: 'false' }, '/repo');
+    expect(sessionService.create.mock.calls[0][0]).toMatchObject({ pullRequest: 42, branchOff: 'false', worktree: {} });
+
+    await service.execute('session.create', { prompt: 'x', pullRequest: 42 }, '/repo');
+    expect(sessionService.create.mock.calls[1][0]).toMatchObject({ branchOff: true, worktree: { name: 'csv-export' } });
+    expect(generateWorktreeName).toHaveBeenCalledTimes(1);
+  });
+
   it('session.create passes branchOff with a pull request to the session service', async () => {
     const { service, sessionService } = createService({ isGitRepository: vi.fn(async () => true) });
     await service.execute('session.create', { prompt: 'Follow up', pullRequest: 42, branchOff: true, worktree: 'follow-up' }, '/repo');

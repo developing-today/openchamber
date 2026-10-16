@@ -33,7 +33,7 @@ import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
 import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
-import { renderBranchName } from '@/lib/worktrees/branchNameTemplate';
+import { branchNameFromTemplate, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
 import {
   checkPullRequestSource,
   pullRequestWorktreeChoices,
@@ -266,11 +266,12 @@ export function NewWorktreeDialog({
   const branchName = mode === 'existing-branch' ? existingBranch.selectedBranch : draft.branchName;
   const worktreeName = mode === 'existing-branch' ? existingBranch.worktreeName : draft.worktreeName;
   const startsNewBranch = mode === 'new-branch' || (mode === 'from-item' && !linkedPr);
-  const prBranchName = (pr: PrWorktreeSource) => renderBranchName(pullRequestBranchTemplate, {
-    name: generateBranchSlug(),
-    pr: pr.number,
-    head: pr.head,
-  });
+  // The suggestion uses this open's own name, so toggling the PR choice swaps
+  // between the same two names, and steps past local branches like the others.
+  const prBranchName = (pr: PrWorktreeSource) => uniqueBranchName(
+    branchNameFromTemplate(pullRequestBranchTemplate, { name: fallbackFolderName, pr: pr.number, head: pr.head }),
+    new Set(localBranches),
+  );
 
   // Start from the Settings default once branches are known: the default
   // remote's default branch when chosen, else the branch the project root is on.
@@ -310,14 +311,15 @@ export function NewWorktreeDialog({
     pendingInitialSelection.current = initialSelection ?? null;
     setFallbackFolderName(uniqueSlug);
     setMode(initialSelection ? 'from-item' : 'new-branch');
-    setNewBranch({ branchName: renderBranchName(branchTemplate, { name: uniqueSlug }), worktreeName: uniqueSlug, isSyncingWorktreeName: true });
+    const suggestedBranch = uniqueBranchName(branchNameFromTemplate(branchTemplate, { name: uniqueSlug }), new Set(localBranches));
+    setNewBranch({ branchName: suggestedBranch, worktreeName: uniqueSlug, isSyncingWorktreeName: true });
     setItemBranch(EMPTY_DRAFT);
     setLinked(null);
     setExistingBranch({ selectedBranch: '', worktreeName: '' });
     setSourceBranch('');
     setPrBranchOff(false);
     setValidation({ isValidating: false, branchError: null, worktreeError: null, touched: false });
-  }, [open, generateUniqueSlug, initialSelection, branchTemplate]);
+  }, [open, generateUniqueSlug, initialSelection, branchTemplate, localBranches]);
 
   // The folder follows the branch name until the user renames the folder.
   React.useEffect(() => {

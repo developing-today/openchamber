@@ -625,8 +625,15 @@ export const createOpenChamberControlService = (dependencies) => {
    */
   const resolvePullRequestWorktreeName = async (input, payload) => {
     if (payload.worktree?.name) return { mode: 'explicit' };
+    // A call the session service refuses (a malformed number or branchOff, a
+    // start ref or upstream beside it) gets its 400 without a naming call.
+    if (!Number.isSafeInteger(input.pullRequest) || input.pullRequest < 1
+      || input.startRef !== undefined || input.setUpstream !== undefined
+      || (input.branchOff !== undefined && !isBoolean(input.branchOff))) {
+      return { mode: 'explicit' };
+    }
     const settings = await readSettingsFromDiskMigrated();
-    const branchOff = isBoolean(input.branchOff) ? input.branchOff : branchesOffPullRequestsByDefault(settings);
+    const branchOff = input.branchOff ?? branchesOffPullRequestsByDefault(settings);
     if (!branchOff) return { mode: 'explicit' };
     const directory = await payloadDirectory(payload);
     if (!directory) return { mode: 'explicit' };

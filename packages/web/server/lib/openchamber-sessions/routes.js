@@ -28,7 +28,7 @@ import {
   resolveRemoteDefaultStartRef,
   resolveWorktreeStartFrom,
 } from '../git/worktree-start-ref.js';
-import { branchTemplateFrom, defaultBranchName } from '../git/branch-name-template.js';
+import { branchTemplateFrom, defaultBranchName, localBranchNames } from '../git/branch-name-template.js';
 
 const asList = (value) => (Array.isArray(value) ? value : []);
 
@@ -870,11 +870,16 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
     // What the caller left out comes from Settings: where a new branch starts,
     // what it is called, and whether a pull request is checked out or branched off.
+    // The branch this call named itself, which may take the next free name.
+    let nameDefaultBranch = null;
     if (worktreeInput || pullRequestInput) {
       const settings = await readSettingsFromDiskMigrated();
       if (pullRequestInput) {
         if (pullRequestInput.branchOff === undefined) pullRequestInput.branchOff = branchesOffPullRequestsByDefault(settings);
-        if (pullRequestInput.branchOff) pullRequestInput.branchTemplate = branchTemplateFrom(settings, 'pull-request');
+        if (pullRequestInput.branchOff && !pullRequestInput.branchName) {
+          pullRequestInput.branchTemplate = branchTemplateFrom(settings, 'pull-request');
+          pullRequestInput.existingBranches = localBranchNames(await getBranches(resolvedDirectory.directory, { remote: 'local' }));
+        }
       }
       if (worktreeInput && (!worktreeInput.startRef || !worktreeInput.branchName)) {
         const branches = await getBranches(resolvedDirectory.directory, { remote: 'local' });
@@ -882,7 +887,10 @@ export const createOpenChamberSessionService = (dependencies) => {
           const startRef = resolveRemoteDefaultStartRef(branches);
           if (startRef) worktreeInput.startRef = startRef;
         }
-        if (!worktreeInput.branchName) worktreeInput.branchName = defaultBranchName(settings, branches, worktreeInput.name);
+        if (!worktreeInput.branchName) {
+          nameDefaultBranch = (current) => defaultBranchName(settings, current, worktreeInput.name);
+          worktreeInput.branchName = nameDefaultBranch(branches);
+        }
       }
     }
 
@@ -926,10 +934,16 @@ export const createOpenChamberSessionService = (dependencies) => {
         parentDirectory: resolvedDirectory.directory,
         parentRemoteName,
       });
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, {
-        bootstrapStore: worktreeBootstrapStore,
-        hydrateCheckout,
-      });
+      const createOptions = { bootstrapStore: worktreeBootstrapStore, hydrateCheckout };
+      try {
+        worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, createOptions);
+      } catch (error) {
+        // Two calls naming the same task at once both read the branch list
+        // before either made its branch; the later one takes the next free name.
+        if (!nameDefaultBranch || !/Branch already exists/.test(error instanceof Error ? error.message : '')) throw error;
+        worktreeInput.branchName = nameDefaultBranch(await getBranches(resolvedDirectory.directory, { remote: 'local' }));
+        worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, createOptions);
+      }
       sessionDirectory = worktree.path;
       await waitForWorktreeBootstrapReady({
         directory: sessionDirectory,

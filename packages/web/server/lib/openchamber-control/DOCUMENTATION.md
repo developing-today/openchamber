@@ -174,11 +174,16 @@ other.
   the same rule the UI applies. A repository whose remotes name no default
   branch gets the project root's branch; a failed branch read fails the call.
 - A new worktree's branch, when the call names none, is the
-  `worktreeBranchTemplate` (default `{name}`) filled with the worktree name, a
-  path's last segment for an exact `/path`, with `-2`, `-3`… when a local
-  branch already has it (`../git/branch-name-template.js`). `session.create`
-  and `session.moveToWorktree` both name branches this way; before the
-  template existed, an unnamed branch was `openchamber/<name>`.
+  `worktreeBranchTemplate` (default `{name}`) filled with the worktree name made
+  fit for a branch (a path's last segment for an exact `/path`; spaces and
+  characters git refuses become `-`), with `-2`, `-3`… when a local branch
+  already has it (`../git/branch-name-template.js`). When a parallel call took
+  that name between the branch read and the creation, `session.create` reads
+  the branches again and retries once with the next free name; a branch the
+  call named is never renamed. `session.create` and `session.moveToWorktree`
+  both name branches this way; before the template existed, an unnamed branch
+  was `openchamber/<name>`. A pull request branch-off without `branch` gets the
+  same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `provider-actions.js`) are passed in as
   `actionModules` and dispatched by action name before the built-in actions;

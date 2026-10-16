@@ -970,8 +970,28 @@ describe('openchamber session routes', () => {
     await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', pullRequest: 42, branchOff: true, worktree: { name: 'follow-up' } }).expect(200);
 
     expect(createChangeRequestWorktree).toHaveBeenCalledExactlyOnceWith({
-      directory: '/repo/app', number: 42, name: 'follow-up', branchOff: true, branchTemplate: '{name}-off-{pr}',
+      directory: '/repo/app', number: 42, name: 'follow-up', branchOff: true, branchTemplate: '{name}-off-{pr}', existingBranches: new Set(),
     });
+  });
+
+  it('gives a branch it named the next free name when another call took it meanwhile', async () => {
+    let listing = { all: ['main'], defaultBranches: {} };
+    const getBranches = vi.fn(async () => listing);
+    createWorktreeMock.mockImplementationOnce(async () => {
+      listing = { all: ['main', 'review'], defaultBranches: {} };
+      throw new Error('Branch already exists: review');
+    });
+    const { app } = createApp({ getBranches });
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'review' } }).expect(200);
+
+    expect(createWorktreeMock.mock.calls.map(([, input]) => input.branchName)).toEqual(['review-2', 'review-2']);
+  });
+
+  it('does not rename a branch the call named itself', async () => {
+    createWorktreeMock.mockImplementationOnce(async () => { throw new Error('Branch already exists: chosen'); });
+    const { app } = createApp({ getBranches: vi.fn(async () => ({ all: ['main'], defaultBranches: {} })) });
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'mine', branchName: 'chosen' } }).expect(500);
+    expect(createWorktreeMock).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a pull request it cannot make a worktree for and creates no session', async () => {

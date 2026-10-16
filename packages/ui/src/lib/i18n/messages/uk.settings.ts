@@ -1075,7 +1075,7 @@ export const settingsDict = {
   "settings.openchamber.autoCreateWorktree.pullRequest.title": "Worktree з pull request",
   "settings.openchamber.autoCreateWorktree.pullRequest.checkOut": "Перемкнутися на його гілку, щоб коміти йшли в неї",
   "settings.openchamber.autoCreateWorktree.pullRequest.branchOff": "Почати нову гілку з його head",
-  "settings.openchamber.autoCreateWorktree.pullRequest.info": "Щоразу можна вибрати інший спосіб: у діалозі «Нове worktree», поруч із pull request, вибраним для автоматичного створення worktree, і через branchOff, коли агент створює сесію. Pull request із форку можна лише отримати.",
+  "settings.openchamber.autoCreateWorktree.pullRequest.info": "Щоразу можна вибрати інший спосіб: у діалозі «Нове worktree», поруч із pull request, вибраним для автоматичного створення worktree, і через branchOff, коли агент створює сесію. На гілку pull request із форку можна лише перейти.",
   "settings.openchamber.autoCreateWorktree.branchName.title": "Назви гілок",
   "settings.openchamber.autoCreateWorktree.branchName.info": "OpenChamber використовує їх, коли називає гілку: автоматичне створення worktree, швидкий worktree, плани й завдання, надіслані в worktree, worktree, які створюють агенти, і гілка, яку пропонує діалог «Нове worktree». Якщо гілка з такою назвою вже є, нова отримує -2, -3 і так далі.",
   "settings.openchamber.autoCreateWorktree.branchName.worktree": "Нова гілка",
