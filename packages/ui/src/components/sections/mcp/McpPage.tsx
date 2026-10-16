@@ -22,7 +22,7 @@ import {
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { McpOAuthSignIn } from './McpOAuthSignIn';
-import { MCP_DRAFT_OAUTH_UNSET, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
+import { MCP_DRAFT_OAUTH_UNSET, normalizeMcpServerName, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { cn } from '@/lib/utils';
@@ -233,7 +233,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
             <code className="typography-micro text-foreground/80 whitespace-pre">
               {value.map((a, i) => (
                 <span key={i} className="block">
-                  <span className="text-muted-foreground select-none mr-2">[{i}]</span>
+                  <span className="text-muted-foreground select-none me-2">[{i}]</span>
                   {a}
                 </span>
               ))}
@@ -409,7 +409,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
                 value={entry.value}
                 onChange={(e) => updateRow(idx, 'value', e.target.value)}
                 placeholder={valuePlaceholder}
-                className="font-mono typography-meta pr-8 w-full"
+                className="font-mono typography-meta pe-8 w-full"
                 autoComplete="new-password"
                 data-bwignore="true"
                 data-1p-ignore="true"
@@ -419,7 +419,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
               <button
                 type="button"
                 onClick={() => toggleReveal(idx)}
-                className="absolute right-2 text-muted-foreground/60 hover:text-muted-foreground"
+                className="absolute inset-e-2 text-muted-foreground/60 hover:text-muted-foreground"
                 title={revealedKeys.has(idx) ? hideValueTitle : showValueTitle}
               >
                 {revealedKeys.has(idx)
@@ -520,12 +520,12 @@ const getStatusDescription = (
 const statusCardClass = (status: string | undefined): string => {
   switch (status) {
     case 'failed':
-      return 'border-[var(--status-error-border)] bg-[var(--status-error-background)]';
+      return 'bg-[var(--status-error-background)]';
     case 'needs_auth':
     case 'blocked':
-      return 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)]';
+      return 'bg-[var(--status-warning-background)]';
     default:
-      return 'border-[var(--interactive-border)] bg-[var(--surface-elevated)]';
+      return 'oc-tile';
   }
 };
 
@@ -973,20 +973,17 @@ export const McpPage: React.FC = () => {
 
     setIsCreating(true);
     try {
+      // A rejected create throws with the server's reason, shown by the catch below.
       const result = await createMcp(buildDraft(name), currentDirectory);
-      if (result.ok) {
-        setMcpDraft(null);
-        setSelectedMcp(name);
-        await refreshStatus({ directory: currentDirectory, silent: true });
-        if (result.reloadFailed) {
-          toast.warning(result.message || t('settings.mcp.page.toast.serverCreatedReloadFailed'), {
-            description: result.warning || t('settings.mcp.page.toast.retryRefreshHint'),
-          });
-        } else {
-          toast.success(result.message || t('settings.mcp.page.toast.serverCreatedReloading'));
-        }
+      setMcpDraft(null);
+      setSelectedMcp(name);
+      await refreshStatus({ directory: currentDirectory, silent: true });
+      if (result.reloadFailed) {
+        toast.warning(result.message || t('settings.mcp.page.toast.serverCreatedReloadFailed'), {
+          description: result.warning || t('settings.mcp.page.toast.retryRefreshHint'),
+        });
       } else {
-        toast.error(t('settings.mcp.page.toast.saveFailed'));
+        toast.success(result.message || t('settings.mcp.page.toast.serverCreatedReloading'));
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.mcp.page.toast.unexpectedError'));
@@ -1217,7 +1214,7 @@ export const McpPage: React.FC = () => {
         {/* Runtime Status - Simplified for connected, expanded for errors */}
         {!isNewServer && shouldShowFullStatusCard(effectiveStatusName) && (
           <SettingsSection divider={false}>
-            <div className={cn('rounded-lg border p-3', statusCardClass(effectiveStatusName))}>
+            <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1290,7 +1287,7 @@ export const McpPage: React.FC = () => {
               >
                   <Input
                     value={draftName}
-                    onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
+                    onChange={(e) => setDraftName(normalizeMcpServerName(e.target.value))}
                     placeholder={t('settings.mcp.page.server.namePlaceholder')}
                     className="h-7 w-48 min-w-0 max-w-full shrink font-mono px-2"
                     autoFocus
@@ -1348,17 +1345,23 @@ export const McpPage: React.FC = () => {
             {/* Pasting a link or a command still flips this for you, but the
                 choice is a control you can see and press. As one sentence with
                 an inline link it was, in practice, undiscoverable. */}
-            <SortableTabsStrip
-              items={connectionKindTabs}
-              activeId={mcpType}
-              onSelect={(id) => {
-                setMcpType(id as 'local' | 'remote');
-                requestSave();
-              }}
-              layoutMode="fit"
-              variant="active-pill"
-              className="h-7"
-            />
+            {/* Sized by its two labels, like any segmented choice: stretched
+                across the pane each half read as a wide empty bar. */}
+            <div className="flex">
+              <SortableTabsStrip
+                items={connectionKindTabs}
+                activeId={mcpType}
+                onSelect={(id) => {
+                  setMcpType(id as 'local' | 'remote');
+                  requestSave();
+                }}
+                layoutMode="scrollable"
+                intrinsicWidth
+                variant="active-pill"
+                activePillButtonClassName="px-3"
+                className="h-7 flex-none"
+              />
+            </div>
 
             {mcpType === 'local' ? (
               <CommandTextarea
@@ -1392,7 +1395,7 @@ export const McpPage: React.FC = () => {
                 onOpenChange={setIsAdvancedRemoteOptionsOpen}
               >
                 <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
-                  <div className="flex items-center gap-1.5 text-left">
+                  <div className="flex items-center gap-1.5 text-start">
                     <span className="typography-ui-label font-normal text-foreground">{t('settings.mcp.page.advanced.configure')}</span>
                     {/* What is actually set, so a collapsed section is never a
                         blank promise. Everything at its default says nothing. */}
@@ -1425,7 +1428,7 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          className="!h-7 w-full max-w-[16rem] px-2"
+                          className="!h-7 w-fit max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.protocol')}
                         >
                           <span className="truncate">{t(MCP_PROTOCOL_LABEL_KEYS[protocol])}</span>
@@ -1517,7 +1520,7 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          className="!h-7 w-full max-w-[16rem] px-2"
+                          className="!h-7 w-fit max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.codemode')}
                         >
                           <span className="truncate">{t(MCP_CODEMODE_LABEL_KEYS[codemode])}</span>
@@ -1537,7 +1540,7 @@ export const McpPage: React.FC = () => {
                       <SettingsGroupTitle as="div" className="mb-2">
                         {t('settings.mcp.page.advanced.requestHeaders')}
                         {headerEntries.length > 0 && (
-                          <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
+                          <span className="ms-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
                         )}
                       </SettingsGroupTitle>
                       <EnvEditor

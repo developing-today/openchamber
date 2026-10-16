@@ -92,12 +92,9 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
 
     return (
         <div className="flex flex-col">
-            {/* Shadow on the wrapper, never on the glass: see "Floating
-                composer" in composer/DOCUMENTATION.md. The wrapper hugs the
-                box, so the shadow follows the morph's height tween. */}
             <div
                 className={cn(
-                    'flex min-w-0 flex-col shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                    'flex min-w-0 flex-col',
                     topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
                 )}
             >
@@ -106,17 +103,19 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 // The morph measures and animates this box (see mobileComposerMorph).
                 data-composer-box="true"
                 className={cn(
-                    'oc-glass-composer flex min-w-0 flex-col border border-border/80',
+                    // Lit like the desktop composer box: top edge, hairline,
+                    // shadow and, in dark themes, the faint sheen.
+                    'oc-surface-floating oc-glass-floating oc-composer-sheen flex min-w-0 flex-col',
                     topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
                 )}
             >
             {topRow}
             {attachments}
-            {/* pl-1 puts the attach icon at the same inset the expanded
+            {/* ps-1 puts the attach icon at the same inset the expanded
                 footer gives it, and h-12 is the expanded footer's height
                 (its buttons sit on the mobile 36px touch floor), so the icons
                 do not shift across the swap. */}
-            <div className="flex h-12 min-w-0 items-center gap-x-0.5 pl-1 pr-1">
+            <div className="flex h-12 min-w-0 items-center gap-x-0.5 ps-1 pe-1">
                 <ComposerAttachmentControls
                     isVSCode={isVSCode}
                     footerIconButtonClass={footerIconButtonClass}
@@ -132,7 +131,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     type="button"
                     // The morph moves the editor block to and from this line.
                     data-composer-morph-prompt="true"
-                    className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-left"
+                    className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-start"
                     onClick={onExpand}
                 >
                     <span
@@ -171,7 +170,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         title={t('chat.chatInput.actions.queueMessageAria')}
                         aria-label={t('chat.chatInput.actions.queueMessageAria')}
                     >
-                        <Icon name="send-plane-2" className={cn(sendIconSizeClass, '-rotate-90')} />
+                        <Icon name="send-plane-2" className={cn(sendIconSizeClass, '-rotate-90 rtl:rotate-90')} />
                     </button>
                 ) : null}
                 {/* Same visibility rule as the full composer's stop control:

@@ -162,7 +162,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           key={`${remote ? 'remote' : 'local'}-${branch}`}
           type="button"
           onClick={() => handleCheckout(branch)}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-interactive-hover"
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-interactive-hover"
         >
           <span className="min-w-0 flex-1 truncate">{branch}</span>
           {ahead > 0 ? (
@@ -190,7 +190,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           onClick={() => setIsOpen(true)}
         >
           <Icon name="git-branch" className="size-4 text-primary" />
-          <span className="min-w-0 truncate font-medium text-left">
+          <span className="min-w-0 truncate font-medium text-start">
             {currentBranch || t('gitView.branch.detachedHead')}
           </span>
           <Icon name="arrow-down-s" className="size-4 opacity-60" />
@@ -208,7 +208,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t('gitView.branch.searchPlaceholder')}
-              className="oc-surface-elevated h-9 w-full rounded-lg border border-border bg-surface-elevated px-3 typography-meta outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="oc-surface-elevated oc-raised oc-field h-9 w-full rounded-lg bg-surface-elevated px-3 typography-meta outline-none placeholder:text-muted-foreground"
             />
             {switchBlockedNotice ? (
               <div className="flex items-start gap-2 px-2 py-1">
@@ -248,7 +248,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               disabled={disabled}
             >
               <Icon name="git-branch" className="size-4 text-primary" />
-              <span className="min-w-0 truncate font-medium text-left">
+              <span className="min-w-0 truncate font-medium text-start">
                 {currentBranch || t('gitView.branch.detachedHead')}
               </span>
               <Icon name="arrow-down-s" className="size-4 opacity-60" />

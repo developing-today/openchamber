@@ -5,6 +5,7 @@ import { Select as BaseSelect } from "@base-ui/react/select"
 import type { SelectRootChangeEventDetails } from "@base-ui/react/select";
 
 import { cn } from "@/lib/utils"
+import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { dropdownTriggerVariants } from "@/components/ui/dropdown-trigger"
 import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
 import { Icon } from "@/components/icon/Icon";
@@ -161,7 +162,7 @@ function SelectTrigger({
       className={cn(
         // Shared trigger chrome: one source of truth for every dropdown trigger.
         dropdownTriggerVariants(),
-        "w-fit data-[placeholder]:text-muted-foreground aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
+        "w-fit data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
         className
       )}
       onPointerDownCapture={(event) => {
@@ -257,8 +258,10 @@ function SelectContent({
     });
   };
 
+  // `contents`: inside a dialog the portal node is one more flex child, and
+  // the dialog's gap grew the dialog by a row while the popup was open.
   return (
-    <BaseSelect.Portal container={portalToBody ? undefined : portalContainer || undefined}>
+    <BaseSelect.Portal className="contents" container={portalToBody ? undefined : portalContainer || undefined}>
       <BaseSelect.Positioner
         alignItemWithTrigger={alignItemWithTrigger}
         sideOffset={sideOffset}
@@ -300,6 +303,7 @@ function SelectContent({
           >
             {children}
           </ScrollableOverlay>
+          <GlassRedrawGuard />
         </BaseSelect.Popup>
       </BaseSelect.Positioner>
     </BaseSelect.Portal>
@@ -328,12 +332,12 @@ function SelectItem({
     <BaseSelect.Item
       data-slot="select-item"
       className={cn(
-        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-8 pl-2 typography-ui-label outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-lg py-1.5 pe-8 ps-2 typography-ui-label outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className
       )}
       {...props}
     >
-      <span className="absolute right-2 flex size-3.5 items-center justify-center">
+      <span className="absolute inset-e-2 flex size-3.5 items-center justify-center">
         <BaseSelect.ItemIndicator>
           <Icon name="check" className="size-4 text-foreground" />
         </BaseSelect.ItemIndicator>

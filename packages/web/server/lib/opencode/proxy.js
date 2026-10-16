@@ -14,6 +14,7 @@ import { createSseCursor } from '../event-stream/sse-cursor.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { beginUpstreamRequest } from './upstream-requests.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
+import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 // How long a browser's SSE stream waits, with no block forwarded, for OpenCode to take it back.
@@ -1082,6 +1083,33 @@ export const registerOpenCodeProxy = (app, deps) => {
     } catch (error) {
       if (isAbortError(error)) return;
       console.error('[proxy] OpenCode session.get proxy error:', error?.message ?? error);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'OpenCode service unavailable' });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  // A client that asks for it gets message pages with finished tool results
+  // shelled (see message-shells.js); anyone else reaches OpenCode untouched.
+  app.get('/api/session/:sessionID/message', async (req, res, next) => {
+    const keepWhole = parsePartShellsHeader(req.get(PART_SHELLS_HEADER));
+    if (!keepWhole) return next();
+    try {
+      const upstreamPath = await getRequestUpstreamPath(req);
+      const result = await fetchSessionListPayload(upstreamPath, { req });
+      res.status(result.upstream.status);
+      applyForwardProxyResponseHeaders(result.upstream.headers, res);
+      res.setHeader('content-type', result.contentType);
+      if (!result.isJson || result.parseError || !result.upstream.ok) {
+        res.end(result.bodyText);
+        return;
+      }
+      res.json(shellMessagePage(result.payload, keepWhole));
+    } catch (error) {
+      if (isAbortError(error)) return;
+      console.error('[proxy] OpenCode message.list proxy error:', error?.message ?? error);
       if (!res.headersSent) {
         res.status(503).json({ error: 'OpenCode service unavailable' });
         return;

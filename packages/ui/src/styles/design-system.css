@@ -297,7 +297,7 @@
   .bg-popover,
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-composer {
+  .oc-surface-floating {
     --foreground: var(--surface-elevated-foreground);
     color: var(--foreground);
   }
@@ -331,8 +331,7 @@
      Utilities remain able to opt an individual consumer out. */
   .oc-glass-popover,
 .oc-glass-tooltip,
-.oc-glass-panel,
-.oc-glass-composer {
+.oc-glass-panel {
   background-color: color-mix(in srgb, var(--oc-glass-color) var(--oc-glass-opacity), transparent);
   -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
   backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
@@ -352,10 +351,36 @@
   --oc-glass-color: var(--surface-muted);
 }
 
-/* The chat composer floating over the transcript. */
-.oc-glass-composer {
-  --oc-glass-color: var(--surface-elevated);
-  --oc-glass-opacity: var(--oc-glass-popover-opacity);
+/* Surfaces that are always on screen over the moving transcript: the
+   composer and the status and scroll-to-bottom pills. They are opaque: a blur
+   under them is redrawn on every streamed frame, and in a headed streaming run
+   that was most of the GPU process's work. Surfaces shown only for a while
+   (menus, tooltips, the docks above the composer) keep the glass. */
+.oc-surface-floating {
+  background-color: var(--surface-elevated);
+}
+
+/* The desktop composer box in dark themes: the text fields' faint sheen,
+   fading down from the lit top edge. Light themes keep the plain fill. */
+.dark .oc-composer-sheen {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+}
+
+/* The composer is a place to type, so its top line is as quiet as a text
+   field's; the hairline and shadows stay the dropdown's, since it floats over
+   the chat. The selector outranks .dark .oc-glass-floating. */
+.dark .oc-glass-floating.oc-composer-sheen {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.025),
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 0 0 1px rgb(0 0 0 / 0.36),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
+    0 6px 6px -3px rgb(0 0 0 / 0.16);
 }
 
 .oc-glass-floating {
@@ -370,7 +395,7 @@
 
 .dark .oc-glass-floating {
   box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
     inset 0 0 0 1px rgb(255 255 255 / 0.08),
     0 0 0 1px rgb(0 0 0 / 0.36),
     0 1px 1px -0.5px rgb(0 0 0 / 0.22),
@@ -437,7 +462,7 @@
 
 .dark .oc-panel-edge[data-edge-floating]::after {
   box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
     inset 0 0 0 1px rgb(255 255 255 / 0.08);
 }
 
@@ -450,6 +475,154 @@
 
 .oc-panel-edge[data-edge-hidden]::after {
   opacity: 0;
+}
+
+/* Lit controls: the active tab pill (oc-raised) and every text field
+   (oc-raised oc-field). The hairline colour lives in --oc-raised-edge so
+   states change only it. Edges are inset, so a field inside a clipping
+   container keeps them. Layered as components, so a call site's shadow-none
+   or ring-0 still drops the edge for a chromeless field.
+
+   Light themes paint the elevated surface darker than the canvas, so lighting
+   it from above made fields look like buttons. There a field is pressed into
+   the page (crisp hairline, faint inner shadow) and a raised pill lifts on a
+   short shadow. Dark themes paint elevated lighter, and both field and pill
+   take the dropdown's lighting: a lit top edge, a soft sheen fading down and
+   a shadow below. */
+@layer components {
+.oc-raised {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--oc-raised-edge),
+    0 1px 2px 0 rgb(0 0 0 / 0.06);
+}
+
+.oc-field {
+  box-shadow:
+    inset 0 0 0 1px var(--oc-raised-edge),
+    inset 0 1px 2px 0 rgb(0 0 0 / 0.04);
+}
+
+.dark .oc-raised {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 6%, transparent);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 3%, transparent),
+    inset 0 0 0 1px var(--oc-raised-edge),
+    0 1px 1px 0 rgb(0 0 0 / 0.31),
+    0 2px 5px -2px rgb(0 0 0 / 0.4);
+}
+
+/* Text fields sit lower than the buttons and pickers around them: a field is
+   a place to type, not something to press, so in dark themes it takes a much
+   fainter sheen and top line and a shorter shadow. */
+.dark .oc-raised.oc-field {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 1.5%, transparent),
+    inset 0 0 0 1px var(--oc-raised-edge),
+    0 1px 1px 0 rgb(0 0 0 / 0.28),
+    0 2px 3px -2px rgb(0 0 0 / 0.2);
+}
+
+/* A chromeless field keeps its transparent fill. */
+.dark .oc-raised.bg-transparent {
+  background-image: none;
+}
+
+/* A text field shows focus by brightening its own hairline, with no ring
+   around it: the caret already marks where typing goes. An invalid field
+   keeps the error colour, focused or not. */
+.oc-field:focus,
+.oc-field:focus-within {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 26%, transparent);
+}
+
+.oc-field:is([aria-invalid="true"], [data-invalid]),
+.oc-field:is([aria-invalid="true"], [data-invalid]):is(:focus, :focus-within) {
+  --oc-raised-edge: var(--status-error);
+}
+
+/* The track a raised pill moves in reads as pressed in. */
+.oc-recessed {
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.dark .oc-recessed {
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.4);
+}
+
+/* Filled buttons (primary, destructive, info) keep their tinted border as the
+   edge and take the controls' light on top of it: a lit top line and a short
+   shadow, the dark themes' faint sheen. Pressed, the button sinks flat. */
+.oc-raised-button {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.45),
+    0 1px 2px 0 rgb(0 0 0 / 0.08);
+}
+
+.dark .oc-raised-button {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 6%, transparent),
+    0 1px 1px 0 rgb(0 0 0 / 0.31),
+    0 2px 5px -2px rgb(0 0 0 / 0.4);
+}
+
+.oc-raised-button:active,
+.oc-raised:is(button, [role="button"]):active {
+  background-image: none;
+  box-shadow: inset 0 0 0 1px var(--oc-raised-edge, transparent);
+}
+
+/* Flat surfaces in the layout (cards, list tiles) separate from the page by
+   tone, with no border. Each step mixes the text colour into whatever sits
+   below, so it reads the same on the canvas, in a dialog and in light and
+   dark themes: a tile is one step, a block inside it (an icon square, a
+   neutral pill) is the next, and hover adds a step to what it sits on. */
+.oc-tile {
+  background-color: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.oc-tile-inset {
+  background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.oc-tile-hover:hover {
+  background-color: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+.oc-tile.oc-tile-hover:hover {
+  background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+}
+
+/* Keyboard focus draws no ring anywhere in the app. Chromium matches
+   :focus-visible not only on Tab but whenever focus moves after a key press
+   (a menu closed with Escape hands focus back to its trigger), so rings
+   surfaced at random. A focused control takes the hover fill instead, which
+   still shows where Tab is. Unlayered, so it outranks the ring utilities on
+   every component; text fields mark focus with their own edge (oc-field). */
+:focus-visible {
+  --tw-ring-color: transparent;
+  --tw-ring-offset-width: 0px;
+  outline: none;
+}
+
+:where(button, a[href], summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [role="radio"]):focus-visible {
+  background-image: linear-gradient(var(--interactive-hover), var(--interactive-hover));
 }
 
 /* A modal window (dialogs, the command palette, Settings) lifts off the
@@ -481,20 +654,18 @@
   }
 }
 
-/* Voice overlay. Glass inside glass is not glass: a nested backdrop-filter
-   blurs the parent's own content (placeholder, footer icons), not the
-   transcript, so that content read through the overlay. While the overlay is
-   up, the composer's own contents go transparent and exactly one glass
-   surface remains. Desktop: the overlay is mounted inside the glass box, so
-   every box child off the overlay's ancestor chain hides and the box stays
-   the glass. The chain is marked with [data-dictation-chain] and the box
-   with [data-dictating] while the overlay is up: a `:has()` over the box
+/* Voice overlay. While it is up, the composer's own contents (placeholder,
+   footer icons) go transparent so they never read through the overlay, and
+   exactly one surface remains. Desktop: the overlay is mounted inside the
+   box, so every box child off the overlay's ancestor chain hides and the box
+   stays the surface. The chain is marked with [data-dictation-chain] and the
+   box with [data-dictating] while the overlay is up: a `:has()` over the box
    would be re-evaluated for every descendant on each editor keystroke.
    Mobile: the overlay is mounted beside the pill/box in [data-dictation-host],
    so those siblings hide and the overlay's inner [data-dictation-glass]
-   layer is the glass. */
-.oc-glass-composer[data-dictating] > :not([data-dictation-chain]),
-.oc-glass-composer[data-dictating] [data-dictation-chain] > :not([data-dictation-chain], .oc-dictation-overlay),
+   layer is the surface. */
+.oc-surface-floating[data-dictating] > :not([data-dictation-chain]),
+.oc-surface-floating[data-dictating] [data-dictation-chain] > :not([data-dictation-chain], .oc-dictation-overlay),
 [data-dictation-host]:has(> .oc-dictation-overlay) > :not(.oc-dictation-overlay) {
   opacity: 0;
 }
@@ -502,6 +673,29 @@
 .oc-glass-backdrop {
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+}
+
+/* Chromium partial-redraw workaround for glass over glass. When a layer
+   leaves the screen (a tooltip closes), Chromium's damage tracker walks the
+   blurred surfaces once, back to front, growing the redrawn rect by each one
+   it touches (cc/trees/damage_tracker.cc). A menu over the composer grows it
+   only after the composer was already passed, so part of the composer's glass
+   keeps a stale blur: a flat rectangle across the menu and tooltip that also
+   hides the menu's shadow. This blurred layer under everything is the first
+   surface of that walk and covers the viewport, so any removal grows the
+   redraw to the whole frame. Other frames keep redrawing in parts. It blurs
+   only the page background, so it is invisible. It exists only while a glass
+   popup is open (GlassRedrawGuard), so streaming with nothing open pays
+   nothing for it. */
+html[data-glass-redraw-guard] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: rgb(0 0 0 / 0.004);
+  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(1px);
 }
 
 /* The recap hint floats in the band above the composer; a panel docked
@@ -521,8 +715,7 @@
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-panel,
-  .oc-glass-composer {
+  .oc-glass-panel {
     background-color: var(--oc-glass-color);
   }
 }
@@ -531,16 +724,19 @@
   .oc-glass-popover,
   .oc-glass-tooltip,
   .oc-glass-panel,
-  .oc-glass-composer,
   .oc-glass-backdrop {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
 
+  /* Without glass there is nothing to repaint stale. */
+  html[data-glass-redraw-guard] body::before {
+    content: none;
+  }
+
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-panel,
-  .oc-glass-composer {
+  .oc-glass-panel {
     background-color: var(--oc-glass-color);
   }
 }
@@ -620,6 +816,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

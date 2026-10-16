@@ -47,6 +47,7 @@ function adoptTunnel() {
     },
     getStatus: () => ({ state: "connected" }),
     subscribeStatus: () => () => undefined,
+    retry: () => undefined,
     close: () => undefined,
   }
   adoptRelayTunnel({ relayUrl: "wss://relay.test", serverId: "fixture", hostEncPubJwk: {} }, tunnel)

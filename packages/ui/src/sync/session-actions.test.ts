@@ -11,6 +11,9 @@ let formReplyError: unknown | null = null
 let formCancelError: unknown | null = null
 let permissionReplyError: unknown | null = null
 const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
+// Optional cursor pages for getSessionMessages: the request's cursor selects
+// the page by index, so a paged lookup can be pinned without the flat records.
+let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
 const sessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
 let sessionDeleteError: unknown | null = null
@@ -69,7 +72,9 @@ mock.module("@/lib/opencode/client", () => ({
       options?: { limit?: number; cursor?: string },
       directory?: string | null,
     ) => {
-      replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory, limit: options?.limit } })
+      replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory, limit: options?.limit, cursor: options?.cursor } })
+      const page = cursorMessagePages ? cursorMessagePages[Number(options?.cursor ?? "0")] : undefined
+      if (page) return page
       return { items: sessionMessageRecords.get(sessionId) ?? [], cursor: {} }
     }),
     createSession: mock(async (params: Record<string, unknown>, directory?: string | null): Promise<Session> => {
@@ -374,6 +379,7 @@ mock.module("./sync-refs", () => ({
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import { SESSION_KNOWLEDGE_HEADER } from "@/lib/sessionKnowledgeApi"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveCall = { sessionID: string; directory?: string | null; messageID: string }
@@ -2454,8 +2460,8 @@ describe("revertToMessage passes session directory", () => {
     const session = sessionFixture("session-a")
     sessionRecords.set(session.id, session)
     const earlier = { id: "msg_1", sessionID: "session-a", role: "user", time: { created: 1 } } as Message
-    const firstCarrier = { id: "msg_ctx_1", sessionID: "session-a", role: "synthetic", time: { created: 2 } } as Message
-    const secondCarrier = { id: "msg_ctx_2", sessionID: "session-a", role: "synthetic", time: { created: 3 } } as Message
+    const firstCarrier = { id: "msg_ctx_1", sessionID: "session-a", role: "synthetic", time: { created: 2 }, text: "quoted selection" } as Message
+    const secondCarrier = { id: "msg_ctx_2", sessionID: "session-a", role: "synthetic", time: { created: 3 }, text: "review comment" } as Message
     const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 4 } } as Message
     const sessionStore = createStore({}, {
       session: [session],
@@ -2464,12 +2470,37 @@ describe("revertToMessage passes session directory", () => {
     })
     const { setActionRefs, revertToMessage } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", sessionStore]]), () => "/test/project")
+    openchamberRouteRequests.length = 0
 
     await revertToMessage("session-a", "msg_2")
 
     expect(replyCalls.find((call) => call.method === "session.revert.stage")?.params.messageID).toBe("msg_ctx_1")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_ctx_1")
     expect(inputState.pendingInputText).toBe("edit this")
+    // No knowledge block was cut, so the server's delivery record stands.
+    expect(openchamberRouteRequests.some((request) => request.path === "/api/session-knowledge/forget")).toBe(false)
+  })
+
+  test("a cut that takes the project knowledge block makes the next send carry it again", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const knowledge: Message = { id: "msg_knowledge", sessionID: "session-a", role: "synthetic", time: { created: 1 }, text: `${SESSION_KNOWLEDGE_HEADER}\n\nPinned note.` }
+    const targetMessage: Message = { id: "msg_1", sessionID: "session-a", role: "user", time: { created: 2 } }
+    const targetPart: Part = { id: "prt_1", sessionID: "session-a", messageID: "msg_1", type: "text", text: "first task" }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [knowledge, targetMessage] },
+      part: { "msg_1": [targetPart] },
+    })
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", sessionStore]]), () => "/test/project")
+    openchamberRouteRequests.length = 0
+
+    await revertToMessage("session-a", "msg_1")
+
+    expect(replyCalls.find((call) => call.method === "session.revert.stage")?.params.messageID).toBe("msg_knowledge")
+    expect(openchamberRouteRequests.filter((request) => request.path === "/api/session-knowledge/forget"))
+      .toEqual([{ path: "/api/session-knowledge/forget", body: { directory: "/test/project", sessionId: "session-a" } }])
   })
 
   test("rolls back optimistic revert when the SDK returns an error", async () => {
@@ -2636,6 +2667,51 @@ describe("revertToMessage passes session directory", () => {
       "idle-child",
       "root",
     ])
+  })
+})
+
+describe("revertToMessage paged message lookup", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    sessionMessageRecords.clear()
+    sessionRecords.clear()
+    failingRevertSessionIds.clear()
+    cursorMessagePages = null
+    Object.assign(inputState, {
+      pendingInputText: "",
+      pendingInputMode: "replace",
+      attachedFiles: [],
+    })
+  })
+
+  test("stages the revert when the target message is only on a later page", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const newer: Message = { id: "msg_newer", sessionID: "session-a", role: "user", time: { created: 3 } }
+    const older: Message = { id: "msg_old", sessionID: "session-a", role: "user", time: { created: 1 } }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [newer] },
+      part: {},
+    })
+    const currentStore = createStore({})
+    const childStores = createChildStores([
+      ["/test/project", sessionStore],
+      ["/current/project", currentStore],
+    ])
+    // The local store holds only the newest page; the target sits behind a cursor.
+    cursorMessagePages = [
+      { items: [{ info: newer, parts: [] }], cursor: { next: "1" } },
+      { items: [{ info: older, parts: [] }], cursor: {} },
+    ]
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    await revertToMessage("session-a", "msg_old")
+
+    expect(replyCalls.find((call) => call.method === "session.revert.stage")?.params.messageID).toBe("msg_old")
+    expect(sessionStore.getState().session[0]?.revert?.messageID).toBe("msg_old")
+    expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(2)
   })
 })
 

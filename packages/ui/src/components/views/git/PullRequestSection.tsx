@@ -1005,7 +1005,7 @@ export const PullRequestSection: React.FC<{
 
       <div className={bodyClassName}>
         {capabilitiesUnavailable ? (
-          <div className="space-y-2 rounded-md border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3">
+          <div className="space-y-2 rounded-md bg-[var(--status-error-background)] p-3">
             <div className="typography-ui-label text-[var(--status-error)]">{t('gitView.pr.capabilitiesUnavailable')}</div>
             <Button variant="outline" size="sm" onClick={() => setCapabilityReload((value) => value + 1)}>
               {t('settings.sourceControl.transport.retry')}
@@ -1049,7 +1049,7 @@ export const PullRequestSection: React.FC<{
             ) : (
               <div className="flex flex-col gap-3">
                 {pr && isHistoricalPr ? (
-                  <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-surface-muted/40 px-2.5 py-2">
+                  <div className="flex min-w-0 items-center gap-2 rounded-md oc-tile-inset px-2.5 py-2">
                     <Icon
                       name={pr.state === 'merged' ? 'git-merge' : 'git-close-pull-request'}
                       className="size-4 shrink-0"
@@ -1100,7 +1100,7 @@ export const PullRequestSection: React.FC<{
                       className="h-7 w-32"
                     />
                   )}
-                  <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                  <div className="ms-auto flex shrink-0 items-center gap-0.5">
                     {repoUrl ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1137,7 +1137,7 @@ export const PullRequestSection: React.FC<{
                       <Button
                         variant="ghost"
                         size="xs"
-                        className="rounded-r-none"
+                        className="rounded-e-none"
                         onClick={generateDescription}
                         disabled={isGenerating || isCreating}
                       >
@@ -1149,7 +1149,7 @@ export const PullRequestSection: React.FC<{
                           <Button
                             variant="ghost"
                             size="xs"
-                            className="rounded-l-none border-l-0 px-1"
+                            className="rounded-s-none border-s-0 px-1"
                             disabled={isGenerating || isCreating}
                             aria-label={t('gitView.pr.generate.optionsAria')}
                           >
@@ -1171,7 +1171,7 @@ export const PullRequestSection: React.FC<{
                       <Textarea
                         value={additionalContext}
                         onChange={(e) => setAdditionalContext(e.target.value)}
-                        className="min-h-[72px] pr-9"
+                        className="min-h-[72px] pe-9"
                         placeholder={t('gitView.pr.placeholder.additionalContext')}
                         aria-label={t('gitView.pr.generate.notesAria')}
                         autoFocus={isContextOpen && !additionalContext}
@@ -1179,7 +1179,7 @@ export const PullRequestSection: React.FC<{
                       <Button
                         variant="ghost"
                         size="xs"
-                        className="absolute right-1.5 top-1.5 h-6 w-6 px-0"
+                        className="absolute inset-e-1.5 top-1.5 h-6 w-6 px-0"
                         onClick={() => {
                           setAdditionalContext('');
                           setIsContextOpen(false);
@@ -1214,7 +1214,7 @@ export const PullRequestSection: React.FC<{
                   <div className="flex items-center">
                     <Button
                       size="sm"
-                      className="justify-center gap-2 rounded-r-none"
+                      className="justify-center gap-2 rounded-e-none"
                       onClick={createPr}
                       disabled={createDisabled}
                     >
@@ -1225,7 +1225,7 @@ export const PullRequestSection: React.FC<{
                       <DropdownMenuTrigger asChild>
                         <Button
                           size="sm"
-                          className="rounded-l-none border-l-0 px-1.5"
+                          className="rounded-s-none border-s-0 px-1.5"
                           disabled={isCreating}
                           aria-label={t('gitView.pr.createKindAria')}
                         >

@@ -88,7 +88,6 @@ export const UsagePage: React.FC = () => {
       : null;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
   const credentialProviderId = selectedProviderId === 'exe-dev'
-    || selectedProviderId === 'ollama-cloud'
     || selectedProviderId === 'cursor'
     || selectedProviderId === 'zenmux'
     ? selectedProviderId
@@ -205,7 +204,7 @@ export const UsagePage: React.FC = () => {
           UI consumer left; shown here it labeled DeepSeek with Claude's
           rate-limit message. */}
       {selectedProviderError && (
-        <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
+        <div className="mb-8 rounded-lg bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
           <p className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedProviderError}</p>
         </div>
@@ -213,7 +212,7 @@ export const UsagePage: React.FC = () => {
 
       {/* Providers with an inline credentials form don't need the "go to Providers" banner — the form IS the fix. */}
       {selectedResult && !selectedResult.configured && !hasCredentialsForm && (
-        <div className="mb-8 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
+        <div className="mb-8 rounded-lg bg-[var(--status-warning-background)] px-4 py-3">
           {/* Claude usage comes from Claude Code's own login, which Providers cannot add. */}
           {selectedProviderId === 'claude' ? (
             <>
@@ -263,7 +262,7 @@ export const UsagePage: React.FC = () => {
                   onOpenChange={() => toggleFamilyCollapsed(family.id)}
                 >
                   <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
-                    <div className="flex items-center gap-1.5 text-left">
+                    <div className="flex items-center gap-1.5 text-start">
                       <span className="typography-ui-label font-normal text-foreground">{family.label}</span>
                       <span className="typography-micro text-muted-foreground">
                         ({familyModels.length})
@@ -315,7 +314,7 @@ export const UsagePage: React.FC = () => {
                   onOpenChange={() => toggleFamilyCollapsed('other')}
                 >
                   <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
-                    <div className="flex items-center gap-1.5 text-left">
+                    <div className="flex items-center gap-1.5 text-start">
                       <span className="typography-ui-label font-normal text-foreground">{t('settings.usage.page.section.otherModels')}</span>
                       <span className="typography-micro text-muted-foreground">
                         ({otherModels.length})

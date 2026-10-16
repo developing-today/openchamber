@@ -4,12 +4,13 @@ import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import type { Part } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { isAppLinkUrl, openExternalUrl } from '@/lib/url';
+import { isAppLinkUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
 import { openAppLinkWithConfirmation } from './appLinkConfirmation';
 import { attachAppLinkInteractions } from './appLinkInteractions';
+import { useOpenChatLink } from './useOpenChatLink';
 import { attachFileRefClickGuard, FILE_REFERENCE_LINK_SELECTOR } from './fileRefClickGuard';
 import type { ToolPopupContent } from './message/types';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
@@ -17,7 +18,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
-import { isDesktopLocalOriginActive, isVSCodeRuntime, openDesktopPath } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, openDesktopPath } from '@/lib/desktop';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -43,8 +44,12 @@ import {
   type MermaidRender,
 } from './markdown/decorate';
 import type { RenderedCopyFormat } from './markdown/selectionMarkdown';
+import { attachInlineMarkdownImages } from './markdown/inlineMarkdownImages';
+import { attachMarkdownVideoFallback } from './markdown/markdownVideo';
 import { observeMarkdownTableWidth } from './markdown/tableWidthObserver';
 import { findTextPosition } from './markdown/textPosition';
+import { splitFrontmatter } from './markdown/frontmatter';
+import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './markdown/mermaidViewer';
 import {
   BLOCK_PATH_TOKEN_RE,
@@ -87,13 +92,23 @@ const resolveOwnOrigins = (): string[] => {
   return origins;
 };
 
+const useMarkdownVideoFallback = (containerRef: React.RefObject<HTMLDivElement | null>) => {
+  React.useEffect(() => {
+    const container = containerRef.current;
+    return container ? attachMarkdownVideoFallback(container) : undefined;
+  }, [containerRef]);
+};
+
 const useLinkInteractions = ({
   containerRef,
   enabled,
+  directory,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   enabled?: boolean;
+  directory: string;
 }) => {
+  const openChatLink = useOpenChatLink(directory);
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) {
@@ -105,13 +120,13 @@ const useLinkInteractions = ({
     return attachAppLinkInteractions(container, {
       allowExternalHttp: enabled !== false,
       openAppLink: (href) => void openAppLinkWithConfirmation(href),
-      openExternalHttp: (href) => void openExternalUrl(href),
+      openExternalHttp: openChatLink,
       openSessionLink: opensSessionLinks
         ? (target) => void openSessionLink(target.sessionId, target.messageId)
         : undefined,
       ownOrigins: resolveOwnOrigins(),
     });
-  }, [containerRef, enabled]);
+  }, [containerRef, enabled, openChatLink]);
 };
 
 const DEFAULT_MERMAID_CONTROLS: MermaidControlOptions = {
@@ -120,18 +135,6 @@ const DEFAULT_MERMAID_CONTROLS: MermaidControlOptions = {
   showPanZoomControls: true,
 };
 const DEFAULT_MERMAID_FULLSCREEN_ENABLED = true;
-
-const stripLeadingFrontmatter = (markdown: string): string => {
-  const frontmatterMatch = markdown.match(
-    /^(?:\uFEFF)?(---|\+\+\+)[^\S\r\n]*\r?\n[\s\S]*?\r?\n\1[^\S\r\n]*(?:\r?\n|$)/,
-  );
-
-  if (!frontmatterMatch) {
-    return markdown;
-  }
-
-  return markdown.slice(frontmatterMatch[0].length);
-};
 
 export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
@@ -143,7 +146,6 @@ export interface MarkdownRendererProps {
   skipFadeIn?: boolean;
   className?: string;
   isStreaming?: boolean;
-  disableStreamAnimation?: boolean;
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
@@ -647,6 +649,43 @@ const useFileReferenceInteractions = ({
   }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor, enabled]);
 };
 
+// Draws a settled assistant part's local images in place of their labels
+// (markdown/inlineMarkdownImages.ts). Off while streaming and without a
+// session, which the image grant route needs.
+const useInlineMarkdownImages = ({
+  containerRef,
+  sessionId,
+  messageId,
+  directory,
+  onShowPopup,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  sessionId: string | undefined;
+  messageId: string | undefined;
+  directory: string;
+  onShowPopup?: (content: ToolPopupContent) => void;
+}) => {
+  const onShowPopupRef = React.useRef(onShowPopup);
+  React.useEffect(() => {
+    onShowPopupRef.current = onShowPopup;
+  }, [onShowPopup]);
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !sessionId || !messageId) return;
+    return attachInlineMarkdownImages({
+      container,
+      sessionId,
+      messageId,
+      directory,
+      apiBaseUrl,
+      useWorkspaceFsBridge: isVSCodeRuntime(),
+      onShowPopup: (content) => onShowPopupRef.current?.(content),
+    });
+  }, [apiBaseUrl, containerRef, directory, messageId, sessionId]);
+};
+
 const useMermaidInlineInteractions = ({
   containerRef,
   onShowPopup,
@@ -946,14 +985,10 @@ const useMorphdomMarkdown = ({
   ctx,
   domCacheKey,
   tableLayoutSettled,
-  growing = streaming,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
   streaming: boolean;
-  // The text is still streaming, though rendered as settled when `streaming`
-  // is false (the sorted chat mode): its steps stay out of settled caches.
-  growing?: boolean;
   imageMode?: MarkdownImageMode;
   rawHtml?: MarkdownRawHtmlMode;
   syntaxVars: Record<string, string>;
@@ -1124,7 +1159,7 @@ const useMorphdomMarkdown = ({
       // block whose code is not highlighted yet carries an id that render
       // does not match, so it recolours that block in place and keeps every
       // other block's DOM (selection, file links, images, disclosures).
-      const blocks = renderMarkdownBlocksSync(text, streaming, imageMode, rawHtml, growing);
+      const blocks = renderMarkdownBlocksSync(text, streaming, imageMode, rawHtml);
       let hasMermaidBlock = false;
       for (const renderedBlock of blocks) {
         const block = document.createElement('div');
@@ -1150,7 +1185,7 @@ const useMorphdomMarkdown = ({
       // or re-decorating ordinary blocks.
       refreshMermaidViewers();
     }
-  }, [containerRef, text, streaming, growing, imageMode, rawHtml, ctx, refreshMermaidViewers, tableLayoutSettled, layoutTablesNow]);
+  }, [containerRef, text, streaming, imageMode, rawHtml, ctx, refreshMermaidViewers, tableLayoutSettled, layoutTablesNow]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -1166,7 +1201,7 @@ const useMorphdomMarkdown = ({
     const decorationId = getMarkdownDecorationId(ctx);
 
     if (!streaming) {
-      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode, rawHtml, growing);
+      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode, rawHtml);
       if (cachedBlocks && domMatchesRenderedBlocks(target, cachedBlocks, decorationId)) {
         mountedDomRef.current = domCacheKey
           ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
@@ -1177,7 +1212,7 @@ const useMorphdomMarkdown = ({
       }
     }
 
-    void renderMarkdownBlocks(text, streaming, imageMode, rawHtml, growing).then((blocks) => {
+    void renderMarkdownBlocks(text, streaming, imageMode, rawHtml).then((blocks) => {
       if (!active || renderRevisionRef.current !== renderRevision) return;
       const existing = Array.from(target.children) as HTMLElement[];
       // Reconciling against freshly parsed HTML drops the measured column
@@ -1310,7 +1345,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, ctx, domCacheKey, growing, imageMode, rawHtml, refreshMermaidViewers, layoutTablesNow, scheduleTableLayout, streaming, tableLayoutSettled, text]);
+  }, [containerRef, ctx, domCacheKey, imageMode, rawHtml, refreshMermaidViewers, layoutTablesNow, scheduleTableLayout, streaming, tableLayoutSettled, text]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1334,7 +1369,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   skipFadeIn = false,
   className,
   isStreaming = false,
-  disableStreamAnimation = false,
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
@@ -1353,7 +1387,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     openContextPreview(effectiveDirectory, url);
   }, [effectiveDirectory, openContextPreview]);
 
-  const live = isStreaming && !disableStreamAnimation;
 
   useMermaidInlineInteractions({
     containerRef,
@@ -1368,13 +1401,18 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences && !isStreaming,
   });
-  useLinkInteractions({ containerRef });
+  useLinkInteractions({ containerRef, directory: effectiveDirectory });
+  useMarkdownVideoFallback(containerRef);
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
+  // With links opening in the browser panel anyway, the preview button next to
+  // a local address would only repeat the link.
+  const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel) && isDesktopShell();
+  const ctx = useDecorateContext(currentTheme, effectiveDirectory && !openLinksInBrowserPanel ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const { locale } = useI18n();
-  // Assistant images live in the gallery under the message; tool output and
-  // reasoning draw local images and link remote ones (see MarkdownImageMode).
+  // Assistant images render as labels that useInlineMarkdownImages replaces
+  // with the pictures once the part settles; tool output and reasoning draw
+  // local images and link remote ones (see MarkdownImageMode).
   const imageMode: MarkdownImageMode = variant === 'assistant' ? 'label' : 'local';
   const settledPart = part
     && (part.type === 'text' || part.type === 'reasoning')
@@ -1407,13 +1445,20 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useMorphdomMarkdown({
     containerRef,
     text: content,
-    streaming: live,
-    growing: isStreaming,
+    streaming: isStreaming,
     imageMode,
     syntaxVars,
     ctx,
     domCacheKey,
     tableLayoutSettled: !isStreaming,
+  });
+
+  useInlineMarkdownImages({
+    containerRef,
+    sessionId: imageMode === 'label' && !isStreaming ? settledSessionID : undefined,
+    messageId: settledMessageID,
+    directory: effectiveDirectory,
+    onShowPopup,
   });
 
   const markdownContent = (
@@ -1436,7 +1481,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
   return prev.content === next.content
     && prev.isStreaming === next.isStreaming
-    && prev.disableStreamAnimation === next.disableStreamAnimation
     && prev.variant === next.variant
     && prev.isAnimated === next.isAnimated
     && prev.skipFadeIn === next.skipFadeIn
@@ -1453,7 +1497,8 @@ const SimpleMarkdownRendererImpl: React.FC<{
   variant?: MarkdownVariant;
   // App links remain confirmed even where ordinary HTTP link handling is off.
   disableLinkSafety?: boolean;
-  stripFrontmatter?: boolean;
+  /** A leading frontmatter block: `hide` drops it, `properties` shows it above the body. Without it the block renders as Markdown. */
+  frontmatter?: 'hide' | 'properties';
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControlOptions;
   allowMermaidWheelEvents?: boolean;
@@ -1465,7 +1510,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   className,
   variant = 'assistant',
   disableLinkSafety,
-  stripFrontmatter = false,
+  frontmatter: frontmatterMode,
   onShowPopup,
   mermaidControls = DEFAULT_MERMAID_CONTROLS,
   allowMermaidWheelEvents = false,
@@ -1477,9 +1522,9 @@ const SimpleMarkdownRendererImpl: React.FC<{
   const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
 
-  const renderedContent = React.useMemo(
-    () => (stripFrontmatter ? stripLeadingFrontmatter(content) : content),
-    [content, stripFrontmatter],
+  const { frontmatter, body: renderedContent } = React.useMemo(
+    () => (frontmatterMode ? splitFrontmatter(content) : { frontmatter: null, body: content }),
+    [content, frontmatterMode],
   );
 
   useMermaidInlineInteractions({
@@ -1496,7 +1541,8 @@ const SimpleMarkdownRendererImpl: React.FC<{
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences,
   });
-  useLinkInteractions({ containerRef, enabled: !disableLinkSafety });
+  useLinkInteractions({ containerRef, enabled: !disableLinkSafety, directory: effectiveDirectory });
+  useMarkdownVideoFallback(containerRef);
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, undefined, mermaidControls);
@@ -1516,6 +1562,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
 
   return (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
+      {frontmatterMode === 'properties' && frontmatter ? <FrontmatterProperties frontmatter={frontmatter} /> : null}
       <div className={markdownContentClassName(variant)} data-markdown-content data-markdown-html={allowRawHtml ? '' : undefined} />
     </div>
   );
@@ -1530,7 +1577,7 @@ export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (pr
     && prev.variant === next.variant
     && prev.className === next.className
     && prev.disableLinkSafety === next.disableLinkSafety
-    && prev.stripFrontmatter === next.stripFrontmatter
+    && prev.frontmatter === next.frontmatter
     && prev.onShowPopup === next.onShowPopup
     && prevMermaidControls.download === nextMermaidControls.download
     && prevMermaidControls.copy === nextMermaidControls.copy

@@ -15,7 +15,6 @@ import { TunnelSettings } from './TunnelSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { EnvironmentVariablesSettings } from './EnvironmentVariablesSettings';
 import { IsolatedSpacesSettings } from './IsolatedSpacesSettings';
-import { ISOLATED_SPACES_RELEASED } from '@/lib/spaces/release';
 import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
@@ -168,6 +167,7 @@ const GeneralSectionContent: React.FC = () => {
                 'autoSaveEnabled',
                 ...(!isVSCode ? ['confirmFileTreeMove' as const] : []),
                 ...(!isVSCode ? ['layoutAnimations' as const] : []),
+                ...(!isVSCode ? ['openLinksInBrowserPanel' as const, 'openTrackerLinksOnBoard' as const] : []),
                 ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
                 ...(!isVSCode ? ['terminalShell' as const] : []),
                 ...(!isVSCode ? ['terminalLoginShell' as const] : []),
@@ -206,16 +206,13 @@ const ChatSectionContent: React.FC = () => {
             visibleSettings={[
                 'sessionGoal',
                 'sessionAssist',
-                'chatRenderMode',
                 'activityRenderMode',
                 'userMessageRendering',
                 'mermaidRendering',
                 'reasoning',
                 'showToolFileIcons',
                 'showTurnChangedFiles',
-                'expandedTools',
                 'collapsibleUserMessages',
-                'stickyUserHeader',
                 'promptNavigatorEnabled',
                 'wideChatLayout',
                 'codeBlockLineWrap',
@@ -271,9 +268,10 @@ const VoiceSectionContent: React.FC = () => {
 };
 
 // Isolated spaces: the switch, the idle stop, the places with their disk, and the spaces without a
-// project. Never in VS Code (decision 16), and nowhere until the feature is released.
+// project. Never in VS Code (decision 16); whether Settings offers the page at all is the page's
+// `isAvailable` in lib/settings/metadata.ts.
 const SpacesSectionContent: React.FC = () => {
-    if (isVSCodeRuntime() || !ISOLATED_SPACES_RELEASED) {
+    if (isVSCodeRuntime()) {
         return null;
     }
     return <IsolatedSpacesSettings />;

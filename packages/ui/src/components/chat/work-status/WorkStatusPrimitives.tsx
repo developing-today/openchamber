@@ -10,7 +10,7 @@ import type { IconName } from '@/components/icon/icons';
  *
  * Every readout is a labelled row — icon, name, trailing value — so a glance
  * answers "what is this number" without hovering. Sections carry a heading and
- * are separated by a hairline; the panel itself stays chrome-less, since it is
+ * are separated by space alone; the panel itself stays chrome-less, since it is
  * an object inside the chat rather than a docked pane.
  */
 
@@ -22,8 +22,7 @@ import type { IconName } from '@/components/icon/icons';
  */
 const SECTION_CLASS = cn(
   'flex flex-col',
-  '[&:not(:first-child)]:mt-3 [&:not(:first-child)]:border-t',
-  '[&:not(:first-child)]:border-[var(--interactive-border)] [&:not(:first-child)]:pt-3',
+  '[&:not(:first-child)]:mt-5',
 );
 
 const HEADING_CLASS = 'text-xs font-semibold text-foreground';
@@ -40,10 +39,10 @@ export const WorkStatusSection: React.FC<{
     <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
       <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
         {title}
-        {subject ? <span className="ml-1.5 font-normal text-muted-foreground">{subject}</span> : null}
+        {subject ? <span className="ms-1.5 font-normal text-muted-foreground">{subject}</span> : null}
       </h3>
       {summary !== undefined && summary !== null ? (
-        <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
+        <span dir="auto" className="min-w-0 max-w-[60%] truncate text-end text-xs text-muted-foreground tabular-nums">{summary}</span>
       ) : null}
     </div>
     {children}
@@ -91,7 +90,7 @@ export const WorkStatusCollapsibleSection: React.FC<{
           aria-expanded={expanded}
           onClick={() => setExpandedInStore(id, !expanded)}
           className={cn(
-            'group/section flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-left',
+            'group/section flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-start',
             // No hover fill anywhere in the panel: at this row density the blocks
             // of colour read as selection, not as affordance. Interactivity shows
             // through the text instead.
@@ -112,7 +111,7 @@ export const WorkStatusCollapsibleSection: React.FC<{
           />
           <span className="flex-1" />
           {summary !== undefined && summary !== null ? (
-            <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
+            <span dir="auto" className="min-w-0 max-w-[60%] truncate text-end text-xs text-muted-foreground tabular-nums">{summary}</span>
           ) : null}
         </button>
         {actionLayout === 'inline' ? action : null}
@@ -173,7 +172,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   );
 
   const shared = cn(
-    'flex h-7 w-full items-center gap-2 rounded-md px-1 text-left text-muted-foreground',
+    'flex h-7 w-full items-center gap-2 rounded-md px-1 text-start text-muted-foreground',
     className,
   );
 
@@ -201,7 +200,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   return (
     <Tooltip delayDuration={750}>
       <TooltipTrigger asChild>{row}</TooltipTrigger>
-      <TooltipContent side="left" sideOffset={8} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-left">
+      <TooltipContent side="left" sideOffset={8} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
         {tooltip}
       </TooltipContent>
     </Tooltip>
@@ -221,7 +220,10 @@ export const WorkStatusValue: React.FC<{
   children: React.ReactNode;
   tone?: WorkStatusTone;
 }> = ({ children, tone = 'default' }) => (
+  // Values are mostly numbers with units ("~41 tok/s", "6.6K ↑ · 242 ↓"); dir=auto
+  // keeps those in their own order inside a right-to-left panel.
   <span
+    dir="auto"
     className={tone === 'muted' ? 'text-muted-foreground' : undefined}
     style={tone === 'default' || tone === 'muted' ? undefined : { color: TONE_COLOR[tone] }}
   >

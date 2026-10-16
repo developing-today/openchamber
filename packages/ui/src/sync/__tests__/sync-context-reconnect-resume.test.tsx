@@ -50,6 +50,7 @@ const tunnel: RelayTunnelClient = {
   },
   getStatus: () => ({ state: 'connected' }),
   subscribeStatus: () => () => undefined,
+  retry: () => undefined,
   close: () => undefined,
 };
 

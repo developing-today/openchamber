@@ -11,7 +11,6 @@ import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
-import type { ProjectRef } from '@/lib/projectContextApi';
 import type { PermissionMode } from './utils/permissionAutoAccept';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
@@ -45,7 +44,7 @@ export type { ContextPanelMode };
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
-const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'notes', 'terminal']);
+const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'chat', 'browser', 'git', 'pr', 'notes', 'terminal']);
 // Older builds also stored `widthFractionByMode` (a share of the chat area);
 // it is ignored, and the pixel width the same resize stored is used.
 const persistedPanelWidthsSchema = z.object({
@@ -56,7 +55,6 @@ const persistedPanelHeightsSchema = z.object({
 });
 type MermaidRenderingMode = 'svg' | 'ascii';
 type UserMessageRenderingMode = 'markdown' | 'plain';
-type ChatRenderMode = 'sorted' | 'live';
 type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
@@ -91,14 +89,6 @@ type ContextPanelTab = {
   mode: ContextPanelMode;
   targetPath: string | null;
   targetDirectory: string | null;
-  /** Saved project plan this tab shows, for `plan` tabs opened from the notes
-      panel. Project plans are addressed by id because their markdown is
-      server-owned and has no client-visible path. */
-  projectPlanId: string | null;
-  /** The project that owns `projectPlanId`. Persisted with the tab so a
-      restored plan tab opens against its own project instead of guessing the
-      owner from whatever directory happens to be current. */
-  projectPlanRef: ProjectRef | null;
   dedupeKey: string;
   label: string | null;
   sessionTitleFallback: string | null;
@@ -120,8 +110,6 @@ type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
   targetDirectory?: string | null;
-  projectPlanId?: string | null;
-  projectPlanRef?: ProjectRef | null;
   dedupeKey?: string | null;
   label?: string | null;
   sessionTitleFallback?: string | null;
@@ -299,18 +287,6 @@ const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
   return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' || value === 'commit' || value === 'pr' ? value : null;
 };
 
-/** A plan tab's owner must be a complete project reference or nothing; a
-    half-valid one is worse than none because it points the editor somewhere. */
-const normalizeContextPanelProjectPlanRef = (value: unknown): ProjectRef | null => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  const candidate = value as { id?: unknown; path?: unknown };
-  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-  const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-  return id && path ? { id, path } : null;
-};
-
 const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath: string | null): string => {
   if (mode === 'file') {
     return targetPath || mode;
@@ -365,16 +341,13 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     mode: descriptor.mode,
     targetPath: normalizedTargetPath,
     targetDirectory: normalizedTargetDirectory,
-    projectPlanId: typeof descriptor.projectPlanId === 'string' && descriptor.projectPlanId.trim()
-      ? descriptor.projectPlanId.trim()
-      : null,
-    projectPlanRef: normalizeContextPanelProjectPlanRef(descriptor.projectPlanRef),
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
     sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
-    diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : 'working'),
+    // No scope means the view's default, which depends on the branch.
+    diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : null),
     preview: descriptor.mode === 'file' && descriptor.preview === true,
     ownerSessionId: normalizeBrowserTabOwner(descriptor.mode, descriptor.ownerSessionId),
     touchedAt: Date.now(),
@@ -431,8 +404,6 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       mode?: unknown;
       targetPath?: unknown;
       targetDirectory?: string | null;
-      projectPlanId?: unknown;
-      projectPlanRef?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
       sessionTitleFallback?: unknown;
@@ -461,19 +432,6 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     const targetDirectory = contextPanelModeKeepsTargetDirectory(candidate.mode)
       ? normalizeContextTargetDirectory(candidate.targetDirectory)
       : null;
-    const projectPlanId = typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
-      ? candidate.projectPlanId.trim()
-      : null;
-    const projectPlanRef = normalizeContextPanelProjectPlanRef(candidate.projectPlanRef);
-    // `mode: 'plan'` covers two documents: a saved Project knowledge plan
-    // (needs both the plan id and its owning project) and a plain session
-    // filesystem plan (has neither). Only the half-identified form — id
-    // without owner — is unopenable: the editor would have to guess the
-    // project from the current directory, which is exactly the bug that made
-    // saved plans open empty. Such tabs are dropped rather than resurrected.
-    if (candidate.mode === 'plan' && (projectPlanId !== null) !== (projectPlanRef !== null)) {
-      continue;
-    }
     const dedupeKey = normalizeContextPanelTabDedupeKey(
       candidate.mode,
       targetPath,
@@ -490,14 +448,12 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       mode: candidate.mode,
       targetPath,
       targetDirectory,
-      projectPlanId,
-      projectPlanRef,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
       sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
-      diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : 'working'),
+      diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : null),
       preview: candidate.mode === 'file' && candidate.preview === true,
       ownerSessionId: normalizeBrowserTabOwner(
         candidate.mode,
@@ -598,8 +554,6 @@ const upsertContextPanelTab = (
           mode: nextTab.mode,
           targetPath: nextTab.targetPath || tab.targetPath,
           targetDirectory: nextTab.targetDirectory,
-          projectPlanId: nextTab.projectPlanId ?? tab.projectPlanId,
-          projectPlanRef: nextTab.projectPlanRef ?? tab.projectPlanRef,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
           sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
@@ -802,7 +756,7 @@ const sanitizeContextPanelByDirectory = (
     // no owner and cannot be migrated into an openable saved-plan tab — that
     // combination is dropped by sanitize above. A generic filesystem plan tab
     // (no plan id) revives fine from the descriptor alone.
-    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat' || candidate.mode === 'terminal')) {
+    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'chat' || candidate.mode === 'terminal')) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
         targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,
@@ -891,7 +845,6 @@ interface UIStore {
       it leaves only the tree, with the file tabs kept open. */
   contextEditorVisible: boolean;
   contextEditorTreeWidth: number;
-  notesPanelHeight: number;
   /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
   /**
@@ -938,12 +891,15 @@ interface UIStore {
   isMobile: boolean;
   isCommandPaletteOpen: boolean;
   isHelpDialogOpen: boolean;
+  isProjectActionsDialogOpen: boolean;
   isAboutDialogOpen: boolean;
   isOpenCodeStatusDialogOpen: boolean;
   openCodeStatusText: string;
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
+  /** The full-screen integrations catalog page, opened from the sidebar header. */
+  isIntegrationsCatalogOpen: boolean;
   /** The query the Archive page opened with; empty for a plain open. */
   archivePageSearch: string;
   /** Grows on every open, so a page already on screen restarts with the new query. */
@@ -993,14 +949,10 @@ interface UIStore {
   streamingAutoFollowEnabled: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
-  /** The "In work" sidebar block and the Track / Done actions. */
+  /** The "In work" sidebar block, the Track / Done actions, and sessions going in on a sent message. */
   sessionWorkEnabled: boolean;
-  /** Let Jev move a session into work when real work starts in it. */
-  sessionWorkAutoOpen: boolean;
   /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
   sessionReviewOfferEnabled: boolean;
-  /** Keep a session in work listed under its project group and folders too. */
-  sessionWorkKeepInGroup: boolean;
   sessionGoalEnabled: boolean;
   /** Who checks goal progress; the small model checks when no classification provider can. */
   sessionGoalChecker: SessionGoalChecker;
@@ -1011,7 +963,6 @@ interface UIStore {
   collapsibleThinkingBlocks: boolean;
   /** A collapsible reasoning block opens while its model thinks. Off: it stays folded to its header. */
   expandReasoningWhileStreaming: boolean;
-  chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
@@ -1024,6 +975,10 @@ interface UIStore {
    * as they open and close. Off, they snap (`useLayoutAnimationMs`).
    */
   layoutAnimations: boolean;
+  /** Plain clicks on links in chat open in the built-in browser panel (desktop only). */
+  openLinksInBrowserPanel: boolean;
+  /** Plain clicks on issue, PR and Linear links in chat open them on the issues and PRs board. */
+  openTrackerLinksOnBoard: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   sessionRetentionOnlyArchived: boolean;
@@ -1116,9 +1071,13 @@ interface UIStore {
   /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
   browserProvider: string;
   agentMemoryToolEnabled: boolean;
+  agentKnowledgeToolEnabled: boolean;
   agentNotifyToolEnabled: boolean;
+  agentRenderToolEnabled: boolean;
   /** Whether OpenChamber's agent tools sit behind OpenCode's Code Mode instead of being direct tools. */
   agentToolsCodeMode: boolean;
+  /** Whether an agent moves its session into a new worktree on a busy branch without asking first. */
+  agentWorktreeMoveWithoutAsking: boolean;
   /** The isolated-spaces switch as saved; the server applies it at its next start. */
   isolatedSpacesEnabled: boolean;
   /** The permission mode the server writes onto each new top-level session. */
@@ -1138,10 +1097,13 @@ interface UIStore {
    * new/changed badges; there is no stored review state.
    */
   agentMemoryViewedAt: Record<string, number>;
-  /** Width of the project context panel's section sidebar, in pixels. */
-  projectContextSidebarWidth: number;
   /** Active tab of the project context panel (notes/todos/plans). */
   projectContextTab: string;
+  /**
+   * A saved plan an agent asked to show, waiting for the Project knowledge
+   * panel of its project to open it in place. Not persisted.
+   */
+  projectKnowledgePlanRequest: { projectContextId: string; planId: string } | null;
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
   agentTerminalsPlacement: AgentTerminalsPlacement;
@@ -1154,8 +1116,6 @@ interface UIStore {
   copyMessagesAsPlainText: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
-  showExpandedBashTools: boolean;
-  showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
   desktopWindowControlsPosition: DesktopWindowControlsPosition;
@@ -1163,7 +1123,6 @@ interface UIStore {
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
-  stickyUserHeader: boolean;
   promptNavigatorEnabled: boolean;
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
@@ -1217,7 +1176,6 @@ interface UIStore {
    * on screen it goes along: the zone it left closes and the new one opens on it.
    */
   moveContextSurfaceToZone: (mode: ContextPanelMode, zone: ContextZone) => void;
-  setNotesPanelHeight: (height: number) => void;
   setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;
   setMessageQueueExpanded: (expanded: boolean) => void;
   setWorkStatusScrollTop: (scrollTop: number) => void;
@@ -1242,6 +1200,7 @@ interface UIStore {
   setCommandPaletteOpen: (open: boolean) => void;
   toggleHelpDialog: () => void;
   setHelpDialogOpen: (open: boolean) => void;
+  setProjectActionsDialogOpen: (open: boolean) => void;
   setAboutDialogOpen: (open: boolean) => void;
   setOpenCodeStatusDialogOpen: (open: boolean) => void;
   setOpenCodeStatusText: (text: string) => void;
@@ -1249,6 +1208,7 @@ interface UIStore {
   setScheduledTasksDialogOpen: (open: boolean) => void;
   /** `search` fills the page's search field, for a sidebar search that found nothing. */
   setArchivePageOpen: (open: boolean, search?: string) => void;
+  setIntegrationsCatalogOpen: (open: boolean) => void;
   setUsageStatsPageOpen: (open: boolean) => void;
   setSourceBoardOpen: (open: boolean) => void;
   setOpenGuestPage: (id: string | null) => void;
@@ -1276,9 +1236,7 @@ interface UIStore {
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionWorkEnabled: (value: boolean) => void;
-  setSessionWorkAutoOpen: (value: boolean) => void;
   setSessionReviewOfferEnabled: (value: boolean) => void;
-  setSessionWorkKeepInGroup: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
   setSessionGoalMaxAutoTurns: (value: number) => void;
@@ -1286,7 +1244,6 @@ interface UIStore {
   setSessionGoalDefaultBudget: (value: number) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setExpandReasoningWhileStreaming: (value: boolean) => void;
-  setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
@@ -1294,6 +1251,8 @@ interface UIStore {
   setAutoSaveEnabled: (value: boolean) => void;
   setConfirmFileTreeMove: (value: boolean) => void;
   setLayoutAnimations: (value: boolean) => void;
+  setOpenLinksInBrowserPanel: (value: boolean) => void;
+  setOpenTrackerLinksOnBoard: (value: boolean) => void;
   setFileTreeSide: (side: 'left' | 'right') => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
@@ -1339,6 +1298,8 @@ interface UIStore {
   toggleFavoriteAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
+  /** The layout setting for every diff, dropping the per-file choices (the Changes header toggle). */
+  setDiffLayoutForAllFiles: (mode: 'inline' | 'side-by-side') => void;
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
   setDiffHideWhitespace: (hide: boolean) => void;
@@ -1377,15 +1338,19 @@ interface UIStore {
   setMessageSearchReasoningEnabled: (value: boolean) => void;
   setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
+  setAgentKnowledgeToolEnabled: (value: boolean) => void;
   setAgentNotifyToolEnabled: (value: boolean) => void;
+  setAgentRenderToolEnabled: (value: boolean) => void;
   setAgentToolsCodeMode: (value: boolean) => void;
+  setAgentWorktreeMoveWithoutAsking: (value: boolean) => void;
   setIsolatedSpacesEnabled: (value: boolean) => void;
   setPermissionDefaultMode: (value: PermissionMode) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
   setRoutingFeatureAvailable: (value: boolean) => void;
   markAgentMemoryViewed: (key: string, viewedAt: number) => void;
-  setProjectContextSidebarWidth: (width: number) => void;
   setProjectContextTab: (value: string) => void;
+  openProjectKnowledgePlan: (directory: string, projectContextId: string, planId: string) => void;
+  clearProjectKnowledgePlanRequest: () => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
   setAgentTerminalsPlacement: (value: AgentTerminalsPlacement) => void;
@@ -1398,8 +1363,6 @@ interface UIStore {
   setCopyMessagesAsPlainText: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
-  setShowExpandedBashTools: (value: boolean) => void;
-  setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
@@ -1407,7 +1370,6 @@ interface UIStore {
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
-  setStickyUserHeader: (value: boolean) => void;
   setPromptNavigatorEnabled: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
@@ -1444,7 +1406,6 @@ export const useUIStore = create<UIStore>()(
         fileTreeSide: 'right',
         contextEditorVisible: true,
         contextEditorTreeWidth: 240,
-        notesPanelHeight: 112,
         workStatusExpandedSections: {},
         messageQueueExpanded: false,
         workStatusScrollTop: 0,
@@ -1465,12 +1426,14 @@ export const useUIStore = create<UIStore>()(
         isMobile: false,
         isCommandPaletteOpen: false,
         isHelpDialogOpen: false,
+        isProjectActionsDialogOpen: false,
         isAboutDialogOpen: false,
         isOpenCodeStatusDialogOpen: false,
         openCodeStatusText: '',
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
+        isIntegrationsCatalogOpen: false,
         archivePageSearch: '',
         archivePageOpenCount: 0,
         isUsageStatsPageOpen: false,
@@ -1498,9 +1461,7 @@ export const useUIStore = create<UIStore>()(
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionWorkEnabled: true,
-        sessionWorkAutoOpen: true,
         sessionReviewOfferEnabled: false,
-        sessionWorkKeepInGroup: false,
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
         sessionGoalMaxAutoTurns: DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS,
@@ -1508,13 +1469,14 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
         expandReasoningWhileStreaming: false,
-        chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoSaveEnabled: true,
         confirmFileTreeMove: true,
         layoutAnimations: true,
+        openLinksInBrowserPanel: false,
+        openTrackerLinksOnBoard: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         sessionRetentionOnlyArchived: false,
@@ -1590,15 +1552,18 @@ export const useUIStore = create<UIStore>()(
         messageSearchReasoningEnabled: false,
         browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
+        agentKnowledgeToolEnabled: true,
         agentNotifyToolEnabled: false,
+        agentRenderToolEnabled: true,
         agentToolsCodeMode: false,
+        agentWorktreeMoveWithoutAsking: false,
         isolatedSpacesEnabled: false,
         permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,
         routingFeatureAvailable: false,
         agentMemoryViewedAt: {},
-        projectContextSidebarWidth: 168,
         projectContextTab: 'notes',
+        projectKnowledgePlanRequest: null,
         inputSpellcheckEnabled: false,
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
         agentTerminalsPlacement: DEFAULT_AGENT_TERMINALS_PLACEMENT,
@@ -1611,8 +1576,6 @@ export const useUIStore = create<UIStore>()(
         copyMessagesAsPlainText: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
-        showExpandedBashTools: false,
-        showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         desktopWindowControlsPosition: 'right',
@@ -1620,7 +1583,6 @@ export const useUIStore = create<UIStore>()(
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
-        stickyUserHeader: false,
         promptNavigatorEnabled: true,
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
@@ -2214,10 +2176,6 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setNotesPanelHeight: (height) => {
-          set({ notesPanelHeight: height });
-        },
-
         setWorkStatusSectionExpanded: (sectionId, expanded) => {
           set((state) => (
             state.workStatusExpandedSections[sectionId] === expanded
@@ -2363,6 +2321,10 @@ export const useUIStore = create<UIStore>()(
           set({ isHelpDialogOpen: open });
         },
 
+        setProjectActionsDialogOpen: (open) => {
+          set({ isProjectActionsDialogOpen: open });
+        },
+
         setAboutDialogOpen: (open) => {
           set({ isAboutDialogOpen: open });
         },
@@ -2381,53 +2343,60 @@ export const useUIStore = create<UIStore>()(
 
         setScheduledTasksDialogOpen: (open) => {
           set(open
-            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isScheduledTasksDialogOpen: false });
         },
 
         setArchivePageOpen: (open, search = '') => {
           set(open
-            ? { isArchivePageOpen: true, archivePageSearch: search, archivePageOpenCount: get().archivePageOpenCount + 1, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isArchivePageOpen: true, archivePageSearch: search, archivePageOpenCount: get().archivePageOpenCount + 1, isUsageStatsPageOpen: false, isIntegrationsCatalogOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isArchivePageOpen: false });
+        },
+
+        setIntegrationsCatalogOpen: (open) => {
+          set(open
+            ? { isIntegrationsCatalogOpen: true, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            : { isIntegrationsCatalogOpen: false });
         },
 
         setUsageStatsPageOpen: (open) => {
           set(open
-            ? { isUsageStatsPageOpen: true, isSourceBoardOpen: false, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isUsageStatsPageOpen: true, isSourceBoardOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isUsageStatsPageOpen: false });
         },
 
         setSourceBoardOpen: (open) => {
           set(open
-            ? { isSourceBoardOpen: true, isUsageStatsPageOpen: false, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isSourceBoardOpen: true, isUsageStatsPageOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isSourceBoardOpen: false });
         },
 
         setWorktreesPageProjectId: (projectId) => {
           set(projectId
-            ? { worktreesPageProjectId: projectId, spacesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, runOverviewKey: null, openGuestPageId: null }
+            ? { worktreesPageProjectId: projectId, spacesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, runOverviewKey: null, openGuestPageId: null }
             : { worktreesPageProjectId: null });
         },
 
         setSpacesPageProjectId: (projectId) => {
           set(projectId
-            ? { spacesPageProjectId: projectId, worktreesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, runOverviewKey: null, openGuestPageId: null }
+            ? { spacesPageProjectId: projectId, worktreesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, runOverviewKey: null, openGuestPageId: null }
             : { spacesPageProjectId: null });
         },
 
         setOpenGuestPage: (id) => {
-          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null }
+          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null }
             : { openGuestPageId: null });
         },
 
         closeMainSurfaces: () => {
           const state = get();
-          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.isUsageStatsPageOpen && !state.isSourceBoardOpen && !state.worktreesPageProjectId && !state.spacesPageProjectId && !state.runOverviewKey && !state.openGuestPageId) {
+          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.isIntegrationsCatalogOpen && !state.isUsageStatsPageOpen && !state.isSourceBoardOpen && !state.worktreesPageProjectId && !state.spacesPageProjectId && !state.runOverviewKey && !state.openGuestPageId) {
             return;
           }
           set({
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
+            isIntegrationsCatalogOpen: false,
             isUsageStatsPageOpen: false,
             isSourceBoardOpen: false,
             worktreesPageProjectId: null,
@@ -2521,16 +2490,8 @@ export const useUIStore = create<UIStore>()(
           set({ sessionWorkEnabled: value });
         },
 
-        setSessionWorkAutoOpen: (value) => {
-          set({ sessionWorkAutoOpen: value });
-        },
-
         setSessionReviewOfferEnabled: (value) => {
           set({ sessionReviewOfferEnabled: value });
-        },
-
-        setSessionWorkKeepInGroup: (value) => {
-          set({ sessionWorkKeepInGroup: value });
         },
 
         setSessionGoalEnabled: (value) => {
@@ -2562,10 +2523,6 @@ export const useUIStore = create<UIStore>()(
           set({ expandReasoningWhileStreaming: value });
         },
 
-        setChatRenderMode: (value) => {
-          set({ chatRenderMode: value });
-        },
-
         setActivityRenderMode: (value) => {
           set({ activityRenderMode: value });
         },
@@ -2592,6 +2549,14 @@ export const useUIStore = create<UIStore>()(
 
         setLayoutAnimations: (value) => {
           set({ layoutAnimations: value });
+        },
+
+        setOpenLinksInBrowserPanel: (value) => {
+          set({ openLinksInBrowserPanel: value });
+        },
+
+        setOpenTrackerLinksOnBoard: (value) => {
+          set({ openTrackerLinksOnBoard: value });
         },
 
         setFileTreeSide: (side) => {
@@ -2743,6 +2708,10 @@ export const useUIStore = create<UIStore>()(
 
         setDiffLayoutPreference: (mode) => {
           set({ diffLayoutPreference: mode });
+        },
+
+        setDiffLayoutForAllFiles: (mode) => {
+          set({ diffLayoutPreference: mode, diffFileLayout: {} });
         },
 
         setDiffFileLayout: (filePath, mode) => {
@@ -3037,7 +3006,7 @@ export const useUIStore = create<UIStore>()(
         // opening it closes the other surfaces and vice versa.
         setRunOverviewKey: (runKey) => {
           set(runKey
-            ? { runOverviewKey: runKey, isSessionSwitcherOpen: false, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, openGuestPageId: null }
+            ? { runOverviewKey: runKey, isSessionSwitcherOpen: false, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, openGuestPageId: null }
             : { runOverviewKey: null });
         },
 
@@ -3134,6 +3103,9 @@ export const useUIStore = create<UIStore>()(
         setAgentMemoryToolEnabled: (value) => {
           set({ agentMemoryToolEnabled: value });
         },
+        setAgentKnowledgeToolEnabled: (value) => {
+          set({ agentKnowledgeToolEnabled: value });
+        },
         setIsolatedSpacesEnabled: (value) => {
           set({ isolatedSpacesEnabled: value });
         },
@@ -3143,17 +3115,20 @@ export const useUIStore = create<UIStore>()(
         setAgentNotifyToolEnabled: (value) => {
           set({ agentNotifyToolEnabled: value });
         },
+        setAgentRenderToolEnabled: (value) => {
+          set({ agentRenderToolEnabled: value });
+        },
         setAgentToolsCodeMode: (value) => {
           set({ agentToolsCodeMode: value });
+        },
+        setAgentWorktreeMoveWithoutAsking: (value) => {
+          set({ agentWorktreeMoveWithoutAsking: value });
         },
         setAgentMemoryFeatureAvailable: (value) => {
           set({ agentMemoryFeatureAvailable: value });
         },
         setRoutingFeatureAvailable: (value) => {
           set({ routingFeatureAvailable: value });
-        },
-        setProjectContextSidebarWidth: (width) => {
-          set({ projectContextSidebarWidth: width });
         },
         markAgentMemoryViewed: (key, viewedAt) => {
           set((state) => ({
@@ -3166,6 +3141,13 @@ export const useUIStore = create<UIStore>()(
         },
         setProjectContextTab: (value) => {
           set({ projectContextTab: value });
+        },
+        openProjectKnowledgePlan: (directory, projectContextId, planId) => {
+          set({ projectContextTab: 'plans', projectKnowledgePlanRequest: { projectContextId, planId } });
+          get().openContextPanelTab(directory, { mode: 'notes' });
+        },
+        clearProjectKnowledgePlanRequest: () => {
+          set({ projectKnowledgePlanRequest: null });
         },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
@@ -3209,12 +3191,6 @@ export const useUIStore = create<UIStore>()(
         setShowTurnChangedFiles: (value) => {
           set({ showTurnChangedFiles: value });
         },
-        setShowExpandedBashTools: (value) => {
-          set({ showExpandedBashTools: value });
-        },
-        setShowExpandedEditTools: (value) => {
-          set({ showExpandedEditTools: value });
-        },
 
         setTimeFormatPreference: (value) => {
           set({ timeFormatPreference: value });
@@ -3237,9 +3213,6 @@ export const useUIStore = create<UIStore>()(
         },
         setCollapsibleUserMessages: (value) => {
           set({ collapsibleUserMessages: value });
-        },
-        setStickyUserHeader: (value) => {
-          set({ stickyUserHeader: value });
         },
         setPromptNavigatorEnabled: (value) => {
           set({ promptNavigatorEnabled: value });
@@ -3449,9 +3422,6 @@ export const useUIStore = create<UIStore>()(
             if (!Array.isArray(state.workStatusHiddenSections)) {
               state.workStatusHiddenSections = [];
             }
-            if (typeof state.notesPanelHeight !== 'number' || !Number.isFinite(state.notesPanelHeight)) {
-              state.notesPanelHeight = 112;
-            }
           }
 
           // v0 -> v1: reset legacy notification templates
@@ -3571,7 +3541,6 @@ export const useUIStore = create<UIStore>()(
           fileTreeSide: state.fileTreeSide,
           contextEditorVisible: state.contextEditorVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
-          notesPanelHeight: state.notesPanelHeight,
           workStatusExpandedSections: state.workStatusExpandedSections,
           messageQueueExpanded: state.messageQueueExpanded,
           workStatusScrollTop: state.workStatusScrollTop,
@@ -3592,9 +3561,7 @@ export const useUIStore = create<UIStore>()(
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionWorkEnabled: state.sessionWorkEnabled,
-          sessionWorkAutoOpen: state.sessionWorkAutoOpen,
           sessionReviewOfferEnabled: state.sessionReviewOfferEnabled,
-          sessionWorkKeepInGroup: state.sessionWorkKeepInGroup,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,
           sessionGoalMaxAutoTurns: state.sessionGoalMaxAutoTurns,
@@ -3602,13 +3569,14 @@ export const useUIStore = create<UIStore>()(
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           expandReasoningWhileStreaming: state.expandReasoningWhileStreaming,
-          chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoSaveEnabled: state.autoSaveEnabled,
           confirmFileTreeMove: state.confirmFileTreeMove,
           layoutAnimations: state.layoutAnimations,
+          openLinksInBrowserPanel: state.openLinksInBrowserPanel,
+          openTrackerLinksOnBoard: state.openTrackerLinksOnBoard,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           sessionRetentionOnlyArchived: state.sessionRetentionOnlyArchived,
@@ -3668,12 +3636,14 @@ export const useUIStore = create<UIStore>()(
           messageSearchReasoningEnabled: state.messageSearchReasoningEnabled,
           browserProvider: state.browserProvider,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
+          agentKnowledgeToolEnabled: state.agentKnowledgeToolEnabled,
           agentNotifyToolEnabled: state.agentNotifyToolEnabled,
+          agentRenderToolEnabled: state.agentRenderToolEnabled,
           agentToolsCodeMode: state.agentToolsCodeMode,
+          agentWorktreeMoveWithoutAsking: state.agentWorktreeMoveWithoutAsking,
           isolatedSpacesEnabled: state.isolatedSpacesEnabled,
           permissionDefaultMode: state.permissionDefaultMode,
           agentMemoryViewedAt: state.agentMemoryViewedAt,
-          projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
           agentTerminalsPlacement: state.agentTerminalsPlacement,
@@ -3686,8 +3656,6 @@ export const useUIStore = create<UIStore>()(
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
-          showExpandedBashTools: state.showExpandedBashTools,
-          showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,
@@ -3696,7 +3664,6 @@ export const useUIStore = create<UIStore>()(
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
-          stickyUserHeader: state.stickyUserHeader,
           promptNavigatorEnabled: state.promptNavigatorEnabled,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,

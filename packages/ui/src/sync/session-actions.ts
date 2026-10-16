@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelRef, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
+import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
@@ -26,6 +26,7 @@ import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from "@/sto
 import { materializeSessionSnapshots } from "./materialization"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
+import { SESSION_KNOWLEDGE_HEADER, forgetSessionKnowledgeDelivered } from "@/lib/sessionKnowledgeApi"
 import {
   getOriginalSessionID,
   getSessionMetadata,
@@ -37,6 +38,7 @@ import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/l
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
+import { withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
@@ -515,6 +517,25 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
 }
 
 /**
+ * Finds one message by id, following the cursor until it appears or the
+ * history runs out. The local store holds only the newest page, so a revert
+ * target older than that must be searched for across pages, not assumed gone.
+ */
+async function findSessionMessageById(sessionId: string, messageId: string, directory?: string | null): Promise<Message | null> {
+  const seenCursors = new Set<string>()
+  let cursor: string | undefined
+  for (;;) {
+    const page = await opencodeClient.getSessionMessages(sessionId, cursor ? { cursor } : undefined, directory)
+    const found = page.items.map(({ info }) => info).find((message) => message.id === messageId)
+    if (found) return found
+    const next = page.cursor.next
+    if (!next || seenCursors.has(next)) return null
+    seenCursors.add(next)
+    cursor = next
+  }
+}
+
+/**
  * From when descendants are reverted along with a cut at `target`. A subagent
  * run's report lands after its child already worked, so reverting the run
  * reverts the child from its start; any other target cuts at its own time.
@@ -972,7 +993,7 @@ function getRequestReplyDirectory(
  * what the first turn will run on pass it here, so the session is created on
  * that selection and the first prompt needs no switch at all.
  */
-export type SessionCreateSelection = { model?: ModelRef; agent?: string }
+export type SessionCreateSelection = { model?: ModelSelection; agent?: string }
 
 export async function createSession(
   title?: string,
@@ -1136,6 +1157,26 @@ export async function setSessionWorkState(
   try {
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
       withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+  } catch (error) {
+    if (isStaleRuntime(runtimeKeyAtClick)) return null
+    throw error
+  }
+}
+
+/**
+ * Pin or unpin a session for every client of the server. Bound to the server
+ * it was clicked on, like the work state: a runtime switch mid-request writes
+ * nothing to the new server and resolves null.
+ */
+export async function setSessionPinned(
+  sessionId: string,
+  directory: string | null | undefined,
+  pinned: boolean,
+): Promise<Session | null> {
+  const runtimeKeyAtClick = getRuntimeKey()
+  try {
+    return await patchSessionMetadata(sessionId, directory, (metadata) =>
+      withSessionPinned(metadata, pinned, Date.now()), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -2487,7 +2528,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   const localTarget = state.message[sessionId]?.find((message) => message.id === messageId)
   const targetMessage = localTarget
-    ?? (await fetchSessionMessages(sessionId, directory)).find((message) => message.id === messageId)
+    ?? (await findSessionMessageById(sessionId, messageId, directory))
   if (!targetMessage) throw new Error(`Cannot revert session: message ${messageId} was not found`)
 
   // Abort if busy before mutating session state
@@ -2572,6 +2613,13 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     // Stage only: the messages disappear behind the revert marker while the
     // dock offers Commit (finalize) or Clear (bring them back).
     await opencodeClient.stageRevert(sessionId, revertMessageID, { directory })
+    // The cut takes the synthetic messages before the prompt along, the
+    // project knowledge block among them. Unless the server forgets it was
+    // delivered, the resend goes out without it (#4877).
+    const hidesKnowledge = messagesFrom(messages, revertMessageID).some((message) => (
+      message.role === "synthetic" && message.text.startsWith(SESSION_KNOWLEDGE_HEADER)
+    ))
+    if (hidesKnowledge) await forgetSessionKnowledgeDelivered(directory, sessionId)
     const revertedSession = await opencodeClient.getSession(sessionId, directory)
     const current = store.getState()
     const updated = [...current.session]

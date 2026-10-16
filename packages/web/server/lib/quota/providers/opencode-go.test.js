@@ -248,7 +248,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
         billingRequestedBeforeStatusAnswered = requested.includes(CONSOLE_BILLING_STATUS_URL);
         return new Response(JSON.stringify(consolePayload()));
       }
-      return new Response(JSON.stringify({ availableMicroCents: '2500000' }));
+      return new Response(JSON.stringify({ availableMicroCents: '250000000' }));
     });
     const result = await fetchQuota({ readAuth: async () => consoleAuth(), fetchImpl });
     expect(billingRequestedBeforeStatusAnswered).toBe(true);
@@ -298,6 +298,18 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(isConfigured(consoleAuth({ orgID: 'not-an-org' }))).toBe(false);
     expect(isConfigured(consoleAuth())).toBe(true);
     expect(isConfigured({ 'opencode-go': { key: 'test-key' } })).toBe(true);
+  });
+
+  it('accepts a wrk_ workspace id from a Console sign-in', async () => {
+    const orgID = 'wrk_01JBW7QK3E8V2Y5M9R4T6A8C0D';
+    expect(isConfigured(consoleAuth({ orgID }))).toBe(true);
+
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+    const result = await fetchQuota({ readAuth: async () => consoleAuth({ orgID }), fetchImpl });
+
+    expect(result.ok).toBe(true);
+    const statusCall = fetchImpl.mock.calls.find((call) => call[0] === CONSOLE_STATUS_URL);
+    expect(statusCall[1].headers['x-org-id']).toBe(orgID);
   });
 
   it('distinguishes an expired sign-in without sending the stale token', async () => {
@@ -373,9 +385,11 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
   });
 
   it('parses the billing balance from micro-cents and rejects unusable amounts', () => {
-    expect(parseConsoleBillingBalance({ availableMicroCents: '12000000' })).toBe(12);
+    expect(parseConsoleBillingBalance({ availableMicroCents: '1200000000' })).toBe(12);
+    // One cent is 1_000_000 micro-cents in the Console, so this is $12.34, never $1234.
+    expect(parseConsoleBillingBalance({ availableMicroCents: '1234000000' })).toBe(12.34);
     expect(parseConsoleBillingBalance({ availableMicroCents: '0' })).toBe(0);
-    expect(parseConsoleBillingBalance({ availableMicroCents: 500000 })).toBe(0.5);
+    expect(parseConsoleBillingBalance({ availableMicroCents: 50000000 })).toBe(0.5);
     expect(parseConsoleBillingBalance({ availableMicroCents: '-1' })).toBeNull();
     expect(parseConsoleBillingBalance({ availableMicroCents: 'not-a-number' })).toBeNull();
     expect(parseConsoleBillingBalance({})).toBeNull();
@@ -388,7 +402,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
       { access: 'console-access', orgID: 'org_TESTORG123' },
       async (url, options) => {
         request = { url, options };
-        return new Response(JSON.stringify({ availableMicroCents: '12000000' }));
+        return new Response(JSON.stringify({ availableMicroCents: '1200000000' }));
       },
     );
     expect(request.url).toBe(CONSOLE_BILLING_STATUS_URL);
@@ -427,7 +441,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
       readAuth: async () => consoleAuth(),
       fetchImpl: async (url) => new Response(JSON.stringify(
         url === CONSOLE_BILLING_STATUS_URL
-          ? { availableMicroCents: '12000000' }
+          ? { availableMicroCents: '1200000000' }
           : consolePayload(),
       )),
     });

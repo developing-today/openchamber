@@ -11,7 +11,7 @@ const openaiLogin = { kind: 'login' as const, id: 'openai', provider: 'openai', 
 const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: 'a1b2c3d4e5f6',
   name: 'Fix login',
-  placeId: 'docker',
+  placeId: 'docker', machine: null,
   projectDirectory: '/home/me/app',
   projectFolder: { path: '/home/me/app', found: true },
   directory: '/spaces/a1b2c3d4e5f6/app',
@@ -23,6 +23,7 @@ const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   grants: [anthropic, openai],
   access: 'granted',
   needsAccess: [],
+  accessFailures: [],
   damage: null,
   setup: null,
   ...change,
@@ -49,9 +50,27 @@ describe('spaceAccessNoticeOf', () => {
 
   test('warns about a running space with no model key, an opened domain not counting and a login counting', () => {
     expect(spaceAccessNoticeOf(entry({ grants: [registry] }))).toEqual({ kind: 'no_model' });
+    // A provider of the user's own is a model like any other.
+    const custom = { kind: 'custom' as const, id: 'ollama-local', provider: 'ollama-local', url: 'http://gatekeeper:8080/model/ollama-local' };
+    expect(spaceAccessNoticeOf(entry({ grants: [registry, custom] }))).toBeNull();
+    expect(spaceAccessNoticeOf(entry({ grants: [custom], access: 'needs_access', needsAccess: ['ollama-local'] }))).toEqual({ kind: 'needs_again', providers: ['ollama-local'] });
     expect(spaceAccessNoticeOf(entry({ grants: [openaiLogin] }))).toBeNull();
     expect(spaceAccessNoticeOf(entry({ grants: [openaiLogin], access: 'needs_access', needsAccess: ['openai'] }))).toEqual({ kind: 'needs_again', providers: ['openai'] });
     expect(spaceAccessNoticeOf(entry({ grants: [], access: null }))).toEqual({ kind: 'no_model' });
+  });
+
+  test('warns about a missing model key whatever the network, since OpenCode\'s free models refuse a space', () => {
+    expect(spaceAccessNoticeOf(entry({ grants: [], access: null, network: { mode: 'open', domains: [] } }))).toEqual({ kind: 'no_model' });
+    expect(spaceAccessNoticeOf(entry({ grants: [registry], network: { mode: 'open', domains: [] } }))).toEqual({ kind: 'no_model' });
+    expect(spaceAccessNoticeOf(entry({ grants: [], access: null, network: null }))).toEqual({ kind: 'no_model' });
+    expect(spaceAccessNoticeOf(entry({ grants: [], access: null, network: { mode: 'allowlist', domains: ['opencode.ai'] } }))).toEqual({ kind: 'no_model' });
+    // A key, a login or a provider of the user's own is access with the open internet too.
+    const custom = { kind: 'custom' as const, id: 'ollama-local', provider: 'ollama-local', url: 'http://gatekeeper:8080/model/ollama-local' };
+    for (const grant of [anthropic, openaiLogin, custom]) {
+      expect(spaceAccessNoticeOf(entry({ grants: [grant], network: { mode: 'open', domains: [] } }))).toBeNull();
+    }
+    // A key lost at a restart is still said, whatever the network.
+    expect(spaceAccessNoticeOf(entry({ access: 'needs_access', needsAccess: ['anthropic'], network: { mode: 'open', domains: [] } }))).toEqual({ kind: 'needs_again', providers: ['anthropic'] });
   });
 
   test('says it could not check rather than "granted" when the gatekeeper did not answer', () => {

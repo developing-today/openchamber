@@ -11,8 +11,8 @@ without a name is unreadable at a glance, which is what an unlabelled stream of
 values degenerates into.
 
 Rows are grouped into **named sections**, one component each, composed in
-order by `WorkStatusPanel`. The separator between them is a
-`:not(:first-child)` CSS rule rather than a prop, because every section renders
+order by `WorkStatusPanel`. They are parted by space alone, no rule. The gap
+is a `:not(:first-child)` CSS rule rather than a prop, because every section renders
 conditionally; passing "am I first?" down would mean each one tracking what the
 sections above it decided to render.
 
@@ -125,7 +125,10 @@ which requests only providers enabled for this panel.
 
 Subagent status uses the Tasks section's leading icons: blue for busy/retrying,
 green for idle, and a neutral clock while status is unknown. A successful status
-snapshot also establishes idle for omitted sessions in that same directory.
+snapshot also establishes idle for omitted sessions in that same directory,
+compared as normalized paths and skipping sessions whose status was invalidated.
+The global status store fills the gap for children the snapshot does not cover:
+a child it holds as busy runs, and one it saw settle is idle (or failed).
 Permission requests and questions take precedence with a warning icon and text.
 Running rows reuse `SessionActivityDuration` and its shared one-second ticker
 for the current turn's elapsed time, including retries and waiting within that
@@ -133,9 +136,10 @@ turn. No timer is shown until the activity store has an observed start; blocked,
 settled, and collapsed rows do not mount a running counter.
 
 Rows are ordered newest first by creation time, never by last activity, which
-reshuffled them on every step and moved them under the pointer. Finished rows
-(done or failed, with no pending blocker) sink below unfinished ones and keep
-the same creation order, so a fully finished list reads as it did at launch.
+reshuffled them on every step and moved them under the pointer. Rows group by
+state first: blockers, then running, then unknown status, then finished (done
+or failed, with no pending blocker). Creation order holds within each group, so
+a fully finished list reads as it did at launch.
 The section derives per-row cost with `computeRollup` over the live-session list
 it already holds instead of opening a second subscription through the hook.
 
@@ -212,7 +216,9 @@ reporting assistant turn is the answer, not a sum across turns.
 
 Which message is "latest" is decided by `findLatestContextFill` in
 `stores/utils/tokenUtils.ts`, shared with the VS Code header, mini chat,
-mobile metadata and context sidebar. A finished compaction's own record (a
+mobile metadata, context sidebar and the context rail's ring icon
+(`layout/ContextRailUsage.tsx`, which re-renders only when the reading changes
+and reads cost only while its tooltip is open). A finished compaction's own record (a
 `compaction` message with `status: 'completed'`) is not a reading: its tokens
 describe the summarizing request,
 whose input is the pre-compaction history. Until a later response reports
@@ -448,7 +454,7 @@ Rows that name something the app can already show are buttons:
 | Branch | git surface (`openContextSurface(dir, 'git')`) |
 | Pull request, Checks | PR surface (`openContextSurface(dir, 'pr')`) |
 | App icon (Project heading, right) | opens the project in the chosen app (`OpenInAppButton`, desktop with a local host only); its chevron copies the path or picks another app. The project name beside the title is plain text |
-| Project action | runs or stops the selected project action (`ProjectActionsButton`); its chevron picks another action. This row is the only place the control lives — the header no longer carries it — so a project without a repository still gets a Project section |
+| Project action | runs or stops the selected project action (`ProjectActionsButton`); its chevron picks another action. The project's own actions come first and auto-discovery last, so with nothing picked the row offers the first configured action, or auto-discovery when there is none. The pick is stored per runtime and project (`lib/projectActionSelection.ts`) and survives remounts and restarts; a pick that no longer names an action falls back to the first one. A running action takes the row over an idle pick, and pressing the row acts on the action it shows, through the same shared-setup trust prompt as the menu. The row is a view: the runner lives in `ProjectActionsProvider` above the whole layout (see below). The header carries no action control, so a project without a repository still gets a Project section |
 | Subagent | that child session's chat tab, read-only |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
@@ -456,6 +462,27 @@ Rows that name something the app can already show are buttons:
 | MCP status | the state doubles as the button that reconnects |
 | Pinned (pin icon) | unpins the message |
 | Pinned (text) | jumps the transcript to that message |
+
+### Project actions outside the panel
+
+The panel hides whenever a rail panel opens, so the actions cannot depend on
+it. `components/layout/ProjectActionsProvider` mounts one runner
+(`useProjectActionsRunner`) in `MainLayout` for the project
+`useProjectActionsContext` resolves, which is the panel's own context. A managed
+Chat resolves to none. Three views read that runner through
+`projectActionsRunnerContext`:
+
+- the Work Status row;
+- `ProjectActionsDialog`, opened by `open_project_actions` (`mod+alt+r`). It
+  lists the actions with their state, opens with the row's action highlighted,
+  and Enter picks the action and runs or stops it;
+- the command palette's search-only "Run: name" / "Stop: name" entries and its
+  "Project actions" entry.
+
+Because the runner outlives the panel, a run keeps its output watch (URL
+auto-open, exit tracking) while the card is hidden. The server terminal listing
+still runs only on demand: each view calls `useObserveProjectActionRuns` while
+it is on screen, and the runner polls only while at least one view asks.
 
 The goal icon reproduces the **composer target button's** colour mapping, not
 the goal strip's. The two disagree today — the strip paints `paused` muted and

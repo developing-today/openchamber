@@ -39,7 +39,7 @@ const CheckRunDetails: React.FC<{
         </div>
       ) : null}
       {run.output?.text ? (
-        <div className="rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+        <div className="rounded oc-tile-inset px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
           {run.output.text}
         </div>
       ) : null}
@@ -53,7 +53,7 @@ const CheckRunDetails: React.FC<{
           </div>
           <div className="space-y-1">
             {annotations.slice(0, 20).map((annotation, idx) => (
-              <div key={`${annotation.path || 'file'}:${annotation.startLine || idx}:${idx}`} className="rounded border border-[var(--status-error-border)] bg-[var(--status-error-background)]/40 px-2 py-2">
+              <div key={`${annotation.path || 'file'}:${annotation.startLine || idx}:${idx}`} className="rounded bg-[var(--status-error-background)]/60 px-2 py-2">
                 <div className="typography-micro break-words text-[var(--status-error)]">
                   {annotation.title || annotation.level || 'Issue'}
                   {annotation.path ? ` · ${annotation.path}` : ''}
@@ -84,7 +84,7 @@ const CheckRunDetails: React.FC<{
                 return (
                   <div key={stepKey} className="typography-micro flex w-full items-center gap-2 rounded px-2 py-1 text-muted-foreground">
                     <span className="truncate">{step.name}</span>
-                    {step.conclusion ? <span className="ml-auto flex-shrink-0">{step.conclusion}</span> : null}
+                    {step.conclusion ? <span className="ms-auto flex-shrink-0">{step.conclusion}</span> : null}
                   </div>
                 );
               }
@@ -94,14 +94,14 @@ const CheckRunDetails: React.FC<{
                   <button
                     type="button"
                     onClick={() => expansion.toggleStep(stepKey)}
-                    className="typography-micro flex w-full items-center gap-2 rounded bg-destructive/10 px-2 py-1 text-left text-destructive"
+                    className="typography-micro flex w-full items-center gap-2 rounded bg-destructive/10 px-2 py-1 text-start text-destructive"
                   >
                     {stepExpanded ? <Icon name="arrow-down-s" className="size-4" /> : <Icon name="arrow-right-s" className="size-4" />}
                     <span className="truncate">{step.name}</span>
-                    {step.conclusion ? <span className="ml-auto flex-shrink-0">{step.conclusion}</span> : null}
+                    {step.conclusion ? <span className="ms-auto flex-shrink-0">{step.conclusion}</span> : null}
                   </button>
                   <CollapsibleContent>
-                    <div className="ml-6 mt-1 rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground space-y-1">
+                    <div className="ms-6 mt-1 rounded oc-tile-inset px-2 py-2 typography-micro text-muted-foreground space-y-1">
                       {step.number !== undefined ? <div>{t('gitView.pr.checks.stepLabel')}: {step.number}</div> : null}
                       {step.status ? <div>{t('gitView.pr.checks.statusLabel')}: {step.status}</div> : null}
                       {step.conclusion ? <div>{t('gitView.pr.checks.conclusionLabel')}: {step.conclusion}</div> : null}
@@ -148,12 +148,12 @@ export const CheckRunList: React.FC<{
         ? formatElapsedDuration(run.startedAt, undefined, now)
         : formatElapsedDuration(run.startedAt, run.completedAt);
       return (
-        <div key={runKey} className={cn('rounded-md border border-border/40', failed && 'border-[var(--status-error-border)]')}>
+        <div key={runKey} className={cn('rounded-md', failed ? 'bg-[var(--status-error-background)]/60' : 'oc-tile')}>
           <button
             type="button"
             disabled={!hasDetails}
             onClick={() => expansion.toggleRun(runKey)}
-            className="flex w-full items-center gap-2 px-2.5 py-2 text-left disabled:cursor-default"
+            className="flex w-full items-center gap-2 px-2.5 py-2 text-start disabled:cursor-default"
           >
             {isRunning ? (
               <Icon name="loader-4" className="size-4 shrink-0 animate-spin text-[var(--status-warning)]" />

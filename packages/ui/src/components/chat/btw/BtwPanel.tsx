@@ -45,9 +45,10 @@ const IDLE_SESSION_STATUS = { type: 'idle' as const };
  * and the app navigates to it), destroy (the fork is deleted; the main
  * conversation is never touched).
  */
-const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; onExit: () => void }> = ({
+const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hidden: boolean; onExit: () => void }> = ({
     parentSessionId,
     panel,
+    hidden,
     onExit,
 }) => {
     const { t } = useI18n();
@@ -99,7 +100,8 @@ const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; on
         );
     }
 
-    return <AnimatePresence>{stage}</AnimatePresence>;
+    // `hidden`: collapsed while the parent's own request takes the dock.
+    return <AnimatePresence>{hidden ? null : stage}</AnimatePresence>;
 };
 
 const useBtwDestroy = (sessionRef: BtwSessionRef | null): (() => void) => {
@@ -250,7 +252,7 @@ const BtwFrame: React.FC<{
                     onClick={onTitleClick}
                     aria-label={titleClickLabel}
                     title={titleClickLabel}
-                    className="flex min-w-0 items-center gap-2 text-left text-muted-foreground transition-colors hover:text-foreground"
+                    className="flex min-w-0 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
                 >
                     {headerSpinner ? (
                         <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin" />
@@ -446,7 +448,6 @@ const BtwMessages: React.FC<{
                     <ChatMessage
                         key={record.info.id}
                         message={record}
-                        previousMessage={data.messageRecords[index - 1]}
                         nextMessage={data.messageRecords[index + 1]}
                         isInActiveTurn={index === data.messageRecords.length - 1}
                         activeStreamingPhase={

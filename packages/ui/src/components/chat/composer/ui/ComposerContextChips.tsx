@@ -10,8 +10,8 @@
  * before sending.
  *
  * The preview is portaled into `previewHost`, a positioned wrapper outside the
- * glass composer box: the box clips its contents, and glass does not nest
- * (see "Floating composer" in composer/DOCUMENTATION.md).
+ * composer box, which clips its contents (see "Floating composer" in
+ * composer/DOCUMENTATION.md).
  */
 
 import React from 'react';
@@ -102,7 +102,7 @@ const DraftPreviewEntry: React.FC<{
         setEditText(draft.text);
         // The draft text at edit start is the baseline; later store updates are
         // our own saves.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [editing]);
 
     const commitEdit = () => {
@@ -175,7 +175,7 @@ const DraftPreviewEntry: React.FC<{
                         {onRevealQuote ? (
                             <button
                                 type="button"
-                                className={`${quoteClassName} block w-full cursor-pointer text-left hover:underline`}
+                                className={`${quoteClassName} block w-full cursor-pointer text-start hover:underline`}
                                 style={{ minHeight: 0 }}
                                 onClick={onRevealQuote}
                                 title={t('chat.message.context.showQuoteSource')}
@@ -200,7 +200,7 @@ const DraftPreviewEntry: React.FC<{
                                 enterSubmits
                                 imagePaste={imagePaste}
                                 placeholder={t('chat.textSelection.comment.placeholder')}
-                                className="oc-surface-elevated mt-0.5 w-full rounded-md border border-border bg-surface-elevated px-2 py-1 text-sm leading-5 text-foreground focus-within:ring-2 focus-within:ring-ring"
+                                className="oc-surface-elevated oc-raised oc-field mt-0.5 w-full rounded-md bg-surface-elevated px-2 py-1 text-sm leading-5 text-foreground"
                             />
                         ) : (
                             <div className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">
@@ -417,15 +417,15 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                 <div
                     key="context-preview"
                     ref={previewRef}
-                    className="absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px]"
+                    className="absolute bottom-full inset-s-0 z-30 mb-1.5 w-full max-w-[480px]"
                     onMouseEnter={cancelClose}
                     onMouseLeave={scheduleClose}
                 >
                 {/* Shadow on the wrapper, never on the glass: see "Floating
                     composer" in composer/DOCUMENTATION.md. */}
-                <GlassPopupMotion className="origin-bottom-left rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+                <GlassPopupMotion className="origin-bottom-left rtl:origin-bottom-right rounded-xl">
                 <div
-                    className="oc-glass-popover overflow-hidden rounded-xl border border-[var(--interactive-border)]"
+                    className="oc-glass-popover oc-glass-floating overflow-hidden rounded-xl"
                     style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
                 >
                     <div
@@ -469,7 +469,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                     // Same chip shape as attached files and linked
                     // references; the inline minimums opt out of the
                     // mobile 36px button floor so the row stays even.
-                    className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2 text-left text-xs transition-opacity hover:opacity-80"
+                    className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2 text-start text-xs transition-opacity hover:opacity-80"
                     style={{ minHeight: 0, minWidth: 0 }}
                     onMouseEnter={() => {
                         cancelClose();

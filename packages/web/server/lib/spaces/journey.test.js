@@ -11,9 +11,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SpaceError } from './errors.js';
 import { createSpaceJourney } from './journey.js';
 import { createLoginKeeper } from './login-keeper.js';
-import { ROLE_GATEKEEPER, spaceResourceName } from './labels.js';
+import { ROLE_GATEKEEPER, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { IMAGE_TIMEOUT } from './layout.js';
-import { createSpaceManager } from './manager.js';
+import { PLACE_RETRY_CAP_MS, createSpaceManager } from './manager.js';
 import { createMemoryPlace } from './places/memory-place.js';
 import { createPlaceRegistry } from './places/registry.js';
 import { createSpaceRecords } from './space-records.js';
@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
+const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt = null, place = createMemoryPlace(), morePlaces = [], projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet, resolveDirectory = undefined } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -78,7 +78,8 @@ const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemory
   let releaseLoginRow = () => {};
   const loginRowHeld = new Promise((resolve) => { releaseLoginRow = resolve; });
   const spaceOpenCode = {
-    writeProviderConfig: async (spaceId, grants) => { calls.push(['writeProviderConfig', spaceId, grants]); fail('writeProviderConfig'); },
+    // The host's custom provider definitions travel as a fourth element only when there are any, so the older expectations read as before.
+    writeProviderConfig: async (spaceId, grants, customProviders) => { calls.push(['writeProviderConfig', spaceId, grants, ...(customProviders?.size > 0 ? [customProviders] : [])]); fail('writeProviderConfig'); },
     writeLogin: async (spaceId, provider, login) => { calls.push(['writeLogin', spaceId, provider, login]); if (holdLoginRow) await loginRowHeld; fail('writeLogin'); },
     removeLogin: async (spaceId, provider) => { calls.push(['removeLogin', spaceId, provider]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
   };
@@ -103,22 +104,32 @@ const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemory
     applyAsChanges: async (request) => { calls.push(['applyAsChanges', request]); fail('applyAsChanges'); return { status: failAt === 'nothing' ? 'nothing_to_apply' : 'applied', appliedPaths: 3, remembered: true }; },
   };
   const records = createSpaceRecords({ dataDir, logger: quiet });
-  const manager = createSpaceManager({ registry: createPlaceRegistry([place]), now: () => new Date('2026-09-26T10:00:00.000Z') });
+  // The clock of the manager and the journey; a test moves it to get past the manager's pause on a failed place.
+  const clock = { time: Date.parse('2026-09-26T10:00:00.000Z') };
+  const places = createPlaceRegistry([place, ...morePlaces]);
+  const manager = createSpaceManager({
+    registry: places,
+    locate: async (spaceId) => records.read(spaceId).record?.placeId ?? null,
+    recall: async () => records.list().map(({ id, record }) => ({ placeId: record.placeId, id, name: record.name ?? id, project: hashProjectDirectory(record.repository), created: record.created ?? '' })),
+    now: () => new Date(clock.time),
+  });
   const journey = createSpaceJourney({
-    manager, place, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
+    manager, places, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
     listProjectDirectories: async () => projects,
     archiveChats,
     readHostSecret: (name) => hostEnvironment[name],
     readHostLogin: readHostLogin ?? (async (provider) => (hostLogin && provider === 'openai' ? hostLogin : null)),
+    hostProviders,
     folderExists: async () => true,
+    resolveDirectory,
     readIdleStop: async () => idle.saved ?? { enabled: true, hours: 4 },
     saveIdleStop: async (setting) => { if (holdIdleSave) await idleSaveHeld; fail('saveIdleStop'); idle.saved = setting; },
     announce: (spaceId, payload) => { events.push({ spaceId, ...payload.properties }); },
     onSpacesChanged: () => { changes.count += 1; },
     logger,
-    now: () => new Date('2026-09-26T10:00:00.000Z'),
+    now: () => new Date(clock.time),
   });
-  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, releaseReady, releaseLoginRow, gatekeeper, dataDir, idle };
+  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, releaseReady, releaseLoginRow, gatekeeper, dataDir, idle, clock };
 };
 
 const REQUEST = { projectDirectory: PROJECT, name: ' Fix login ', start: 'uncommitted', network: NETWORK };
@@ -195,6 +206,17 @@ describe('the journey: create', () => {
     expect(await until(() => steps(events, open.id).includes('ready'))).toBe(true);
   });
 
+  it('takes the project folder in the UI\'s spelling and makes the space for the folder the settings name', async () => {
+    // On Windows the UI sends forward slashes and the settings keep backslashes.
+    const registered = 'C:\\Users\\me\\project';
+    const { journey, events, records } = journeyWith({ projects: [registered], resolveDirectory: path.win32.resolve });
+    const space = await journey.createSpace({ ...REQUEST, projectDirectory: 'C:/Users/me/project/' });
+    expect(space.projectDirectory).toBe(registered);
+    expect(await until(() => steps(events, space.id).includes('ready'))).toBe(true);
+    expect(records.read(space.id).record.repository).toBe(registered);
+    await expect(journey.createSpace({ ...REQUEST, projectDirectory: 'C:/Users/me/other' })).rejects.toMatchObject({ code: 'project_not_registered' });
+  });
+
   it('refuses a bad request before anything runs', async () => {
     const { journey, place, events } = journeyWith();
     await expect(journey.createSpace({ ...REQUEST, projectDirectory: '/home/me/other' })).rejects.toMatchObject({ code: 'project_not_registered' });
@@ -206,6 +228,105 @@ describe('the journey: create', () => {
     await expect(journey.createSpace({ ...REQUEST, name: 7 })).rejects.toMatchObject({ code: 'invalid_space_name' });
     expect(events).toEqual([]);
     expect(await place.list()).toEqual([]);
+  });
+});
+
+describe('the journey: two places', () => {
+  const remote = () => ({ ...createMemoryPlace({ id: 'remote' }), machine: 'box' });
+
+  it('makes a space on the place the request names, remembers it in the record, and routes its actions there', async () => {
+    const second = remote();
+    const { journey, place, records, events } = journeyWith({ morePlaces: [second] });
+    const { id, placeId } = await journey.createSpace({ ...REQUEST, placeId: 'remote' });
+    expect(placeId).toBe('remote');
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect(records.read(id).record).toMatchObject({ placeId: 'remote', name: 'Fix login', created: '2026-09-26T10:00:00.000Z' });
+    expect(await place.list()).toEqual([]);
+    expect((await second.list()).map((space) => space.id)).toEqual([id]);
+    expect((await journey.listSpaces())[0]).toMatchObject({ id, placeId: 'remote', state: 'running' });
+    await journey.stopSpace(id);
+    expect((await second.list())[0].state).toBe('exited');
+    await journey.startSpace(id);
+    expect((await second.list())[0].state).toBe('running');
+    expect(await journey.removeSpace(id)).toMatchObject({ removed: true });
+    expect(await second.list()).toEqual([]);
+  });
+
+  it('lists a space whose place is no longer configured as unreachable, and a delete forgets its record and nothing else', async () => {
+    const { journey, records, place } = journeyWith();
+    records.write('c1c2c3d4e5f6', { placeId: 'cluster', name: 'Elsewhere', created: '2026-10-11T10:00:00.000Z', network: { mode: 'open' }, repository: PROJECT, spacePath: '/spaces/c1c2c3d4e5f6/project' });
+    // Its place is gone, so no machine is known, and the failure says a delete would forget the record.
+    expect((await journey.listSpaces())[0]).toMatchObject({ id: 'c1c2c3d4e5f6', placeId: 'cluster', machine: null, name: 'Elsewhere', state: 'unreachable', failure: { code: 'place_not_found' } });
+    const gone = await journey.removeSpace('c1c2c3d4e5f6', { allowUnsaved: true });
+    expect(gone).toMatchObject({ removed: false, failures: [{ code: 'place_not_found' }] });
+    expect(records.read('c1c2c3d4e5f6')).toEqual({ status: 'missing', record: null });
+    expect(await journey.listSpaces()).toEqual([]);
+    expect(await place.list()).toEqual([]);
+  });
+
+  it('takes the first place when the request names none, and refuses a place it does not have', async () => {
+    const { journey, place, events } = journeyWith({ morePlaces: [remote()] });
+    const { id, placeId } = await journey.createSpace(REQUEST);
+    expect(placeId).toBe('memory');
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect((await place.list()).map((space) => space.id)).toEqual([id]);
+    await expect(journey.createSpace({ ...REQUEST, placeId: 'cluster' })).rejects.toMatchObject({ code: 'place_not_found' });
+  });
+
+  it('is idle only while no creation and no action is under way; a failed creation does not hold it', async () => {
+    const { journey, events, releaseCodeIn } = journeyWith({ holdCodeIn: true });
+    expect(journey.isIdle()).toBe(true);
+    const { id } = await journey.createSpace(REQUEST);
+    expect(journey.isIdle()).toBe(false);
+    releaseCodeIn();
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect(journey.isIdle()).toBe(true);
+    const failing = journeyWith({ failAt: 'setNetwork' });
+    const failed = await failing.journey.createSpace(REQUEST);
+    expect(await until(() => steps(failing.events, failed.id).includes('failed'))).toBe(true);
+    expect(failing.journey.isIdle()).toBe(true);
+  });
+
+  it('keeps listing the spaces of a place that cannot be asked, as unreachable, from the records', async () => {
+    const second = remote();
+    const logs = [];
+    const { journey, events, records, clock } = journeyWith({ morePlaces: [second], logger: { warn: (line) => logs.push(line), info: (line) => logs.push(line) } });
+    const local = await journey.createSpace(REQUEST);
+    const away = await journey.createSpace({ ...REQUEST, name: 'On the box', placeId: 'remote' });
+    expect(await until(() => steps(events, local.id).includes('ready') && steps(events, away.id).includes('ready'))).toBe(true);
+    const { list: answer, remove: removal } = second;
+    second.list = async () => { throw new SpaceError('place_unreachable', 'box did not answer'); };
+    second.remove = async () => { throw new SpaceError('place_unreachable', 'box did not answer'); };
+
+    const listed = await journey.listSpaces();
+    expect(listed.map(({ id, placeId, state }) => [id, placeId, state])).toEqual([[local.id, 'memory', 'running'], [away.id, 'remote', 'unreachable']]);
+    // The machine of the place, and the place's failure, so the group can say why the space is out of reach.
+    expect(listed[1]).toMatchObject({ name: 'On the box', machine: 'box', projectDirectory: PROJECT, directory: `/spaces/${away.id}/project`, network: NETWORK, step: null, failure: { code: 'place_unreachable', message: 'box did not answer' }, damaged: false });
+    expect(listed[0].machine).toBeNull();
+    expect(logs.filter((line) => line.includes('cannot be asked'))).toHaveLength(1);
+    await journey.listSpaces();
+    expect(logs.filter((line) => line.includes('cannot be asked'))).toHaveLength(1);
+    expect(records.read(away.id).status).toBe('ok');
+
+    // The switch cannot stop what it cannot reach, and says so.
+    const turned = await journey.stopAllSpaces();
+    expect(turned.stopped).toEqual([{ id: local.id, name: 'Fix login' }]);
+    expect(turned.stillRunning).toEqual([{ id: away.id, name: 'On the box', code: 'place_unreachable', message: 'box did not answer', details: null }]);
+    expect(turned.unknown).toMatchObject({ code: 'place_unreachable' });
+    journey.reopen();
+
+    // A delete while the machine is away removes nothing and keeps the record, so the space stays listed.
+    const refused = await journey.removeSpace(away.id, { allowUnsaved: true });
+    expect(refused).toMatchObject({ removed: false, failures: [{ code: 'place_unreachable' }] });
+    expect(records.read(away.id).status).toBe('ok');
+    expect((await journey.listSpaces()).find((space) => space.id === away.id)).toMatchObject({ state: 'unreachable' });
+
+    // Back, once the pause between attempts is over: the place's own list is the truth again.
+    second.list = answer;
+    second.remove = removal;
+    clock.time += PLACE_RETRY_CAP_MS;
+    expect((await journey.listSpaces()).find((space) => space.id === away.id)).toMatchObject({ state: 'running' });
+    expect(logs.filter((line) => line.includes('answers again'))).toHaveLength(1);
   });
 });
 
@@ -373,10 +494,11 @@ describe('the journey: start, stop, remove', () => {
     expect((await place.list()).map((space) => space.state).sort()).toEqual(['exited', 'exited', 'running']);
   });
 
-  it('turns off without the list when the place cannot give one, and says it does not know what runs', async () => {
-    const { journey, place } = await ready();
+  it('turns off without the list when the place cannot give one, reports the spaces it remembers there as not stopped, and says it does not know what else runs', async () => {
+    const { journey, place, id } = await ready();
     place.list = async () => { throw new SpaceError('docker_command_failed', 'docker ps exited 1'); };
-    expect(await journey.stopAllSpaces()).toEqual({ stopped: [], stillRunning: [], unknown: { code: 'docker_command_failed', message: 'docker ps exited 1', details: null } });
+    const failure = { code: 'docker_command_failed', message: 'docker ps exited 1', details: null };
+    expect(await journey.stopAllSpaces()).toEqual({ stopped: [], stillRunning: [{ id, name: 'Fix login', ...failure }], unknown: failure });
     await expect(journey.createSpace(REQUEST)).rejects.toMatchObject({ code: 'isolated_spaces_off' });
   });
 
@@ -639,6 +761,31 @@ describe('the journey: grants', () => {
     await expect(journey.grantAccess(id, anthropic)).rejects.toMatchObject({ code: 'space_not_running' });
     expect(calls.filter(([name]) => name === 'addGrant')).toEqual([]);
     await expect(journey.grantAccess('0f0f0f0f0f0f', anthropic)).rejects.toMatchObject({ code: 'space_not_found' });
+  });
+
+  it('gives the access a creation carries before the space is ready, and lists what it could not give until a grant succeeds', async () => {
+    const made = journeyWith({ hostEnvironment: {} });
+    const { journey, records, events } = made;
+    const { id } = await journey.createSpace({ ...REQUEST, grants: [anthropic, openai] });
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect(steps(events, id)).toEqual(['checking_place', 'creating', 'setting_network', 'bringing_code', 'giving_access', 'ready']);
+
+    // The typed key went in; the variable the host does not have is listed with its reason.
+    expect(records.read(id).record.grants.map((grant) => grant.id)).toEqual(['anthropic']);
+    const listed = (await journey.listSpaces()).find((space) => space.id === id);
+    expect(listed.accessFailures).toEqual([expect.objectContaining({ provider: 'openai', code: 'secret_source_missing' })]);
+    expect(JSON.stringify(listed)).not.toContain(KEY);
+    expect(JSON.stringify(records.read(id).record)).not.toContain(KEY);
+
+    // A later grant for the provider takes its failure off the list.
+    await journey.grantAccess(id, { ...openai, secret: { kind: 'typed', value: 'sk-live-later' } });
+    expect((await journey.listSpaces()).find((space) => space.id === id).accessFailures).toEqual([]);
+  });
+
+  it('refuses a creation whose access is not model access', async () => {
+    const { journey } = journeyWith();
+    await expect(journey.createSpace({ ...REQUEST, grants: [registry] })).rejects.toMatchObject({ code: 'invalid_grant_request' });
+    await expect(journey.createSpace({ ...REQUEST, grants: [{ kind: 'model', provider: 'anthropic' }] })).rejects.toMatchObject({ code: 'invalid_grant_request' });
   });
 
   it('keeps a grant whose configuration inside was not written, and writes it again at the next start', async () => {
@@ -1043,6 +1190,92 @@ describe('the journey: grants', () => {
   });
 });
 
+describe('the journey: a provider of the user\'s own', () => {
+  const OLLAMA = { name: 'Ollama (local)', package: 'aisdk:@ai-sdk/openai-compatible', baseURL: 'http://localhost:11434/v1', headers: {}, models: { 'qwen3:8b': { modelID: 'qwen3:8b', name: 'Qwen3 8B' } }, key: null };
+  const LIGHTHOUSE = { name: 'Lighthouse', package: 'aisdk:@ai-sdk/openai', baseURL: 'https://lighthouse-gw.example.dev/v1', headers: { 'x-team': 'platform' }, models: { 'gpt-5.5': { modelID: 'gpt-5.5' } }, key: 'sk-lighthouse' };
+  /** The host's providers as a stand-in reads them, by id; `reads` records which directory each read named. */
+  const hostProvidersOf = (definitions, reads = []) => ({
+    read: async (providerId, directory) => { reads.push([providerId, directory]); return definitions[providerId] ?? null; },
+    list: async () => Object.entries(definitions).map(([id, definition]) => ({ id, name: definition.name, hasKey: definition.key !== null })),
+  });
+  const ready = async (options) => {
+    const made = journeyWith(options);
+    const { id } = await made.journey.createSpace(REQUEST);
+    await until(() => steps(made.events, id).includes('ready'));
+    await until(() => made.records.read(id).record?.history !== 'pending');
+    made.calls.splice(0);
+    return { ...made, id };
+  };
+
+  it('reads the provider from the host for the space\'s project, sends "this machine" to the Docker host, and tells OpenCode inside the provider as the host defines it', async () => {
+    const reads = [];
+    const { journey, records, calls, id } = await ready({ hostProviders: hostProvidersOf({ 'ollama-local': OLLAMA, lighthouse: LIGHTHOUSE }, reads) });
+    const ollama = await journey.grantAccess(id, { kind: 'custom', provider: 'ollama-local' });
+    expect(ollama.grant).toEqual({ kind: 'custom', id: 'ollama-local', provider: 'ollama-local', url: 'http://gatekeeper:8080/model/ollama-local' });
+    const lighthouse = await journey.grantAccess(id, { kind: 'custom', provider: 'lighthouse' });
+    expect(lighthouse.grant).toMatchObject({ kind: 'custom', id: 'lighthouse' });
+    expect(reads.every(([, directory]) => directory === PROJECT)).toBe(true);
+
+    const definitionOf = (definition) => { const { key: _key, ...rest } = definition; return rest; };
+    expect(calls).toEqual([
+      // No key: the window forwards the request as the space made it, less its credential headers.
+      ['addGrant', id, { id: 'ollama-local', upstream: 'http://host.docker.internal:11434/v1', header: null, secret: null }],
+      ['writeProviderConfig', id, [expect.objectContaining({ id: 'ollama-local' })], new Map([['ollama-local', definitionOf(OLLAMA)]])],
+      // The provider's own headers go with the key to the gatekeeper, and nowhere else.
+      ['addGrant', id, { id: 'lighthouse', upstream: 'https://lighthouse-gw.example.dev/v1', header: 'authorization', secret: 'sk-lighthouse', headers: { 'x-team': 'platform' } }],
+      ['writeProviderConfig', id, [expect.objectContaining({ id: 'ollama-local' }), expect.objectContaining({ id: 'lighthouse' })], new Map([['ollama-local', definitionOf(OLLAMA)], ['lighthouse', definitionOf(LIGHTHOUSE)]])],
+    ]);
+    // The headers are read on the host and go to the gatekeeper; the record names none of them.
+    expect(JSON.stringify(records.read(id).record)).not.toContain('platform');
+    // The record names the providers and nothing of them: no address, no key.
+    expect(records.read(id).record.grants).toEqual([{ kind: 'custom', id: 'ollama-local', provider: 'ollama-local' }, { kind: 'custom', id: 'lighthouse', provider: 'lighthouse' }]);
+    const onDisk = JSON.stringify(records.read(id).record);
+    expect(onDisk).not.toContain('11434');
+    expect(onDisk).not.toContain('sk-lighthouse');
+    expect(JSON.stringify(await journey.listSpaces({ access: true }))).not.toContain('sk-lighthouse');
+  });
+
+  it('refuses a provider the host does not define, one whose SDK the window cannot serve, and one without an address', async () => {
+    const bedrock = { ...LIGHTHOUSE, package: 'aisdk:@ai-sdk/amazon-bedrock' };
+    const noAddress = { ...LIGHTHOUSE, baseURL: null };
+    const { journey, records, calls, id } = await ready({ hostProviders: hostProvidersOf({ bedrock, 'no-address': noAddress }) });
+    await expect(journey.grantAccess(id, { kind: 'custom', provider: 'nowhere' })).rejects.toMatchObject({ code: 'provider_not_found' });
+    await expect(journey.grantAccess(id, { kind: 'custom', provider: 'bedrock' })).rejects.toMatchObject({ code: 'provider_not_supported' });
+    await expect(journey.grantAccess(id, { kind: 'custom', provider: 'no-address' })).rejects.toMatchObject({ code: 'provider_not_supported' });
+    await expect(journey.grantAccess(id, { kind: 'custom', provider: 'bedrock', upstream: 'https://x.example/' })).rejects.toMatchObject({ code: 'invalid_grant_request' });
+    expect(calls).toEqual([]);
+    expect(records.read(id).record.grants).toEqual([]);
+  });
+
+  it('says the grant again after a start from the host\'s definition as it is then, and leaves one the host no longer defines as "needs access"', async () => {
+    const definitions = { 'ollama-local': OLLAMA, lighthouse: LIGHTHOUSE };
+    const { journey, calls, gatekeeper, id } = await ready({ hostProviders: hostProvidersOf(definitions) });
+    await journey.grantAccess(id, { kind: 'custom', provider: 'ollama-local' });
+    await journey.grantAccess(id, { kind: 'custom', provider: 'lighthouse' });
+    await journey.stopSpace(id);
+    // Like the program's memory: a stop forgets every grant.
+    gatekeeper.forget(id);
+    // Meanwhile the user changed Lighthouse's key in Settings and deleted Ollama there.
+    definitions.lighthouse = { ...LIGHTHOUSE, key: 'sk-lighthouse-2' };
+    delete definitions['ollama-local'];
+    calls.splice(0);
+
+    const started = await journey.startSpace(id);
+    expect(started).toMatchObject({ grantsRestored: ['lighthouse'], needsAccess: ['ollama-local'] });
+    expect(calls.filter(([name]) => name === 'addGrant')).toEqual([['addGrant', id, { id: 'lighthouse', upstream: 'https://lighthouse-gw.example.dev/v1', header: 'authorization', secret: 'sk-lighthouse-2', headers: { 'x-team': 'platform' } }]]);
+    // The configuration inside is written from what the host defines now; the deleted provider is left out.
+    const [write] = calls.filter(([name]) => name === 'writeProviderConfig');
+    expect(write[2].map((grant) => grant.id)).toEqual(['ollama-local', 'lighthouse']);
+    expect(Array.from(write[3].keys())).toEqual(['lighthouse']);
+    expect((await journey.listSpaces({ access: true }))[0]).toMatchObject({ access: 'needs_access', needsAccess: ['ollama-local'] });
+  });
+
+  it('lists the host\'s own providers for the dialogs and leaves the catalog\'s providers to their own rows', async () => {
+    const { journey } = await ready({ hostProviders: hostProvidersOf({ 'ollama-local': OLLAMA, openai: LIGHTHOUSE, 'github-copilot': LIGHTHOUSE }) });
+    expect(await journey.readHostCustomProviders(PROJECT)).toEqual({ providers: [{ id: 'ollama-local', name: 'Ollama (local)', hasKey: false }] });
+  });
+});
+
 describe('the journey: journal and apply', () => {
   const ready = async (options) => {
     const made = journeyWith(options);
@@ -1153,7 +1386,7 @@ describe('the journey: the project folder of a space', () => {
     const asked = [];
     // The record names the folder: a journey that no longer has the project still lists it.
     const unregistered = createSpaceJourney({
-      manager: first.manager, place: first.place, gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: first.records,
+      manager: first.manager, places: createPlaceRegistry([first.place]), gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: first.records,
       spaceOpenCode: {}, serverInside: {}, restartOpenCodeInside: async () => {},
       listProjectDirectories: async () => [],
       folderExists: async (directory) => { asked.push(directory); return false; },
@@ -1170,7 +1403,7 @@ describe('the journey: the project folder of a space', () => {
     fs.writeFileSync(file, '');
     const { first } = await made();
     const look = (directory) => createSpaceJourney({
-      manager: first.manager, place: first.place, gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: { read: () => ({ record: { repository: directory } }) },
+      manager: first.manager, places: createPlaceRegistry([first.place]), gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: { read: () => ({ record: { repository: directory } }) },
       spaceOpenCode: {}, serverInside: {}, restartOpenCodeInside: async () => {},
       listProjectDirectories: async () => [],
       logger: quiet,

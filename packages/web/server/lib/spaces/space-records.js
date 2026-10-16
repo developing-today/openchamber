@@ -74,6 +74,14 @@ export const grantSchema = z.discriminatedUnion('kind', [
     provider: z.string().regex(GRANT_ID_PATTERN),
     method: z.string().regex(/^[a-z0-9-]{1,64}$/),
   }).strict(),
+  // A provider the user defined in the host's OpenCode configuration, "custom" in Settings: its
+  // address, its key and its models are read from the host again at every start, so the record
+  // names only the provider.
+  z.object({
+    kind: z.literal('custom'),
+    id: z.string().regex(GRANT_ID_PATTERN),
+    provider: z.string().regex(GRANT_ID_PATTERN),
+  }).strict(),
 ]);
 const MAX_GRANTS = 100;
 
@@ -100,6 +108,11 @@ const setupSchema = z.discriminatedUnion('state', [
 
 const recordSchema = z.object({
   version: z.literal(1),
+  /** The place the space was made on. A record from before there were two names the local Docker place. */
+  placeId: z.string().min(1).default('docker'),
+  /** The display name and the creation time, as the labels hold them, for a list while the place cannot be asked. */
+  name: z.string().nullable().default(null),
+  created: z.string().nullable().default(null),
   network: networkSchema,
   /** The host repository the code came from, as the user's project names it. */
   repository: z.string().min(1).nullable().default(null),
@@ -195,5 +208,21 @@ export function createSpaceRecords({ dataDir, logger = console }) {
     }
   };
 
-  return { read, write, update, remove };
+  /** Every record the host holds, `{ id, record }`, by space id; one that cannot be read is left out with its warning. */
+  const list = () => {
+    let names;
+    try {
+      names = fs.readdirSync(directory);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') logger.warn?.(`[spaces] could not list the records: ${error?.code ?? error?.message ?? error}`);
+      return [];
+    }
+    return names
+      .filter((name) => /^[0-9a-f]{12}\.json$/.test(name))
+      .map((name) => ({ id: name.slice(0, -5), ...read(name.slice(0, -5)) }))
+      .filter((entry) => entry.status === 'ok')
+      .map(({ id, record }) => ({ id, record }));
+  };
+
+  return { read, write, update, remove, list };
 }

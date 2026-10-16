@@ -33,7 +33,9 @@ type SpaceAccessNotice =
 export const spaceAccessNoticeOf = (entry: SpaceEntry | undefined): SpaceAccessNotice | null => {
   if (!entry || entry.state !== 'running') return null;
   if (entry.access === 'unknown') return { kind: 'unknown' };
-  const models = entry.grants.filter((grant) => grant.kind === 'model' || grant.kind === 'login');
+  const models = entry.grants.filter((grant) => grant.kind === 'model' || grant.kind === 'login' || grant.kind === 'custom');
+  // Whatever the network: OpenCode's free models refuse a request from inside a space, measured
+  // on 2026-10-14 with the open internet ("free tier can only be used from within OpenCode").
   if (models.length === 0) return { kind: 'no_model' };
   const providers = models.filter((grant) => entry.needsAccess.includes(grant.id)).map((grant) => grant.provider);
   return providers.length > 0 ? { kind: 'needs_again', providers } : null;

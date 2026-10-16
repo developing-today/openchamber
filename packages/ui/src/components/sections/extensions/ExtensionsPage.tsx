@@ -9,7 +9,7 @@ import {
   SettingsStackedField,
 } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { IntegrationCatalogCard } from '@/components/sections/integrations/IntegrationCatalogCard';
 import {
   Dialog,
   DialogContent,
@@ -239,33 +239,21 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
     : enabled
       ? t('settings.extensions.status.enabled')
       : t('settings.extensions.status.disabled');
-  const statusClassName = enterpriseBlocked || needsApproval
-    ? 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]'
-    : enabled
-      ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
-      : 'bg-[var(--surface-muted)] text-muted-foreground';
-
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]">
-        <CollapsibleTrigger
-          className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
-        >
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-            <GuestIcon
-              icon={resolveGuestIconName(guest.icon)}
-              iconSrc={iconSrc}
-              className="size-5 text-foreground"
-            />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-foreground">{guest.name}</div>
-            <p className="mt-0.5 truncate text-xs leading-snug text-muted-foreground">
-              {meta}
-            </p>
-          </div>
+    <IntegrationCatalogCard
+      logo={(
+        <GuestIcon
+          icon={resolveGuestIconName(guest.icon)}
+          iconSrc={iconSrc}
+          className="size-5 text-foreground"
+        />
+      )}
+      name={guest.name}
+      description={meta}
+      badges={(
+        <>
           {builtIn ? (
-            <span className="shrink-0 rounded-full border border-[var(--interactive-border)] px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className="oc-tile-inset shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
               {t('settings.extensions.source.bundled')}
             </span>
           ) : null}
@@ -274,21 +262,13 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
               {t('settings.extensions.update.badge', { version: update.version })}
             </span>
           ) : null}
-          <span
-            aria-live="polite"
-            className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium', statusClassName)}
-          >
-            {statusLabel}
-          </span>
-          <Icon
-            name="arrow-down-s"
-            className={cn(
-              'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
-              open && 'rotate-180',
-            )}
-          />
-        </CollapsibleTrigger>
-        <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
+        </>
+      )}
+      status={statusLabel}
+      statusTone={enterpriseBlocked || needsApproval ? 'warning' : enabled ? 'success' : 'neutral'}
+      open={open}
+      onOpenChange={setOpen}
+    >
           <div className="space-y-3">
             <p className="typography-meta truncate font-mono text-muted-foreground" title={location}>
               {location}
@@ -378,7 +358,7 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="ml-auto"
+                  className="ms-auto"
                   onClick={() => void openExternalUrl(sourceUrl)}
                 >
                   <Icon name="external-link" className="size-4" />
@@ -387,9 +367,7 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
               ) : null}
             </div>
           </div>
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
+    </IntegrationCatalogCard>
   );
 };
 
@@ -406,8 +384,8 @@ const UnreadableExtensionCard: React.FC<{
   const name = guest.name ?? guest.id ?? t('settings.extensions.unreadable.unnamed');
   const removableId = guest.builtIn ? null : guest.id;
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-4 py-3">
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
+    <div className="flex min-w-0 items-center gap-3 oc-tile rounded-xl px-4 py-3">
+      <div className="flex size-10 shrink-0 items-center justify-center oc-tile-inset rounded-[10px]">
         <Icon name="error-warning" className="size-5 text-[var(--status-error)]" />
       </div>
       <div className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{name}</div>
@@ -814,8 +792,8 @@ export const ExtensionsPage: React.FC = () => {
                   placeholder={t('settings.extensions.add.placeholder')}
                   aria-label={t('settings.extensions.add.label')}
                   className={cn(
-                    'h-8 min-w-0 flex-1 rounded-md pl-3',
-                    nativePaths ? 'pr-14' : 'pr-8',
+                    'h-8 min-w-0 flex-1 rounded-md ps-3',
+                    nativePaths ? 'pe-14' : 'pe-8',
                   )}
                   disabled={busy}
                 />
@@ -828,7 +806,7 @@ export const ExtensionsPage: React.FC = () => {
                   aria-hidden="true"
                   onChange={(event) => void onZipPicked(event)}
                 />
-                <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                <div className="absolute inset-e-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                   {nativePaths ? (
                     <Button
                       type="button"

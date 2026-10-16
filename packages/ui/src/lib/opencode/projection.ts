@@ -455,7 +455,15 @@ export function projectMessage(info: SessionMessageInfo, sessionID: string): Pro
       }
     case "idle":
       return {
-        message: compact({ id: info.id, sessionID, role: "idle", time: { ...info.time }, outcome: info.outcome, metadata }),
+        message: compact({
+          id: info.id,
+          sessionID,
+          role: "idle",
+          time: { ...info.time },
+          outcome: info.outcome,
+          error: info.error,
+          metadata,
+        }),
         parts: [],
       }
   }
@@ -498,14 +506,23 @@ export function mergeConfigDocuments(entries: readonly ConfigEntry[]): Config {
 }
 
 /**
+ * A document's policy statements. OpenCode 2.0.29 serves them as top-level
+ * `policies`; older servers keep them under `experimental.policies`. Same
+ * order as upstream's merge, the experimental ones first.
+ */
+function documentPolicies(entry: ConfigDocument) {
+  return [...(entry.info.experimental?.policies ?? []), ...(entry.info.policies ?? [])]
+}
+
+/**
  * Whether any config document denies a provider through a `provider.use`
  * policy. Read per document: the folded config keeps only the last
- * document's `experimental`, and policies from every layer apply. Statements
+ * document's policies, and policies from every layer apply. Statements
  * from a connected OpenCode Console workspace are not part of `/api/config`.
  */
 export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
   return entries.some((entry) => isDocument(entry)
-    && (entry.info.experimental?.policies ?? []).some((policy) => policy.action === "provider.use" && policy.effect === "deny"))
+    && documentPolicies(entry).some((policy) => policy.action === "provider.use" && policy.effect === "deny"))
 }
 
 /** One `integration.use` statement: `resource` is `mcp:<server>` or `skill:<id>`, with `*` and `?` wildcards. */
@@ -521,7 +538,7 @@ export function readIntegrationPolicies(entries: readonly ConfigEntry[]): Integr
   return entries
     .filter(isDocument)
     .reverse()
-    .flatMap((entry) => entry.info.experimental?.policies ?? [])
+    .flatMap(documentPolicies)
     .flatMap((policy) => (policy.action === "integration.use" ? [{ resource: policy.resource, effect: policy.effect }] : []))
 }
 

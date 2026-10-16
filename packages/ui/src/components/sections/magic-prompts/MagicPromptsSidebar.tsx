@@ -47,6 +47,12 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
           { id: 'session.fusion', titleKey: 'settings.magicPrompts.sidebar.item.sessionFusion' },
         ],
       },
+      {
+        groupKey: 'settings.magicPrompts.sidebar.group.memory',
+        items: [
+          { id: 'memory.tidy', titleKey: 'settings.magicPrompts.sidebar.item.memoryTidy' },
+        ],
+      },
     ] as const;
   }, []);
 
@@ -72,7 +78,7 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
                     onItemSelect?.();
                   }}
                   className={cn(
-                    'flex w-full items-center rounded-md px-2 py-1.5 text-left transition-colors',
+                    'flex w-full items-center rounded-md px-2 py-1.5 text-start transition-colors',
                     selected ? 'bg-interactive-selection text-foreground' : 'text-foreground hover:bg-interactive-hover'
                   )}
                 >

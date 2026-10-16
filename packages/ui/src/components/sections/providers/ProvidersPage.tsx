@@ -139,10 +139,9 @@ export const ProvidersPage: React.FC = () => {
   const showAllModels = useUIStore((state) => state.showAllModels);
 
   // The app only loads providers for the project it is on; Settings has to ask
-  // for the one it is looking at.
+  // for the one it is looking at. Without a project that is the app's own.
   const loadProviders = useConfigStore((state) => state.loadProviders);
   React.useEffect(() => {
-    if (!settingsDirectory) return;
     void loadProviders({ directory: settingsDirectory, source: 'settings:providers' });
   }, [loadProviders, settingsDirectory]);
 
@@ -894,7 +893,7 @@ export const ProvidersPage: React.FC = () => {
           <div
             className={cn(
               'space-y-4',
-              providerConnections.length > 0 && 'rounded-xl border border-[var(--interactive-border)] p-4',
+              providerConnections.length > 0 && 'oc-tile rounded-xl p-4',
             )}
           >
             {showApiKeyAuth ? (
@@ -956,12 +955,12 @@ export const ProvidersPage: React.FC = () => {
         settingsItem="providers.models"
       >
             <div className="relative mb-2">
-              <Icon name="search" className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Icon name="search" className="absolute inset-s-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={modelQuery}
                 onChange={(event) => setModelQuery(event.target.value)}
                 placeholder={t('settings.providers.page.models.filterPlaceholder')}
-                className="h-7 pl-8 w-full"
+                className="h-7 ps-8 w-full"
               />
             </div>
 
@@ -1020,7 +1019,7 @@ export const ProvidersPage: React.FC = () => {
                         ) : (
                           <>
                         {tokenSummary ? (
-                          <span className="typography-micro text-muted-foreground flex-shrink-0 bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">
+                          <span className="typography-micro text-muted-foreground flex-shrink-0 oc-tile-inset px-1.5 py-0.5 rounded">
                             {tokenSummary}
                           </span>
                         ) : null}
@@ -1029,7 +1028,7 @@ export const ProvidersPage: React.FC = () => {
                             {capabilityIcons.map(({ key, icon: iconName, label }) => (
                               <span
                                 key={key}
-                                className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground bg-[var(--surface-muted)]"
+                                className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground oc-tile-inset"
                                 title={label}
                                 aria-label={label}
                               >

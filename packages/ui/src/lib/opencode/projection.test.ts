@@ -260,6 +260,16 @@ describe("projectMessage (other roles)", () => {
     expect(projected[5].message).toMatchObject({ status: "failed", summary: "", error: { message: "boom" } })
     expect(projected[8].message).toMatchObject({ directory: "/b", previous: "/a" })
   })
+
+  test("an idle record keeps the error of a failed turn", () => {
+    const failed = projectMessage(
+      { id: "1", type: "idle", time: { created: 1 }, outcome: "failed", error: { type: "provider", message: "quota" } },
+      "ses_1",
+    )
+    expect(failed.message).toMatchObject({ role: "idle", outcome: "failed", error: { type: "provider", message: "quota" } })
+    const succeeded = projectMessage({ id: "2", type: "idle", time: { created: 2 }, outcome: "succeeded" }, "ses_1")
+    expect("error" in succeeded.message).toBe(false)
+  })
 })
 
 describe("mergeConfigDocuments", () => {
@@ -324,6 +334,12 @@ describe("deniesAnyProvider", () => {
     ])).toBe(false)
     expect(deniesAnyProvider([doc("/repo/opencode.json")])).toBe(false)
   })
+
+  test("reads top-level policies, where OpenCode 2.0.29 serves them", () => {
+    expect(deniesAnyProvider([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "provider.use", resource: "*", effect: "deny" }] } },
+    ])).toBe(true)
+  })
 })
 
 describe("integration policies", () => {
@@ -359,6 +375,13 @@ describe("integration policies", () => {
       ] }),
     ]), "mcp:docs")).toBe(false)
     expect(isIntegrationDenied([], "mcp:docs")).toBe(false)
+  })
+
+  test("reads top-level policies, where OpenCode 2.0.29 serves them", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "mcp:github", effect: "deny" }] } },
+    ])
+    expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
   })
 })
 
