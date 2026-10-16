@@ -1,13 +1,13 @@
 <!--
   developing-today/openchamber fork notice:
   This fork tracks upstream openchamber/openchamber (branch main).
-  Latest upstream commit merged: 09494f3db599b9c81e0eecea86ba16e75cecf362 (fix(browser): agent clicks open pickers that react to mousedown or focus (#4703), v2.2.0-103-g09494f3db) via merge commit ca9aa8eb0.
+  Latest upstream commit merged: 2b94db8470ca77d946917e937e3b04d7b0b678bc (feat(render): let agents ask the user to choose on a page, Fri Oct 16 03:45:18 2026 +0300) via merge commit 8f9956331.
 -->
 
 > [!NOTE]
 > **Fork Information (`developing-today/openchamber`):**
 > This repository is a fork of [OpenChamber](https://github.com/openchamber/openchamber) tracking upstream `main`.
-> - **Latest upstream commit merged**: `09494f3db599b9c81e0eecea86ba16e75cecf362` (`v2.2.0-103-g09494f3db`, merged via `ca9aa8eb0`).
+> - **Latest upstream commit merged**: `2b94db8470ca77d946917e937e3b04d7b0b678bc` (Fri Oct 16 2026, merged via `8f9956331`).
 >
 > **High-Level Additions & Differences in this Fork:**
 > - **Model Pools UI & Recurring Schedules**: Settings section for managing OpenCode route pools (`experimental.model_routes`), target memberships, weights, and recurring time-based weight schedules (`ScheduleFields` / `ScheduleListEditor` with timezone, weekdays, and day-of-month windows).
