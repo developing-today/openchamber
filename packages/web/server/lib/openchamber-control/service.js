@@ -879,6 +879,7 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action)) {
         return await knowledgeActions.execute(action, input, contextDirectory, options.contextSessionId);
+      }
       const actionModule = actionModules.find((entry) => entry.actions.includes(action));
       if (actionModule) {
         return await actionModule.execute(action, input, {
