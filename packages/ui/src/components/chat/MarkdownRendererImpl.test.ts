@@ -269,7 +269,7 @@ mock.module('@/lib/desktop', () => ({ isDesktopLocalOriginActive: () => false, i
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => () => undefined }));
 mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
 mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, resolveTildeFilePath: (value: string) => value, toAbsoluteFilePath: () => '' }));
-mock.module('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ homeDirectory: '' }) } }));
+mock.module('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { homeDirectory: string }) => string) => selector({ homeDirectory: '' }), { getState: () => ({ homeDirectory: '' }) }) }));
 mock.module('./markdown/markdownCore', () => ({
     getCachedMarkdownBlocks: () => cachedRendererBlocks,
     renderMarkdownBlocks: () => renderMarkdownBlocksForTest(),

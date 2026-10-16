@@ -341,7 +341,7 @@ const wrapBlockCodePathTokens = (
   codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
 };
 
-const getResolvedReference = (rawValue: string, effectiveDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
+const getResolvedReference = (rawValue: string, effectiveDirectory: string, homeDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
   const parsed = parseFileReference(rawValue);
   if (!parsed || !isLikelyFilePathValue(parsed.path)) {
     return null;
@@ -350,7 +350,7 @@ const getResolvedReference = (rawValue: string, effectiveDirectory: string): (Pa
   // A `~/...` reference names the user's home directory, not a path relative
   // to the session — joining it under effectiveDirectory would look for a
   // literal "~" folder there and never find the file.
-  const expandedPath = resolveTildeFilePath(parsed.path, useDirectoryStore.getState().homeDirectory);
+  const expandedPath = resolveTildeFilePath(parsed.path, homeDirectory);
   const resolvedPath = isAbsolutePath(expandedPath)
     ? normalizePath(expandedPath)
     : toAbsolutePath(effectiveDirectory, expandedPath);
@@ -382,6 +382,10 @@ const useFileReferenceInteractions = ({
   enabled: boolean;
 }) => {
   const annotationDebounceRef = React.useRef<number | null>(null);
+  // Reactive, not a one-off `.getState()` read: the home directory often
+  // resolves after this effect's first run (see useDirectoryStore.ts), and a
+  // `~` reference annotated before then must be picked up once it's known.
+  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -426,7 +430,7 @@ const useFileReferenceInteractions = ({
 
     const openFileReference = async (sourceElement: HTMLElement, options?: { external: boolean }) => {
       const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
-      const parsedReference = getResolvedReference(raw, effectiveDirectory);
+      const parsedReference = getResolvedReference(raw, effectiveDirectory, homeDirectory);
       if (!parsedReference) {
         return;
       }
@@ -472,7 +476,7 @@ const useFileReferenceInteractions = ({
 
     const attachClickGuard = () => attachFileRefClickGuard(container, {
       hrefCandidate: extractHrefFileReferenceCandidate,
-      isResolvable: (raw) => getResolvedReference(raw, effectiveDirectory) !== null,
+      isResolvable: (raw) => getResolvedReference(raw, effectiveDirectory, homeDirectory) !== null,
       openFileReference,
     });
 
@@ -557,7 +561,7 @@ const useFileReferenceInteractions = ({
       const links: Array<{ candidate: HTMLElement; resolvedPath: string; target: Promise<string | null> }> = [];
       const unlinked: HTMLElement[] = [];
       for (const candidate of Array.from(candidates)) {
-        const resolved = getResolvedReference(extractPathCandidateFromElement(candidate), effectiveDirectory);
+        const resolved = getResolvedReference(extractPathCandidateFromElement(candidate), effectiveDirectory, homeDirectory);
         if (!resolved || linkedCount >= fileReferenceLinkLimit) {
           unlinked.push(candidate);
           continue;
@@ -569,7 +573,7 @@ const useFileReferenceInteractions = ({
       const blocks = findBlockCodePathTokens(container).map(({ codeBlock, tokens }) => ({
         codeBlock,
         tokens: tokens.flatMap((token) => {
-          const resolved = getResolvedReference(token.raw, effectiveDirectory);
+          const resolved = getResolvedReference(token.raw, effectiveDirectory, homeDirectory);
           if (!resolved || linkedCount >= fileReferenceLinkLimit) return [];
           linkedCount += 1;
           return [{ ...token, target: resolveTarget(resolved) }];
@@ -593,7 +597,7 @@ const useFileReferenceInteractions = ({
           for (const { candidate, resolvedPath, targetPath } of linkResults) {
             if (!container.contains(candidate)) continue;
             const latestRaw = extractPathCandidateFromElement(candidate);
-            if (getResolvedReference(latestRaw, effectiveDirectory)?.resolvedPath !== resolvedPath) continue;
+            if (getResolvedReference(latestRaw, effectiveDirectory, homeDirectory)?.resolvedPath !== resolvedPath) continue;
             if (targetPath) markFileLink(candidate, latestRaw, targetPath);
             else clearFileLinkAttributes(candidate);
           }
@@ -651,7 +655,7 @@ const useFileReferenceInteractions = ({
       removeClickGuard();
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor, enabled]);
+  }, [containerRef, editor, effectiveDirectory, homeDirectory, preferRuntimeEditor, enabled]);
 };
 
 // Draws a settled assistant part's local images in place of their labels
