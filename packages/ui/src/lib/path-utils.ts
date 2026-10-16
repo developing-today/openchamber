@@ -38,6 +38,26 @@ export const isAbsoluteFilePath = (value: string | null | undefined): boolean =>
   return normalized.startsWith('/') || WINDOWS_DRIVE_ABSOLUTE_PATTERN.test(normalized);
 };
 
+/**
+ * Expand a leading `~` into the given home directory, the same way a shell
+ * would. Without a known home directory the value is returned trimmed but
+ * otherwise unchanged, so a caller with no home yet falls back to treating it
+ * as a literal (relative) path rather than guessing.
+ */
+export const resolveTildeFilePath = (value: string, homeDirectory?: string | null): string => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('~')) {
+    return trimmed;
+  }
+  if (trimmed === '~') {
+    return homeDirectory || trimmed;
+  }
+  if ((trimmed.startsWith('~/') || trimmed.startsWith('~\\')) && homeDirectory) {
+    return `${homeDirectory}${trimmed.slice(1)}`;
+  }
+  return trimmed;
+};
+
 const toComparableFilePath = (value: string | null | undefined): string => {
   const normalized = normalizeFilePath(value);
   return WINDOWS_DRIVE_ABSOLUTE_PATTERN.test(normalized) || normalized.startsWith('//')

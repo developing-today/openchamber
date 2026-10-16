@@ -22,7 +22,8 @@ import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, openDeskto
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
-import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getDirectoryForFilePath, isFilePathWithinDirectory, resolveTildeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   getCachedMarkdownBlocks,
   renderMarkdownBlocks,
@@ -346,9 +347,13 @@ const getResolvedReference = (rawValue: string, effectiveDirectory: string): (Pa
     return null;
   }
 
-  const resolvedPath = isAbsolutePath(parsed.path)
-    ? normalizePath(parsed.path)
-    : toAbsolutePath(effectiveDirectory, parsed.path);
+  // A `~/...` reference names the user's home directory, not a path relative
+  // to the session — joining it under effectiveDirectory would look for a
+  // literal "~" folder there and never find the file.
+  const expandedPath = resolveTildeFilePath(parsed.path, useDirectoryStore.getState().homeDirectory);
+  const resolvedPath = isAbsolutePath(expandedPath)
+    ? normalizePath(expandedPath)
+    : toAbsolutePath(effectiveDirectory, expandedPath);
   if (!resolvedPath) {
     return null;
   }

@@ -7,6 +7,7 @@ import {
   isAbsoluteFilePath,
   isFilePathWithinDirectory,
   normalizeFilePath,
+  resolveTildeFilePath,
   toAbsoluteFilePath,
 } from './path-utils';
 
@@ -89,5 +90,27 @@ describe('path-utils', () => {
     const folders = getDisambiguatingFolders(['a/README.md', 'x/a/README.md']);
     expect(folders.get('a/README.md')).toBe('a');
     expect(folders.get('x/a/README.md')).toBe('x/a');
+  });
+
+  test('expands a leading tilde into the given home directory', () => {
+    expect(resolveTildeFilePath('~/notes.md', '/Users/dev')).toBe('/Users/dev/notes.md');
+    expect(resolveTildeFilePath('~', '/Users/dev')).toBe('/Users/dev');
+    expect(resolveTildeFilePath('~\\notes.md', '/Users/dev')).toBe('/Users/dev\\notes.md');
+  });
+
+  test('leaves a tilde path untouched without a known home directory', () => {
+    expect(resolveTildeFilePath('~/notes.md', null)).toBe('~/notes.md');
+    expect(resolveTildeFilePath('~/notes.md')).toBe('~/notes.md');
+  });
+
+  test('leaves a path without a leading tilde unchanged', () => {
+    expect(resolveTildeFilePath('src/notes.md', '/Users/dev')).toBe('src/notes.md');
+    expect(resolveTildeFilePath('~notes.md', '/Users/dev')).toBe('~notes.md');
+  });
+
+  test('resolves a tilde reference against the project through toAbsoluteFilePath', () => {
+    const expanded = resolveTildeFilePath('~/notes.md', '/Users/dev');
+    expect(isAbsoluteFilePath(expanded)).toBe(true);
+    expect(toAbsoluteFilePath('/Users/dev/projects/openchamber', expanded)).toBe('/Users/dev/notes.md');
   });
 });
