@@ -2,6 +2,7 @@ import { settingsDict } from './tr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -72,6 +73,7 @@ export const dict = {
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...sessionMenuHintsI18n.tr,
+  ...sidebarLayoutI18n.tr,
   ...projectKnowledgeI18n.tr,
   ...linearPanelI18n.tr,
   ...routingI18n.tr,

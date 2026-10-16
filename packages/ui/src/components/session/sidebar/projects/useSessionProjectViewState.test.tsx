@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import type { SessionGroup } from '../types';
+import { SIDEBAR_ACTIVITY_KEYS } from '../sessionSidebarRowModel';
 import { useSessionProjectViewState } from './useSessionProjectViewState';
 
 class ElementStub implements Partial<Element> {
@@ -110,7 +111,7 @@ describe('useSessionProjectViewState', () => {
       await act(async () => initialActions.setCollapsedActivities(new Set(['timeline'])));
       await act(async () => initialActions.collapseAll());
       expect(capture.state?.collapsedProjects).toEqual(new Set(['project-a', 'project-b']));
-      expect(capture.state?.collapsedActivities).toEqual(new Set(['timeline', 'chats', 'pinned', 'work']));
+      expect(capture.state?.collapsedActivities).toEqual(new Set(['timeline', ...SIDEBAR_ACTIVITY_KEYS]));
       await act(async () => initialActions.expandAll());
       expect(capture.state?.collapsedProjects).toEqual(new Set());
       expect(capture.state?.collapsedActivities).toEqual(new Set(['timeline']));

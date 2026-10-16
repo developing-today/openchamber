@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { DEFAULT_SIDEBAR_LAYOUT, sidebarLayoutSchema, type SidebarLayout } from './sidebarLayout';
 
 type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 // Worktree groups inside a project. 'recent' floats worktrees with the latest
@@ -37,6 +38,9 @@ type SessionDisplayStore = {
   showArchivedSessions: boolean;
   projectSortOrder: ProjectSortOrder;
   worktreeSortOrder: WorktreeSortOrder;
+  /** Section order, attention sections, the open session's hold and the List layout (`sidebarLayout.ts`). */
+  sidebarLayout: SidebarLayout;
+  setSidebarLayout: (layout: SidebarLayout) => void;
   setShowChatsSection: (show: boolean) => void;
   setShowWorkSection: (show: boolean) => void;
   setShowPinnedSection: (show: boolean) => void;
@@ -114,6 +118,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       showArchivedSessions: false,
       projectSortOrder: 'manual',
       worktreeSortOrder: 'manual',
+      sidebarLayout: DEFAULT_SIDEBAR_LAYOUT,
+      setSidebarLayout: (layout) => set({ sidebarLayout: layout }),
       setShowChatsSection: (show) => set({ showChatsSection: show }),
       setShowWorkSection: (show) => set({ showWorkSection: show }),
       setShowPinnedSection: (show) => set({ showPinnedSection: show }),
@@ -125,7 +131,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
-      version: 10,
+      version: 11,
       // v1→v2 adds projectSortOrder using the canonical manual ordering.
       // v2→v3 replaces the previously shipped recent default with manual.
       // v3→v4 removes displayMode (single sidebar row layout).
@@ -135,7 +141,20 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // v7→v8 turned Recent off by default.
       // v8→v9 adds worktreeSortOrder (manual by default).
       // v9→v10 drops showRecentSection (Recent is gone).
+      // v10→v11 adds sidebarLayout (default on hydration when missing).
       migrate: migrateSessionDisplayState,
+      // Hydration parses the sidebar layout whatever the stored version: a
+      // missing one keeps the default, a stored one (also from a newer
+      // version or edited by hand) keeps what this version understands field
+      // by field, and one that is not a layout is dropped, so the sidebar
+      // never draws from a partial layout.
+      merge: (persisted, current) => {
+        // SAFETY: the persisted value is this store's own state written by `persist`;
+        // the layout, the one field the sidebar cannot draw from partially, is parsed below.
+        const stored = (persisted ?? {}) as Partial<SessionDisplayStore>;
+        const layout = stored.sidebarLayout === undefined ? null : sidebarLayoutSchema.safeParse(stored.sidebarLayout);
+        return { ...current, ...stored, sidebarLayout: layout?.success ? layout.data : current.sidebarLayout };
+      },
     },
   ),
 );

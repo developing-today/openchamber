@@ -25,6 +25,58 @@ import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
+import {
+  attentionZonesInUse,
+  CLASSIC_SIDEBAR_LAYOUT,
+  DEFAULT_SIDEBAR_LAYOUT,
+  moveSectionAmongShown,
+  placeSection,
+  type AttentionGrouping,
+  type OpenSessionLeave,
+  type OtherAttentionGrouping,
+  type OtherAttentionScope,
+  type SidebarSectionKey,
+  type TimelineChatsPlacement,
+} from '@/stores/sidebarLayout';
+import { ACTIVITY_TITLE_KEY } from '../sessionSidebarActivityTitles';
+import { saveSidebarLayout } from '../zones/saveSidebarLayout';
+
+const ATTENTION_OPTIONS = [
+  ['off', 'sessions.sidebar.header.layout.attention.off'],
+  ['separate', 'sessions.sidebar.header.layout.attention.separate'],
+  ['blocked', 'sessions.sidebar.header.layout.attention.blocked'],
+  ['combined', 'sessions.sidebar.header.layout.attention.combined'],
+  ['pending', 'sessions.sidebar.header.layout.attention.pending'],
+] as const satisfies readonly (readonly [AttentionGrouping, I18nKey])[];
+
+const OTHER_SCOPE_OPTIONS = [
+  ['off', 'sessions.sidebar.header.layout.other.off'],
+  ['shared', 'sessions.sidebar.header.layout.other.shared'],
+  ['separate', 'sessions.sidebar.header.layout.other.separate'],
+] as const satisfies readonly (readonly [OtherAttentionScope, I18nKey])[];
+
+const OTHER_GROUPING_OPTIONS = [
+  ['separate', 'sessions.sidebar.header.layout.attention.separate'],
+  ['blocked', 'sessions.sidebar.header.layout.attention.blocked'],
+  ['combined', 'sessions.sidebar.header.layout.attention.combined'],
+] as const satisfies readonly (readonly [OtherAttentionGrouping, I18nKey])[];
+
+const AFTER_LEAVE_OPTIONS = [
+  ['hold', 'sessions.sidebar.header.layout.afterLeave.hold'],
+  ['stay', 'sessions.sidebar.header.layout.afterLeave.stay'],
+  ['reveal', 'sessions.sidebar.header.layout.afterLeave.reveal'],
+  ['attention', 'sessions.sidebar.header.layout.afterLeave.attention'],
+  ['down', 'sessions.sidebar.header.layout.afterLeave.down'],
+  ['up', 'sessions.sidebar.header.layout.afterLeave.up'],
+  ['down-up', 'sessions.sidebar.header.layout.afterLeave.downUp'],
+  ['up-down', 'sessions.sidebar.header.layout.afterLeave.upDown'],
+  ['previous', 'sessions.sidebar.header.layout.afterLeave.previous'],
+] as const satisfies readonly (readonly [OpenSessionLeave, I18nKey])[];
+
+const LIST_CHATS_OPTIONS = [
+  ['group', 'sessions.sidebar.header.layout.listChats.group'],
+  ['section', 'sessions.sidebar.header.layout.listChats.section'],
+] as const satisfies readonly (readonly [TimelineChatsPlacement, I18nKey])[];
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -176,6 +228,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
+  const sidebarLayout = useSessionDisplayStore((state) => state.sidebarLayout);
   // VS Code has no mode switch and always renders the projects view.
   const timelineView = showProjectDisplayControls && sidebarViewMode === 'timeline';
   // The timeline always lists every project, so the grouped view's
@@ -295,6 +348,104 @@ export function SidebarHeader(props: Props): React.ReactNode {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
       }) : null}
+    </>);
+  }
+  if (showSectionControls) {
+    // The sections the sidebar can draw now, empty or not, in their order:
+    // moving one passes over the hidden ones, so every click visibly moves it.
+    const chatsInListProjects = timelineView && sidebarLayout.timelineChats === 'group';
+    const combinedList = timelineView && !sidebarLayout.timelineProjectGroups;
+    const attentionZones = attentionZonesInUse(sidebarLayout);
+    const sectionsInUse = sidebarLayout.sectionOrder.filter((key) => {
+      if (key === 'projects') return true;
+      if (key === 'chats') return showChatsSection && !chatsInListProjects;
+      if (key === 'pinned') return showPinnedSection;
+      if (key === 'work') return sessionWorkEnabled && showWorkSection;
+      return attentionZones.has(key);
+    });
+    const sectionLabelKey = (key: SidebarSectionKey): I18nKey => {
+      if (key !== 'projects') return ACTIVITY_TITLE_KEY[key];
+      return combinedList || chatsInListProjects ? ACTIVITY_TITLE_KEY.all : 'sessions.sidebar.zone.projects';
+    };
+    const moveSection = (key: SidebarSectionKey, to: 'up' | 'down' | 'top' | 'bottom') => {
+      const order = sidebarLayout.sectionOrder;
+      const first = sectionsInUse[0];
+      const last = sectionsInUse[sectionsInUse.length - 1];
+      let next: SidebarSectionKey[];
+      if (to === 'top') next = first ? placeSection(order, key, first, 'before') : [...order];
+      else if (to === 'bottom') next = last ? placeSection(order, key, last, 'after') : [...order];
+      else next = moveSectionAmongShown(order, sectionsInUse, key, to);
+      saveSidebarLayout({ sectionOrder: next });
+    };
+    const moveItem = (key: SidebarSectionKey, to: 'up' | 'down' | 'top' | 'bottom', labelKey: I18nKey, icon: 'arrow-up-s' | 'arrow-down-s' | 'arrow-up-double', disabled: boolean) => (
+      <DropdownMenuItem key={to} closeOnClick={false} disabled={disabled} onClick={() => moveSection(key, to)} className="flex items-center gap-2">
+        <Icon name={icon} className={cn('h-4 w-4', to === 'bottom' && 'rotate-180')} />
+        <span>{t(labelKey)}</span>
+      </DropdownMenuItem>
+    );
+    if (timelineView) {
+      displayMenuSections.push(<>
+        {choiceSubmenu('sessions.sidebar.header.layout.listChats', LIST_CHATS_OPTIONS, sidebarLayout.timelineChats, (placement) => saveSidebarLayout({ timelineChats: placement }))}
+        {toggleItem('sessions.sidebar.header.layout.projectGroups', sidebarLayout.timelineProjectGroups, () => saveSidebarLayout({ timelineProjectGroups: !sidebarLayout.timelineProjectGroups }))}
+        {toggleItem('sessions.sidebar.header.layout.compactRows', sidebarLayout.timelineCompactRows, () => saveSidebarLayout({ timelineCompactRows: !sidebarLayout.timelineCompactRows }))}
+      </>);
+    }
+    displayMenuSections.push(<>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <span className="flex-1">{t('sessions.sidebar.header.layout.sections')}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-[200px]">
+          {sectionsInUse.map((key, index) => (
+            <DropdownMenuSub key={key}>
+              <DropdownMenuSubTrigger>
+                <span className="flex-1">{t(sectionLabelKey(key))}</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="min-w-[160px]">
+                {moveItem(key, 'top', 'sessions.sidebar.header.layout.moveTop', 'arrow-up-double', index === 0)}
+                {moveItem(key, 'up', 'sessions.sidebar.header.layout.moveUp', 'arrow-up-s', index === 0)}
+                {moveItem(key, 'down', 'sessions.sidebar.header.layout.moveDown', 'arrow-down-s', index === sectionsInUse.length - 1)}
+                {moveItem(key, 'bottom', 'sessions.sidebar.header.layout.moveBottom', 'arrow-up-double', index === sectionsInUse.length - 1)}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <span className="flex-1">{t('sessions.sidebar.header.layout.attention')}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-[220px]">
+          {choiceSubmenu('sessions.sidebar.header.layout.attentionFollowed', ATTENTION_OPTIONS, sidebarLayout.attention, (attention) => saveSidebarLayout({ attention }))}
+          {choiceSubmenu('sessions.sidebar.header.layout.otherSessions', OTHER_SCOPE_OPTIONS, sidebarLayout.otherAttention, (otherAttention) => saveSidebarLayout({ otherAttention }))}
+          {sidebarLayout.otherAttention === 'separate'
+            ? choiceSubmenu('sessions.sidebar.header.layout.otherGrouping', OTHER_GROUPING_OPTIONS, sidebarLayout.otherAttentionGrouping, (otherAttentionGrouping) => saveSidebarLayout({ otherAttentionGrouping }))
+            : null}
+          {toggleItem('sessions.sidebar.header.layout.otherActive', sidebarLayout.otherActive, () => saveSidebarLayout({ otherActive: !sidebarLayout.otherActive }))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <span className="flex-1">{t('sessions.sidebar.header.layout.openSession')}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-[220px]">
+          {toggleItem('sessions.sidebar.header.layout.holdOpenSession', sidebarLayout.holdOpenSession, () => saveSidebarLayout({ holdOpenSession: !sidebarLayout.holdOpenSession }))}
+          {choiceSubmenu('sessions.sidebar.header.layout.afterLeave', AFTER_LEAVE_OPTIONS, sidebarLayout.afterLeave, (afterLeave) => saveSidebarLayout({ afterLeave }))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <span className="flex-1">{t('sessions.sidebar.header.layout.preset')}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-[200px]">
+          <DropdownMenuItem onClick={() => saveSidebarLayout(DEFAULT_SIDEBAR_LAYOUT)}>
+            <span>{t('sessions.sidebar.header.layout.restoreDefault')}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => saveSidebarLayout(CLASSIC_SIDEBAR_LAYOUT)}>
+            <span>{t('sessions.sidebar.header.layout.classic')}</span>
+          </DropdownMenuItem>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
     </>);
   }
   if (!isSingleProjectMode) {

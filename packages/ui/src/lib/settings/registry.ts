@@ -33,6 +33,7 @@ import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
 import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
@@ -369,6 +370,10 @@ export const SETTINGS_REGISTRY = {
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
   sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
+  // Section order, attention sections, the open session's hold and the List
+  // layout, as one value: `stores/sidebarLayout.ts` completes a stored one
+  // with the defaults, field by field.
+  sidebarLayout: field({ scope: 'profile', perSurface: true, parse: fromSchema(sidebarLayoutSchema), ui: sessionDisplayField('sidebarLayout') }),
 
   // ── Work status ──
   workStatusSectionOrder: field({

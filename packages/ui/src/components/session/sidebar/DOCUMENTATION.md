@@ -12,9 +12,14 @@ kept at this root in `types.ts` and `utils.tsx`.
 - `recent/` owns the In work and timeline row projections and session
   locations (the name predates the removal of Recent).
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
+- `zones/` owns the attention zones (which live state pulls a session into
+  which zone), the open session's hold, what the open session does after Done
+  or Archive, section dragging, and saving the layout. The layout value itself
+  (`sidebarLayout`) is defined in `stores/sidebarLayout.ts`.
 - `sessionSidebarRowModel.ts` owns the ordered, mode-neutral projection for
-  Chats, In work, projects, groups, folders, sessions, status notices, empty
-  states, and reveal controls. `SessionSidebarRows.tsx` is the shared desktop
+  Chats, Pinned, In work, the attention zones, projects, groups, folders,
+  sessions, status notices, empty states, and reveal controls, drawn in the
+  layout's section order. `SessionSidebarRows.tsx` is the shared desktop
   Web, Electron and VS Code sidebar row renderer. Normal and committed-search modes use the same
   model and the same `@tanstack/react-virtual` instance.
 - `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
@@ -69,7 +74,10 @@ row's title carries its state too: semibold at full strength while a finished
 turn is unseen or a permission or question waits on the user, full strength
 while it runs, muted otherwise; the active row keeps the selection colors. The display
 store is at version 10 (v10 dropped the Recent toggle): missing preferences inherit the default during hydration,
-while an explicitly saved choice survives reload.
+while an explicitly saved choice survives reload. Version 11 adds
+`sidebarLayout`; a missing one takes the default, a stored one keeps what
+this version understands field by field, and anything that is not a layout is
+dropped.
 
 Full-app active records remain in the collection when their directory is no
 longer in known topology, such as a deleted worktree. Grouping first uses exact
@@ -86,7 +94,9 @@ In work, and Timeline use this same ownership resolver; rows keep the session's
 own directory while taking display ownership (project id, labels) from the
 index.
 
-Web and desktop show managed Chats, then In work, then the projects. There is
+Web and desktop draw their sections in the layout's order, by default the
+attention zones, Pinned, In work, the zones of other sessions, Chats, then the
+projects (see *Section order, attention zones and the open session* below). There is
 no Recent zone any more (removed 2026-10): In work holds the sessions being
 worked on, and the timeline view answers "what was I doing". Chats use
 their shared managed root for folders and never expose worktree actions. Project
@@ -178,6 +188,75 @@ Manual rename inputs share `components/session/sessionRenameKeyboard.ts` with
 the header and mobile list. Enter explicitly submits the owning form on
 keydown; Escape cancels. IME composition keys keep their text-input behavior,
 and held Enter does not submit repeatedly.
+
+## Section order, attention zones and the open session
+
+The display menu's layout (`sidebarLayout`, `stores/sidebarLayout.ts`, profile
+setting stored per surface) arranges the desktop and web sidebar. VS Code
+always draws the classic layout and offers none of these controls; the phone
+sheet keeps its own sections and is unchanged. The menu's Layout submenu has
+Restore the default layout and Classic layout, which is the sidebar as it was
+before: no attention zones, nothing held, Chats in their own section, Done
+moves the row at once.
+
+- **Section order.** `sectionOrder` lists every section (`SIDEBAR_SECTION_KEYS`):
+  the zones and `projects`, the whole project list. A stored order is
+  completed with sections it lacks, each right after its default predecessor.
+  Every section can go anywhere, Other blocked above In work for instance.
+  Zone headers drag to reorder (`zones/sectionDrag.ts`): a header moves among
+  the drawn section headers, and the projects take part through the first
+  header of their block (the first project's, or All sessions in the List
+  view when Chats are among the projects or the list is combined). Dragging a project header still reorders projects. The menu's
+  Section order submenu moves any section in use (empty or not) up, down, to
+  the top or to the bottom, passing over sections that are not in use, so
+  every move is visible. VS Code has no section dragging.
+- **Attention zones.** A session the user follows is one the Pinned or In work
+  zone would list. `zones/useSidebarLiveStates.ts` reads its live state from
+  the live channels only, its subsessions included: a pending permission
+  (`approval`), a pending form or waiting page (`question`) from the
+  cross-directory request index, a running turn from the global busy index or
+  a background command, then the outcome the server recorded for its last turn
+  (`failed` is `error`, `interrupted` is `stopped`). A request outranks a
+  running turn, and a running turn outranks how the last one ended. The
+  `attention` choice sends followed sessions in those states to Approvals,
+  Questions, Errors and Stopped (`separate`, the default), joins approvals and
+  questions as Blocked (`blocked`), puts all four in Needs attention
+  (`combined`), or puts everything not running in Pending (`pending`), leaving
+  In work with the running sessions. `otherAttention` lets the remaining
+  top-level sessions, Chats included, join the same zones (`shared`, never for
+  idle sessions) or zones of their own (`separate`, grouped by
+  `otherAttentionGrouping`, prefixed Other), and `otherActive` gives running
+  sessions and finished ones not looked at yet a zone, Active elsewhere. Zones
+  of other sessions open on a page of 7. `zones/sidebarZones.ts` partitions in
+  the shared lifecycle order, each session in one zone at most; attention zone
+  headers show their count. Like In work, a zone session stays in its project
+  too, and search lists it once, in its zone. The stores read here publish on
+  lifecycle events only, and each selector returns a string, so streaming and
+  unrelated sessions re-render nothing.
+- **The open session holds its place.** With `holdOpenSession` (default on),
+  the open session keeps the zone and the lifecycle rank it had when it was
+  opened, until another session opens: answering its question, sending a
+  message or a turn finishing moves nothing under the user, while the live
+  rank and zone carry on underneath (`zones/openSessionHold.ts`). The hold
+  publishes an override only while the held place differs from the live one,
+  and follows selection with a store subscription, so opening a session does
+  not re-render the sidebar orchestration. The collection orders with the
+  held rank (`heldRank`), and the partition draws the held zone, or none, as
+  long as the layout still has that zone.
+- **After Done or Archive** (`afterLeave`) of the open session: keep its row
+  until another session opens (`hold`, the default; it holds the row even when
+  the general hold is off), move it at once (`stay`), move it and scroll to
+  where it went, opening its project when collapsed (`reveal`,
+  `zones/sidebarReveal.ts`), or open another session: the top one in an
+  attention zone, else the first finished one not looked at, else the first of
+  its own list (`attention`); the next one down or up in its own list, then in
+  the whole sidebar (`down`, `up`); one way with the other as fallback
+  (`down-up`, `up-down`); or the session opened before (`previous`). The
+  sidebar registers this as the session actions' leave planner
+  (`zones/useSessionLeavePlanner.ts`, `sync/session-leave-navigation.ts`); the
+  target comes from the model's `navigationEntries` (top-level session rows in
+  drawn order with their list), read when the user clicks. An archived session
+  never stays open: the first three choices close it.
 
 ## Multi-run rows
 
@@ -314,8 +393,28 @@ pair as the changes file tree). VS Code has no switch and always renders
 `projects`. The display menu opens with Select sessions, then the view, then
 the project sort, worktree sort and project display as submenus that name the
 current choice (Tree only; VS Code keeps the project sort), then the section
-toggles (Chats, Pinned, In work) and, in Tree, Detailed rows, then Collapse
-all / Expand all.
+toggles (Chats, Pinned, In work) and, in Tree, Detailed rows, then the List
+layout (List only: Chats in the list, Group by project, One line per
+session), the Section order, Needs attention, Open session and Layout
+submenus (not in VS Code), then Collapse all / Expand all.
+
+- **Chats in the list** (`timelineChats`). By default Chats are one more
+  group among the projects, with the chat icon on its header, at
+  `chatsGroupIndex`, and one heading, All sessions, covers the projects and
+  Chats together below the zones: collapsing it hides them all, and dragging
+  it moves them as one section. Dragging the Chats header among the project
+  headers moves it, and dragging a project past it moves both. The other
+  choice keeps Chats as their own section, by default between In work and the
+  projects.
+- **Group by project** (`timelineProjectGroups`, on by default). Off, one
+  header, All sessions, lists every top-level session in lifecycle order, 20
+  at a time, and the chats too while Chats are with the projects; its rows are
+  zone rows, which name their project with its icon (a chat with the chat
+  mark).
+- **One line per session** (`timelineCompactRows`). List rows under a project
+  render as `'timeline-chat'` and zone and combined-list rows as
+  `'mixed-flat'`: one line, the project's icon before the title where projects
+  mix. Neither expands.
 
 - Chats rows are one line in both views. In List they render with
   `renderContext: 'timeline-chat'`: no left gutter, pin marker and status icon

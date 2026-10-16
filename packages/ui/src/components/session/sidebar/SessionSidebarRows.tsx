@@ -48,6 +48,8 @@ type Props = {
   pinnedRowIndexes: ReadonlySet<number>;
   renderRow: (row: SessionSidebarRow, index: number) => React.ReactNode;
   onFirstVisibleIndexChange: (index: number) => void;
+  /** A row to scroll into view; a new nonce scrolls again. */
+  revealIndex?: { index: number; nonce: number } | null;
 };
 
 export function SessionSidebarRows({
@@ -56,6 +58,7 @@ export function SessionSidebarRows({
   pinnedRowIndexes,
   renderRow,
   onFirstVisibleIndexChange,
+  revealIndex = null,
 }: Props): React.ReactNode {
   const rows = model.rows;
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
@@ -123,6 +126,13 @@ export function SessionSidebarRows({
   React.useLayoutEffect(() => {
     onFirstVisibleIndexChange(firstVisibleIndex);
   }, [firstVisibleIndex, onFirstVisibleIndexChange]);
+
+  const revealNonce = revealIndex?.nonce;
+  const revealRowIndex = revealIndex?.index;
+  React.useEffect(() => {
+    if (revealNonce === undefined || revealRowIndex === undefined || !scrollElement) return;
+    virtualizer.scrollToIndex(revealRowIndex, { align: 'auto' });
+  }, [revealNonce, revealRowIndex, scrollElement, virtualizer]);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const lastLayoutRef = React.useRef<{ rows: readonly SessionSidebarRow[]; measurements: readonly VirtualItem[] } | null>(null);

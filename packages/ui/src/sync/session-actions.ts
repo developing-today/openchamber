@@ -55,6 +55,7 @@ import { deleteChatDirectory } from "@/lib/chatDirectories"
 import { createChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { cancelSessionTitleGeneration } from "./session-title-generation"
 import { recordSessionActionFailure } from "./session-action-failures"
+import { planOpenSessionLeave, type PlannedSessionLeave } from "./session-leave-navigation"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
 import { getSessionGoal } from "@/lib/sessionGoalMetadata"
 import { fetchGoalObjectiveContent, writeGoalObjectiveFile } from "@/lib/goalObjectiveFiles"
@@ -1154,13 +1155,43 @@ export async function setSessionWorkState(
   state: SessionWork["state"],
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
+  // Marking the open session done may open another one, as the sidebar's
+  // layout says; the plan is made from the list as it is before the change.
+  const leave = state === "done"
+    ? planOpenSessionLeave(useSessionUIStore.getState().currentSessionId, [sessionId], "done")
+    : null
   try {
-    return await patchSessionMetadata(sessionId, directory, (metadata) =>
+    const updated = await patchSessionMetadata(sessionId, directory, (metadata) =>
       withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+    if (leave && !isStaleRuntime(runtimeKeyAtClick)) commitSessionLeave(leave, "done")
+    return updated
   } catch (error) {
+    leave?.plan.cancel?.()
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
   }
+}
+
+/**
+ * Applies a planned leave once its action succeeded, if the session is still
+ * the open one: the user may have opened another meanwhile. An archived
+ * session never stays open, whatever the plan.
+ */
+function commitSessionLeave(leave: PlannedSessionLeave, kind: "done" | "archive"): void {
+  const ui = useSessionUIStore.getState()
+  if (ui.currentSessionId !== leave.sessionId) return
+  const { next, afterCommit } = leave.plan
+  if (next) ui.setCurrentSession(next.id, next.directory)
+  else if (kind === "archive") ui.setCurrentSession(null)
+  afterCommit?.()
+}
+
+/** Closes or replaces the open session when it is among `ids`, which were just archived. */
+function leaveArchivedOpenSession(ids: readonly string[], leave: PlannedSessionLeave | null): void {
+  const ui = useSessionUIStore.getState()
+  if (!ui.currentSessionId || !ids.includes(ui.currentSessionId)) return
+  if (leave?.sessionId === ui.currentSessionId) commitSessionLeave(leave, "archive")
+  else ui.setCurrentSession(null)
 }
 
 /**
@@ -1554,6 +1585,15 @@ export async function deleteSessions(
  * the runtime is loaded.
  */
 export async function archiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
+  const leave = planOpenSessionLeave(useSessionUIStore.getState().currentSessionId, [sessionId], "archive")
+  return archiveOneSession(sessionId, expectedRuntimeKey, leave)
+}
+
+async function archiveOneSession(
+  sessionId: string,
+  expectedRuntimeKey: string,
+  leave: PlannedSessionLeave | null,
+): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   const archivedAt = Date.now()
@@ -1574,10 +1614,10 @@ export async function archiveSession(sessionId: string, expectedRuntimeKey = get
     const snapshots = removeSessionFromLiveStores(sessionId, sessionDirectory, true)
     invalidateSessionLoads(sessionId, [...snapshots.map((snapshot) => snapshot.directory), sessionDirectory])
     if (archived) useGlobalSessionsStore.getState().upsertSession(archived)
-    const ui = useSessionUIStore.getState()
-    if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
+    leaveArchivedOpenSession([sessionId], leave)
     return true
   } catch (error) {
+    leave?.plan.cancel?.()
     console.error("[session-actions] archiveSession failed", error)
     recordSessionActionFailure(sessionId, toError(error))
     return false
@@ -1619,6 +1659,7 @@ export async function archiveSessions(
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
   if (ids.length === 0) return { archivedIds, failedIds }
 
+  const leave = planOpenSessionLeave(useSessionUIStore.getState().currentSessionId, ids, "archive")
   const plan = planArchiveBatches(ids)
 
   for (const [directory, batchIds] of plan.batchesByDirectory) {
@@ -1644,7 +1685,7 @@ export async function archiveSessions(
         expectedRuntimeKey,
         result.archived,
       )
-      commitArchivedSessions(result.archived, directory)
+      commitArchivedSessions(result.archived, directory, leave)
       archivedIds.push(...result.archived.map((entry) => entry.id))
       failedIds.push(...result.failedIds)
       continue
@@ -1664,7 +1705,7 @@ export async function archiveSessions(
       failedIds.push(...plan.individualIds.slice(index))
       break
     }
-    if (await archiveSession(id, expectedRuntimeKey)) archivedIds.push(id)
+    if (await archiveOneSession(id, expectedRuntimeKey, leave)) archivedIds.push(id)
     else failedIds.push(id)
   }
 
@@ -1733,7 +1774,7 @@ function planArchiveBatches(ids: string[]) {
  * archived bucket, and clear it if it was open — with the per-session store
  * notifications collapsed into one.
  */
-function commitArchivedSessions(stamps: SessionArchiveStamp[], directory: string): void {
+function commitArchivedSessions(stamps: SessionArchiveStamp[], directory: string, leave: PlannedSessionLeave | null): void {
   if (stamps.length === 0) return
 
   const ids = stamps.map((stamp) => stamp.id)
@@ -1743,9 +1784,7 @@ function commitArchivedSessions(stamps: SessionArchiveStamp[], directory: string
   for (const id of ids) invalidateSessionLoads(id, directories)
 
   useGlobalSessionsStore.getState().upsertSessions(archived)
-
-  const ui = useSessionUIStore.getState()
-  if (ui.currentSessionId && ids.includes(ui.currentSessionId)) ui.setCurrentSession(null)
+  leaveArchivedOpenSession(ids, leave)
 }
 
 /**
