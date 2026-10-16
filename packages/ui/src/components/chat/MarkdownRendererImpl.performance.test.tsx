@@ -330,7 +330,8 @@ const initializePerformanceDom = async (): Promise<void> => {
   mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => () => undefined }));
   mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
   mock.module('@/lib/router/openSessionFromRoute', () => ({ openSessionLink: async () => undefined }));
-  mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => fileLinksInsideWorkspace || fileLinkTestDirectory === null, toAbsoluteFilePath: (_base: string, value: string) => `/outside/${value}`, normalizeFilePath: (value: string) => value, isAbsoluteFilePath: (value: string) => value.startsWith('/') }));
+  mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => fileLinksInsideWorkspace || fileLinkTestDirectory === null, resolveTildeFilePath: (value: string) => value, toAbsoluteFilePath: (_base: string, value: string) => `/outside/${value}`, normalizeFilePath: (value: string) => value, isAbsoluteFilePath: (value: string) => value.startsWith('/') }));
+  mock.module('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { homeDirectory: string }) => string) => selector({ homeDirectory: '' }), { getState: () => ({ homeDirectory: '' }) }) }));
   mock.module('@/lib/clipboard', () => ({ copyTextToClipboard: async () => undefined }));
   mock.module('beautiful-mermaid', () => ({
     renderMermaidASCII: () => 'diagram',

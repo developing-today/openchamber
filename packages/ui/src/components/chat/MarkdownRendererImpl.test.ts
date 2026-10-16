@@ -268,7 +268,8 @@ mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ editor: 
 mock.module('@/lib/desktop', () => ({ isDesktopLocalOriginActive: () => false, isDesktopShell: () => false, isVSCodeRuntime: () => false, openDesktopPath: async () => false }));
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => () => undefined }));
 mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
-mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, toAbsoluteFilePath: () => '' }));
+mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, resolveTildeFilePath: (value: string) => value, toAbsoluteFilePath: () => '' }));
+mock.module('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { homeDirectory: string }) => string) => selector({ homeDirectory: '' }), { getState: () => ({ homeDirectory: '' }) }) }));
 mock.module('./markdown/markdownCore', () => ({
     getCachedMarkdownBlocks: () => cachedRendererBlocks,
     renderMarkdownBlocks: () => renderMarkdownBlocksForTest(),
