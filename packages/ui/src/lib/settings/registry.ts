@@ -29,6 +29,12 @@ import { useI18nStore } from '@/lib/i18n/store';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
 import { normalizeMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isTerminalShell } from '@/lib/terminalShell';
+import {
+  PULL_REQUEST_WORKTREE_MODES,
+  WORKTREE_START_FROM_OPTIONS,
+  WORKTREE_START_PLACES,
+  type WorktreeStartFromOverrides,
+} from '@/lib/worktrees/worktreeStartSource';
 import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
@@ -184,6 +190,9 @@ const RESPONSE_STYLE_PRESETS = ['concise', 'detailed', 'mentor', 'pushback', 'no
 const parseTerminalShell: SettingsParser<TerminalShell> = parseGuarded(isTerminalShell);
 const parseUiFont: SettingsParser<UiFontOption> = parseGuarded(isUiFontOption);
 const parseMonoFont: SettingsParser<MonoFontOption> = parseGuarded(isMonoFontOption);
+const parseWorktreeStartFromOverrides: SettingsParser<WorktreeStartFromOverrides> = fromSchema(
+  z.partialRecord(z.enum(WORKTREE_START_PLACES), z.enum(WORKTREE_START_FROM_OPTIONS)),
+);
 const parseInputHistoryScope: SettingsParser<InputHistoryScope> = fromSchema(z.string().refine(isInputHistoryScope));
 const parseInputHistoryLimit: SettingsParser<number> = fromSchema(z.number().refine(isInputHistoryLimit));
 const parseMobileKeyboardModeValue = mapParser(parseTrimmedString, (value) => normalizeMobileKeyboardMode(value, undefined));
@@ -456,6 +465,9 @@ export const SETTINGS_REGISTRY = {
   openLinksInBrowserPanel: field({ scope: 'profile', surfaces: ['desktop'], parse: parseBoolean, ui: uiStore('openLinksInBrowserPanel', (v) => useUIStore.getState().setOpenLinksInBrowserPanel(v)) }),
   openTrackerLinksOnBoard: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('openTrackerLinksOnBoard', (v) => useUIStore.getState().setOpenTrackerLinksOnBoard(v)) }),
   autoCreateWorktree: field({ scope: 'profile', parse: parseBoolean, ui: configField('settingsAutoCreateWorktree') }),
+  worktreeStartFrom: field({ scope: 'profile', parse: parseOneOf(WORKTREE_START_FROM_OPTIONS), ui: configField('settingsWorktreeStartFrom') }),
+  worktreeStartFromOverrides: field({ scope: 'profile', parse: parseWorktreeStartFromOverrides, ui: configField('settingsWorktreeStartFromOverrides') }),
+  pullRequestWorktree: field({ scope: 'profile', parse: parseOneOf(PULL_REQUEST_WORKTREE_MODES), ui: configField('settingsPullRequestWorktree') }),
   sessionTabsEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'vscode'], parse: parseBoolean, ui: uiStore('sessionTabsEnabled', (v) => useUIStore.getState().setSessionTabsEnabled(v)) }),
   allowPromptingSubagentSessions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('allowPromptingSubagentSessions', (v) => useUIStore.getState().setAllowPromptingSubagentSessions(v)) }),
 

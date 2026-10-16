@@ -134,6 +134,14 @@ describe('OpenChamber control service', () => {
     expect(generateWorktreeName).not.toHaveBeenCalled();
   });
 
+  it('session.create passes branchOff with a pull request to the session service', async () => {
+    const { service, sessionService } = createService({ isGitRepository: vi.fn(async () => true) });
+    await service.execute('session.create', { prompt: 'Follow up', pullRequest: 42, branchOff: true, worktree: 'follow-up' }, '/repo');
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({
+      pullRequest: 42, branchOff: true, worktree: { name: 'follow-up' },
+    }));
+  });
+
   it('rejects projects.add and projects.remove when the server has not wired the dependencies they need', async () => {
     const { service } = createService();
     await expect(service.execute('projects.add', { directory: '/repo2' })).rejects.toMatchObject({

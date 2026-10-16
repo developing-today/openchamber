@@ -634,7 +634,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           if (!canCreateWorktree) {
             return;
           }
-          const created = await createWorktreeSessionForNewBranch(sendTargetProject.path, generateBranchName());
+          const created = await createWorktreeSessionForNewBranch(sendTargetProject.path, generateBranchName(), undefined, { place: 'handoff' });
           if (!created?.id) {
             return;
           }

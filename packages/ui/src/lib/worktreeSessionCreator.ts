@@ -20,7 +20,8 @@ import {
   removeProjectWorktree,
   type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
-import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
+import { createWorktreeWithDefaults, resolveDefaultWorktreeStartRef } from '@/lib/worktrees/worktreeCreate';
+import { selectWorktreeStartFrom, type WorktreeStartPlace } from '@/lib/worktrees/worktreeStartSource';
 import {
   createPendingDraftWorktreeRequest,
   rejectPendingDraftWorktreeRequest,
@@ -240,10 +241,11 @@ const createInstantWorktreeDraft = async (options?: {
     }
 
     const preferredName = generateBranchName();
+    const startRef = await resolveDefaultWorktreeStartRef(projectRef.path, selectWorktreeStartFrom(useConfigStore.getState(), 'quick'));
 
     // A preview path has no bootstrap state yet. Selecting it lets background
     // OpenCode reads initialize an instance before the worktree exists.
-    const metadata = await createQuickWorktree(projectRef, { preferredName });
+    const metadata = await createQuickWorktree(projectRef, { preferredName, startRef });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);
     useSessionUIStore.getState().overrideNewSessionDraftTarget({
@@ -294,12 +296,16 @@ export async function createWorktreeDraft(options?: { initialPrompt?: string; ti
 /**
  * Create a worktree session for a new branch name.
  * Callers can still use startPoint for metadata or follow-up git operations.
+ * Without one, the worktree starts where Settings say for `options.place`,
+ * else from the project root's branch.
  */
 export async function createWorktreeSessionForNewBranch(
   projectDirectory: string,
   preferredBranchName: string,
   startPoint?: string,
   options?: {
+    /** Where the worktree is made, for its Settings start when no start point is given. */
+    place?: WorktreeStartPlace;
     kind?: 'pr' | 'standard';
     worktreeName?: string;
     setUpstream?: boolean;
@@ -318,7 +324,6 @@ export async function createWorktreeSessionForNewBranch(
   isCreatingWorktreeSession = true;
 
   try {
-    const start = startPoint?.trim() || 'HEAD';
     const base = preferredBranchName?.trim();
     if (!base) {
       throw new Error('Branch name is required');
@@ -348,6 +353,9 @@ export async function createWorktreeSessionForNewBranch(
     const setupCommands = await resolveWorktreeSetupCommands(projectRef);
     const rootBranch = await getRootBranch(projectRef.path);
     try {
+      const start = startPoint?.trim()
+        || (options?.place ? await resolveDefaultWorktreeStartRef(projectRef.path, selectWorktreeStartFrom(useConfigStore.getState(), options.place)) : undefined)
+        || 'HEAD';
       const metadata = await createWorktreeWithDefaults(projectRef, {
         preferredName: base,
         mode: 'new',
@@ -364,7 +372,8 @@ export async function createWorktreeSessionForNewBranch(
       });
       const createdMetadata = {
         ...metadata,
-        createdFromBranch: options?.createdFromBranch || rootBranch || start,
+        // Integrate commits moves work onto this local branch: `main` for `remotes/origin/main`.
+        createdFromBranch: options?.createdFromBranch || (start === 'HEAD' ? rootBranch || start : start.replace(/^remotes\/[^/]+\//, '')),
         kind,
       };
 

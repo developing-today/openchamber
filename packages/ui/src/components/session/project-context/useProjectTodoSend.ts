@@ -117,7 +117,7 @@ export const useProjectTodoSend = (options: {
             toast.error(t('rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo'));
             return;
           }
-          const created = await createWorktreeSessionForNewBranch(projectRef.path, generateBranchName());
+          const created = await createWorktreeSessionForNewBranch(projectRef.path, generateBranchName(), undefined, { place: 'handoff' });
           if (!created?.id) {
             return;
           }

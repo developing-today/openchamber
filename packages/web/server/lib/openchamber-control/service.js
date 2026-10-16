@@ -676,6 +676,8 @@ export const createOpenChamberControlService = (dependencies) => {
     // start ref the session service refuses) travel without a worktree name.
     if (input.pullRequest !== undefined) {
       payload.pullRequest = input.pullRequest;
+      // Checked by the session service, which also applies the Settings default.
+      if (input.branchOff !== undefined) payload.branchOff = input.branchOff;
       if (!payload.worktree) {
         payload.worktree = {};
         if (asNonEmptyString(input.branch)) payload.worktree.branchName = input.branch.trim();

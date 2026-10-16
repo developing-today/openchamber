@@ -902,7 +902,7 @@ describe('openchamber session routes', () => {
       .send({ directory: '/repo/app', pullRequest: 42, worktree: { name: 'review-42' }, prompt: 'Review it', model: 'openai/gpt-5.5' })
       .expect(200);
 
-    expect(createChangeRequestWorktree).toHaveBeenCalledExactlyOnceWith({ directory: '/repo/app', number: 42, name: 'review-42' });
+    expect(createChangeRequestWorktree).toHaveBeenCalledExactlyOnceWith({ directory: '/repo/app', number: 42, name: 'review-42', branchOff: false });
     expect(createWorktreeMock).not.toHaveBeenCalled();
     expect(getWorktreeBootstrapStatusMock.mock.invocationCallOrder[0])
       .toBeLessThan(sessionCreateMock.mock.invocationCallOrder[0]);
@@ -911,6 +911,42 @@ describe('openchamber session routes', () => {
     }));
     expect(response.body.directory).toBe('/repo/worktrees/feature-fix');
     expect(response.body.worktree.branch).toBe('feature/fix');
+  });
+
+  it('checks out or branches off a pull request the way Settings say, unless the call says', async () => {
+    const createChangeRequestWorktree = vi.fn(async () => ({ name: 'follow-up', branch: 'follow-up', path: '/repo/worktrees/follow-up' }));
+    const { app } = createApp({
+      createChangeRequestWorktree,
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }], pullRequestWorktree: 'branch-off' }),
+    });
+
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', pullRequest: 42 }).expect(200);
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', pullRequest: 42, branchOff: false }).expect(200);
+
+    expect(createChangeRequestWorktree.mock.calls.map(([input]) => input.branchOff)).toEqual([true, false]);
+  });
+
+  it('starts a new worktree at the default remote\'s default branch unless the call or Settings say otherwise', async () => {
+    const getBranches = vi.fn(async () => ({ all: ['main', 'remotes/origin/main', 'remotes/origin/HEAD'], defaultBranches: { origin: 'main' } }));
+    const { app } = createApp({ getBranches });
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'side-task' } }).expect(200);
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'side-task', startRef: 'feature' } }).expect(200);
+
+    expect(createWorktreeMock.mock.calls.map(([, input]) => input.startRef)).toEqual(['remotes/origin/main', 'feature']);
+    expect(getBranches).toHaveBeenCalledExactlyOnceWith('/repo/app', { remote: 'local' });
+
+    createWorktreeMock.mockClear();
+    const projectRoot = createApp({
+      getBranches,
+      readSettingsFromDiskMigrated: async () => ({
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+        worktreeStartFrom: 'remote-default',
+        worktreeStartFromOverrides: { agent: 'project-root' },
+      }),
+    });
+    await request(projectRoot.app).post('/api/openchamber/sessions').send({ directory: '/repo/app', worktree: { name: 'side-task' } }).expect(200);
+    expect(createWorktreeMock.mock.calls[0][1]).not.toHaveProperty('startRef');
+    expect(getBranches).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a pull request it cannot make a worktree for and creates no session', async () => {
@@ -949,7 +985,11 @@ describe('openchamber session routes', () => {
     await request(app)
       .post('/api/openchamber/sessions')
       .send({ directory: '/repo/app', pullRequest: 42, worktree: { startRef: 'main' } })
-      .expect(400, { error: 'pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream' });
+      .expect(400, { error: 'pullRequest starts from the pull request\'s head; do not combine it with startRef or setUpstream' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: 42, branchOff: 'yes' })
+      .expect(400, { error: 'branchOff must be true or false' });
 
     expect(createChangeRequestWorktree).not.toHaveBeenCalled();
     expect(sessionCreateMock).not.toHaveBeenCalled();

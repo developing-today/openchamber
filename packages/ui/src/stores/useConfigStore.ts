@@ -29,6 +29,13 @@ import { runtimeFetch } from "@/lib/runtime-fetch";
 import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
+import {
+    DEFAULT_WORKTREE_START_FROM,
+    type PullRequestWorktreeMode,
+    type WorktreeStartFrom,
+    type WorktreeStartFromOverrides,
+    type WorktreeStartPlace,
+} from "@/lib/worktrees/worktreeStartSource";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
 import { readCachedCatalog, shouldHoldFirstLoadAgainstCache, writeCachedCatalogWhenSettled, type CachedCatalog } from "./configCatalogCache";
@@ -53,6 +60,9 @@ interface OpenChamberDefaults {
     defaultVariant?: string;
     defaultAgent?: string;
     autoCreateWorktree?: boolean;
+    worktreeStartFrom?: WorktreeStartFrom;
+    worktreeStartFromOverrides?: WorktreeStartFromOverrides;
+    pullRequestWorktree?: PullRequestWorktreeMode;
     gitmojiEnabled?: boolean;
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
@@ -137,6 +147,9 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
         defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
         autoCreateWorktree: data.autoCreateWorktree,
+        worktreeStartFrom: data.worktreeStartFrom,
+        worktreeStartFromOverrides: data.worktreeStartFromOverrides,
+        pullRequestWorktree: data.pullRequestWorktree,
         gitmojiEnabled: data.gitmojiEnabled,
         defaultFileViewerPreview: data.defaultFileViewerPreview,
         zenModel: zenModel.length > 0 ? zenModel : undefined,
@@ -1449,6 +1462,9 @@ interface ConfigStore {
     // when neither our settingsDefaultModel nor the resolved agent pins a model.
     opencodeDefaultModel: string | undefined;
     settingsAutoCreateWorktree: boolean;
+    settingsWorktreeStartFrom: WorktreeStartFrom;
+    settingsWorktreeStartFromOverrides: WorktreeStartFromOverrides;
+    settingsPullRequestWorktree: PullRequestWorktreeMode;
     settingsGitmojiEnabled: boolean;
     settingsDefaultFileViewerPreview: boolean;
     settingsZenModel: string | undefined;
@@ -1552,6 +1568,10 @@ interface ConfigStore {
     setSettingsDefaultVariant: (variant: string | undefined) => void;
     setSettingsDefaultAgent: (agent: string | undefined) => void;
     setSettingsAutoCreateWorktree: (enabled: boolean) => void;
+    setSettingsWorktreeStartFrom: (startFrom: WorktreeStartFrom) => void;
+    /** `null` makes the place follow the default again. */
+    setSettingsWorktreeStartFromOverride: (place: WorktreeStartPlace, startFrom: WorktreeStartFrom | null) => void;
+    setSettingsPullRequestWorktree: (mode: PullRequestWorktreeMode) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;
     setSettingsZenModel: (model: string | undefined) => void;
@@ -1742,6 +1762,9 @@ export const useConfigStore = create<ConfigStore>()(
                 opencodeDefaultAgent: undefined,
                 opencodeDefaultModel: undefined,
                 settingsAutoCreateWorktree: false,
+                settingsWorktreeStartFrom: DEFAULT_WORKTREE_START_FROM,
+                settingsWorktreeStartFromOverrides: {},
+                settingsPullRequestWorktree: 'check-out',
                 settingsGitmojiEnabled: false,
                 settingsDefaultFileViewerPreview: true,
                 settingsZenModel: undefined,
@@ -2721,6 +2744,9 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsDefaultVariant: edited ? state.settingsDefaultVariant : defaults.defaultVariant,
                             settingsDefaultAgent: edited ? state.settingsDefaultAgent : defaults.defaultAgent,
                             settingsAutoCreateWorktree: edited ? state.settingsAutoCreateWorktree : defaults.autoCreateWorktree ?? false,
+                            settingsWorktreeStartFrom: edited ? state.settingsWorktreeStartFrom : defaults.worktreeStartFrom ?? DEFAULT_WORKTREE_START_FROM,
+                            settingsWorktreeStartFromOverrides: edited ? state.settingsWorktreeStartFromOverrides : defaults.worktreeStartFromOverrides ?? {},
+                            settingsPullRequestWorktree: edited ? state.settingsPullRequestWorktree : defaults.pullRequestWorktree ?? 'check-out',
                             settingsGitmojiEnabled: defaults.gitmojiEnabled ?? false,
                             settingsDefaultFileViewerPreview: defaults.defaultFileViewerPreview ?? true,
                             settingsZenModel: defaults.zenModel,
@@ -3764,6 +3790,27 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ autoCreateWorktree: enabled }).catch(() => {});
                 },
 
+                setSettingsWorktreeStartFrom: (startFrom: WorktreeStartFrom) => {
+                    recordOpenChamberDefaultsChange();
+                    set({ settingsWorktreeStartFrom: startFrom });
+                    updateDesktopSettings({ worktreeStartFrom: startFrom }).catch(() => {});
+                },
+
+                setSettingsWorktreeStartFromOverride: (place: WorktreeStartPlace, startFrom: WorktreeStartFrom | null) => {
+                    recordOpenChamberDefaultsChange();
+                    const next: WorktreeStartFromOverrides = { ...get().settingsWorktreeStartFromOverrides };
+                    if (startFrom) next[place] = startFrom;
+                    else delete next[place];
+                    set({ settingsWorktreeStartFromOverrides: next });
+                    updateDesktopSettings({ worktreeStartFromOverrides: next }).catch(() => {});
+                },
+
+                setSettingsPullRequestWorktree: (mode: PullRequestWorktreeMode) => {
+                    recordOpenChamberDefaultsChange();
+                    set({ settingsPullRequestWorktree: mode });
+                    updateDesktopSettings({ pullRequestWorktree: mode }).catch(() => {});
+                },
+
                 setSettingsGitmojiEnabled: (enabled: boolean) => {
                     set({ settingsGitmojiEnabled: enabled });
                 },
@@ -4352,6 +4399,9 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsDefaultVariant: state.settingsDefaultVariant,
                     settingsDefaultAgent: state.settingsDefaultAgent,
                     settingsAutoCreateWorktree: state.settingsAutoCreateWorktree,
+                    settingsWorktreeStartFrom: state.settingsWorktreeStartFrom,
+                    settingsWorktreeStartFromOverrides: state.settingsWorktreeStartFromOverrides,
+                    settingsPullRequestWorktree: state.settingsPullRequestWorktree,
                     settingsGitmojiEnabled: state.settingsGitmojiEnabled,
                     settingsDefaultFileViewerPreview: state.settingsDefaultFileViewerPreview,
                     settingsZenModel: state.settingsZenModel,

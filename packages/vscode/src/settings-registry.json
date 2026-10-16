@@ -456,6 +456,15 @@
     "autoCreateWorktree": {
       "scope": "profile"
     },
+    "worktreeStartFrom": {
+      "scope": "profile"
+    },
+    "worktreeStartFromOverrides": {
+      "scope": "profile"
+    },
+    "pullRequestWorktree": {
+      "scope": "profile"
+    },
     "sessionTabsEnabled": {
       "scope": "profile",
       "surfaces": [

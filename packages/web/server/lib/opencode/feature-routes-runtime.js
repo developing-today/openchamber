@@ -183,10 +183,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
    * A worktree from a pull or merge request given by number, the same kind
    * the New worktree dialog makes: the server reads the change request with
    * the project's own account and creates the worktree through the Git
-   * routes' contributor pipeline. `name` and `branchName` default to the
-   * change request's head branch.
+   * routes' contributor pipeline. It checks out the request's branch, or with
+   * `branchOff` starts a new branch from its head. `branchName` defaults to
+   * the head branch, or for a new branch to `name`, else `pr-<number>-<head>`;
+   * `name` defaults to the branch.
    */
-  const createChangeRequestWorktree = async ({ directory, number, name, branchName }) => {
+  const createChangeRequestWorktree = async ({ directory, number, name, branchName, branchOff = false }) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -194,9 +196,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       });
     }
     const { headBranch, sourceRequest } = await walkthroughBindingService.resolveChangeRequestWorktreeSource({ directory, number });
-    const branch = branchName || headBranch;
+    // An absolute folder path is no branch name.
+    const nameAsBranch = name && !name.startsWith('/') ? name : null;
+    const branch = branchName || (branchOff ? nameAsBranch || `pr-${number}-${headBranch}` : headBranch);
     return gitWorktreeCreation.createWorktree(directory, {
-      mode: 'existing',
+      mode: branchOff ? 'new' : 'existing',
       branchName: branch,
       worktreeName: name || branch,
       changeRequestSource: sourceRequest,

@@ -152,12 +152,15 @@ mock.module('@/lib/worktrees/worktreeManager', () => ({
   ...actualWorktreeManager,
   validateWorktreeCreate: async () => ({ ok: true, errors: [] }),
 }));
-mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async (_project: { id: string; path: string }, args: { setupCommands?: string[]; branchName?: string; worktreeName?: string }) => {
-  worktreeCreations += 1;
-  lastSetupCommands = args.setupCommands;
-  lastCreateNames = { branchName: args.branchName, worktreeName: args.worktreeName };
-  return null;
-} }));
+mock.module('@/lib/worktrees/worktreeCreate', () => ({
+  resolveDefaultWorktreeStartRef: async () => undefined,
+  createWorktreeWithDefaults: async (_project: { id: string; path: string }, args: { setupCommands?: string[]; branchName?: string; worktreeName?: string }) => {
+    worktreeCreations += 1;
+    lastSetupCommands = args.setupCommands;
+    lastCreateNames = { branchName: args.branchName, worktreeName: args.worktreeName };
+    return null;
+  },
+}));
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeBootstrap: async () => undefined }));
 mock.module('@/lib/openchamberConfig', () => ({
   getProjectSetup: async () => ({ setupWorktree: ['bun install'] }),

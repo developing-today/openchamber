@@ -200,14 +200,19 @@ describe('moving a session into a new worktree', () => {
 });
 
 describe('the default start ref', () => {
-  const resolveWith = async (branches) => {
+  const resolveWith = async (branches, startFrom = 'remote-default') => {
     const resolver = createSessionWorktreeMover({
       ...Object.fromEntries(['createWorktree', 'removeWorktree', 'waitForWorktreeReady', 'hydrateCheckout', 'stashPush', 'stashApply', 'stashDrop', 'listStashes', 'resolvePrimaryWorktreeRoot', 'moveSession'].map((name) => [name, vi.fn()])),
       bootstrapStore: {},
       getBranches: vi.fn(async () => branches),
+      readStartFrom: async () => startFrom,
     });
     return resolver.resolveDefaultStartRef(ROOT);
   };
+
+  it('starts from the project root\'s HEAD when Settings say so for agents', async () => {
+    await expect(resolveWith({ all: ['main', 'remotes/origin/main'], defaultBranches: { origin: 'main' } }, 'project-root')).resolves.toBe('HEAD');
+  });
 
   it('prefers the local copy of the remote default branch, then its remote-tracking ref', async () => {
     await expect(resolveWith({ all: ['main', 'remotes/origin/main'], defaultBranches: { origin: 'main' } })).resolves.toBe('main');
