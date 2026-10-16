@@ -91,7 +91,6 @@
         "scripts/**/*.{js,cjs,mjs,ts}"
       ],
       "project": [
-        "*.{js,cjs,mjs,ts}",
         "scripts/**/*.{js,cjs,mjs,ts}"
       ]
     }

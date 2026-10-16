@@ -36,14 +36,16 @@ const DEFAULT_MONO = 'ui-monospace, "SFMono-Regular", Menlo, monospace';
 /** The app theme as the page's variables, following theme and interface size switches live. */
 function useHtmlRenderTheme(): HtmlRenderTheme {
     const { currentTheme } = useThemeSystem();
-    // The interface size setting scales the root font, and the app's
-    // controls with it; read again whenever it changes.
+    // The interface size setting scales the root font (as a percentage, applied
+    // synchronously by setFontSize), and the app's controls with it; read again
+    // whenever it changes.
     const interfaceSize = useUIStore((state) => state.fontSize);
     return React.useMemo(() => {
         // The user's font settings land on the root as these variables.
         const style = getComputedStyle(document.documentElement);
         return htmlRenderTheme(currentTheme, {
-            rem: Number.parseFloat(style.fontSize) || 16,
+            // Without a computed size, assume the usual 16px browser default at the interface scale.
+            rem: Number.parseFloat(style.fontSize) || (16 * interfaceSize) / 100,
             sans: style.getPropertyValue('--font-sans').trim() || DEFAULT_SANS,
             mono: style.getPropertyValue('--font-mono').trim() || DEFAULT_MONO,
         });

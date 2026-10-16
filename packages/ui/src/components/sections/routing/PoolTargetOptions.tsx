@@ -75,7 +75,7 @@ export const PoolTargetOptions: React.FC<{
   const heading = 'typography-meta text-muted-foreground';
 
   return (
-    <div className="space-y-2 pl-2">
+    <div className="space-y-2 ps-2">
       <Button size="sm" variant="ghost" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         {open ? t('settings.pools.target.hideOptions') : t('settings.pools.target.options')}
       </Button>

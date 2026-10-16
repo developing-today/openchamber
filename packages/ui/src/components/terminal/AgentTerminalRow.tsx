@@ -163,7 +163,7 @@ export const AgentTerminalRow: React.FC<{ pty: TrackedPty }> = ({ pty }) => {
 
   return (
     <div>
-      <div className="flex h-8 items-center gap-2 pl-3 pr-1.5 pt-1">
+      <div className="flex h-8 items-center gap-2 ps-3 pe-1.5 pt-1">
         <Icon name="terminal-box" className="size-3.5 shrink-0 text-muted-foreground" />
         {renaming ? (
           <TerminalRename ptyID={pty.id} command={command} initial={customName ?? ''} onDone={() => setRenaming(false)} />
@@ -211,12 +211,12 @@ export const AgentTerminalRow: React.FC<{ pty: TrackedPty }> = ({ pty }) => {
           {t('chat.persistentTerminals.stop')}
         </Button>
       </div>
-      <div className="flex items-center gap-2 pb-1 pl-7 pr-1.5">
+      <div className="flex items-center gap-2 pb-1 ps-7 pe-1.5">
         <button
           type="button"
           onClick={() => useSessionUIStore.getState().setCurrentSession(pty.sessionID, pty.directory)}
           title={pty.sessionID}
-          className="min-w-0 flex-1 truncate text-left typography-meta text-muted-foreground hover:text-foreground"
+          className="min-w-0 flex-1 truncate text-start typography-meta text-muted-foreground hover:text-foreground"
         >
           {t(isSubagent ? 'chat.persistentTerminals.originSubagent' : 'chat.persistentTerminals.origin', { title: originTitle })}
         </button>

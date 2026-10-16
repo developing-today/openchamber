@@ -18,7 +18,7 @@ const GITHUB_RELEASES_URL = 'https://github.com/developing-today/openchamber/rel
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/developing-today/openchamber/releases';
 // npm publishes upstream's @openchamber/web, so this build never installs updates through
 // the package manager. The server and CLI report the fork release and the user installs it.
-export const FORK_RELEASES_LATEST_URL = `${GITHUB_RELEASES_URL}/latest`;
+const FORK_RELEASES_LATEST_URL = `${GITHUB_RELEASES_URL}/latest`;
 let cachedDetection = null;
 
 function getSpawnSyncBaseOptions() {

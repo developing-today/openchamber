@@ -11,13 +11,13 @@ import { z } from 'zod';
 
 import { resolveOpenCodeDataDir } from './route-overrides-store.js';
 
-export const COVERAGE = ['subscription', 'credits', 'metered', 'free', 'trial'];
-export const TIERS = ['cheap', 'standard', 'frontier'];
-export const UNITS = ['requests', 'messages', 'tokens', 'usd', 'percent', 'other'];
-export const STATUSES = ['active', 'expired', 'cancelled', 'unknown'];
-export const PERIODS = ['monthly', 'yearly', 'once'];
-export const NOTE_KINDS = ['experience', 'expectation', 'plan-change', 'correction', 'other'];
-export const NOTE_SOURCES = ['user', 'model', 'ui'];
+const COVERAGE = ['subscription', 'credits', 'metered', 'free', 'trial'];
+const TIERS = ['cheap', 'standard', 'frontier'];
+const UNITS = ['requests', 'messages', 'tokens', 'usd', 'percent', 'other'];
+const STATUSES = ['active', 'expired', 'cancelled', 'unknown'];
+const PERIODS = ['monthly', 'yearly', 'once'];
+const NOTE_KINDS = ['experience', 'expectation', 'plan-change', 'correction', 'other'];
+const NOTE_SOURCES = ['user', 'model', 'ui'];
 
 const text = z.string();
 const finite = z.number().finite();
@@ -70,14 +70,14 @@ const poolEntrySchema = z.object({
   updatedAt: text,
 });
 
-export const storeSchema = z.object({
+const storeSchema = z.object({
   version: z.literal(1),
   plans: z.array(planSchema),
   models: z.record(text, modelEntrySchema),
   pools: z.record(text, poolEntrySchema),
 });
 
-export const noteSchema = z.object({
+const noteSchema = z.object({
   id: text,
   at: text,
   kind: z.enum(NOTE_KINDS),
@@ -93,7 +93,7 @@ const httpError = (status, message, code) => Object.assign(new Error(message), {
 
 export const emptyPlanStore = () => ({ version: 1, plans: [], models: {}, pools: {} });
 
-export const planStoreFiles = (dataDir = resolveOpenCodeDataDir()) => ({
+const planStoreFiles = (dataDir = resolveOpenCodeDataDir()) => ({
   dir: dataDir,
   store: path.join(dataDir, 'plans.json'),
   notes: path.join(dataDir, 'plan-notes.jsonl'),
@@ -125,7 +125,7 @@ export const writePlanStore = (value, dataDir) => {
   return valid;
 };
 
-export const slug = (value) =>
+const slug = (value) =>
   value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
