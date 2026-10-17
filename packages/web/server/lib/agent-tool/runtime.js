@@ -513,6 +513,13 @@ const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   exports: { '.': './index.js' },
 }, null, 2)}\n`;
 
+// OpenCode probes `<dir>/server` before falling back to `index.js`, and the
+// Bun resolve bug (developing-today/opencode#16) breaks that fallback, so a
+// missing `server.js` fails plugin reload with
+// `Cannot find module '…/openchamber-agent-tool/server'`.
+// Writing this tiny re-export keeps the plugin loadable until #16 lands.
+const PLUGIN_SERVER_ENTRY = `export { default } from "./index.js";\n`;
+
 export const createAgentToolRuntime = (dependencies) => {
   const {
     crypto,
@@ -527,6 +534,7 @@ export const createAgentToolRuntime = (dependencies) => {
   const pluginRoot = path.join(dataDir, 'agent-tool');
   const pluginDirectory = path.join(pluginRoot, PLUGIN_ID);
   const pluginPath = path.join(pluginDirectory, 'index.js');
+  const pluginServerEntryPath = path.join(pluginDirectory, 'server.js');
   const pluginManifestPath = path.join(pluginDirectory, 'package.json');
   let activeToken = null;
 
@@ -546,6 +554,7 @@ export const createAgentToolRuntime = (dependencies) => {
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
     await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode, worktreeMoveWithoutAsking }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginServerEntryPath, PLUGIN_SERVER_ENTRY, { mode: 0o600 });
     return pluginDirectory;
   };
 

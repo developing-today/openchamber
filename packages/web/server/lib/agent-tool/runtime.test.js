@@ -294,6 +294,16 @@ describe('managed agent tool runtime', () => {
     // The managed config layer names this directory; the runtime only writes it.
     expect(preparedEnv.pluginDirectory).toBe(pluginDirectoryFor(dataDir));
     expect(manifest.exports).toEqual({ '.': './index.js' });
+    // OpenCode probes `<dir>/server` first and the Bun resolve bug breaks
+    // the `index.js` fallback, so the plugin must ship a `server.js` that
+    // re-exports the index default (issue #35).
+    const serverEntry = path.join(pluginDirectoryFor(dataDir), 'server.js');
+    expect(await fs.readFile(serverEntry, 'utf8')).toBe('export { default } from "./index.js";\n');
+    // server.js re-exports the bare './index.js' module, so compare against a
+    // bare import too; a query-tagged import would be a separate module record.
+    const serverModule = await import(pathToFileURL(serverEntry).href);
+    const indexModule = await import(pathToFileURL(path.join(pluginDirectoryFor(dataDir), 'index.js')).href);
+    expect(serverModule.default).toBe(indexModule.default);
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_URL).toBe('http://127.0.0.1:3901/api/openchamber/agent-tool');
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(source).toContain('openchamber: {');
