@@ -79,7 +79,12 @@ both settings are `false`.
 2. `materializePlugin()` writes the plugin under
    `<openchamber-data-dir>/agent-tool/` and returns its directory; the managed
    config layer lists that directory in `<data-dir>/opencode.managed.json` and
-   rewrites the file whenever a tool setting changes.
+   rewrites the file whenever a tool setting changes. The plugin source is
+   written as `index.js`, with a `package.json` whose `exports` resolves the
+   entrypoint, plus a `server.js` re-export of `index.js`'s default export:
+   OpenCode probes `<dir>/server` first and the Bun resolve bug
+   (developing-today/opencode#16) breaks its fallback to `index.js`, so
+   without `server.js` a plugin reload fails with `Cannot find module '…/openchamber-agent-tool/server'`.
 3. `createChildEnv()` adds a random per-child token and the callback URL to the
    managed OpenCode child environment. They are present even while every tool
    is off, so a tool switched on later can call back without a restart. The URL
