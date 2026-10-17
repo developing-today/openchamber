@@ -1079,7 +1079,15 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action.startsWith('session.')) {
         const sessionID = asNonEmptyString(input.sessionId);
         if (action !== 'session.list' && !sessionID) throw new OpenChamberControlError('sessionId is required', 400);
-        const directory = await resolveReadDirectory(input, contextDirectory);
+        let directory = await resolveReadDirectory(input, contextDirectory);
+        // A read of one session belongs to that session: with no explicit
+        // projectId or directory, resolve the session's own directory from
+        // the global session list the way send and fork do, and keep the
+        // caller's directory only as the fallback when it is not found.
+        if (action !== 'session.list' && !asNonEmptyString(input.directory) && !asNonEmptyString(input.projectId)) {
+          const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
+          if (resolvedSessionDirectory) directory = resolvedSessionDirectory;
+        }
         const client = await getClient(directory);
         if (action === 'session.list') {
           const limit = positiveInteger(input.limit, 10, 'limit');

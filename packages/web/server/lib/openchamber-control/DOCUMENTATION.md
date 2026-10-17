@@ -148,7 +148,11 @@ other.
   `resolveDirectory`, the lookup create/send/fork use: an unknown project is a
   404 and a missing project folder a 400, never a read of the current or every
   directory. Every `session.*` action refuses `projectId` and `directory`
-  together with a 400, so neither silently wins.
+  together with a 400, so neither silently wins. `session.status` and
+  `session.messages` with no explicit scope resolve the target session's
+  own directory from the global session list, the way send and fork do,
+  and use the calling session's directory only when the session is not
+  found there. The directory in the result is the one the read used.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
 - `session.create` runs in a new git worktree by default (`resolveAutoWorktree`
