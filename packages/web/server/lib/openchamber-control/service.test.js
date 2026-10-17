@@ -591,6 +591,43 @@ describe('OpenChamber control service', () => {
       .resolves.toEqual({ sessionId: 'ses_repo', directory: '/repo', sessionStatus: { type: 'idle' } });
   });
 
+  it('reports the target session directory for status and messages when no scope is given', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_target', location: { directory: '/repo/worktrees/target' } }],
+    });
+    client.message.list.mockResolvedValue({
+      data: [{ id: 'msg_user', type: 'user', time: { created: 10 }, text: 'Question' }],
+    });
+
+    await expect(service.execute('session.status', { sessionId: 'ses_target' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_target', directory: '/repo/worktrees/target', sessionStatus: { type: 'idle' } });
+    await expect(service.execute('session.messages', { sessionId: 'ses_target' }, '/current-session'))
+      .resolves.toEqual(expect.objectContaining({
+        sessionId: 'ses_target',
+        directory: '/repo/worktrees/target',
+        messages: [expect.objectContaining({ id: 'msg_user', text: 'Question' })],
+      }));
+  });
+
+  it('keeps an explicit directory for status instead of the session directory', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_target', location: { directory: '/repo/worktrees/target' } }],
+    });
+
+    await expect(service.execute('session.status', { sessionId: 'ses_target', directory: '/explicit' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_target', directory: '/explicit', sessionStatus: { type: 'idle' } });
+  });
+
+  it('falls back to the context directory when the session is not in the global list', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({ data: [] });
+
+    await expect(service.execute('session.status', { sessionId: 'ses_unknown' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_unknown', directory: '/current-session', sessionStatus: { type: 'idle' } });
+  });
+
   it('rejects an unknown project instead of reading another directory', async () => {
     const { service, client } = createService();
     await expect(service.execute('session.list', { projectId: 'missing' }, '/current-session'))
