@@ -200,8 +200,21 @@ other.
   which recomputes `activeProjectId` on its own — the checkout, its sessions
   and its worktrees are left untouched. Both 503 when the server has not
   wired `fsPromises`/`validateDirectoryPath`/`persistSettings`/
-  `createProjectIdFromPath`. Session and worktree deletion are still not part
-  of the action contract.
+  `createProjectIdFromPath`. Worktree deletion is still not part of the
+  action contract.
+- `session.archive` / `session.unarchive` move a session out of (and back
+  into) the active list through the session service's `archive` /
+  `unarchive`, so open windows hear the same broadcast as a UI archive; a
+  server whose session service lacks those methods falls back to the
+  injected `archiveStore`, and one with neither answers 503. A session the
+  store refuses to archive is a 500, never a claimed success. Archiving is
+  reversible, so the agent tool may use it — that is how throwaway sessions
+  an agent created are removed through the same API.
+- `session.delete` permanently removes a session through the
+  directory-scoped client's `session.remove`. It is CLI-only
+  (`agentExposed: false`, like `schedule.status`): permanent deletion stays
+  a human's action, so the agent tool rejects it before the service runs.
+  The service also refuses to delete the session a call is running in.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of
