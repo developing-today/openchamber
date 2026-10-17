@@ -1917,7 +1917,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     </>
                 ) : (
                     <>
-                        <CurrentModelIndicator messages={timelineController.renderedMessages} />
+                        {!isMobile ? (
+                            <CurrentModelIndicator sessionId={currentSessionId} directory={effectiveSessionDirectory} />
+                        ) : null}
                         <ChatInput
                             active={active}
                             scrollToBottom={scrollToBottomOnSend}

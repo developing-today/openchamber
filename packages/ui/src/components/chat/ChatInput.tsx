@@ -233,6 +233,7 @@ import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessagesStrip } from './RevertedMessagesStrip';
+import CurrentModelIndicator from './CurrentModelIndicator';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionDoneHintRow } from '@/components/chat/SessionDoneHintRow';
 import { SessionReviewHintRow } from '@/components/chat/SessionReviewHintRow';
@@ -4152,13 +4153,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // px-3.5 lines the model logo and the agent label up with the attach
         // and mic icons above them; the buttons drop their own padding so the
         // row alone owns the inset.
-        <div className="flex items-center justify-between gap-x-2 px-3.5 pb-2 pt-0.5">
-            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
-            <MemoMobileAgentButton
-                onOpenAgentPanel={handleOpenAgentPanel}
-                onCycleAgent={handleCycleAgent}
-                className="flex-shrink-0 px-0"
+        <div className="flex flex-col gap-0.5 px-3.5 pb-2 pt-0.5">
+            <CurrentModelIndicator
+                sessionId={currentSessionId}
+                directory={currentSessionDirectoryForSync ?? currentDirectory}
             />
+            <div className="flex items-center justify-between gap-x-2">
+                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+                <MemoMobileAgentButton
+                    onOpenAgentPanel={handleOpenAgentPanel}
+                    onCycleAgent={handleCycleAgent}
+                    className="flex-shrink-0 px-0"
+                />
+            </div>
         </div>
     ) : null;
 

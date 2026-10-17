@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { create } from 'zustand';
+import type { Message } from '@/lib/opencode/model';
 
 type ConfigState = { currentProviderId: string; currentModelId: string };
 
@@ -13,11 +14,15 @@ const useConfigStore = create<ConfigState>(() => ({
 
 mock.module('@/stores/useConfigStore', () => ({ useConfigStore }));
 
+let sessionMessages: Message[] = [];
+mock.module('@/sync/sync-context', () => ({
+    useSessionMessages: (sessionID: string) => (sessionID ? sessionMessages : []),
+}));
+
 const { default: CurrentModelIndicator } = await import('./CurrentModelIndicator');
 
-const assistantMessage = (id: string, providerID: string, modelID: string, variant?: string) => ({
-    info: { id, sessionID: 's', role: 'assistant' as const, time: { created: 1 }, agent: 'build', providerID, modelID, variant },
-    parts: [],
+const assistantMessage = (id: string, providerID: string, modelID: string, variant?: string): Message => ({
+    id, sessionID: 's', role: 'assistant', time: { created: 1 }, agent: 'build', providerID, modelID, variant,
 });
 
 describe('CurrentModelIndicator', () => {
@@ -50,39 +55,44 @@ describe('CurrentModelIndicator', () => {
     afterEach(async () => {
         await act(async () => root.unmount());
         restore();
+        sessionMessages = [];
         useConfigStore.setState({ currentProviderId: 'anthropic', currentModelId: 'claude-sonnet-5.5' });
     });
 
     test('shows the real model of the last assistant message', async () => {
-        await act(async () => root.render(
-            <CurrentModelIndicator messages={[assistantMessage('a1', 'anthropic', 'claude-sonnet-5.5', 'high')]} />,
-        ));
+        sessionMessages = [assistantMessage('a1', 'anthropic', 'claude-sonnet-5.5', 'high')];
+        await act(async () => root.render(<CurrentModelIndicator sessionId="s1" />));
         const indicator = container.querySelector('[data-current-model-indicator]');
         expect(indicator?.textContent).toBe('anthropic/claude-sonnet-5.5#high');
     });
 
     test('shows the streaming/last message, not an earlier one', async () => {
-        await act(async () => root.render(
-            <CurrentModelIndicator messages={[
-                assistantMessage('a1', 'openai', 'gpt-6-luna'),
-                assistantMessage('a2', 'anthropic', 'claude-sonnet-5.5'),
-            ]} />,
-        ));
+        sessionMessages = [
+            assistantMessage('a1', 'openai', 'gpt-6-luna'),
+            assistantMessage('a2', 'anthropic', 'claude-sonnet-5.5'),
+        ];
+        await act(async () => root.render(<CurrentModelIndicator sessionId="s1" />));
         const indicator = container.querySelector('[data-current-model-indicator]');
         expect(indicator?.textContent).toBe('anthropic/claude-sonnet-5.5');
     });
 
     test('shows "pool · real model" when the selection is a pool', async () => {
         useConfigStore.setState({ currentProviderId: 'opencode-route', currentModelId: 'fast-strong' });
-        await act(async () => root.render(
-            <CurrentModelIndicator messages={[assistantMessage('a1', 'github-copilot', 'gpt-6-luna', 'low')]} />,
-        ));
+        sessionMessages = [assistantMessage('a1', 'github-copilot', 'gpt-6-luna', 'low')];
+        await act(async () => root.render(<CurrentModelIndicator sessionId="s1" />));
         const indicator = container.querySelector('[data-current-model-indicator]');
         expect(indicator?.textContent).toBe('fast-strong·github-copilot/gpt-6-luna#low');
     });
 
     test('renders nothing before any assistant message exists', async () => {
-        await act(async () => root.render(<CurrentModelIndicator messages={[]} />));
+        sessionMessages = [];
+        await act(async () => root.render(<CurrentModelIndicator sessionId="s1" />));
+        expect(container.querySelector('[data-current-model-indicator]')).toBeNull();
+    });
+
+    test('renders nothing without a session id', async () => {
+        sessionMessages = [assistantMessage('a1', 'anthropic', 'claude-sonnet-5.5')];
+        await act(async () => root.render(<CurrentModelIndicator sessionId={null} />));
         expect(container.querySelector('[data-current-model-indicator]')).toBeNull();
     });
 });
