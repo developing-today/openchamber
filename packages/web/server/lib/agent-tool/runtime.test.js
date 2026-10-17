@@ -321,7 +321,7 @@ describe('managed agent tool runtime', () => {
     expect(tool.openchamber.description).not.toContain('without asking');
     expect(tool.openchamber.input.properties.action.oneOf).toContainEqual({
       const: 'session.messages',
-      description: 'Read text-only messages and current sessionStatus for sessionId; directory and limit 10 are defaults',
+      description: 'Read text-only messages and current sessionStatus for sessionId; directory defaults to the session\'s own directory, limit defaults to 10',
     });
     // An agent never blocks on a session: no wait or timeout in its schema.
     const controlParameters = tool.openchamber.input.properties.parameters.properties;
