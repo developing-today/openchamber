@@ -2323,14 +2323,18 @@ export async function respondToPermission(
   requestId: string,
   response: "once" | "always" | "reject",
   directoryOverride?: string,
+  message?: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
   const directory = directoryOverride
     || resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
+  // Deny feedback reaches the agent as the reply message; blank text is a
+  // plain reply with no message at all.
+  const feedback = message?.trim() ? message.trim() : undefined
   try {
-    if (await opencodeClient.replyToPermission(sessionId, requestId, response, { directory }) !== true) {
+    if (await opencodeClient.replyToPermission(sessionId, requestId, response, { directory, message: feedback }) !== true) {
       throw new Error("Permission reply failed")
     }
   } catch (error) {
