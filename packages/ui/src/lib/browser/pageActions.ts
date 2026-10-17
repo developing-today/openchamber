@@ -298,7 +298,15 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
   catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
   if (!target) return { ok: false, error: 'No element matches ' + selector };
 
-  var editable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+  // An <input> is a text field only for text-like types. A generic selector
+  // like 'input' resolves to the first input on the page, which is commonly a
+  // checkbox toggle (DuckDuckGo's #sidemenu-toggle): typing into it set a
+  // meaningless value and still reported success, while a non-field selector
+  // was refused for the same action. The type property is what the page sees:
+  // a missing or unknown type reads back as 'text', as it does to the user.
+  var textInputTypes = ['text', 'search', 'email', 'url', 'tel', 'password', 'number'];
+  var editable = target.tagName === 'TEXTAREA' || target.isContentEditable ||
+    (target.tagName === 'INPUT' && textInputTypes.indexOf(String(target.type || 'text').toLowerCase()) !== -1);
   if (!editable) return { ok: false, error: selector + ' is not a text field' };
   if (target.disabled === true || target.readOnly === true) return { ok: false, error: 'Field is not editable' };
 

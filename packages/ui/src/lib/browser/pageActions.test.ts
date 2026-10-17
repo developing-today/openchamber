@@ -60,6 +60,51 @@ describe('page action scripts', () => {
     expect(script).toContain(JSON.stringify(value));
   });
 
+  test('typing refuses a non-text input a generic selector resolves to', () => {
+    // Issue #32: on DuckDuckGo, selector 'input' resolved to the checkbox
+    // #sidemenu-toggle and browser.type reported success, while a button
+    // selector was refused as not a text field. The check is the input type,
+    // not the tag name.
+    const win = new Window({ url: 'https://duckduckgo.com/' });
+    win.document.body.innerHTML = '<input type="checkbox" id="sidemenu-toggle"><input type="text" id="search">';
+    const runType = new Function(
+      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
+      `return ${buildTypeScript({ selector: 'input', value: 'hello', submit: false })}`,
+    );
+    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
+    expect(JSON.stringify(result)).toBe('{"ok":false,"error":"input is not a text field"}');
+    expect(win.document.querySelector('input')?.checked).toBe(false);
+  });
+
+  test('typing refuses button-like and hidden inputs but accepts text-like ones', () => {
+    const win = new Window({ url: 'https://example.test/' });
+    const runType = (selector: string): string => JSON.stringify(new Function(
+      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
+      `return ${buildTypeScript({ selector, value: 'hello', submit: false })}`,
+    )(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event));
+
+    for (const type of ['submit', 'button', 'radio', 'hidden', 'file']) {
+      win.document.body.innerHTML = `<input type="${type}" id="field">`;
+      expect(runType('#field')).toBe('{"ok":false,"error":"#field is not a text field"}');
+    }
+    for (const type of ['text', 'search', 'email', 'password', 'tel', 'url']) {
+      win.document.body.innerHTML = `<input type="${type}" id="field">`;
+      expect(runType('#field')).toContain('"ok":true');
+      expect(win.document.querySelector('input')?.value).toBe('hello');
+    }
+    // A number field is text-like too; it just rejects non-numeric values
+    // itself, as it does for a user typing letters into it.
+    win.document.body.innerHTML = '<input type="number" id="field">';
+    expect(runType('#field')).toContain('"ok":true');
+    // No type attribute reads back as 'text', in the page and to the user.
+    win.document.body.innerHTML = '<input id="field">';
+    expect(runType('#field')).toContain('"ok":true');
+
+    win.document.body.innerHTML = '<textarea id="field"></textarea>';
+    expect(runType('#field')).toContain('"ok":true');
+    expect(win.document.querySelector('textarea')?.value).toBe('hello');
+  });
+
   test('whitespace regexes survive interpolation', () => {
     // A doubled backslash here would produce a literal backslash-s and match
     // nothing, silently collapsing no whitespace at all.
