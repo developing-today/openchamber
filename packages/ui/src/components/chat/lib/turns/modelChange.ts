@@ -27,6 +27,25 @@ export const turnRealModelRef = (turn: TurnWithAssistants): string | undefined =
     return model ? formatModelRef(model) : undefined;
 };
 
+/**
+ * The most recent real model among `turns`, scanning from the end backward —
+ * the "previous model" a turn that follows all of them should compare
+ * against. `undefined` when none of them has one yet.
+ *
+ * This is what the transcript's trailing row (the last turn, idle or
+ * streaming — see `MessageList`'s `trailingStreamingEntry`) needs for its own
+ * model-changed check: it sits outside `buildHistoryEntries`, so it cannot
+ * read the running accumulator `orderHistoryEntries` keeps for every turn
+ * before it, and must ask every history turn again here instead.
+ */
+export const lastKnownModelRef = (turns: readonly TurnWithAssistants[]): string | undefined => {
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+        const ref = turnRealModelRef(turns[index]);
+        if (ref) return ref;
+    }
+    return undefined;
+};
+
 interface ModelChangeNotice {
     readonly from: ModelRefLike;
     readonly to: ModelRefLike;

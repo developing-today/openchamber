@@ -10,7 +10,7 @@ import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContexts
 import TurnItem from './components/TurnItem';
 import { LiveTurnActivity } from './components/LiveTurnActivity';
 import { getTurnsWithLaterAssistant, hasLiveActivity } from './lib/turns/liveActivity';
-import { turnRealModelRef } from './lib/turns/modelChange';
+import { turnRealModelRef, lastKnownModelRef } from './lib/turns/modelChange';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { useMessageModelAttribution } from './hooks/useMessageModelAttribution';
@@ -939,6 +939,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [defaultActivityExpanded, staticTurns, tailHasAssistant]);
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
     const staticEntryUngroupedIds = hasUngroupedStaticEntries ? projection.ungroupedMessageIds : EMPTY_UNGROUPED_MESSAGE_IDS;
+    // The trailing row renders the last turn whether idle or streaming (see
+    // useTurnRecords' `tailIsTurn`), bypassing buildHistoryEntries entirely —
+    // so it needs its own previous-model lookup for the model-changed divider,
+    // mirroring what orderHistoryEntries tracks for every turn before it.
+    const previousAssistantModelForTrailingTurn = React.useMemo(
+        () => lastKnownModelRef(staticTurns),
+        [staticTurns]
+    );
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
             return {
@@ -946,6 +954,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 key: `turn:${streamingTurn.turnId}`,
                 turn: streamingTurn,
                 isLastTurn: streamingTurn.turnId === projection.lastTurnId,
+                previousAssistantModel: previousAssistantModelForTrailingTurn,
             } satisfies RenderEntry;
         }
 
@@ -964,7 +973,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             message: lastMessage,
             nextMessage: undefined,
         } satisfies RenderEntry;
-    }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
+    }, [displayMessages, previousAssistantModelForTrailingTurn, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
 
     if (trailingStreamingEntry) {
         streamPerfCount('ui.message_list.render.streaming');

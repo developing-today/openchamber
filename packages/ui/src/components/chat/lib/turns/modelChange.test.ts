@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage } from '@/lib/opencode/model';
-import { detectModelChange, turnRealModel, turnRealModelRef } from './modelChange';
+import { detectModelChange, lastKnownModelRef, turnRealModel, turnRealModelRef } from './modelChange';
 import type { ChatMessageEntry, TurnRecord } from './types';
 
 const assistant = (id: string, providerID: string, modelID: string, variant?: string): ChatMessageEntry => {
@@ -61,5 +61,32 @@ describe('detectModelChange', () => {
 
     test('undefined while the new turn has no assistant model yet (still streaming in)', () => {
         expect(detectModelChange(previous, turnOf([]))).toBeUndefined();
+    });
+});
+
+describe('lastKnownModelRef', () => {
+    test('undefined for no turns at all (the first turn of a session)', () => {
+        expect(lastKnownModelRef([])).toBeUndefined();
+    });
+
+    test('the most recent turn with a real model', () => {
+        const turns = [
+            turnOf([assistant('a1', 'anthropic', 'claude-sonnet-5.5', 'low')]),
+            turnOf([assistant('a2', 'github-copilot', 'gpt-6-luna', 'medium')]),
+        ];
+        expect(lastKnownModelRef(turns)).toBe('github-copilot/gpt-6-luna#medium');
+    });
+
+    // Regression for #29: the trailing row renders the last turn whether the
+    // session is idle or still streaming, outside buildHistoryEntries, so it
+    // must look this up itself instead of reading orderHistoryEntries'
+    // accumulator — a model change on the very last turn was otherwise never
+    // marked.
+    test('skips a trailing turn that has no assistant model yet', () => {
+        const turns = [
+            turnOf([assistant('a1', 'anthropic', 'claude-sonnet-5.5', 'low')]),
+            turnOf([]),
+        ];
+        expect(lastKnownModelRef(turns)).toBe('anthropic/claude-sonnet-5.5#low');
     });
 });
