@@ -154,7 +154,8 @@ describe('OpenCode handoff with real children', () => {
       expect(current.pid).not.toBe(first.pid);
       const saved = readState(fixture.root);
       expect(saved.pid).toBe(current.pid);
-      expect(saved.binary).toBe(nextBinary);
+      // The state records the resolved binary; os.tmpdir() is behind a symlink on macOS.
+      expect(saved.binary).toBe(fs.realpathSync(nextBinary));
       expect(saved.port).not.toBe(oldPort);
       expect(fixture.handoffs.map((entry) => entry.url)).toEqual([`http://127.0.0.1:${oldPort}`]);
 
@@ -197,6 +198,29 @@ describe('OpenCode handoff with real children', () => {
       expect(readState(fixture.root).pid).toBe(pidBefore);
       expect(fixture.handoffs).toEqual([]);
       expect(alive(first.pid)).toBe(true);
+    } finally {
+      await fixture.cleanup(runtime, []);
+      if (previousRegistry === undefined) delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+      else process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = previousRegistry;
+    }
+  }, 30_000);
+
+  it('does not restart OpenCode on a reload when its bin link still points at the same binary', async () => {
+    const fixture = await createFixture();
+    const previousRegistry = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = path.join(fixture.root, 'registry');
+    const link = path.join(fixture.root, 'opencode-link');
+    fs.symlinkSync(process.execPath, link);
+    fixture.binary.current = link;
+    const runtime = fixture.createRuntime();
+    try {
+      const first = await runtime.startOpenCode();
+      fixture.state.openCodeProcess = first;
+
+      expect(await runtime.reloadOpenCode()).toBe(false);
+
+      expect(await fixture.spawnedPids()).toEqual([first.pid]);
+      expect(fixture.handoffs).toEqual([]);
     } finally {
       await fixture.cleanup(runtime, []);
       if (previousRegistry === undefined) delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;

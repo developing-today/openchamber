@@ -1091,7 +1091,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     await applyOpencodeBinaryFromSettings({ strict: false });
     const binary = ensureOpencodeCliEnv();
     const args = managedOpenCodeArgs(env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
-    if (binary === saved.binary && sameOpenCodeArgs(saved.args, args)) return false;
+    // saved.binary is the resolved identity, so an unchanged bin link is not a change.
+    if (resolveBinaryIdentity(binary) === saved.binary && sameOpenCodeArgs(saved.args, args)) return false;
     console.log('[OpenCode] binary or arguments changed; handing off to a new OpenCode process');
     await restartOpenCode('config-reload', { handoff: true, busySessionIds: listBusySessionIds() });
     return true;
