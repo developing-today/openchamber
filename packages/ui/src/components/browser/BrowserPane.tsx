@@ -26,6 +26,7 @@ import {
   type PageCapture,
 } from '@/lib/browser/annotationSession';
 import { resolveAnnotationOverlayTheme } from '@/lib/browser/overlayTheme';
+import { capturePageWithRetry } from '@/lib/browser/captureRetry';
 import { registerBrowserController } from '@/lib/browser/controlClient';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
@@ -328,7 +329,13 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       if (!webview) return null;
       const webContentsId = webview.getWebContentsId();
       if (!Number.isFinite(webContentsId)) return null;
-      return await invokeDesktopCommand<PageCapture>('desktop_browser_capture_page', { webContentsId });
+      // A resize or a tab outside the view can leave Chromium without a
+      // composited frame for a moment, and capturePage answers
+      // UnknownVizError until the next frame lands. The retry waits that gap
+      // out; every other failure comes back on the first attempt.
+      return await capturePageWithRetry(
+        () => invokeDesktopCommand<PageCapture>('desktop_browser_capture_page', { webContentsId }),
+      );
     },
   }), []);
 
