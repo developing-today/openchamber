@@ -7,6 +7,7 @@
  * scoping through `x-opencode-directory`), error normalisation (v2 throws
  * tagged error bodies without an HTTP status), and projection of wire shapes
  * into the OpenChamber domain model (`./model`, `./projection`).
+ * Routing-response validation shared with SDK-gap adapters lives in `./runtime-response`.
  *
  * OpenChamber-owned server routes (`/api/fs/*`, `/api/opencode/*`) also live
  * here when they are part of the same directory/session workflows.
@@ -64,6 +65,7 @@ import {
   toModelRef,
 } from "./model"
 import { ascendingId } from "./ids"
+import { RuntimeRoutingResponseError, validateRuntimeResponse } from "./runtime-response"
 import { runningShellFromWire, shellCancellationNote, type RunningShell, type ShellToStop } from "./background-shell"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
@@ -153,23 +155,6 @@ export class OpencodeApiError extends Error {
 }
 
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
-
-class RuntimeRoutingResponseError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message)
-    this.name = 'RuntimeRoutingResponseError'
-  }
-}
-
-export const validateRuntimeResponse = (response: Response): Response => {
-  const unavailable = response.headers.get('x-openchamber-error') === 'runtime-unavailable'
-  const html = response.ok && (response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')
-  if (!unavailable && !html) return response
-  void response.body?.cancel().catch(() => undefined)
-  throw new RuntimeRoutingResponseError(response.status, unavailable
-    ? 'runtime_unavailable'
-    : 'the runtime returned a web page instead of an API response')
-}
 
 /**
  * Turns whatever the generated client threw into an `OpencodeApiError` with a

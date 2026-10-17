@@ -18,7 +18,8 @@
 
 import { z } from "zod"
 
-import { OpencodeApiError, normalizeOpencodeError, validateRuntimeResponse } from "./client"
+import { OpencodeApiError, normalizeOpencodeError } from "./client"
+import { validateRuntimeResponse } from "./runtime-response"
 import type { Message } from "./model"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 

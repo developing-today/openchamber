@@ -16,9 +16,20 @@ const runtimeCtx = {
   routingAvailable: false,
   enterpriseMode: false,
   jevBlockedByEnterprise: false,
+  messagingSupported: true,
 };
 
 describe('settings search', () => {
+  test('indexes live messaging controls only on supported servers and keeps editable config searchable', () => {
+    const live = ['model', 'autostart', 'model-url', 'model-path', 'pooling', 'threads', 'gpu-layers', 'server', 'query', 'presets', 'constants', 'variables'];
+    const editable = ['remote', 'search', 'delivery', 'session-start'];
+    for (const messagingSupported of [false, true]) {
+      const results = buildSettingsSearchResults({ query: 'messaging', runtimeCtx: { ...runtimeCtx, messagingSupported }, t, getPageTitle: (page) => page });
+      for (const id of live) expect(results.some((result) => result.id === `messaging.${id}`)).toBe(messagingSupported);
+      for (const id of editable) expect(results.some((result) => result.id === `messaging.${id}`)).toBe(true);
+    }
+  });
+
   test('finds double-paste on every shared Settings surface', () => {
     for (const query of ['double paste', 'ctrl v', 'cmd v']) {
       for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {

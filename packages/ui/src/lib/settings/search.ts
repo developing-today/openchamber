@@ -20,6 +20,7 @@ export interface SettingsSearchResult extends SettingsSearchItem {
 }
 
 interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+  messagingSupported: boolean;
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
@@ -1385,12 +1386,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.messaging.section.model',
     descriptionKey: 'settings.messaging.section.modelInfo',
     keywords: ['embedding', 'embeddings', 'semantic search', 'llama.cpp', 'qwen', 'gguf', 'download', 'model size', 'tier'],
+    isAvailable: (ctx) => ctx.messagingSupported,
   },
   {
     id: 'messaging.autostart',
     page: 'messaging',
     titleKey: 'settings.messaging.model.autostart',
     keywords: ['embedding', 'autostart', 'download', 'startup'],
+    isAvailable: (ctx) => ctx.messagingSupported,
   },
   {
     id: 'messaging.remote',
@@ -1399,13 +1402,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.messaging.section.remoteInfo',
     keywords: ['embeddings', 'openai', 'api key', 'endpoint', 'remote'],
   },
-  { id: 'messaging.model-url', page: 'messaging', titleKey: 'settings.messaging.model.url', keywords: ['embedding', 'gguf', 'download', 'url', 'custom model'] },
-  { id: 'messaging.model-path', page: 'messaging', titleKey: 'settings.messaging.model.path', keywords: ['embedding', 'gguf', 'file', 'local path', 'custom model'] },
-  { id: 'messaging.pooling', page: 'messaging', titleKey: 'settings.messaging.model.pooling', keywords: ['embedding', 'pooling', 'last', 'mean', 'cls'] },
-  { id: 'messaging.threads', page: 'messaging', titleKey: 'settings.messaging.model.threads', keywords: ['embedding', 'cpu', 'threads', 'llama.cpp'] },
-  { id: 'messaging.gpu-layers', page: 'messaging', titleKey: 'settings.messaging.model.gpuLayers', keywords: ['embedding', 'gpu', 'layers', 'offload'] },
-  { id: 'messaging.server', page: 'messaging', titleKey: 'settings.messaging.model.server', keywords: ['embedding', 'llama-server', 'executable', 'binary', 'path'] },
-  { id: 'messaging.query', page: 'messaging', titleKey: 'settings.messaging.model.query', keywords: ['embedding', 'query', 'prefix', 'instruction', 'remote'] },
+  { id: 'messaging.model-url', page: 'messaging', titleKey: 'settings.messaging.model.url', keywords: ['embedding', 'gguf', 'download', 'url', 'custom model'], isAvailable: (ctx) => ctx.messagingSupported },
+  { id: 'messaging.model-path', page: 'messaging', titleKey: 'settings.messaging.model.path', keywords: ['embedding', 'gguf', 'file', 'local path', 'custom model'], isAvailable: (ctx) => ctx.messagingSupported },
+  { id: 'messaging.pooling', page: 'messaging', titleKey: 'settings.messaging.model.pooling', keywords: ['embedding', 'pooling', 'last', 'mean', 'cls'], isAvailable: (ctx) => ctx.messagingSupported },
+  { id: 'messaging.threads', page: 'messaging', titleKey: 'settings.messaging.model.threads', keywords: ['embedding', 'cpu', 'threads', 'llama.cpp'], isAvailable: (ctx) => ctx.messagingSupported },
+  { id: 'messaging.gpu-layers', page: 'messaging', titleKey: 'settings.messaging.model.gpuLayers', keywords: ['embedding', 'gpu', 'layers', 'offload'], isAvailable: (ctx) => ctx.messagingSupported },
+  { id: 'messaging.server', page: 'messaging', titleKey: 'settings.messaging.model.server', keywords: ['embedding', 'llama-server', 'executable', 'binary', 'path'], isAvailable: (ctx) => ctx.messagingSupported },
+  { id: 'messaging.query', page: 'messaging', titleKey: 'settings.messaging.model.query', keywords: ['embedding', 'query', 'prefix', 'instruction', 'remote'], isAvailable: (ctx) => ctx.messagingSupported },
   {
     id: 'messaging.search',
     page: 'messaging',
@@ -1431,12 +1434,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.messaging.section.presets',
     descriptionKey: 'settings.messaging.section.presetsInfo',
     keywords: ['topics', 'presets', 'templates', 'topic names'],
+    isAvailable: (ctx) => ctx.messagingSupported,
   },
   {
     id: 'messaging.constants',
     page: 'messaging',
     titleKey: 'settings.messaging.section.constants',
     keywords: ['separator', 'constants', 'templates'],
+    isAvailable: (ctx) => ctx.messagingSupported,
   },
   {
     id: 'messaging.variables',
@@ -1444,6 +1449,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.messaging.section.variables',
     descriptionKey: 'settings.messaging.section.variablesInfo',
     keywords: ['variables', 'global variables', 'templates'],
+    isAvailable: (ctx) => ctx.messagingSupported,
   },
   {
     id: 'skills.create',

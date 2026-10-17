@@ -11,6 +11,11 @@
 - `registry-snapshot.ts` — renders the plain-JSON snapshot for the two consumers that cannot import the UI's TypeScript: the OpenChamber server (`packages/web/server/lib/opencode/settings-registry.json`) and the VS Code extension host (`packages/vscode/src/settings-registry.json`). Regenerate with `bun run settings-registry:generate`; `registry.test.ts` fails when a checked-in copy is stale.
 - `metadata.ts`, `search.ts` — Settings page metadata and the search index (unchanged by the registry; see `.agents/skills/settings-ui-patterns`).
 
+Messaging model and template search targets require confirmed server support.
+`SettingsView` probes once while visible and subscribes to that capability;
+the remote endpoint, search, delivery and session-start config targets remain
+available on older servers. The probe is global and starts no Location.
+
 ## Invariants
 
 - **A key that is not in the registry does not persist.** `parseSettingsDocument` drops unknown keys on the way in; `updateDesktopSettings` sends only registry keys that are not `computed`; the server and the VS Code bridge drop anything the snapshot does not list.
