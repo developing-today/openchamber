@@ -11,6 +11,7 @@
 
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
+import { injectedEnvKeys } from './injected-env.js';
 
 const POSIX_ENV_BINARIES = ['/usr/bin/env', '/bin/env'];
 /** Variables a PTY shell must never inherit from the OpenChamber host process. */
@@ -27,6 +28,33 @@ export function stripAppImageArgv0Leak(env) {
     delete env.ARGV0;
   }
   return env;
+}
+
+/**
+ * Remove OpenChamber's own host-private variables (the Electron desktop
+ * process's identity, dist dir, bind host, and the rest `main.mjs` sets
+ * through `assignInjectedEnv`) from a mutable env object before it becomes
+ * the base for a user-facing child: the managed OpenCode process, or a PTY
+ * terminal.
+ *
+ * `assignInjectedEnv` already records every variable it actually set (never a
+ * value that matched what the shell already had) in `OPENCHAMBER_INJECTED_ENV`,
+ * so this reads that record instead of a separate list of names that could
+ * drift from the code that sets them (#4604). Call it on the base env *before*
+ * the child's own deliberate additions (its server password, `OPENCODE_CONFIG`
+ * for the managed OpenCode process itself) go on top through that child's own
+ * `assignInjectedEnv` call — stripping after would remove those too.
+ *
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined> | null | undefined} sourceEnv
+ *   Where the injected-variable record is read from (normally `process.env`).
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined> | null | undefined} targetEnv
+ *   The mutable env to strip; defaults to `sourceEnv` itself.
+ * @returns {typeof targetEnv}
+ */
+export function stripHostInjectedEnv(sourceEnv, targetEnv = sourceEnv) {
+  if (targetEnv == null) return targetEnv;
+  for (const key of injectedEnvKeys(sourceEnv ?? {})) delete targetEnv[key];
+  return targetEnv;
 }
 
 /**

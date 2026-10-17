@@ -4,7 +4,9 @@ import {
   resolvePosixPtyLaunch,
   stripAppImageArgv0Leak,
   stripAppImageLauncherEnv,
+  stripHostInjectedEnv,
 } from './inherited-env.js';
+import { assignInjectedEnv } from './injected-env.js';
 
 describe('stripAppImageArgv0Leak', () => {
   it('removes ARGV0 from a child env object', () => {
@@ -119,5 +121,56 @@ describe('resolvePosixPtyLaunch', () => {
       executable: '/bin/zsh',
       args: ['-l'],
     });
+  });
+});
+
+describe('stripHostInjectedEnv', () => {
+  it('removes only the variables assignInjectedEnv actually set', () => {
+    // Mirrors Desktop's main.mjs: process.env starts as the user's own shell,
+    // then main.mjs injects its own identity/dist-dir/bind-host variables.
+    const hostEnv = { PATH: '/usr/bin', SHELL: '/bin/zsh' };
+    assignInjectedEnv(hostEnv, {
+      OPENCHAMBER_RUNTIME: 'desktop',
+      OPENCHAMBER_DIST_DIR: '/Applications/OpenChamber.app/Contents/Resources/web-dist',
+      OPENCHAMBER_HOST: '127.0.0.1',
+    });
+
+    // The managed OpenCode (or a PTY terminal) starts from a copy of that host env.
+    const childEnv = { ...hostEnv };
+    expect(stripHostInjectedEnv(hostEnv, childEnv)).toBe(childEnv);
+
+    expect(childEnv).toEqual({ PATH: '/usr/bin', SHELL: '/bin/zsh' });
+    // The host process keeps its own copy; only the child's env was stripped.
+    expect(hostEnv.OPENCHAMBER_RUNTIME).toBe('desktop');
+  });
+
+  it('never strips a variable the user already had (assignInjectedEnv only records changes)', () => {
+    const hostEnv = { OPENCODE_PASSWORD: 'user-set' };
+    assignInjectedEnv(hostEnv, { OPENCODE_PASSWORD: 'user-set', OPENCHAMBER_RUNTIME: 'desktop' });
+
+    const childEnv = { ...hostEnv };
+    stripHostInjectedEnv(hostEnv, childEnv);
+
+    expect(childEnv).toEqual({ OPENCODE_PASSWORD: 'user-set' });
+  });
+
+  it('leaves a plain env (no Desktop host) untouched', () => {
+    const hostEnv = { PATH: '/usr/bin', SHELL: '/bin/zsh' };
+    const childEnv = { ...hostEnv };
+    stripHostInjectedEnv(hostEnv, childEnv);
+    expect(childEnv).toEqual(hostEnv);
+  });
+
+  it('defaults the target to the source env', () => {
+    const env = { PATH: '/usr/bin' };
+    assignInjectedEnv(env, { OPENCHAMBER_RUNTIME: 'desktop' });
+    expect(stripHostInjectedEnv(env)).toBe(env);
+    expect(env).toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('tolerates nullish envs', () => {
+    expect(stripHostInjectedEnv(null, null)).toBeNull();
+    expect(stripHostInjectedEnv(undefined, undefined)).toBeUndefined();
+    expect(stripHostInjectedEnv(null, { PATH: '/usr/bin' })).toEqual({ PATH: '/usr/bin' });
   });
 });

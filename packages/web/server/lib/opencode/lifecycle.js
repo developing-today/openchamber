@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { accessSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, openSync, realpathSync, statSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
+import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import {
@@ -902,6 +902,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // in front of the managed PATH) and under everything OpenChamber itself
     // sets for OpenCode.
     const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
+    // The host process (Desktop's Electron main, or `serve --foreground`)
+    // records its own private variables as injected; OpenCode does not need
+    // Desktop's identity, dist dir or bind host, and nothing it spawns should
+    // see them either. Strip them before OpenChamber's own deliberate
+    // additions for OpenCode (its server password, OPENCODE_CONFIG) go on top.
+    stripHostInjectedEnv(process.env, inheritedEnv);
     // What OpenChamber sets for OpenCode is recorded as injected, so a shell
     // the agent opens can tell it from the user's own variables.
     const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(

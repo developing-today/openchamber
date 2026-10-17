@@ -10,7 +10,7 @@ import {
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
-import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
+import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch, stripHostInjectedEnv } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
@@ -218,6 +218,9 @@ export function createTerminalRuntime({
     // The user's and the project's variables go under the terminal's own TERM
     // settings and the host-private removals below.
     const hostEnv = { ...process.env, PATH: buildAugmentedPath() };
+    // A terminal is the user's own shell, not the Desktop host process: it
+    // gets none of main.mjs's injected identity/dist-dir/bind-host variables.
+    stripHostInjectedEnv(process.env, hostEnv);
     // Opening a terminal or running a project action is the user's own act,
     // so it may run the project's environment command.
     const inheritedEnv = environmentRuntime ? await environmentRuntime.applyToDirectory(cwd, hostEnv, { refresh: true }) : hostEnv;
