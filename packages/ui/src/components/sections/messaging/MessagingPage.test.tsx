@@ -137,6 +137,17 @@ test('rechecks support without remounting and edits every embedding runtime over
   await act(async () => { await useMessagingSettingsStore.getState().load(null); });
   expect(persisted.embedding?.pooling).toBe('mean');
 
+  for (const label of ['CPU threads', 'GPU layers']) {
+    const reset = container.querySelector<HTMLButtonElement>(`button[aria-label="Reset ${label}"]`);
+    if (!reset) throw new Error(`Missing ${label} reset`);
+    expect(reset.disabled).toBe(false);
+    await act(async () => reset.click());
+    await act(async () => { await useMessagingSettingsStore.getState().load(null); });
+    expect(reset.disabled).toBe(true);
+  }
+  expect(persisted.embedding?.threads).toBeUndefined();
+  expect(persisted.embedding?.gpu_layers).toBeUndefined();
+  await edit('CPU threads', '3');
   await edit('CPU threads', '');
   await act(async () => toggle.click());
   await act(async () => { await useMessagingSettingsStore.getState().load(null); });

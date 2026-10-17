@@ -310,6 +310,8 @@ selected session. A failed read retains values only within that scope.
   an unset value from an explicit empty prefix and preserves its whitespace.
   The prefix also applies to remote embeddings. Each control has a Settings
   search target.
+  Numeric overrides have explicit Reset actions because mobile steppers do
+  not have a text field that can be cleared.
 - Presets and constants show the built-in value as the placeholder; a field
   left empty removes the override. Global variables are not config: they go
   through OpenCode's messaging API and apply to every session at once.

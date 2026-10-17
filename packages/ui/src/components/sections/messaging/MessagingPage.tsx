@@ -265,6 +265,11 @@ const ModelSection: React.FC<{ config: MessagingConfig; locked: boolean; onChang
               <NumberInput value={embedding.threads} min={1} step={1} disabled={locked} deferExternalValueWhileFocused
                 emptyLabel={t('settings.messaging.model.inherit')} aria-label={t('settings.messaging.model.threads')}
                 onValueChange={(value) => setEmbedding({ threads: Math.round(value) })} onClear={() => setEmbedding({ threads: undefined })} />
+              <Button type="button" variant="ghost" size="sm" className={SETTINGS_ICON_BUTTON_CLASS}
+                disabled={locked || embedding.threads === undefined} onClick={() => setEmbedding({ threads: undefined })}
+                aria-label={t('settings.messaging.presets.reset', { name: t('settings.messaging.model.threads') })} title={t('settings.common.actions.reset')}>
+                <Icon name="restart" className="h-3.5 w-3.5" />
+              </Button>
             </div>
           </SettingsStackedField>
           <SettingsStackedField label={t('settings.messaging.model.gpuLayers')} info={t('settings.messaging.model.runtimeInfo')} settingsItem="messaging.gpu-layers">
@@ -272,6 +277,11 @@ const ModelSection: React.FC<{ config: MessagingConfig; locked: boolean; onChang
               <NumberInput value={embedding.gpu_layers} min={-1} step={1} disabled={locked} deferExternalValueWhileFocused
                 emptyLabel={t('settings.messaging.model.inherit')} aria-label={t('settings.messaging.model.gpuLayers')}
                 onValueChange={(value) => setEmbedding({ gpu_layers: Math.round(value) })} onClear={() => setEmbedding({ gpu_layers: undefined })} />
+              <Button type="button" variant="ghost" size="sm" className={SETTINGS_ICON_BUTTON_CLASS}
+                disabled={locked || embedding.gpu_layers === undefined} onClick={() => setEmbedding({ gpu_layers: undefined })}
+                aria-label={t('settings.messaging.presets.reset', { name: t('settings.messaging.model.gpuLayers') })} title={t('settings.common.actions.reset')}>
+                <Icon name="restart" className="h-3.5 w-3.5" />
+              </Button>
             </div>
           </SettingsStackedField>
           <SettingsStackedField label={t('settings.messaging.model.server')} settingsItem="messaging.server">
