@@ -146,7 +146,7 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   positions). Chat tab records stay open, but only the active chat tab's
   pinned chat column is mounted while the panel is open. A selected chat
   restores its state from the session stores. A closed panel mounts no chat.
-  Singleton surfaces (git, pr, notes, context) remount on switch. These
+  Singleton surfaces (git, pr, notes, messages, context) remount on switch. These
   surfaces must restore their state from stores or snapshots.
 - Portalled menus and dialogs handle their own Escape key. The panel's capture
   handler ignores their events so dismissing an overlay does not close the panel.

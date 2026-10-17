@@ -51,6 +51,14 @@ owner cannot replace the catalog or finish the current owner's loading state.
 
 ### Feature cache / query stores
 
+The Messages stores keep server-owned data in memory for the active runtime.
+`useMessagingStore` retains the selected tab and request-keyed pages, and
+suspends event-triggered reads while no Messages view is active. The panel's
+visibility contract is in `components/messaging/DOCUMENTATION.md`.
+`useMessagingSettingsStore` owns serial config writes, read reconciliation and
+session-scoped variable values. Its persistence contract is in
+`components/sections/DOCUMENTATION.md`, "The messaging page".
+
 The Stats page keeps its reports in a feature-local store, `components/views/usage/usageStatsStore.ts`: keyed by runtime, range and project, in memory only, never refetched on its own once a key has a report, cleared on runtime switch. A failed refresh keeps the cached report. The report is requested with `tools: "none"`; tool calls, which make OpenCode scan every tool call in the range, load on request under the same key, over the loaded report's own window. Once the user asks for them, every report shown later in the app session fetches its tool calls after it lands. A failed tool read shows an error with retry and never reads as zero calls.
 
 PR status reads share the aggregate background-network budget as well as their PR-specific cap. Command discovery gates each scope/config read, including body decoding, rather than only gating the initial SDK list. Command reads have a bounded deadline and abort on runtime reset. Reset clears server-derived command caches and invalidates late reads and mutation responses while preserving unsaved command drafts.

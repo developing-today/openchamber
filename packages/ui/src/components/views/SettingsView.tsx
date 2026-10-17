@@ -22,6 +22,7 @@ import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
 import { WebSearchPage } from '@/components/sections/websearch/WebSearchPage';
+import { MessagingPage } from '@/components/sections/messaging/MessagingPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpPage } from '@/components/sections/mcp/McpPage';
@@ -66,6 +67,7 @@ import {
   type SettingsPageMeta,
 } from '@/lib/settings/metadata';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
+import { useMessagingStore } from '@/stores/useMessagingStore';
 
 // UI Kit: fixed split-page sidebar width
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
@@ -127,6 +129,7 @@ const pageOrder: SettingsPageSlug[] = [
   // 'opencode' group — OpenCode
   'providers',
   'web-search',
+  'messaging',
   'agents',
   'behavior',
   'commands',
@@ -235,12 +238,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   // keep platform check available for future window chrome tweaks
 
   const routingAvailable = useUIStore((state) => state.routingFeatureAvailable);
+  const messagingSupported = useMessagingStore((state) => state.support.kind === 'supported');
+  const checkMessagingSupport = useMessagingStore((state) => state.checkSupport);
   const enterpriseMode = useEnterpriseMode();
   const jevBlockedByEnterprise = useJevBlockedByEnterprise();
   const runtimeCtx = React.useMemo(
     () => buildRuntimeContext(isDesktopApp, isMobile, routingAvailable, enterpriseMode, jevBlockedByEnterprise),
     [isDesktopApp, isMobile, routingAvailable, enterpriseMode, jevBlockedByEnterprise],
   );
+
+  React.useEffect(() => {
+    if (runtimeCtx.isVSCode || (!isSettingsDialogOpen && !isWindowed)) return;
+    void checkMessagingSupport();
+  }, [checkMessagingSupport, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode]);
 
   const visiblePages = React.useMemo(() => {
     const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
@@ -339,6 +349,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.providers.title');
       case 'web-search':
         return t('settings.page.webSearch.title');
+      case 'messaging':
+        return t('settings.page.messaging.title');
       case 'usage':
         return t('settings.page.usage.title');
       case 'agents':
@@ -394,12 +406,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
-      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux },
+      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, messagingSupported },
       visiblePageSlugs,
       t,
       getPageTitle,
     });
-  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
+  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, messagingSupported, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {
@@ -687,6 +699,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProvidersPage />;
       case 'web-search':
         return <WebSearchPage />;
+      case 'messaging':
+        return <MessagingPage />;
       case 'usage':
         return <UsagePage />;
       case 'about':

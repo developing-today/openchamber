@@ -82,6 +82,8 @@ import { markConfigCatalogStale, useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
 import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { useMessagingStore } from "@/stores/useMessagingStore"
+import { isMessagingSession, type MessagingCreated } from "@/lib/opencode/messaging"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { isDirectoryOfKnownSpace, isSpaceDirectoryStopped, isSpaceStopped, knownSpaceIds, refreshSpacesJourney, spaceIdsGone, spacesRuntimeGeneration, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
@@ -1815,6 +1817,57 @@ const notifyWaitingPage = (event: Extract<SyncEvent, { type: "openchamber.page-w
   })
 }
 
+/**
+ * A message a session sent up to the person (written to its user topic). Shown as an
+ * in-app toast with a link to the session, unless the session or its root is
+ * on screen, where the transcript already shows it; a hidden window also gets
+ * a native notification.
+ */
+const notifyMessageToUser = (event: MessagingCreated): void => {
+  if (!event.inbox || !isMessagingSession(event.writer)) return
+  const sessions = useGlobalSessionsStore.getState().entityById
+  const writer = sessions.get(event.writer)
+  const directory = writer ? resolveGlobalSessionDirectory(writer) : null
+  let root = writer
+  const seen = new Set<string>()
+  while (root?.parentID && !seen.has(root.id)) {
+    seen.add(root.id)
+    root = sessions.get(root.parentID) ?? root
+  }
+  const onScreen = [writer, root].some((session) => {
+    const sessionDirectory = session ? resolveGlobalSessionDirectory(session) : null
+    return session !== undefined && sessionDirectory !== null && isViewedInCurrentSession(sessionDirectory, session.id)
+  })
+  if (onScreen) return
+
+  const dictionary = useI18nStore.getState().dictionary
+  const sessionTitle = writer?.title.trim()
+  const title = sessionTitle
+    ? formatMessage(dictionary, "messaging.toast.fromSession", { title: sessionTitle })
+    : formatMessage(dictionary, "messaging.toast.fromUntitledSession")
+  toast.info(title, {
+    id: `messaging-${event.topic}#${event.seq}`,
+    description: event.preview,
+    action: directory
+      ? { label: formatMessage(dictionary, "messaging.toast.openSession"), onClick: () => openSessionFromToast(event.writer, directory) }
+      : undefined,
+  })
+  const notifications = getRegisteredRuntimeAPIs()?.notifications
+  if (!notifications?.notifyAgentCompletion) return
+  void notifications.notifyAgentCompletion({
+    title,
+    body: event.preview,
+    tag: `messaging:${event.topic}#${event.seq}`,
+    kind: "messaging",
+    sessionId: event.writer,
+    directory: directory ?? undefined,
+    runtimeKey: getRuntimeKey(),
+    requireHidden: true,
+  }).catch((error) => {
+    console.warn("[notifications] failed to dispatch the message notification", error)
+  })
+}
+
 // Blocking requests in a directory without a store still deserve the in-app
 // toast: the sidebar row and tray approvals need the directory store, but the
 // toast only needs the request and where to open it. VS Code keeps its
@@ -1872,6 +1925,15 @@ export function handleEvent(
 ) {
   if (payload.type === "openchamber.notification") {
     handleUiNotificationEvent(payload.properties, normalizeEventDirectory(rawDirectory))
+    return
+  }
+
+  // Messages live in no directory store: the Messages panel re-reads what it
+  // shows, and a message to the person raises a toast.
+  if (payload.type === "messaging.message.created") {
+    if (expectedRuntimeKey !== getRuntimeKey()) return
+    useMessagingStore.getState().applyCreated(payload.properties)
+    notifyMessageToUser(payload.properties)
     return
   }
 

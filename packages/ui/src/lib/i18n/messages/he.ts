@@ -1,4 +1,5 @@
 import { settingsDict } from './he.settings';
+import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -3770,6 +3771,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'המשימה הזו כבר ממתינה בתור ההמתנה ותרוץ כשיתפנה מקום',
   'chat.modelControls.agentFavoriteAdd': 'הוסף למועדפים. כשיש מועדפים, Tab עובר רק ביניהם',
   ...settingsDict,
+  ...messagingI18n.he,
   ...linearIssuePickerI18n.he,
   ...referencePickerI18n.he,
   ...sessionMenuHintsI18n.he,

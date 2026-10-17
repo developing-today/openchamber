@@ -22,7 +22,10 @@ the 2.x code, not from memory of 1.x.
   `plugins.ts` translates the experimental plugin routes; `session-stats.ts`
   translates the experimental `session.stats` usage route; `websearch.ts`
   translates web search (providers, the `websearch` config choice, keys, the
-  tool's text result and its first-use consent form). These files are the
+  tool's text result and its first-use consent form); `messaging.ts`
+  translates the `/api/messaging/*` routes of OpenCode builds with
+  inter-session messaging, which the pinned client predates, so it calls them
+  through `runtimeFetch` and parses each answer with zod. These files are the
   only place that knows 2.x wire shapes. Rendering and stores
   read the domain model; fix a missing field there, never with a shim.
 - `packages/web/server/lib/opencode/proxy.js` forwards `/api/*` as-is (2.x

@@ -1,4 +1,5 @@
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { messagingSettingsI18n } from './messaging.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2574,6 +2575,7 @@ export const settingsDict = {
   ...extensionCatalogI18n.uk,
   ...guestIntegrationsI18n.uk,
   ...extensionsSettingsI18n.uk,
+  ...messagingSettingsI18n.uk,
   'settings.page.integrations.title': 'Інтеграції',
   'settings.page.integrations.description': 'Підключіть сервіси та підписки, з якими працює OpenChamber.',
   'settings.agents.page.field.steps': 'Максимум кроків',

@@ -1,4 +1,5 @@
 import { settingsDict } from './ar.settings';
+import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -3770,6 +3771,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'هذه المهمة في قائمة الانتظار بالفعل وستعمل عند توفر مكان',
   'chat.modelControls.agentFavoriteAdd': 'إضافة إلى المفضلة. عند وجود مفضلة، يتنقل Tab بينها فقط',
   ...settingsDict,
+  ...messagingI18n.ar,
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...sessionMenuHintsI18n.ar,

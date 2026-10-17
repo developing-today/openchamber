@@ -6,9 +6,10 @@
  * own. Only `user` and `assistant` carry parts, so the roles that have
  * something to show render here as small, self-contained rows instead of
  * going through `ChatMessage`. So does a background subagent run, which v2
- * reports as a synthetic message (see `@/lib/opencode/subagent-run`), and the
+ * reports as a synthetic message (see `@/lib/opencode/subagent-run`), the
  * result of a session the agent dispatched with `returnResult` (see
- * `@/lib/opencode/dispatched-session`).
+ * `@/lib/opencode/dispatched-session`), and a message that another session or
+ * the person sent through OpenCode messaging (see `@/lib/opencode/messaging`).
  */
 
 import React from 'react';
@@ -21,6 +22,10 @@ import ToolPart from './parts/ToolPart';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
+import { MESSAGING_USER, isMessagingSession, readMessagingNotice, type MessagingNotice } from '@/lib/opencode/messaging';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { useMessagingStore } from '@/stores/useMessagingStore';
+import { useTopicLabel } from '@/components/messaging/messagingLabels';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { IconName } from '@/components/icon/icons';
 import { useUIStore } from '@/stores/useUIStore';
@@ -303,11 +308,83 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
     );
 };
 
+/**
+ * A message another session or the person sent this session through OpenCode
+ * messaging: one collapsed line naming who wrote it and to which topic,
+ * opening to the message. A message to the person opens by default, and says
+ * so when the agent does not see it.
+ */
+const MessagingNoticeRow: React.FC<{ message: SyntheticMessage; notice: MessagingNotice }> = ({ message, notice }) => {
+    const { t } = useI18n();
+    const isMobile = useUIStore((state) => state.isMobile);
+    const fromSession = isMessagingSession(notice.from);
+    const sender = useSession(fromSession ? notice.from : null);
+    const own = useSession(message.sessionID);
+    const senderName = sender?.title.trim() || notice.fromTitle || notice.from;
+    const topic = useTopicLabel(notice.topic);
+    const title = notice.toYou
+        ? t('chat.messaging.toYou', { sender: senderName })
+        : notice.from === MESSAGING_USER
+            ? t('chat.messaging.fromYou', { topic })
+            : t('chat.messaging.from', { sender: senderName, topic });
+    // The Messages surface lives in the desktop and web context panel only.
+    const directory = own?.directory ?? null;
+    const canOpenTopic = !isMobile && !isVSCodeRuntime() && directory !== null;
+
+    const openSender = React.useCallback(() => {
+        void openSessionLink(notice.from, null);
+    }, [notice.from]);
+    const openTopic = React.useCallback(() => {
+        if (!directory) return;
+        useMessagingStore.getState().openTopicAt(notice.topic, notice.seq);
+        useUIStore.getState().openContextPanelTab(directory, { mode: 'messages' });
+    }, [directory, notice.seq, notice.topic]);
+
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={notice.body}
+                blockId={message.id}
+                defaultExpanded={notice.toYou}
+                presentation={{
+                    icon: 'mail',
+                    title,
+                    expandLabel: t('chat.messaging.show'),
+                    collapseLabel: t('chat.messaging.hide'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+                actions={(
+                    <>
+                        {fromSession ? (
+                            <Button type="button" variant="ghost" size="xs" onClick={openSender}>
+                                <Icon name="external-link" className="h-3.5 w-3.5" />
+                                {t('chat.messaging.openSender')}
+                            </Button>
+                        ) : null}
+                        {canOpenTopic ? (
+                            <Button type="button" variant="ghost" size="xs" onClick={openTopic}>
+                                <Icon name="mail" className="h-3.5 w-3.5" />
+                                {t('chat.messaging.openTopic')}
+                            </Button>
+                        ) : null}
+                    </>
+                )}
+            />
+            {!notice.agentSees ? (
+                <div className="ps-5 typography-meta text-muted-foreground">{t('chat.messaging.notForAgent')}</div>
+            ) : null}
+        </NoticeRow>
+    );
+};
+
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
+    const delivered = React.useMemo(() => (run || dispatched ? undefined : readMessagingNotice(message)), [dispatched, message, run]);
     if (run) return <SubagentRunNotice message={message} run={run} />;
-    return dispatched ? <DispatchedSessionNotice message={message} result={dispatched} /> : null;
+    if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
+    return delivered ? <MessagingNoticeRow message={message} notice={delivered} /> : null;
 };
 
 /**

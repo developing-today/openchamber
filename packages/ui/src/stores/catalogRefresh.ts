@@ -21,6 +21,7 @@ import { useMcpConfigStore } from "@/stores/useMcpConfigStore";
 import { usePluginsStore } from "@/stores/usePluginsStore";
 import { useQuotaStore } from "@/stores/useQuotaStore";
 import { refreshWebSearchIfLoaded } from "@/stores/useWebSearchStore";
+import { refreshMessagingSettingsIfLoaded } from "@/stores/useMessagingSettingsStore";
 
 const SOURCE = "catalogRefresh";
 
@@ -157,7 +158,7 @@ export function catalogRefreshTasks(
     // opencode.json included), and OpenChamber's own plugin injection lives
     // in one, so the whole set is re-read.
     case "config":
-      return [() => refreshAgents(eventDirectories), refreshCommands, refreshSkills, refreshMcp, refreshPlugins, refreshProviders, refreshWebSearchIfLoaded];
+      return [() => refreshAgents(eventDirectories), refreshCommands, refreshSkills, refreshMcp, refreshPlugins, refreshProviders, refreshWebSearchIfLoaded, refreshMessagingSettingsIfLoaded];
     // Projects are the sync layer's own slice; nothing in Settings reads them
     // through these stores.
     case "project":

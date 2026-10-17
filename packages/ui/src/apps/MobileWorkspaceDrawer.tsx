@@ -20,6 +20,7 @@ import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
+import { MessagingPanel } from '@/components/messaging/MessagingPanel';
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
 const ENTER_DELAY_MS = 16;
@@ -28,7 +29,7 @@ const ENTER_DELAY_MS = 16;
 const ENTER_DURATION_MS = 320;
 const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
-export type MobileWorkspaceTab = 'changes' | 'files' | 'terminal' | 'notes' | 'mcp';
+export type MobileWorkspaceTab = 'changes' | 'files' | 'terminal' | 'notes' | 'messages' | 'mcp';
 
 /** Quick MCP enable/disable toggles as a workspace pane, with its own slim
     action row (add server → settings, refresh) replacing the old fullscreen
@@ -203,6 +204,7 @@ export const MobileWorkspaceDrawer: React.FC<{
     { id: 'files', label: t('mobile.menu.files'), icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
     { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
     { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
+    { id: 'messages', label: t('contextRail.surface.messages'), icon: <Icon name="mail" className="h-3.5 w-3.5" /> },
     { id: 'mcp', label: t('mobile.menu.mcp'), icon: <McpIcon className="h-3.5 w-3.5" /> },
   ];
 
@@ -221,7 +223,7 @@ export const MobileWorkspaceDrawer: React.FC<{
               layoutMode="fit"
               variant="active-pill"
               nonCompositedIndicator
-              // Five tabs don't fit with labels — the active tab keeps
+              // Six tabs don't fit with labels — the active tab keeps
               // icon + label, the rest collapse to icons.
               inactiveTabsIconOnly
               className="h-full"
@@ -276,6 +278,13 @@ export const MobileWorkspaceDrawer: React.FC<{
           <div className={cn('h-full', tab !== 'notes' && 'hidden')}>
             <ErrorBoundary>
               <ProjectContextPanel visible={open && tab === 'notes'} onActionComplete={onClose} onOpenPlan={onOpenPlan} />
+            </ErrorBoundary>
+          </div>
+        ) : null}
+        {visitedTabs.has('messages') ? (
+          <div className={cn('h-full', tab !== 'messages' && 'hidden')}>
+            <ErrorBoundary>
+              <MessagingPanel active={open && tab === 'messages'} />
             </ErrorBoundary>
           </div>
         ) : null}

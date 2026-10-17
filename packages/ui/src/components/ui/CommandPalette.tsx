@@ -427,6 +427,16 @@ export const CommandPalette: React.FC = () => {
         }),
       },
       {
+        id: 'open-messages',
+        secondary: true,
+        title: t('commandPalette.item.openMessages'),
+        icon: <Icon name="mail" className="me-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.openMessages'),
+        onSelect: run(() => {
+          if (currentDirectory) openContextSurface(currentDirectory, 'messages');
+        }),
+      },
+      {
         id: 'open-todos',
         secondary: true,
         title: t('commandPalette.item.openTodos'),

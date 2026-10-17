@@ -44,7 +44,7 @@ export type { ContextPanelMode };
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
-const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'chat', 'browser', 'git', 'pr', 'notes', 'terminal']);
+const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'chat', 'browser', 'git', 'pr', 'notes', 'messages', 'terminal']);
 // Older builds also stored `widthFractionByMode` (a share of the chat area);
 // it is ignored, and the pixel width the same resize stored is used.
 const persistedPanelWidthsSchema = z.object({

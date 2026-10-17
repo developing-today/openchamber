@@ -34,6 +34,7 @@ import {
 } from "./model"
 import { projectUserParts, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
 import { runningShellFromWire, type RunningShell, type ShellEnd } from "./background-shell"
+import type { MessagingCreated } from "./messaging"
 
 // ---------------------------------------------------------------------------
 // Event vocabulary
@@ -161,6 +162,8 @@ export type SyncEvent =
   | { type: "openchamber.page-waiting"; properties: { sessionID: string; directory: string | null; page: { id: string; title: string } } }
   /** That page stopped waiting: answered, answered in the chat, or its turn ended. */
   | { type: "openchamber.page-settled"; properties: { sessionID: string; pageID: string } }
+  /** A message was written to a messaging topic (OpenCode builds with messaging; global, no directory). */
+  | { type: "messaging.message.created"; properties: MessagingCreated }
 
 /** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {
