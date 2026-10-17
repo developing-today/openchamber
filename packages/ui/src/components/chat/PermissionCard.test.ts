@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
 import { permissionFilePreviewsSchema } from './permissionFilePreviews';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission } from './permissionSummary';
-import { permissionShortcutReply } from './usePermissionResponse';
+import { permissionFeedbackKeyAction, permissionFeedbackMessage, permissionShortcutReply } from './usePermissionResponse';
 
 describe('permission file previews', () => {
   test('reads edit and new-file patches from OpenCode FileDiff.Info entries', () => {
@@ -90,5 +90,37 @@ describe('always allow without anything to save', () => {
     expect(permissionShortcutReply(press('Enter'), true)).toBe('once');
     expect(permissionShortcutReply({ ...press('Enter'), altKey: false }, true)).toBeNull();
     expect(permissionShortcutReply({ ...press('Enter'), metaKey: true }, true)).toBeNull();
+  });
+});
+
+describe('deny with feedback', () => {
+  test('trims feedback and drops whitespace-only text', () => {
+    expect(permissionFeedbackMessage('  use rg instead  ')).toBe('use rg instead');
+    expect(permissionFeedbackMessage('   \n ')).toBeUndefined();
+    expect(permissionFeedbackMessage('')).toBeUndefined();
+  });
+
+  const key = (overrides: Partial<{ key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; isComposing: boolean; keyCode: number }> = {}) => ({
+    key: 'Enter', shiftKey: false, ctrlKey: false, metaKey: false, isComposing: false, keyCode: 13, ...overrides,
+  });
+
+  test('Enter submits on desktop; Shift+Enter and other keys do not', () => {
+    expect(permissionFeedbackKeyAction(key(), false)).toBe('submit');
+    expect(permissionFeedbackKeyAction(key({ shiftKey: true }), false)).toBeNull();
+    expect(permissionFeedbackKeyAction(key({ key: 'a' }), false)).toBeNull();
+  });
+
+  test('on mobile Enter inserts a newline and only Cmd/Ctrl+Enter submits', () => {
+    expect(permissionFeedbackKeyAction(key(), true)).toBeNull();
+    expect(permissionFeedbackKeyAction(key({ ctrlKey: true }), true)).toBe('submit');
+    expect(permissionFeedbackKeyAction(key({ metaKey: true }), true)).toBe('submit');
+    expect(permissionFeedbackKeyAction(key({ ctrlKey: true }), false)).toBe('submit');
+  });
+
+  test('Escape cancels and IME composition never submits or cancels', () => {
+    expect(permissionFeedbackKeyAction(key({ key: 'Escape', keyCode: 27 }), false)).toBe('cancel');
+    expect(permissionFeedbackKeyAction(key({ isComposing: true }), false)).toBeNull();
+    expect(permissionFeedbackKeyAction(key({ keyCode: 229 }), false)).toBeNull();
+    expect(permissionFeedbackKeyAction(key({ key: 'Escape', keyCode: 229 }), false)).toBeNull();
   });
 });

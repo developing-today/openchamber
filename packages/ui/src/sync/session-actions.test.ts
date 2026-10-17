@@ -132,11 +132,11 @@ mock.module("@/lib/opencode/client", () => ({
       sessionId: string,
       requestId: string,
       reply: string,
-      options?: { directory?: string | null },
+      options?: { directory?: string | null; message?: string },
     ) => {
       replyCalls.push({
         method: "permission.reply",
-        params: { sessionID: sessionId, requestID: requestId, reply, directory: options?.directory },
+        params: { sessionID: sessionId, requestID: requestId, reply, directory: options?.directory, message: options?.message },
       })
       if (permissionReplyError) throw permissionReplyError
       return true
@@ -1965,6 +1965,32 @@ describe("respondToPermission passes directory", () => {
     expect(replyCalls[0].params.requestID).toBe("perm-3")
     expect(replyCalls[0].params.reply).toBe("reject")
     expect(replyCalls[0].params.directory).toBe("/fallback/dir")
+  })
+
+  test("forwards deny feedback as the reply message", async () => {
+    const childStores = createChildStores([])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await respondToPermission("session-a", "perm-feedback", "reject", undefined, "use rg instead")
+
+    expect(replyCalls.length).toBe(1)
+    expect(replyCalls[0].params.reply).toBe("reject")
+    expect(replyCalls[0].params.message).toBe("use rg instead")
+  })
+
+  test("whitespace-only feedback degrades to a plain reply without a message", async () => {
+    const childStores = createChildStores([])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await respondToPermission("session-a", "perm-blank", "reject", undefined, "  \n ")
+
+    expect(replyCalls.length).toBe(1)
+    expect(replyCalls[0].params.reply).toBe("reject")
+    expect(replyCalls[0].params.message).toBeUndefined()
   })
 
   test("uses an explicit event directory before incomplete local routing state", async () => {

@@ -15,7 +15,8 @@ import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { toolFileDiffs } from '@/lib/opencode/tools';
 import { getPermissionToolPresentation, getToolDisplayName } from './permissionToolPresentation';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
-import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
+import { permissionFeedbackKeyAction, permissionFeedbackMessage, usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
+import { useUIStore } from '@/stores/useUIStore';
 
 const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
   margin: 0,
@@ -359,17 +360,68 @@ const useAlwaysLabel = (permission: PermissionRequest): { label: string; full: s
   };
 };
 
-/** Allow once / always / deny. The dock uses the shared buttons; the inline card keeps its status-coloured row. */
+/** Allow once / always / deny, plus deny-with-feedback. The dock uses the shared buttons; the inline card keeps its status-coloured row. */
 export const PermissionActions: React.FC<{
   permission: PermissionRequest;
   isResponding: boolean;
-  onRespond: (response: PermissionReply) => void;
+  onRespond: (response: PermissionReply, message?: string) => void;
   variant: 'inline' | 'dock';
 }> = ({ permission, isResponding, onRespond, variant }) => {
   const { t } = useI18n();
   const always = useAlwaysLabel(permission);
   const hasSave = always.full !== undefined;
   const canSave = canSavePermission(permission.save);
+  const isMobile = useUIStore((state) => state.isMobile);
+  const [feedbackOpen, setFeedbackOpen] = React.useState(false);
+  const [feedback, setFeedback] = React.useState('');
+  const feedbackRef = React.useRef<HTMLTextAreaElement | null>(null);
+
+  React.useEffect(() => {
+    if (feedbackOpen) feedbackRef.current?.focus();
+  }, [feedbackOpen]);
+
+  const submitFeedback = React.useCallback(() => {
+    onRespond('reject', permissionFeedbackMessage(feedback));
+  }, [feedback, onRespond]);
+
+  const handleFeedbackKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const action = permissionFeedbackKeyAction(event.nativeEvent, isMobile);
+    if (action === 'submit') {
+      event.preventDefault();
+      submitFeedback();
+    } else if (action === 'cancel') {
+      event.preventDefault();
+      setFeedbackOpen(false);
+    }
+  }, [isMobile, submitFeedback]);
+
+  const feedbackBox = (
+    <div className={variant === 'dock' ? 'px-3 pb-2 pt-1' : 'px-2 pb-2 sm:pb-1.5 pt-1.5 sm:pt-1 border-t border-border/20'}>
+      <textarea
+        ref={feedbackRef}
+        value={feedback}
+        onChange={(event) => setFeedback(event.target.value)}
+        onKeyDown={handleFeedbackKeyDown}
+        placeholder={t('chat.permissionCard.feedbackPlaceholder')}
+        aria-label={t('chat.permissionCard.denyWithFeedback')}
+        rows={2}
+        disabled={isResponding}
+        className="w-full resize-none rounded-md border border-border/30 bg-transparent px-2 py-1.5 typography-meta text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+      />
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => setFeedbackOpen(false)}>
+          {t('chat.permissionCard.feedbackCancel')}
+        </Button>
+        <div className="min-w-0 flex-1" />
+        <Button size="xs" disabled={isResponding} onClick={submitFeedback} className="bg-[var(--status-error)] text-white hover:bg-[var(--status-error)]/90">
+          <Icon name="close" className="size-3.5" />
+          {t('chat.permissionCard.deny')}
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (feedbackOpen) return feedbackBox;
 
   if (variant === 'dock') {
     return (
@@ -378,6 +430,9 @@ export const PermissionActions: React.FC<{
           <Icon name="close" className="size-3.5" />
           {t('chat.permissionCard.deny')}
           <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
+        </Button>
+        <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => setFeedbackOpen(true)} className="text-[var(--status-error)]">
+          {t('chat.permissionCard.denyWithFeedback')}
         </Button>
         <div className="min-w-0 flex-1" />
         {canSave ? (
@@ -446,6 +501,16 @@ export const PermissionActions: React.FC<{
         <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
       </button>
 
+      <button
+        onClick={() => setFeedbackOpen(true)}
+        disabled={isResponding}
+        className={rowClass}
+        style={{ backgroundColor: 'rgb(var(--status-error) / 0.1)', color: 'var(--status-error)' }}
+        {...hover('rgb(var(--status-error) / 0.1)', 'rgb(var(--status-error) / 0.2)')}
+      >
+        {t('chat.permissionCard.denyWithFeedback')}
+      </button>
+
       {isResponding && (
         <div className="flex justify-center w-full sm:w-auto sm:ms-auto py-1 sm:py-0 typography-meta text-muted-foreground">
           <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
@@ -492,7 +557,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({ permission, onRe
 
           <PermissionRequestContent permission={permission} />
 
-          <PermissionActions permission={permission} isResponding={isResponding} onRespond={(response) => void respond(response)} variant="inline" />
+          <PermissionActions permission={permission} isResponding={isResponding} onRespond={(response, message) => void respond(response, message)} variant="inline" />
         </div>
       </div>
     </div>

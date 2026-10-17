@@ -30,6 +30,30 @@ export const permissionShortcutReply = (
   return null;
 };
 
+/** The message a deny-with-feedback reply carries; blank text is no message. */
+export const permissionFeedbackMessage = (text: string): string | undefined => {
+  const trimmed = text.trim();
+  return trimmed ? trimmed : undefined;
+};
+
+/**
+ * What a key press in the deny-feedback box means. Enter submits on desktop
+ * and Shift+Enter inserts a newline; on mobile Enter inserts a newline and
+ * only Cmd/Ctrl+Enter submits (the FormDock rule). Escape cancels back to the
+ * buttons. IME composition never submits or cancels (mirrors
+ * `isIMECompositionEvent` in lib/ime).
+ */
+export const permissionFeedbackKeyAction = (
+  event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'isComposing' | 'keyCode'>,
+  isMobile: boolean,
+): 'submit' | 'cancel' | null => {
+  if (event.isComposing || event.keyCode === 229) return null;
+  if (event.key === 'Escape') return 'cancel';
+  if (event.key !== 'Enter' || event.shiftKey) return null;
+  if (event.ctrlKey || event.metaKey) return 'submit';
+  return isMobile ? null : 'submit';
+};
+
 /** The request was raised by a child of the session the user is looking at. */
 export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
   const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
@@ -56,10 +80,10 @@ export const usePermissionResponse = (
   const respondToPermission = sessionActions.respondToPermission;
   const canSave = canSavePermission(permission.save);
 
-  const respond = React.useCallback(async (response: PermissionReply) => {
+  const respond = React.useCallback(async (response: PermissionReply, message?: string) => {
     setIsResponding(true);
     try {
-      await respondToPermission(permission.sessionID, permission.id, response);
+      await respondToPermission(permission.sessionID, permission.id, response, undefined, message);
       setHasResponded(true);
       onResponse?.(response);
     } catch (error) {
