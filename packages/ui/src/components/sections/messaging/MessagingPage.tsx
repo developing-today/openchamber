@@ -13,12 +13,14 @@ import {
   SETTINGS_CUSTOM_TRIGGER_CLASS,
   SETTINGS_HELPER_CLASS,
   SETTINGS_ICON_BUTTON_CLASS,
+  SETTINGS_NUMBER_STEPPER_ROW_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MATCH_LABEL_KEYS } from '@/components/messaging/messagingLabels';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
@@ -82,11 +84,13 @@ const CommitInput: React.FC<{
   type?: 'text' | 'password' | 'number';
   className?: string;
   disabled?: boolean;
-}> = ({ value, onCommit, placeholder, ariaLabel, type = 'text', className, disabled }) => {
+  preserveWhitespace?: boolean;
+}> = ({ value, onCommit, placeholder, ariaLabel, type = 'text', className, disabled, preserveWhitespace = false }) => {
   const [draft, setDraft] = React.useState(value);
   React.useEffect(() => setDraft(value), [value]);
   const commit = () => {
-    if (draft.trim() !== value) onCommit(draft.trim());
+    const next = preserveWhitespace ? draft : draft.trim();
+    if (next !== value) onCommit(next);
   };
   return (
     <Input
@@ -223,7 +227,7 @@ const ModelSection: React.FC<{ config: MessagingConfig; locked: boolean; onChang
         />
 
         <SettingsTwoColumn>
-          <SettingsStackedField label={t('settings.messaging.model.url')} info={t('settings.messaging.model.customInfo')}>
+          <SettingsStackedField label={t('settings.messaging.model.url')} info={t('settings.messaging.model.customInfo')} settingsItem="messaging.model-url">
             <CommitInput
               value={embedding.url ?? ''}
               disabled={locked}
@@ -232,7 +236,7 @@ const ModelSection: React.FC<{ config: MessagingConfig; locked: boolean; onChang
               onCommit={(url) => setEmbedding({ url: url || undefined })}
             />
           </SettingsStackedField>
-          <SettingsStackedField label={t('settings.messaging.model.path')}>
+          <SettingsStackedField label={t('settings.messaging.model.path')} settingsItem="messaging.model-path">
             <CommitInput
               value={embedding.path ?? ''}
               disabled={locked}
@@ -242,6 +246,49 @@ const ModelSection: React.FC<{ config: MessagingConfig; locked: boolean; onChang
             />
           </SettingsStackedField>
         </SettingsTwoColumn>
+
+        <SettingsFieldRow label={t('settings.messaging.model.pooling')} info={t('settings.messaging.model.runtimeInfo')} settingsItem="messaging.pooling">
+          <Select value={embedding.pooling ?? 'default'} disabled={locked} onValueChange={(value) => setEmbedding({ pooling: value === 'last' || value === 'mean' || value === 'cls' ? value : undefined })}>
+            <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('settings.messaging.model.pooling')}>
+              <SelectValue>{embedding.pooling ?? t('settings.messaging.model.inherit')}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">{t('settings.messaging.model.inherit')}</SelectItem>
+              {(['last', 'mean', 'cls'] as const).map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
+
+        <SettingsTwoColumn>
+          <SettingsStackedField label={t('settings.messaging.model.threads')} settingsItem="messaging.threads">
+            <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+              <NumberInput value={embedding.threads} min={1} step={1} disabled={locked} deferExternalValueWhileFocused
+                emptyLabel={t('settings.messaging.model.inherit')} aria-label={t('settings.messaging.model.threads')}
+                onValueChange={(value) => setEmbedding({ threads: Math.round(value) })} onClear={() => setEmbedding({ threads: undefined })} />
+            </div>
+          </SettingsStackedField>
+          <SettingsStackedField label={t('settings.messaging.model.gpuLayers')} info={t('settings.messaging.model.runtimeInfo')} settingsItem="messaging.gpu-layers">
+            <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+              <NumberInput value={embedding.gpu_layers} min={-1} step={1} disabled={locked} deferExternalValueWhileFocused
+                emptyLabel={t('settings.messaging.model.inherit')} aria-label={t('settings.messaging.model.gpuLayers')}
+                onValueChange={(value) => setEmbedding({ gpu_layers: Math.round(value) })} onClear={() => setEmbedding({ gpu_layers: undefined })} />
+            </div>
+          </SettingsStackedField>
+          <SettingsStackedField label={t('settings.messaging.model.server')} settingsItem="messaging.server">
+            <CommitInput value={embedding.server ?? ''} disabled={locked} placeholder="/path/to/llama-server" ariaLabel={t('settings.messaging.model.server')}
+              onCommit={(server) => setEmbedding({ server: server || undefined })} />
+          </SettingsStackedField>
+        </SettingsTwoColumn>
+
+        <SettingsStackedField label={t('settings.messaging.model.query')} info={t('settings.messaging.model.queryInfo')} settingsItem="messaging.query">
+          <div className="space-y-2">
+            <SettingsCheckboxRow checked={embedding.query !== undefined} disabled={locked} label={t('settings.messaging.model.queryOverride')}
+              onChange={(checked) => setEmbedding({ query: checked ? '' : undefined })} />
+            <CommitInput value={embedding.query ?? ''} disabled={locked || embedding.query === undefined} preserveWhitespace
+              placeholder={embedding.query === undefined ? t('settings.messaging.model.inherit') : undefined} ariaLabel={t('settings.messaging.model.query')}
+              onCommit={(query) => setEmbedding({ query })} />
+          </div>
+        </SettingsStackedField>
       </div>
     </SettingsSection>
   );

@@ -1399,6 +1399,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.messaging.section.remoteInfo',
     keywords: ['embeddings', 'openai', 'api key', 'endpoint', 'remote'],
   },
+  { id: 'messaging.model-url', page: 'messaging', titleKey: 'settings.messaging.model.url', keywords: ['embedding', 'gguf', 'download', 'url', 'custom model'] },
+  { id: 'messaging.model-path', page: 'messaging', titleKey: 'settings.messaging.model.path', keywords: ['embedding', 'gguf', 'file', 'local path', 'custom model'] },
+  { id: 'messaging.pooling', page: 'messaging', titleKey: 'settings.messaging.model.pooling', keywords: ['embedding', 'pooling', 'last', 'mean', 'cls'] },
+  { id: 'messaging.threads', page: 'messaging', titleKey: 'settings.messaging.model.threads', keywords: ['embedding', 'cpu', 'threads', 'llama.cpp'] },
+  { id: 'messaging.gpu-layers', page: 'messaging', titleKey: 'settings.messaging.model.gpuLayers', keywords: ['embedding', 'gpu', 'layers', 'offload'] },
+  { id: 'messaging.server', page: 'messaging', titleKey: 'settings.messaging.model.server', keywords: ['embedding', 'llama-server', 'executable', 'binary', 'path'] },
+  { id: 'messaging.query', page: 'messaging', titleKey: 'settings.messaging.model.query', keywords: ['embedding', 'query', 'prefix', 'instruction', 'remote'] },
   {
     id: 'messaging.search',
     page: 'messaging',

@@ -305,6 +305,11 @@ selected session. A failed read retains values only within that scope.
   two seconds while the model downloads or starts. Choosing a size writes the
   config and also selects it in the running OpenCode, so the status follows at
   once. A size the hardware cannot run is shown disabled.
+- Optional pooling, CPU threads, GPU layers and llama-server path overrides
+  keep the other embedding settings intact. A query-prefix override distinguishes
+  an unset value from an explicit empty prefix and preserves its whitespace.
+  The prefix also applies to remote embeddings. Each control has a Settings
+  search target.
 - Presets and constants show the built-in value as the placeholder; a field
   left empty removes the override. Global variables are not config: they go
   through OpenCode's messaging API and apply to every session at once.
