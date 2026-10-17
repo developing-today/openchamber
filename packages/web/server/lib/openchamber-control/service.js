@@ -1154,6 +1154,39 @@ export const createOpenChamberControlService = (dependencies) => {
           const limit = input.all === true ? undefined : (last ? 1 : positiveInteger(input.limit, 10, 'limit'));
           return { sessionId: sessionID, directory, role, sessionStatus: currentStatus, messages: await sessionMessages(client, sessionID, role, limit) };
         }
+        if (action === 'session.archive' || action === 'session.unarchive') {
+          // The session service owns the broadcast that tells open windows;
+          // the bare store is the same state without it, for servers whose
+          // session service predates the archive methods.
+          const archiving = action === 'session.archive';
+          const serviceMethod = archiving ? sessionService?.archive : sessionService?.unarchive;
+          const storeMethod = archiving ? archiveStore?.archive : archiveStore?.unarchive;
+          let outcome;
+          if (serviceMethod) {
+            outcome = await serviceMethod.call(sessionService, { ids: [sessionID] });
+          } else if (storeMethod) {
+            outcome = await storeMethod.call(archiveStore, [sessionID]);
+          } else {
+            throw new OpenChamberControlError('Archiving sessions is not available on this server', 503);
+          }
+          const applied = (archiving ? outcome?.archived : outcome?.restored) || [];
+          if (!applied.some((entry) => entry?.id === sessionID)) {
+            throw new OpenChamberControlError(`Failed to ${archiving ? 'archive' : 'restore'} session ${sessionID}`, 500);
+          }
+          return archiving
+            ? { sessionId: sessionID, directory, archived: true, archivedAt: applied.find((entry) => entry?.id === sessionID)?.archivedAt ?? null }
+            : { sessionId: sessionID, directory, archived: false };
+        }
+        if (action === 'session.delete') {
+          // Deleting the session a call runs in would remove the very
+          // conversation waiting for this answer. The CLI has no calling
+          // session, so this only ever refuses the tool path's own session.
+          if (asNonEmptyString(options.contextSessionId) === sessionID) {
+            throw new OpenChamberControlError('session.delete cannot target the session you are running in; pass the sessionId of another session', 400);
+          }
+          await client.session.remove({ sessionID });
+          return { sessionId: sessionID, directory, deleted: true };
+        }
       }
       throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
     } catch (error) {

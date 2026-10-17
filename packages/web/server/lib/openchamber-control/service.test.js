@@ -12,6 +12,7 @@ const createService = (overrides = {}) => {
     session: {
       list: vi.fn(async () => ({ data: [] })),
       active: vi.fn(async () => ({})),
+      remove: vi.fn(async () => true),
     },
     message: {
       list: vi.fn(async () => ({ data: [] })),
@@ -785,7 +786,59 @@ describe('OpenChamber control service', () => {
 
   it('rejects actions outside the fixed contract', async () => {
     const { service } = createService();
-    await expect(service.execute('session.delete')).rejects.toThrow('Unsupported OpenChamber action');
+    await expect(service.execute('session.explode')).rejects.toThrow('Unsupported OpenChamber action');
+  });
+
+  it('archives and restores a session through the archive store', async () => {
+    const archiveStore = {
+      archivedAt: vi.fn(async () => null),
+      archive: vi.fn(async (ids) => ({ archived: ids.map((id) => ({ id, archivedAt: 123 })), failedIds: [] })),
+      unarchive: vi.fn(async (ids) => ({ restored: ids.map((id) => ({ id, archivedAt: null })), failedIds: [] })),
+    };
+    const { service } = createService({ archiveStore });
+    await expect(service.execute('session.archive', { sessionId: 'ses_1', directory: '/repo' }))
+      .resolves.toEqual({ sessionId: 'ses_1', directory: '/repo', archived: true, archivedAt: 123 });
+    expect(archiveStore.archive).toHaveBeenCalledWith(['ses_1']);
+    await expect(service.execute('session.unarchive', { sessionId: 'ses_1', directory: '/repo' }))
+      .resolves.toEqual({ sessionId: 'ses_1', directory: '/repo', archived: false });
+    expect(archiveStore.unarchive).toHaveBeenCalledWith(['ses_1']);
+  });
+
+  it('prefers the session service archive, which broadcasts to open windows', async () => {
+    const { service, sessionService } = createService();
+    sessionService.archive = vi.fn(async ({ ids }) => ({ archived: ids.map((id) => ({ id, archivedAt: 7 })), failedIds: [] }));
+    await expect(service.execute('session.archive', { sessionId: 'ses_1', directory: '/repo' }))
+      .resolves.toEqual({ sessionId: 'ses_1', directory: '/repo', archived: true, archivedAt: 7 });
+    expect(sessionService.archive).toHaveBeenCalledWith({ ids: ['ses_1'] });
+  });
+
+  it('reports an archive the store refused, and 503s when no archive is wired', async () => {
+    const failing = createService({
+      archiveStore: {
+        archivedAt: vi.fn(async () => null),
+        archive: vi.fn(async () => ({ archived: [], failedIds: ['ses_1'] })),
+        unarchive: vi.fn(async () => ({ restored: [], failedIds: ['ses_1'] })),
+      },
+    });
+    await expect(failing.service.execute('session.archive', { sessionId: 'ses_1', directory: '/repo' }))
+      .rejects.toMatchObject({ statusCode: 500 });
+    const bare = createService();
+    await expect(bare.service.execute('session.archive', { sessionId: 'ses_1', directory: '/repo' }))
+      .rejects.toMatchObject({ statusCode: 503 });
+  });
+
+  it('deletes a session through the directory-scoped client', async () => {
+    const { service, client } = createService();
+    await expect(service.execute('session.delete', { sessionId: 'ses_1', directory: '/repo' }))
+      .resolves.toEqual({ sessionId: 'ses_1', directory: '/repo', deleted: true });
+    expect(client.session.remove).toHaveBeenCalledWith({ sessionID: 'ses_1' });
+  });
+
+  it('refuses to delete the session the call is running in', async () => {
+    const { service, client } = createService();
+    await expect(service.execute('session.delete', { sessionId: 'ses_1', directory: '/repo' }, '/repo', { contextSessionId: 'ses_1' }))
+      .rejects.toMatchObject({ statusCode: 400 });
+    expect(client.session.remove).not.toHaveBeenCalled();
   });
 });
 
