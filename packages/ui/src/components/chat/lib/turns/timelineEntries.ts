@@ -1,3 +1,4 @@
+import { turnRealModelRef } from './modelChange';
 import type { ChatMessageEntry, TurnRecord } from './types';
 
 /** One row of the transcript list: a turn, or a message that belongs to no turn. */
@@ -16,6 +17,8 @@ export type TimelineEntry =
         hasLaterAssistant?: boolean;
         /** The first message of the row after this turn, for the last assistant message's footer. */
         nextEntryFirstMessage?: ChatMessageEntry;
+        /** The real model (`provider/model#variant`) the previous turn with one ran on, for the model-changed marker. */
+        previousAssistantModel?: string;
     };
 
 type HistoryEntriesInput = {
@@ -42,13 +45,21 @@ const orderHistoryEntries = ({
     ungroupedMessageIds,
     hasStreamingTurn,
 }: HistoryEntriesInput): TimelineEntry[] => {
-    const turnEntries: TimelineEntry[] = staticTurns.map((turn) => ({
-        kind: 'turn',
-        key: `turn:${turn.turnId}`,
-        turn,
-        isLastTurn: turn.turnId === lastTurnId,
-        hasLaterAssistant: turnsWithLaterAssistant.has(turn.turnId),
-    }));
+    let previousAssistantModel: string | undefined;
+    const turnEntries: TimelineEntry[] = staticTurns.map((turn) => {
+        const entry: TimelineEntry = {
+            kind: 'turn',
+            key: `turn:${turn.turnId}`,
+            turn,
+            isLastTurn: turn.turnId === lastTurnId,
+            hasLaterAssistant: turnsWithLaterAssistant.has(turn.turnId),
+            previousAssistantModel,
+        };
+        // A turn without a model yet (still streaming in) keeps the marker
+        // pointed at the last turn that actually had one.
+        previousAssistantModel = turnRealModelRef(turn) ?? previousAssistantModel;
+        return entry;
+    });
     if (ungroupedMessageIds.size === 0) return turnEntries;
 
     const turnEntryByUserMessageId = new Map<string, TimelineEntry>();
@@ -81,7 +92,8 @@ const isSameEntry = (previous: TimelineEntry, next: TimelineEntry): boolean => {
         return previous.turn === next.turn
             && previous.isLastTurn === next.isLastTurn
             && previous.hasLaterAssistant === next.hasLaterAssistant
-            && previous.nextEntryFirstMessage === next.nextEntryFirstMessage;
+            && previous.nextEntryFirstMessage === next.nextEntryFirstMessage
+            && previous.previousAssistantModel === next.previousAssistantModel;
     }
     if (previous.kind === 'ungrouped' && next.kind === 'ungrouped') {
         return previous.message === next.message

@@ -28,6 +28,8 @@ import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { flattenAssistantTextParts, flattenUserTextParts } from '@/lib/messages/messageText';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
+import { formatModelRef } from '@/lib/opencode/modelRef';
+import { useModelAttributionFor } from './context/useModelAttributionFor';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { TurnGroupingContext } from './lib/turns/types';
 import { copyMarkdownToClipboard, copyTextToClipboard } from '@/lib/clipboard';
@@ -456,6 +458,35 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const headerVariant = !isUser && modelHasVariants ? (headerVariantRaw ?? 'Default') : undefined;
 
+    const assistantMessageId = !isUser && message.info.role === 'assistant' ? message.info.id : undefined;
+    const modelAttribution = useModelAttributionFor(assistantMessageId);
+
+    // The compact `provider/model#variant` form next to the human model name;
+    // criterion 1 of #29 wants it visible, not only inferable from the name.
+    const footerModelRef = React.useMemo(() => {
+        if (isUser || !providerID || !modelID) return undefined;
+        return formatModelRef({ providerID, modelID, variant: headerVariantRaw });
+    }, [isUser, providerID, modelID, headerVariantRaw]);
+
+    const footerModelTitle = React.useMemo(() => {
+        if (!modelAttribution) return undefined;
+        const facts: string[] = [];
+        if (modelAttribution.routeID) facts.push(`${t('chat.messageBody.modelAttribution.poolLabel')}: ${modelAttribution.routeID}`);
+        if (modelAttribution.selection) facts.push(`${t('chat.messageBody.modelAttribution.selectionLabel')}: ${modelAttribution.selection.reason}`);
+        if (modelAttribution.failover) {
+            const from = formatModelRef({
+                providerID: modelAttribution.failover.providerID,
+                modelID: modelAttribution.failover.modelID,
+                variant: modelAttribution.failover.variant ?? undefined,
+            });
+            const reason = modelAttribution.failover.errorMessage || modelAttribution.failover.errorTag;
+            facts.push(reason
+                ? `${t('chat.messageBody.modelAttribution.failoverLabel')} ${from} (${reason})`
+                : `${t('chat.messageBody.modelAttribution.failoverLabel')} ${from}`);
+        }
+        return facts.length > 0 ? facts.join('\n') : undefined;
+    }, [modelAttribution, t]);
+
     // Summary body removed — flat rendering means text is always inline.
 
     const assistantError = React.useMemo(() => {
@@ -776,6 +807,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 footerModelName={headerModelName}
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}
+                                footerModelRef={footerModelRef}
+                                footerModelTitle={footerModelTitle}
                                 isDarkTheme={isDarkTheme}
                                 extraActions={guestMessageActions}
                             />

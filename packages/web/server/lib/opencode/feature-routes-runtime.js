@@ -24,6 +24,7 @@ import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerModelRouteRoutes } from '../routing/model-routes.js';
 import { registerModelRouteStatsRoutes } from '../routing/model-route-stats.js';
+import { registerMessageModelAttributionRoutes } from '../routing/message-model-attribution.js';
 import { registerPlanRoutes } from '../routing/plan-routes.js';
 import { registerRouteRulesRoutes } from '../routing/route-rules-routes.js';
 import { createJevClient } from '../routing/jev.js';
@@ -303,6 +304,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       refreshOpenCodeAfterConfigChange,
     });
     registerModelRouteStatsRoutes(app);
+    registerMessageModelAttributionRoutes(app);
     registerPlanRoutes(app);
     registerRouteRulesRoutes(app, { routingRuntime, jev: createJevClient() });
     // Before the generic OpenCode proxy: swallows the `openchamber/auto` model

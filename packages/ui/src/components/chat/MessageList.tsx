@@ -10,8 +10,11 @@ import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContexts
 import TurnItem from './components/TurnItem';
 import { LiveTurnActivity } from './components/LiveTurnActivity';
 import { getTurnsWithLaterAssistant, hasLiveActivity } from './lib/turns/liveActivity';
+import { turnRealModelRef } from './lib/turns/modelChange';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
+import { useMessageModelAttribution } from './hooks/useMessageModelAttribution';
+import { ModelAttributionProvider } from './context/ModelAttributionContext';
 import { buildHistoryEntries, type TimelineEntry } from './lib/turns/timelineEntries';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
@@ -246,6 +249,8 @@ interface TurnBlockProps {
     hasLaterAssistant?: boolean;
     isLastTurn: boolean;
     nextEntryFirstMessage?: ChatMessageEntry;
+    /** The real model the previous turn with one ran on, for the model-changed divider. */
+    previousAssistantModel?: string;
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     turnExpansion: Map<string, boolean>;
@@ -263,6 +268,7 @@ const TurnBlock = React.memo(({
     hasLaterAssistant = false,
     isLastTurn,
     nextEntryFirstMessage,
+    previousAssistantModel,
     sessionIsWorking,
     defaultActivityExpanded,
     turnExpansion,
@@ -300,6 +306,17 @@ const TurnBlock = React.memo(({
         () => earlierAssistantText(turn.assistantMessages),
         [turn.assistantMessages]
     );
+
+    // A pool's round-robin pick or a failover can land this turn on a
+    // different real model than the one before it; the divider names both
+    // and, when known, why (see ModelAttributionProvider for the "why").
+    const modelChange = React.useMemo(() => {
+        const currentAssistantModel = turnRealModelRef(turn);
+        if (!previousAssistantModel || !currentAssistantModel || previousAssistantModel === currentAssistantModel) {
+            return undefined;
+        }
+        return { from: previousAssistantModel, to: currentAssistantModel };
+    }, [previousAssistantModel, turn]);
 
     const assistantIndexById = React.useMemo(() => {
         const ids = new Map<string, number>();
@@ -424,6 +441,7 @@ const TurnBlock = React.memo(({
         <TurnItem
             turn={turn}
             renderMessage={renderMessage}
+            modelChange={modelChange}
             assistantContent={!defaultActivityExpanded && hasLiveActivity(turn, showReasoningTraces) ? (
                 <LiveTurnActivity
                     turn={turn}
@@ -537,6 +555,7 @@ const MessageListEntry = React.memo(({
             hasLaterAssistant={entry.hasLaterAssistant}
             isLastTurn={entry.isLastTurn}
             nextEntryFirstMessage={entry.nextEntryFirstMessage}
+            previousAssistantModel={entry.previousAssistantModel}
             sessionIsWorking={sessionIsWorking}
             defaultActivityExpanded={defaultActivityExpanded}
             turnExpansion={turnExpansion}
@@ -837,6 +856,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
 
     const runningSubagentRuns = useRunningSubagentRuns(sessionKey, directory);
+
+    // Refetches only when a turn actually finishes (OpenCode has written that
+    // turn's route_attempt rows by then), never on an interval or every render.
+    const completedAssistantTurnCount = React.useMemo(
+        () => messages.reduce((count, message) => (
+            message.info.role === 'assistant' && message.info.finish ? count + 1 : count
+        ), 0),
+        [messages]
+    );
+    const modelAttribution = useMessageModelAttribution(sessionKey, completedAssistantTurnCount);
 
     const baseDisplayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.base_display_ms', () => {
         const timeline = withRunningSubagentRuns(messages, runningSubagentRuns);
@@ -1404,25 +1433,27 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // fade on every remount reads as blinking. Rows are never "new" from the
         // list's point of view, so fade-in is disabled for them — content
         // arriving inside the streaming tail keeps its own animations.
-        <FadeInDisabledProvider disabled>
-            <TurnMessageWindowContext.Provider value={turnMessageWindow}>
-                <TimelineList
-                    key={sessionKey}
-                    entries={allEntries}
-                    streamingTailKey={trailingStreamingEntry?.key ?? null}
-                    registerList={handleRegisterList}
-                    composerOverlayHeight={composerOverlayHeight}
-                    onIsAtEndChange={stableIsAtEndChange}
-                    onListMetricsChange={stableListMetricsChange}
-                    onTimelineDataChange={stableTimelineDataChange}
-                    listHeader={listHeader}
-                    listFooter={listFooter}
-                    scrollContainerProps={scrollContainerProps}
-                    rowContext={rowContext}
-                    endPinningReleased={endPinningReleased}
-                />
-            </TurnMessageWindowContext.Provider>
-        </FadeInDisabledProvider>
+        <ModelAttributionProvider value={modelAttribution}>
+            <FadeInDisabledProvider disabled>
+                <TurnMessageWindowContext.Provider value={turnMessageWindow}>
+                    <TimelineList
+                        key={sessionKey}
+                        entries={allEntries}
+                        streamingTailKey={trailingStreamingEntry?.key ?? null}
+                        registerList={handleRegisterList}
+                        composerOverlayHeight={composerOverlayHeight}
+                        onIsAtEndChange={stableIsAtEndChange}
+                        onListMetricsChange={stableListMetricsChange}
+                        onTimelineDataChange={stableTimelineDataChange}
+                        listHeader={listHeader}
+                        listFooter={listFooter}
+                        scrollContainerProps={scrollContainerProps}
+                        rowContext={rowContext}
+                        endPinningReleased={endPinningReleased}
+                    />
+                </TurnMessageWindowContext.Provider>
+            </FadeInDisabledProvider>
+        </ModelAttributionProvider>
     );
 });
 

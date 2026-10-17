@@ -245,6 +245,29 @@ the source and manages the TypeSafe key and, through `CustomEndpointFields.tsx`,
 the custom endpoint; `JevAccessNote` links there from the
 features that need Jev.
 
+## Model pool telemetry
+
+Separate from Jev/Auto above: read-only views over OpenCode's own
+`route_attempt`/`route_decision` tables (`experimental.model_routes` pools,
+`model-routes.js`'s concern), not OpenChamber's classifier. Both report
+`{ available: false, reason }` instead of an empty result when the database,
+its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
+
+- `model-route-stats.js` — `GET /api/model-routes/stats`: aggregate counts,
+  latencies, grouped errors and hedge win rates per target over a trailing
+  window (`hours`, default 24).
+- `message-model-attribution.js` — `GET /api/model-routes/turns?sessionID=`:
+  per-assistant-message attribution for one session, keyed by assistant
+  message id (`routeID`, the `selection` decision nearest before the attempt
+  that answered, and a `failover` block when an earlier attempt for the same
+  message failed over to a different target first). Every request OpenCode
+  runs writes an attempt row, routed or not, so a direct (non-pool) model gets
+  an entry too, with `routeID: null`. This backs the UI's per-message model
+  badge, its hover detail, and the transcript's model-changed divider; the
+  divider's "does the real model differ from the previous turn" check itself
+  needs no telemetry, since it just compares the assistant messages' own
+  `providerID`/`modelID`/`variant` (`packages/ui/src/components/chat/lib/turns/modelChange.ts`).
+
 ## Tests
 
 `store.test.js` (defaults, deviation round-trip, the cache setting's default,

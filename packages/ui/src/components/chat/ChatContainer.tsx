@@ -6,6 +6,7 @@ import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
 import { isOpencodeNotFound, opencodeClient } from '@/lib/opencode/client';
 
 import { ChatInput } from './ChatInput';
+import CurrentModelIndicator from './CurrentModelIndicator';
 import { CHAT_INPUT_EDITOR_SELECTOR } from './composer/editor/dom';
 import {
     ChatColumnActionsContext,
@@ -1915,12 +1916,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         />
                     </>
                 ) : (
-                    <ChatInput
-                        active={active}
-                        scrollToBottom={scrollToBottomOnSend}
-                        scrollToLatest={resumeToLatestInstant}
-                        draftPresentationExiting={draftPresentationExiting}
-                    />
+                    <>
+                        <CurrentModelIndicator messages={timelineController.renderedMessages} />
+                        <ChatInput
+                            active={active}
+                            scrollToBottom={scrollToBottomOnSend}
+                            scrollToLatest={resumeToLatestInstant}
+                            draftPresentationExiting={draftPresentationExiting}
+                        />
+                    </>
                 )}
             </div>
 

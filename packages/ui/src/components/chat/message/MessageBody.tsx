@@ -277,6 +277,10 @@ interface MessageBodyProps {
     footerModelName?: string;
     footerAgentName?: string;
     footerVariant?: string;
+    /** Compact `provider/model#variant`, shown next to `footerModelName`; hover/expand shows pool and reason via `footerModelTitle`. */
+    footerModelRef?: string;
+    /** Pool, selection reason, and failover detail for `footerModelRef`, from session-scoped routing telemetry. */
+    footerModelTitle?: string;
     isDarkTheme?: boolean;
     /** Actions installed extensions contribute for this message's role; rendered after the built-ins. */
     extraActions?: MessageExtraAction[];
@@ -1149,6 +1153,8 @@ const AssistantMessageBody = React.memo(({
     footerModelName,
     footerAgentName,
     footerVariant,
+    footerModelRef,
+    footerModelTitle,
     isDarkTheme = false,
     extraActions,
 }: Omit<MessageBodyProps, 'isUser'>) => {
@@ -1576,7 +1582,10 @@ const AssistantMessageBody = React.memo(({
     const showErrorMessage = Boolean(errorMessage);
     const isPeekSurface = chatSurfaceMode === 'peek';
     const shouldShowMessageActions = hasCopyableText && !isPeekSurface;
-    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface;
+    // The model badge matters in a subagent's own transcript too (which model
+    // actually answered it), so the footer still shows there; only the
+    // message-action affordances are peek-specific noise.
+    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage));
     const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !shouldShowTurnFooter;
 
     const messageActionButtons = React.useMemo(() => (
@@ -2183,7 +2192,7 @@ const AssistantMessageBody = React.memo(({
                             truncates once those two alone stop fitting. */}
                         <div ref={footerFactsRef} className="message-footer__facts whitespace-nowrap text-sm text-muted-foreground/60">
                             {footerModelName ? (
-                                <span className="flex min-w-0 shrink items-center gap-1.5">
+                                <span className="flex min-w-0 shrink items-center gap-1.5" title={footerModelTitle}>
                                     {footerHasLogo && footerLogoSrc ? (
                                         <img
                                             src={footerLogoSrc}
@@ -2198,6 +2207,11 @@ const AssistantMessageBody = React.memo(({
                                         <AgentModelIcon agentName={footerAgentName} />
                                     )}
                                     <span data-fact-model className="truncate">{footerModelName}</span>
+                                    {footerModelRef ? (
+                                        <span data-fact-model-ref className="truncate font-mono text-[0.85em] opacity-70">
+                                            {footerModelRef}
+                                        </span>
+                                    ) : null}
                                 </span>
                             ) : null}
                             {footerVariant && !['default', 'none'].includes(footerVariant.toLowerCase()) ? (

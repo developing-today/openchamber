@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 import type { ModelRoute } from './modelRoutesApi';
-import { fetchModelRoutes, saveModelRouteTuning, saveModelRoutes } from './modelRoutesApi';
+import { fetchMessageModelAttribution, fetchModelRoutes, saveModelRouteTuning, saveModelRoutes } from './modelRoutesApi';
 
 type Sent = { url: string; method: string; body: string };
 
@@ -70,5 +70,32 @@ describe('saveModelRouteTuning', () => {
     const state = await saveModelRouteTuning(tuning);
     expect(JSON.parse(sent[0]?.body ?? '')).toEqual({ tuning });
     expect(state.tuning).toEqual(tuning);
+  });
+});
+
+describe('fetchMessageModelAttribution', () => {
+  test('reads per-message attribution for a session', async () => {
+    respond = () => reply(JSON.stringify({
+      available: true,
+      messages: {
+        msg_1: {
+          providerID: 'github-copilot', modelID: 'gpt-6-luna', variant: 'low', routeID: 'fast-strong',
+          selection: { mode: 'round-robin', reason: 'drawn' }, failover: null,
+        },
+      },
+    }));
+    const result = await fetchMessageModelAttribution('ses_1');
+    expect(sent[0]).toMatchObject({ url: '/api/model-routes/turns?sessionID=ses_1', method: 'GET' });
+    expect(result.messages?.msg_1).toMatchObject({ providerID: 'github-copilot', routeID: 'fast-strong' });
+  });
+
+  test('reports unavailable telemetry without throwing', async () => {
+    respond = () => reply(JSON.stringify({ available: false, reason: 'no-database' }));
+    expect(await fetchMessageModelAttribution('ses_1')).toEqual({ available: false, reason: 'no-database' });
+  });
+
+  test('throws the server message when the request fails', async () => {
+    respond = () => reply(JSON.stringify({ error: 'sessionID is required' }), 400);
+    await expect(fetchMessageModelAttribution('')).rejects.toThrow('sessionID is required');
   });
 });

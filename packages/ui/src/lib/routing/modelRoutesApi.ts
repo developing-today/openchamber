@@ -161,3 +161,45 @@ export const fetchRouteStats = async (hours = 24): Promise<RouteStats> => {
   }
   return routeStatsSchema.parse(payload);
 };
+
+const messageAttributionSelectionSchema = z.object({
+  mode: z.string(),
+  reason: z.string(),
+});
+
+const messageAttributionFailoverSchema = z.object({
+  providerID: z.string(),
+  modelID: z.string(),
+  variant: z.string().nullable(),
+  errorTag: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+});
+
+const messageAttributionSchema = z.object({
+  providerID: z.string(),
+  modelID: z.string(),
+  variant: z.string().nullable(),
+  routeID: z.string().nullable(),
+  selection: messageAttributionSelectionSchema.nullable(),
+  failover: messageAttributionFailoverSchema.nullable(),
+});
+
+const messageModelAttributionResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().optional(),
+  messages: z.record(z.string(), messageAttributionSchema).optional(),
+});
+
+export type MessageModelAttribution = z.infer<typeof messageAttributionSchema>;
+type MessageModelAttributionResponse = z.infer<typeof messageModelAttributionResponseSchema>;
+
+/** Per-assistant-message pool/selection/failover attribution for one session, from OpenCode's routing tables. */
+export const fetchMessageModelAttribution = async (sessionID: string): Promise<MessageModelAttributionResponse> => {
+  const response = await runtimeFetch(`/api/model-routes/turns?sessionID=${encodeURIComponent(sessionID)}`);
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const failure = errorPayloadSchema.safeParse(payload);
+    throw new Error(failure.success ? failure.data.error : `Routing telemetry request failed (${response.status})`);
+  }
+  return messageModelAttributionResponseSchema.parse(payload);
+};
