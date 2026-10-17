@@ -8,6 +8,7 @@
   openssh,
   opencode,
   src,
+  nodeModulesHash ? (lib.importJSON ./hashes.json).nodeModules.${stdenvNoCC.hostPlatform.system},
 }:
 let
   cleanSrc = lib.cleanSourceWith {
@@ -16,6 +17,12 @@ let
   };
 
   version = (lib.importJSON "${cleanSrc}/packages/web/package.json").version;
+
+  platform = stdenvNoCC.hostPlatform;
+  # bun installs only the optional native packages matching these, so the
+  # node_modules output (and its hash) differs per system.
+  bunCpu = if platform.isAarch64 then "arm64" else "x64";
+  bunOs = if platform.isDarwin then "darwin" else "linux";
 
   # Fetched with bun, not npm: the fork's patchedDependencies (bun-patches/) cannot be applied by npm.
   node_modules = stdenvNoCC.mkDerivation {
@@ -32,7 +39,7 @@ let
       runHook preBuild
       export HOME=$TMPDIR
       export BUN_INSTALL_CACHE_DIR=$(mktemp -d)
-      bun install --frozen-lockfile --ignore-scripts --no-progress
+      bun install --cpu=${bunCpu} --os=${bunOs} --frozen-lockfile --ignore-scripts --no-progress
       runHook postBuild
     '';
 
@@ -46,7 +53,7 @@ let
     dontFixup = true;
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
-    outputHash = "sha256-0ycJaJOyxYhtErzWVStLIBlQkj+vnrCtfCNFpkSFS/Q=";
+    outputHash = nodeModulesHash;
   };
 in
 stdenvNoCC.mkDerivation {
@@ -97,6 +104,6 @@ stdenvNoCC.mkDerivation {
     description = "OpenChamber built from source";
     license = lib.licenses.mit;
     mainProgram = "openchamber";
-    platforms = lib.platforms.linux;
+    platforms = builtins.attrNames (lib.importJSON ./hashes.json).nodeModules;
   };
 }
