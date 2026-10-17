@@ -85,7 +85,7 @@ import {
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
-import { wrapSystemReminder } from "@/lib/systemReminder"
+import { buildGoalIntroReminder } from "@/lib/goalWriter"
 import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
@@ -1814,25 +1814,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       const goalArm = inputMode !== "shell" && content.trim().length > 0
         ? useSessionGoalArmStore.getState().consume()
-        : { armed: false, objectiveOverride: null }
+        : { armed: false, objectiveOverride: null, settled: false, briefAgent: false }
       const goalArmed = goalArm.armed
-      if (goalArmed) {
-        // Teach the agent the goal protocol from turn one — without this it
-        // only learns about goal mode from the first server continuation.
-        const uiState = useUIStore.getState()
-        const budgetLine = uiState.sessionGoalDefaultBudgetEnabled
-          ? ` A token budget of ${uiState.sessionGoalDefaultBudget} tokens applies to this goal.`
-          : ""
-        const goalIntro = wrapSystemReminder(
-          "Goal mode is active for this session. The user message above defines the goal objective. "
-          + "Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. "
-          + "Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains."
-          + budgetLine,
-        )
-        additionalParts = [...(additionalParts ?? []), { text: goalIntro, synthetic: true }]
-      }
+      // Creates the armed goal and returns its goal-mode reminder, which
+      // teaches the agent the goal protocol from turn one (without it the agent
+      // only learns about goal mode from the first server continuation). It is
+      // built after the goal is saved so it names the objective that was
+      // saved: a spec the writer produced carries that spec to the agent.
       const applyArmedGoal = async (goalSessionId: string, goalDirectory: string | null | undefined) => {
-        if (!goalArmed) return
+        if (!goalArmed) return null
         const uiState = useUIStore.getState()
         const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
         let objective = goalArm.objectiveOverride?.trim() || content
@@ -1844,12 +1834,23 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           const knownCommands = selectCommandsForDirectory(useCommandsStore.getState(), goalDirectory)
           objective = expandSlashCommandGoalObjective(content, knownCommands)
         }
+        // "Rewrite every goal" covers the run-as-goal flows too; the writer
+        // falls back to the model this message is sent with.
+        const rewrite = uiState.sessionGoalRewriteAll && !goalArm.settled
+          ? { providerID, modelID }
+          : null
+        let rewrittenSpec: string | null
         try {
-          await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
+          ({ rewrittenSpec } = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite }, null))
         } catch (error) {
-          useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride)
+          useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
+            settled: goalArm.settled,
+            briefAgent: goalArm.briefAgent,
+          })
           throw error
         }
+        const briefing = goalArm.briefAgent ? goalArm.objectiveOverride : rewrittenSpec
+        return { text: buildGoalIntroReminder(tokenBudget, briefing), synthetic: true }
       }
 
       // ---- New session from draft ----
@@ -1862,9 +1863,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         }, options?.draftSnapshot)
         if (!createdDraftSession) throw new Error("Failed to create session")
 
-        const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }> | undefined = createdDraftSession.syntheticParts?.length
-          ? [...(additionalParts || []), ...createdDraftSession.syntheticParts]
-          : additionalParts
         // The server decides what this session still owes and assembles it; the
         // client only carries it and reports it delivered. It is fetched while
         // the message is already on screen: only the prompt request waits.
@@ -1894,7 +1892,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           filename: a.filename,
         }))
 
-        await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
+        const draftGoalIntro = await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
+        const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }> = [
+          ...(additionalParts ?? []),
+          ...(draftGoalIntro ? [draftGoalIntro] : []),
+          ...(createdDraftSession.syntheticParts ?? []),
+        ]
         const messageRoute = await routeMessage({
           sessionId: createdDraftSession.sessionId,
           directory: createdDraftSession.directory,
@@ -1910,7 +1913,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           delivery: options?.delivery,
           skills: options?.skills,
           sessionKnowledge: draftKnowledgeRequest?.then((knowledge) => knowledge.text),
-          additionalParts: draftParts?.map((p) => ({
+          additionalParts: draftParts.map((p) => ({
             text: p.text,
             synthetic: p.synthetic,
             metadata: p.metadata,
@@ -2008,7 +2011,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         : fetchSessionKnowledge(currentSessionDirectory, targetSessionId || "")
 
       if (targetSessionId) {
-        await applyArmedGoal(targetSessionId, currentSessionDirectory)
+        const goalIntro = await applyArmedGoal(targetSessionId, currentSessionDirectory)
+        if (goalIntro) additionalParts = [...(additionalParts ?? []), goalIntro]
       }
       const historyIdentity = createInputHistoryIdentity(
         capturedRuntimeKey,

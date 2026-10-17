@@ -12,6 +12,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from './selection-store';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -1879,6 +1880,69 @@ describe('goal objective directory scoping', () => {
     expect(metadataWrites).toHaveLength(1);
     expect(metadataWrites[0].directory).toBe('/repo/worktree');
     expect(metadataWrites[0].patch.openchamber.goal.objective).toBe('Worktree inspects auth flow.');
+  });
+
+  const sendToWorktree = (text) => useSessionUIStore.getState().sendMessage(
+    text,
+    'provider-a',
+    'model-a',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'normal',
+    { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-worktree', directory: '/repo/worktree' } },
+  );
+
+  test('a written spec sent with the message becomes the objective and briefs the agent', async () => {
+    const sent = [];
+    opencodeClient.sendMessage = async (params) => {
+      sent.push(params);
+      return 'msg';
+    };
+    useSessionGoalArmStore.getState().setArmed(true, '## Objective\nShip <it>', { settled: true, briefAgent: true });
+
+    await sendToWorktree('ship it');
+
+    expect(metadataWrites[0].patch.openchamber.goal.objective).toBe('## Objective\nShip <it>');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toBe('ship it');
+    expect(JSON.stringify(sent[0])).toContain('<goal-spec>\\n## Objective\\nShip &lt;it&gt;\\n</goal-spec>');
+  });
+
+  test('rewrite every goal sends an unsettled objective through the goal writer', async () => {
+    const specRequests = [];
+    const sent = [];
+    opencodeClient.sendMessage = async (params) => {
+      sent.push(params);
+      return 'msg';
+    };
+    const metadataFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if ((input instanceof Request ? input.url : String(input)).endsWith('/api/goals/spec')) {
+        specRequests.push(JSON.parse(init.body));
+        return Response.json({ spec: 'Written spec', providerID: 'provider-a', modelID: 'model-a' });
+      }
+      return metadataFetch(input, init);
+    };
+    useUIStore.setState({ sessionGoalRewriteAll: true });
+    try {
+      await sendToWorktree('make the build green');
+      expect(specRequests).toEqual([{ request: 'make the build green', directory: '/repo/worktree', providerID: 'provider-a', modelID: 'model-a' }]);
+      expect(metadataWrites[0].patch.openchamber.goal.objective).toBe('Written spec');
+      // The agent is briefed with the spec that was saved, not the message.
+      expect(JSON.stringify(sent[0])).toContain('<goal-spec>\\nWritten spec\\n</goal-spec>');
+
+      // A spec the writer already produced is not rewritten again.
+      metadataWrites.length = 0;
+      useSessionGoalArmStore.getState().setArmed(true, 'Approved spec', { settled: true });
+      await sendToWorktree('make the build green');
+      expect(specRequests).toHaveLength(1);
+      expect(metadataWrites[0].patch.openchamber.goal.objective).toBe('Approved spec');
+    } finally {
+      useUIStore.setState({ sessionGoalRewriteAll: false });
+    }
   });
 });
 

@@ -9,6 +9,12 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { planGoalWriter, requestGoalSpec, type GoalSubmitChoice } from '@/lib/goalWriter';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
+import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
+import { GoalSpecDialog, type GoalSpecDialogRequest } from '@/components/chat/GoalSpecDialog';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
@@ -128,7 +134,7 @@ import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
-import { getSyncMessages } from '@/sync/sync-refs';
+import { getAllSyncSessionMap, getSyncMessages } from '@/sync/sync-refs';
 import { useOpenCodeStartupStore } from '@/sync/opencode-startup-gate';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import {
@@ -315,6 +321,10 @@ const recordLinkedReferences = (
 const hasUserMessages = (sessionId: string, directory?: string) => {
     return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
 };
+
+const sameDraftIdentity = (a: ChatDraftIdentity | null, b: ChatDraftIdentity | null): boolean => (
+    a === null || b === null ? a === b : getChatDraftIdentityKey(a) === getChatDraftIdentityKey(b)
+);
 
 const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
     if (!projectLabel) return title;
@@ -1348,8 +1358,40 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             starter chips: on mobile the collapsed pill has no mounted textarea,
             so the DOM-first input snapshot would read empty content. */
         presetText?: string;
+        /** The goal writer's outcome for this send; set when the writer dialog sends again. */
+        goal?: GoalSubmitChoice;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
+
+    // A send waiting on the goal writer: the dialog's request and the
+    // message it was written from, which the chosen send uses. Both belong to
+    // the composer they were asked from: a choice made after the composer
+    // moved to another session or draft would send there instead.
+    const [goalWriterRequest, setGoalWriterRequest] = React.useState<GoalSpecDialogRequest | null>(null);
+    const goalWriterRequestIdRef = React.useRef(0);
+    const goalWriterPendingRef = React.useRef<{
+        message: string;
+        delivery?: 'steer';
+        identity: ChatDraftIdentity | null;
+    } | null>(null);
+    const cancelGoalWriter = React.useCallback(() => {
+        goalWriterPendingRef.current = null;
+        setGoalWriterRequest(null);
+    }, []);
+    React.useEffect(() => {
+        cancelGoalWriter();
+    }, [cancelGoalWriter, chatDraftIdentity]);
+    const handleGoalWriterChoice = React.useCallback((choice: GoalSubmitChoice) => {
+        const pending = goalWriterPendingRef.current;
+        goalWriterPendingRef.current = null;
+        setGoalWriterRequest(null);
+        if (!pending || !sameDraftIdentity(pending.identity, currentChatDraftIdentityRef.current)) return;
+        void handleSubmitRef.current({
+            presetText: choice.kind === 'spec' && choice.sendMode === 'goal-as-message' ? choice.spec : pending.message,
+            delivery: pending.delivery,
+            goal: choice,
+        });
+    }, []);
 
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(async () => {
@@ -1770,6 +1812,75 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 },
             });
             return;
+        }
+
+        // The goal writer turns the message into a goal spec before anything
+        // is taken from the composer. The dialog's choice submits again with
+        // `goal`, so cancelling leaves the composer, the queue and any pending
+        // prompts exactly as they were.
+        if (!options?.goal) {
+            const uiState = useUIStore.getState();
+            const goalTargetDirectory = currentSessionId
+                ? currentSessionDirectoryForSync ?? currentDirectory ?? null
+                : newSessionDraft?.directoryOverride ?? currentDirectory ?? null;
+            const goalWriterPlan = planGoalWriter({
+                eligible: !queuedOnly
+                    && !isBtwActive
+                    && inputMode === 'normal'
+                    && !commandPlan
+                    && inputSnapshot.message.trim().length > 0
+                    && !inputSnapshot.message.trimStart().startsWith('/')
+                    // These sends are queued behind the review, never sent now.
+                    && !(currentSessionId && autoReviewRunning),
+                goalsAvailable: !isVSCodeRuntime() && uiState.sessionGoalEnabled && isGoalCheckAvailableNow(goalTargetDirectory),
+                armed: useSessionGoalArmStore.getState().armed,
+                hasGoal: currentSessionId ? getSessionGoal(getAllSyncSessionMap().get(currentSessionId)) !== null : false,
+                writerEnabled: uiState.sessionGoalWriterEnabled,
+                rewriteAll: uiState.sessionGoalRewriteAll,
+                review: uiState.sessionGoalWriterReview,
+                // A message sent while the agent is still working follows up on that turn.
+                autoCreate: sessionPhase === 'idle' ? uiState.sessionGoalAutoCreate : 'off',
+            });
+            if (goalWriterPlan) {
+                const request = inputSnapshot.message;
+                const queuedTexts = composerQueuedMessages.map((queued) => queued.content);
+                const sessionIdForContext = currentSessionId;
+                const projectForContext = currentSessionId
+                    ? resolveProjectForSessionDirectory(
+                        useProjectsStore.getState().projects,
+                        useSessionUIStore.getState().availableWorktreesByProject,
+                        goalTargetDirectory,
+                    )
+                    : selectedDraftProject && selectedDraftProject.kind !== 'chat' ? selectedDraftProject : null;
+                goalWriterPendingRef.current = { message: request, delivery: options?.delivery, identity: chatDraftIdentity };
+                goalWriterRequestIdRef.current += 1;
+                setGoalWriterRequest({
+                    id: goalWriterRequestIdRef.current,
+                    trigger: goalWriterPlan.trigger,
+                    review: goalWriterPlan.review,
+                    defaultSendMode: uiState.sessionGoalWriterSendMode,
+                    write: async (signal) => {
+                        const context = goalWriterPlan.trigger === 'auto-create'
+                            ? await collectGoalWriterContext({
+                                sessionId: sessionIdForContext,
+                                directory: goalTargetDirectory,
+                                project: projectForContext ? { id: projectForContext.id, path: projectForContext.path } : null,
+                                queuedMessages: queuedTexts,
+                            })
+                            : null;
+                        return requestGoalSpec({
+                            request,
+                            conversation: context?.conversation,
+                            openItems: context?.openItems,
+                            directory: goalTargetDirectory,
+                            providerID: providerIdToSend,
+                            modelID: modelIdToSend,
+                            signal,
+                        });
+                    },
+                });
+                return;
+            }
         }
 
         // Auto-review owns the active workflow; follow-ups wait in its queue.
@@ -2243,6 +2354,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sourceControl: runtimeSourceControl,
                 fallbackDirectory: capturedDraftSnapshot.directoryOverride ?? selectedDraftProject.path,
             });
+        }
+
+        // The goal writer's choice decides this send's goal; set last, so no
+        // early return above can leave a stale arm behind.
+        if (options?.goal) {
+            const goalArm = useSessionGoalArmStore.getState();
+            const choice = options.goal;
+            if (choice.kind === 'none') goalArm.setArmed(false);
+            else if (choice.kind === 'unchanged') goalArm.setArmed(true, null, { settled: true });
+            else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message' });
         }
 
         const sendPromise = sendMessage(
@@ -4619,6 +4740,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             submitting={reviewFlowSubmitting}
             onConfirm={handleStartReviewFlow}
         /> : null}
+        <GoalSpecDialog request={goalWriterRequest} onCancel={cancelGoalWriter} onSubmit={handleGoalWriterChoice} />
         {attachmentPreviewMounted ? (
             <React.Suspense fallback={null}>
                 <ToolOutputDialog

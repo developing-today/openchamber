@@ -1,6 +1,7 @@
 import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-actions';
 import type { Metadata } from '@/lib/opencode/model';
 import { distillGoalObjective } from '@/lib/smallModel';
+import { requestGoalSpec } from '@/lib/goalWriter';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { deleteGoalObjectiveFile, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
@@ -37,6 +38,12 @@ const writeGoal = (
 export interface SetSessionGoalInput {
   objective: string;
   tokenBudget: number | null;
+  /**
+   * Run the objective through the goal writer first ("rewrite every goal").
+   * The model is the session's, which the writer uses unless Settings names
+   * one; null keeps the objective as written.
+   */
+  rewrite?: { providerID?: string | null; modelID?: string | null } | null;
 }
 
 /**
@@ -65,17 +72,36 @@ const fitObjective = async (raw: string): Promise<string> => {
   return `${raw.slice(0, half)}${TRIM_MARKER}${raw.slice(-half)}`;
 };
 
+const rewriteObjective = async (
+  raw: string,
+  directory: string | undefined,
+  model: NonNullable<SetSessionGoalInput['rewrite']>,
+): Promise<string | null> => {
+  const written = await requestGoalSpec({ request: raw, directory, providerID: model.providerID, modelID: model.modelID });
+  if (written.ok) return written.spec;
+  // The goal still starts: the user's own text is a valid objective, and the
+  // toast says it was not rewritten.
+  const dictionary = useI18nStore.getState().dictionary;
+  toast.error(formatMessage(dictionary, 'chat.goal.writer.toast.rewriteFailed'), { description: written.message });
+  return null;
+};
+
+/**
+ * `rewrittenSpec` is the spec the goal writer made the objective, or null
+ * when the objective is the text as given.
+ */
 export async function setSessionGoal(
   sessionId: string,
   directory: string | undefined,
   input: SetSessionGoalInput,
   existing: SessionGoalPayload | null,
-): Promise<void> {
+): Promise<{ rewrittenSpec: string | null }> {
   const rawObjective = input.objective.trim();
   if (!rawObjective) {
     throw new Error('Goal objective must not be empty');
   }
-  const objective = await fitObjective(rawObjective);
+  const rewrittenSpec = input.rewrite ? await rewriteObjective(rawObjective, directory, input.rewrite) : null;
+  const objective = await fitObjective(rewrittenSpec ?? rawObjective);
   const tokenBudget = typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0
     ? Math.floor(input.tokenBudget)
     : null;
@@ -111,6 +137,7 @@ export async function setSessionGoal(
       updatedAt: now,
     };
   });
+  return { rewrittenSpec };
 }
 
 export async function setSessionGoalStatus(

@@ -6,24 +6,46 @@ import { create } from 'zustand';
 // sendMessage in session-ui-store, which turns the sent prompt into the
 // goal objective — unless the arming flow supplied a richer objective
 // override (e.g. the plan content instead of "Implement this plan: X").
-interface SessionGoalArmStore {
+interface SessionGoalArm {
   armed: boolean;
   objectiveOverride: string | null;
-  setArmed: (armed: boolean, objectiveOverride?: string | null) => void;
-  /** Read-and-clear in one step at send time. */
-  consume: () => { armed: boolean; objectiveOverride: string | null };
+  /**
+   * The objective is settled: the goal writer produced it, or the user chose
+   * their own text over it. "Rewrite every goal" leaves a settled objective alone.
+   */
+  settled: boolean;
+  /**
+   * The sent message is not the objective (a written spec sent with the
+   * original message), so the goal reminder carries the objective to the agent.
+   */
+  briefAgent: boolean;
 }
 
+interface SessionGoalArmStore extends SessionGoalArm {
+  setArmed: (
+    armed: boolean,
+    objectiveOverride?: string | null,
+    options?: { settled?: boolean; briefAgent?: boolean },
+  ) => void;
+  /** Read-and-clear in one step at send time. */
+  consume: () => SessionGoalArm;
+}
+
+const DISARMED: SessionGoalArm = { armed: false, objectiveOverride: null, settled: false, briefAgent: false };
+
 export const useSessionGoalArmStore = create<SessionGoalArmStore>((set, get) => ({
-  armed: false,
-  objectiveOverride: null,
-  setArmed: (armed, objectiveOverride = null) => set({
-    armed,
-    objectiveOverride: armed ? objectiveOverride : null,
-  }),
+  ...DISARMED,
+  setArmed: (armed, objectiveOverride = null, options = {}) => set(armed
+    ? {
+        armed,
+        objectiveOverride,
+        settled: options.settled === true,
+        briefAgent: options.briefAgent === true && Boolean(objectiveOverride),
+      }
+    : DISARMED),
   consume: () => {
-    const { armed, objectiveOverride } = get();
-    if (armed) set({ armed: false, objectiveOverride: null });
-    return { armed, objectiveOverride };
+    const { armed, objectiveOverride, settled, briefAgent } = get();
+    if (armed) set(DISARMED);
+    return { armed, objectiveOverride, settled, briefAgent };
   },
 }));

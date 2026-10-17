@@ -14,7 +14,7 @@
 import type { SourceControlProvider } from '@/lib/api/types';
 import React from 'react';
 
-import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
+import { SessionGoalButton, SessionGoalObjectiveCounter, SessionGoalWriterButton } from '@/components/chat/SessionGoalButton';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Icon } from '@/components/icon/Icon';
 import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
@@ -214,6 +214,13 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
                             /> : null}
+                            {!isBtw ? <SessionGoalWriterButton
+                                sessionId={currentSessionId}
+                                directory={directory}
+                                draftOpen={newSessionDraftOpen}
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                            /> : null}
                             {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
@@ -289,6 +296,14 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             withTooltip
                         />
                         {!isBtw ? <SessionGoalButton
+                            sessionId={currentSessionId}
+                            directory={directory}
+                            draftOpen={newSessionDraftOpen}
+                            footerIconButtonClass={footerIconButtonClass}
+                            iconSizeClass={iconSizeClass}
+                            withTooltip
+                        /> : null}
+                        {!isBtw ? <SessionGoalWriterButton
                             sessionId={currentSessionId}
                             directory={directory}
                             draftOpen={newSessionDraftOpen}

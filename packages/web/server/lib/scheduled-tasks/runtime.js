@@ -2,7 +2,7 @@ import { OpenCode } from '@opencode/client';
 import { DateTime } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
-import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { buildGoalIntroText, createSessionGoal as createSessionGoalDefault } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { createExistingSessionTasks } from './existing-session.js';
@@ -260,6 +260,9 @@ export const createScheduledTasksRuntime = (deps) => {
     // The goal record lives in OpenChamber's metadata store (OpenCode 2.x takes
     // session metadata only at create time); without it goal mode cannot run.
     persistSessionGoal = null,
+    // Goal creation, including the "rewrite every goal" spec; injectable so
+    // tests do not depend on the settings file.
+    createSessionGoal = createSessionGoalDefault,
     // Chats scope (see chats-scope.js): scheduled like a project, but each run
     // opens a new chat directory and loop files are not discovered for it.
     chatsScope = null,
@@ -550,7 +553,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const runPrompt = async ({ client, sessionID, projectPath, task }) => {
+  const runPrompt = async ({ client, sessionID, projectPath, task, goalSpec = null }) => {
     const knowledge = await resolveKnowledge(sessionID, projectPath);
 
     // A v2 prompt carries a single authored text. Standing project context and
@@ -562,7 +565,7 @@ export const createScheduledTasksRuntime = (deps) => {
       await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
     }
     if (task.execution.goalEnabled) {
-      await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget), resume: false });
+      await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget, goalSpec), resume: false });
     }
 
     await client.session.prompt({
@@ -594,12 +597,17 @@ export const createScheduledTasksRuntime = (deps) => {
     return command ? { ...parsed, template: command.template } : null;
   };
 
-  const runScheduledCommand = async ({ client, sessionID, projectPath, command }) => {
+  const runScheduledCommand = async ({ client, sessionID, projectPath, command, goalIntro = null }) => {
     // The command route takes no extra parts, so standing context goes in
     // first as a synthetic message that does not start execution.
     const knowledge = await resolveKnowledge(sessionID, projectPath);
     if (knowledge.text) {
       await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
+    }
+    // A goal objective the writer rewrote is not the command's own text, so
+    // the agent is told the spec the same way before the command runs.
+    if (goalIntro) {
+      await client.session.synthetic({ sessionID, text: goalIntro, resume: false });
     }
     // Agent, model and variant are session properties in v2 and were already
     // set when the run created the session; the command body only carries text.
@@ -692,11 +700,12 @@ export const createScheduledTasksRuntime = (deps) => {
 
     const scheduledCommand = await resolveScheduledCommand({ client, projectPath: directory, task });
 
+    let goalSpec = null;
     if (task.execution.goalEnabled) {
       const commandObjective = scheduledCommand
         ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
         : null;
-      await createSessionGoal({
+      ({ spec: goalSpec } = await createSessionGoal({
         baseUrl,
         authHeaders,
         persistSessionGoal,
@@ -707,13 +716,19 @@ export const createScheduledTasksRuntime = (deps) => {
         providerID: selection.providerID ?? undefined,
         modelID: selection.modelID ?? undefined,
         onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
-      });
+      }));
     }
 
     if (scheduledCommand) {
-      await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
+      await runScheduledCommand({
+        client,
+        sessionID,
+        projectPath: directory,
+        command: scheduledCommand,
+        goalIntro: goalSpec ? buildGoalIntroText(task.execution.goalTokenBudget, goalSpec) : null,
+      });
     } else {
-      await runPrompt({ client, sessionID, projectPath: directory, task });
+      await runPrompt({ client, sessionID, projectPath: directory, task, goalSpec });
     }
 
     const finishedAt = Date.now();

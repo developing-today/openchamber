@@ -743,7 +743,7 @@ describe('openchamber session routes', () => {
   });
 
   it('creates goal metadata before dispatching the initial goal prompt', async () => {
-    const createSessionGoal = vi.fn(async () => undefined);
+    const createSessionGoal = vi.fn(async () => ({ goal: {}, spec: null }));
     const { app } = createApp({ createSessionGoal });
     const response = await request(app)
       .post('/api/openchamber/sessions')
@@ -773,6 +773,19 @@ describe('openchamber session routes', () => {
     expect(sessionPromptMock.mock.invocationCallOrder[0])
       .toBeLessThan(sessionSyntheticMock.mock.invocationCallOrder[0]);
     expect(response.body).toMatchObject({ goalEnabled: true, goalTokenBudget: 200000, promptDispatched: true });
+  });
+
+  it('sends the rewritten goal spec in the goal reminder', async () => {
+    const createSessionGoal = vi.fn(async () => ({ goal: {}, spec: '## Objective\nMigrate <all> tables' }));
+    const { app } = createApp({ createSessionGoal });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Finish the migration', model: 'openai/gpt-5.5', goal: true })
+      .expect(200);
+
+    const [{ text }] = sessionSyntheticMock.mock.calls.at(-1);
+    expect(text).toContain('The goal spec below was written from the user message above.');
+    expect(text).toContain('<goal-spec>\n## Objective\nMigrate &lt;all&gt; tables\n</goal-spec>');
   });
 
   it('rejects invalid goal requests before creating a session', async () => {
@@ -1064,7 +1077,7 @@ describe('openchamber session routes', () => {
   });
 
   it('sends a goal prompt to an existing session after creating goal metadata', async () => {
-    const createSessionGoal = vi.fn(async () => undefined);
+    const createSessionGoal = vi.fn(async () => ({ goal: {}, spec: null }));
     setSessionMessages([{ id: 'msg_before', type: 'assistant', time: { created: 10, completed: 20 } }]);
 
     const { app } = createApp({ createSessionGoal });
@@ -1105,7 +1118,7 @@ describe('openchamber session routes', () => {
   it('dispatches a slash command and keeps the typed prompt as the goal objective', async () => {
     // v2 no longer publishes a command's template (`CommandInfo` is just name
     // and description), so the objective is what the user typed.
-    const createSessionGoal = vi.fn(async () => undefined);
+    const createSessionGoal = vi.fn(async () => ({ goal: {}, spec: null }));
     commandListMock.mockResolvedValue({ data: [{ name: 'issue--to-pr', description: 'Issue to PR' }] });
 
     const { app } = createApp({ createSessionGoal });
@@ -1131,6 +1144,25 @@ describe('openchamber session routes', () => {
       .toBeLessThan(sessionCommandMock.mock.invocationCallOrder[0]);
     expect(response.body).toMatchObject({ goalEnabled: true, dispatchedAsCommand: true });
     expect(sessionPromptMock).not.toHaveBeenCalled();
+    // A plain command goal sends no reminder; the command is the objective.
+    expect(sessionSyntheticMock).not.toHaveBeenCalled();
+  });
+
+  it('tells the agent a rewritten goal spec before a slash command runs', async () => {
+    const createSessionGoal = vi.fn(async () => ({ goal: {}, spec: '## Objective\nShip LIN-123' }));
+    commandListMock.mockResolvedValue({ data: [{ name: 'issue--to-pr', description: 'Issue to PR' }] });
+
+    const { app } = createApp({ createSessionGoal });
+    await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: '/issue--to-pr LIN-123', model: 'openai/gpt-5.5', agent: 'build', goal: true })
+      .expect(200);
+
+    expect(sessionSyntheticMock).toHaveBeenCalledWith(expect.objectContaining({ resume: false }));
+    const [{ text }] = sessionSyntheticMock.mock.calls.at(-1);
+    expect(text).toContain('<goal-spec>\n## Objective\nShip LIN-123\n</goal-spec>');
+    expect(sessionSyntheticMock.mock.invocationCallOrder.at(-1))
+      .toBeLessThan(sessionCommandMock.mock.invocationCallOrder[0]);
   });
 
   it('admits standing project context ahead of a dispatched slash command', async () => {

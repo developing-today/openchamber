@@ -353,6 +353,56 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(dispatch[2].body.resume).toBeUndefined();
   });
 
+  it('tells the agent a rewritten goal spec before a prompt or a command runs', async () => {
+    const runOnce = async (prompt) => {
+      const posts = [];
+      vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+        const { pathname } = new URL(String(input));
+        if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+        const data = pathname === '/api/session'
+          ? { id: 'ses_run' }
+          : pathname === '/api/command' ? [{ name: 'review', description: 'Review' }] : {};
+        return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }));
+      const task = {
+        id: 'task-1',
+        name: 'Nightly',
+        enabled: true,
+        schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+        execution: { prompt, providerID: 'openai', modelID: 'gpt-5', goalEnabled: true },
+        state: { createdAt: 1, updatedAt: 1 },
+      };
+      const runtime = createScheduledTasksRuntime({
+        projectConfigRuntime: {
+          listScheduledTasks: async () => [task],
+          reconcileLoopTasks: async () => [task],
+          updateScheduledTaskState: async () => ({ task, updated: true }),
+          updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+        },
+        listProjects: async () => [{ id: 'proj', path: '/repo' }],
+        buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+        getOpenCodeAuthHeaders: () => ({}),
+        waitForOpenCodeReady: async () => {},
+        persistSessionGoal: async () => undefined,
+        createSessionGoal: async () => ({ goal: {}, spec: '## Objective\nReview <all>' }),
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+      });
+      await runtime.start();
+      await runtime.runNow('proj', 'task-1');
+      runtime.stop();
+      return posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/'));
+    };
+
+    const prompted = await runOnce('Review open issues');
+    expect(prompted.map((post) => post.pathname.split('/').at(-1))).toEqual(['synthetic', 'prompt']);
+    expect(prompted[0].body.text).toContain('<goal-spec>\n## Objective\nReview &lt;all&gt;\n</goal-spec>');
+
+    const commanded = await runOnce('/review');
+    expect(commanded.map((post) => post.pathname.split('/').at(-1))).toEqual(['synthetic', 'command']);
+    expect(commanded[0].body).toMatchObject({ resume: false });
+    expect(commanded[0].body.text).toContain('<goal-spec>\n## Objective\nReview &lt;all&gt;\n</goal-spec>');
+  });
+
   it('points a run that fails after creating its session at that session', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
       const { pathname } = new URL(String(input));

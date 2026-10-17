@@ -570,6 +570,22 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
       result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
     }
+    // The goal writer's settings, parsed rather than type-sniffed.
+    for (const key of ['sessionGoalWriterEnabled', 'sessionGoalWriterReview', 'sessionGoalRewriteAll']) {
+      const flag = z.boolean().safeParse(candidate[key]);
+      if (flag.success) result[key] = flag.data;
+    }
+    const goalWriterModel = z.string().trim().safeParse(candidate.sessionGoalWriterModel);
+    if (goalWriterModel.success) {
+      // Empty clears the pick: the session's own model writes specs again.
+      result.sessionGoalWriterModel = goalWriterModel.data || undefined;
+    }
+    if (candidate.sessionGoalWriterSendMode === 'with-message' || candidate.sessionGoalWriterSendMode === 'goal-as-message') {
+      result.sessionGoalWriterSendMode = candidate.sessionGoalWriterSendMode;
+    }
+    if (candidate.sessionGoalAutoCreate === 'off' || candidate.sessionGoalAutoCreate === 'review' || candidate.sessionGoalAutoCreate === 'auto') {
+      result.sessionGoalAutoCreate = candidate.sessionGoalAutoCreate;
+    }
     if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
     }

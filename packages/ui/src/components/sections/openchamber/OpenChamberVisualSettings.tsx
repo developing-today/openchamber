@@ -81,6 +81,7 @@ import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { SessionGoalCheckerField, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
+import { SessionGoalWriterFields } from './SessionGoalWriterFields';
 
 interface Option<T extends string> {
     id: T;
@@ -1980,6 +1981,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 />
                                             ) : null}
                                         </div>
+                                        <SessionGoalWriterFields disabled={!sessionGoalEnabled} />
                                     </SettingsSection>
                                 )}
                                 {shouldShow('reasoning') && (

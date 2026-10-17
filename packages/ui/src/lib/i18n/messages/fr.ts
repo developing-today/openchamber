@@ -22,6 +22,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
+import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode est inclus dans OpenChamber. Mettez OpenChamber à jour pour obtenir OpenCode v2.",
@@ -154,6 +155,7 @@ export const dict = {
   ...mcpxSecretsI18n.fr,
   ...pluginsGridI18n.fr,
   ...integrationsCatalogI18n['fr'],
+  ...sessionGoalWriterI18n['fr'],
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',
   'terminalView.toast.selectionCopied': 'Sortie copiée',

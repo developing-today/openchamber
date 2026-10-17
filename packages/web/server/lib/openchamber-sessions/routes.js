@@ -657,10 +657,11 @@ export const createOpenChamberSessionService = (dependencies) => {
       } catch {
       }
     }
+    let goalSpec = null;
     if (goalInput.enabled) {
       // v2 no longer publishes a command's template, so a slash command's goal
       // objective is the prompt the user typed rather than the expanded body.
-      await (createSessionGoalOverride || createSessionGoal)({
+      ({ spec: goalSpec } = await (createSessionGoalOverride || createSessionGoal)({
         baseUrl,
         authHeaders,
         sessionID,
@@ -675,7 +676,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         persistSessionGoal: async (goalSessionID, goalDirectory, goal) => {
           await writeMetadata(goalSessionID, { openchamber: { goal } }, goalDirectory);
         },
-      });
+      }));
     }
 
     const markGoalPartial = (error) => {
@@ -711,6 +712,15 @@ export const createOpenChamberSessionService = (dependencies) => {
         if (knowledge.text) {
           await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
         }
+        // A goal objective the writer rewrote is not the command's own text,
+        // so the agent is told the spec before the command runs.
+        if (goalSpec) {
+          await client.session.synthetic({
+            sessionID,
+            text: buildGoalIntroText(goalInput.tokenBudget, goalSpec),
+            resume: false,
+          });
+        }
         await client.session.command({
           sessionID,
           // OpenCode 2.0.8 renamed the command body field `command` to `name`.
@@ -734,7 +744,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           // admitted after the prompt; v2 has no way to append to one message.
           await client.session.synthetic({
             sessionID,
-            text: buildGoalIntroText(goalInput.tokenBudget),
+            text: buildGoalIntroText(goalInput.tokenBudget, goalSpec),
             resume: false,
           });
         }

@@ -5,6 +5,7 @@ import { fetchGoalObjectiveContent } from '@/lib/goalObjectiveFiles';
 import { useUIStore } from '@/stores/useUIStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { useSmallModelAvailability } from '@/hooks/useSmallModelAvailability';
+import { selectSmallModelAvailability, useSmallModelStore } from '@/stores/useSmallModelStore';
 
 export interface SessionGoalState {
   /** Parsed goal payload, or null when the session has no goal. */
@@ -36,6 +37,13 @@ export function useGoalCheckAvailable(directory: string | undefined, active: boo
   const jevChecks = jevAvailable && checker === 'classifier';
   const smallModel = useSmallModelAvailability(directory, active && !jevChecks);
   return jevChecks || smallModel !== 'unavailable';
+}
+
+/** `useGoalCheckAvailable` read once, for a decision taken at send time. */
+export function isGoalCheckAvailableNow(directory: string | null | undefined): boolean {
+  const jevChecks = selectSafetyNetAvailable(useRoutingStore.getState())
+    && useUIStore.getState().sessionGoalChecker === 'classifier';
+  return jevChecks || selectSmallModelAvailability(useSmallModelStore.getState(), directory) !== 'unavailable';
 }
 
 const OBJECTIVE_CONTENT_CACHE_MAX = 64;
