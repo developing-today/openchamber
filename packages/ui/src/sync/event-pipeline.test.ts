@@ -459,6 +459,21 @@ describe("classifyStreamPayload", () => {
     expect(classifyStreamPayload("text", undefined)).toEqual({ kind: "events", events: [] })
   })
 
+  test("routes a messaging announcement to the global directory, whatever frame carried it", () => {
+    const created = { topic: "ses_a/user", seq: 3, kind: "message", type: "user", writer: "ses_a", time: 7, preview: "Need a decision", inbox: true }
+    expect(classifyStreamPayload({ id: "evt_1", type: "messaging.message.created", data: created }, "/frame")).toEqual({
+      kind: "events",
+      events: [{ directory: "global", event: { type: "messaging.message.created", properties: created } }],
+    })
+    // Builds that predate the inbox flag read as messages to a topic.
+    const older = { topic: "global", seq: 4, kind: "message", type: "message", writer: "ses_a", time: 8, preview: "Release freeze" }
+    expect(classifyStreamPayload({ id: "evt_3", type: "messaging.message.created", data: older }, undefined)).toMatchObject({
+      events: [{ event: { properties: { inbox: false } } }],
+    })
+    expect(classifyStreamPayload({ id: "evt_2", type: "messaging.message.created", data: { topic: "global" } }, undefined))
+      .toEqual({ kind: "events", events: [] })
+  })
+
   // Dispatching on `type` keeps text deltas off the OpenChamber schemas, which used
   // to cost ~750 ms per 20k deltas on a laptop. A wall-clock bound on that cost failed
   // under load with no code change, so this checks what each delta yields instead.

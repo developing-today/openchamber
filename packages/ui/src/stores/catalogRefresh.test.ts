@@ -8,8 +8,8 @@ describe("catalogRefreshTasks", () => {
   test("a config rebuild re-reads every list a config file can carry", () => {
     // Agents, commands, skills, MCP servers, plugins and providers all live
     // in config, and OpenChamber's own plugin injection is one of them. So
-    // does the web search choice.
-    expect(catalogRefreshTasks("config")).toHaveLength(7);
+    // do the web search choice and the messaging settings.
+    expect(catalogRefreshTasks("config")).toHaveLength(8);
   });
 
   test("a single-catalog rebuild re-reads only that list", () => {

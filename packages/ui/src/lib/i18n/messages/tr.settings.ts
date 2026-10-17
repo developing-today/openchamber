@@ -1,4 +1,5 @@
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { messagingSettingsI18n } from './messaging.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2600,6 +2601,7 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'Tam bir http:// veya https:// adresi girin.',
   ...guestIntegrationsI18n.tr,
   ...extensionsSettingsI18n.tr,
+  ...messagingSettingsI18n.tr,
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Kod fusion talimatları',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Sistem başlık çubuğunu kullan',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Uygulamanın yeniden başlatılmasını gerektirir. Pencere, OpenChamber başlığının üstünde masaüstü ortamınızın kendi başlık çubuğunu ve düğmelerini alır.',

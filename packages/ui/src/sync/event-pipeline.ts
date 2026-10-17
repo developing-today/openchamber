@@ -18,6 +18,7 @@ import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client"
 import { z } from "zod"
 import { opencodeClient } from "@/lib/opencode/client"
 import { GLOBAL_EVENT_DIRECTORY, routeWireEvent, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
+import { messagingCreatedEvent } from "@/lib/opencode/messaging"
 import type { Metadata } from "@/lib/opencode/model"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
@@ -329,6 +330,14 @@ export function classifyStreamPayload(payload: unknown, frameDirectory: string |
   const typed = payloadTypeSchema.safeParse(payload)
   if (!typed.success) return NO_EVENTS
   const { type } = typed.data
+  // Messaging events come from OpenCode builds with messaging, which the
+  // pinned client's event union does not list; they are global.
+  if (type === "messaging.message.created") {
+    const created = messagingCreatedEvent.safeParse(payload)
+    return created.success
+      ? { kind: "events", events: [{ directory: GLOBAL_EVENT_DIRECTORY, event: { type, properties: created.data.data } }] }
+      : NO_EVENTS
+  }
   if (!type.startsWith(OPENCHAMBER_TYPE_PREFIX)) return { kind: "events", events: translateWirePayload(payload, frameDirectory) }
 
   switch (type) {

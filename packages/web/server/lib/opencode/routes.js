@@ -12,6 +12,7 @@ import { OPENCODE_CONFIG_DIR, readConfigLayers } from './shared.js';
 import { settingsSurfaceOf } from './settings-files.js';
 import { parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
 import { getWebSearchSource, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
+import { getMessagingConfig, parseMessagingConfig, setMessagingConfig } from './messaging-config.js';
 import {
   CREDENTIAL_LIST_ERROR,
   ENTERPRISE_MODE_ERROR,
@@ -505,6 +506,32 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to save the web search choice:', error);
       return res.status(500).json({ error: error.message || 'Failed to save the web search choice' });
+    }
+  });
+
+  // Inter-session messaging (`messaging` in OpenCode config), written like
+  // the web search choice above. Writes are refused in enterprise mode: a
+  // remote embedding endpoint or search model would receive message text.
+  app.get('/api/config/messaging', async (req, res) => {
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      return res.json(getMessagingConfig(resolved.directory || null));
+    } catch (error) {
+      console.error('Failed to read the messaging config:', error);
+      return res.status(500).json({ error: error.message || 'Failed to read the messaging config' });
+    }
+  });
+
+  app.put('/api/config/messaging', refuseInEnterpriseMode, (req, res) => {
+    const parsed = parseMessagingConfig(req.body?.messaging);
+    if (parsed.error) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      return res.json(setMessagingConfig(parsed.value));
+    } catch (error) {
+      console.error('Failed to save the messaging config:', error);
+      return res.status(500).json({ error: error.message || 'Failed to save the messaging config' });
     }
   });
 

@@ -1,4 +1,5 @@
 import { settingsDict } from './nl.settings';
+import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -132,6 +133,7 @@ export const dict = {
   'gitView.publish.cancelled': 'Push geannuleerd. Er is niets verzonden.',
   'gitView.publish.succeeded': 'Gepusht',
   ...settingsDict,
+  ...messagingI18n.nl,
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...sessionMenuHintsI18n.nl,

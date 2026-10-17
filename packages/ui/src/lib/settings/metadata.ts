@@ -9,6 +9,7 @@ export type SettingsPageSlug =
   | 'remote-instances'
   | 'providers'
   | 'web-search'
+  | 'messaging'
   | 'usage'
   | 'agents'
   | 'behavior'
@@ -106,6 +107,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'single',
     keywords: ['web search', 'websearch', 'search', 'internet', 'exa', 'tavily', 'firecrawl', 'parallel', 'tinyfish'],
+  },
+  {
+    slug: 'messaging',
+    title: 'Messaging',
+    group: 'opencode',
+    kind: 'single',
+    keywords: ['messaging', 'messages', 'topics', 'inbox', 'embeddings', 'semantic search', 'llama.cpp', 'presets', 'variables', 'templates', 'delivery'],
+    // The page writes OpenCode's config through the OpenChamber server, which VS Code does not run.
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     slug: 'usage',
@@ -317,6 +327,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'cloud';
     case 'web-search':
       return 'global';
+    case 'messaging':
+      return 'mail';
     case 'agents':
       return 'ai-agent';
     case 'behavior':

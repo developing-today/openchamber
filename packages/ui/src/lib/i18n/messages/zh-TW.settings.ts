@@ -1,4 +1,5 @@
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { messagingSettingsI18n } from './messaging.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2574,6 +2575,7 @@ export const settingsDict = {
   ...extensionCatalogI18n['zh-TW'],
   ...guestIntegrationsI18n['zh-TW'],
   ...extensionsSettingsI18n['zh-TW'],
+  ...messagingSettingsI18n['zh-TW'],
   'settings.page.integrations.title': '整合',
   'settings.page.integrations.description': '連接 OpenChamber 所使用的服務和訂閱。',
   'settings.agents.page.field.steps': '最大步數',

@@ -59,7 +59,7 @@ const PROJECT_CONFIG_NAMES = [
  * first, from the directory up to its worktree root. An unreadable file is
  * skipped: it can't be told apart from one without the key.
  */
-function readProjectConfigFiles(directory) {
+export function readProjectConfigFiles(directory) {
   if (!directory) return [];
   const root = findWorktreeRoot(directory) || path.resolve(directory);
   const files = [];

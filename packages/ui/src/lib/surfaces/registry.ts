@@ -13,6 +13,7 @@ type BuiltInContextSurfaceId =
   | 'walkthrough'
   | 'terminal'
   | 'notes'
+  | 'messages'
   | 'context'
   | 'browser'
   | 'chat';
@@ -120,6 +121,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'notes',
     icon: 'book-marked',
     labelKey: 'contextRail.surface.notes',
+    availability: 'always',
+  },
+  {
+    id: 'messages',
+    descriptionKey: 'contextRail.surface.messages.description',
+    defaultWidth: 540,
+    mode: 'messages',
+    icon: 'mail',
+    labelKey: 'contextRail.surface.messages',
     availability: 'always',
   },
   {

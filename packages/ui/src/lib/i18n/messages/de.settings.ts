@@ -1,4 +1,5 @@
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { messagingSettingsI18n } from './messaging.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2565,6 +2566,7 @@ export const settingsDict = {
   ...extensionCatalogI18n.de,
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,
+  ...messagingSettingsI18n.de,
   'settings.page.integrations.title': 'Integrationen',
   'settings.page.integrations.description': 'Verbinde die Dienste und Abonnements, mit denen OpenChamber arbeitet.',
   'settings.agents.page.field.steps': 'Max. Schritte',

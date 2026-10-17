@@ -161,7 +161,7 @@ class RuntimeRoutingResponseError extends Error {
   }
 }
 
-const validateRuntimeResponse = (response: Response): Response => {
+export const validateRuntimeResponse = (response: Response): Response => {
   const unavailable = response.headers.get('x-openchamber-error') === 'runtime-unavailable'
   const html = response.ok && (response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')
   if (!unavailable && !html) return response

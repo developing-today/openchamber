@@ -1,4 +1,5 @@
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { messagingSettingsI18n } from './messaging.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2564,6 +2565,7 @@ export const settingsDict = {
   ...extensionCatalogI18n.nl,
   ...guestIntegrationsI18n.nl,
   ...extensionsSettingsI18n.nl,
+  ...messagingSettingsI18n.nl,
   'settings.page.integrations.title': 'Integraties',
   'settings.page.integrations.description': 'Verbind GitHub en Linear zodat OpenChamber met uw issues en pull requests kan werken.',
   'settings.agents.page.field.steps': 'Max. stappen',
