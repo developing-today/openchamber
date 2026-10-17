@@ -284,7 +284,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         {visitedTabs.has('messages') ? (
           <div className={cn('h-full', tab !== 'messages' && 'hidden')}>
             <ErrorBoundary>
-              <MessagingPanel />
+              <MessagingPanel active={open && tab === 'messages'} />
             </ErrorBoundary>
           </div>
         ) : null}

@@ -112,6 +112,8 @@ type MessagingStore = Slices & MessagingView & {
   model: MessagingModelStatus | null;
 
   checkSupport: (options?: { force?: boolean }) => Promise<MessagingSupport>;
+  /** Registers a visible Messages view; releasing the last one suspends background refreshes. */
+  mountView: () => () => void;
   setView: (patch: Partial<MessagingView>) => void;
   /** Opens a topic in the Topics tab, optionally at one message. */
   openTopicAt: (topic: string, seq?: number | null) => void;
@@ -190,8 +192,10 @@ const generations = {
 } satisfies Record<SliceName, number>;
 
 let supportCheck: Promise<MessagingSupport> | null = null;
+let runtimeGeneration = 0;
+let views = 0;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-const pendingRefresh = new Set<'topics' | 'thread' | 'inbox' | 'topic'>();
+const pendingRefresh = new Set<SliceName>();
 /** The session the topic list was last read for; `undefined` before the first read. */
 let topicsSession: string | null | undefined;
 
@@ -206,6 +210,7 @@ export const useMessagingStore = create<MessagingStore>()((set, get) => {
    */
   const load = async <K extends SliceName>(name: K, key: string, fetch: () => Promise<NonNullable<Slices[K]['data']>>): Promise<void> => {
     const generation = ++generations[name];
+    pendingRefresh.delete(name);
     const current = get()[name];
     const kept = current.key === key ? current.data : null;
     // SAFETY: every slice is a `MessagingSlice` of its own data, and `data` is this slice's current value.
@@ -236,6 +241,7 @@ export const useMessagingStore = create<MessagingStore>()((set, get) => {
 
   const flushRefresh = () => {
     refreshTimer = null;
+    if (views === 0) return;
     const state = get();
     const due = new Set(pendingRefresh);
     pendingRefresh.clear();
@@ -247,7 +253,7 @@ export const useMessagingStore = create<MessagingStore>()((set, get) => {
 
   const scheduleRefresh = (what: 'topics' | 'thread' | 'inbox' | 'topic') => {
     pendingRefresh.add(what);
-    if (refreshTimer === null) refreshTimer = setTimeout(flushRefresh, REFRESH_DELAY_MS);
+    if (views > 0 && refreshTimer === null) refreshTimer = setTimeout(flushRefresh, REFRESH_DELAY_MS);
   };
 
   return {
@@ -260,9 +266,11 @@ export const useMessagingStore = create<MessagingStore>()((set, get) => {
       const known = get().support;
       if (!options?.force && (known.kind === 'supported' || known.kind === 'unsupported')) return known;
       if (supportCheck) return supportCheck;
+      const generation = runtimeGeneration;
       set({ support: { kind: 'checking' } });
       const check = probeMessaging()
         .then((probe): MessagingSupport => {
+          if (generation !== runtimeGeneration) return get().support;
           if (probe.kind === 'supported') {
             set({ support: { kind: 'supported' }, model: probe.model });
             return { kind: 'supported' };
@@ -271,15 +279,28 @@ export const useMessagingStore = create<MessagingStore>()((set, get) => {
           return { kind: 'unsupported' };
         })
         .catch((caught): MessagingSupport => {
+          if (generation !== runtimeGeneration) return get().support;
           const support: MessagingSupport = { kind: 'failed', error: failureText(caught instanceof Error ? caught : new Error(String(caught))) };
           set({ support });
           return support;
         })
         .finally(() => {
-          supportCheck = null;
+          if (supportCheck === check) supportCheck = null;
         });
       supportCheck = check;
       return check;
+    },
+
+    mountView: () => {
+      views += 1;
+      if (pendingRefresh.size > 0 && refreshTimer === null) refreshTimer = setTimeout(flushRefresh, REFRESH_DELAY_MS);
+      return () => {
+        views -= 1;
+        if (views === 0 && refreshTimer !== null) {
+          clearTimeout(refreshTimer);
+          refreshTimer = null;
+        }
+      };
     },
 
     setView: (view) => set(view),
@@ -287,6 +308,7 @@ export const useMessagingStore = create<MessagingStore>()((set, get) => {
     openTopicAt: (topic, seq = null) => set({ tab: 'topics', openTopic: topic, focusSeq: seq, searchOpen: false }),
 
     reset: () => {
+      runtimeGeneration += 1;
       for (const name of SLICE_NAMES) generations[name] += 1;
       supportCheck = null;
       topicsSession = undefined;

@@ -16,7 +16,7 @@ import { MATCH_LABEL_KEYS } from './messagingLabels';
  * when it is not ready, OpenCode matches words instead and says so in the
  * status line. A hit opens its topic at that message.
  */
-export const MessagingSearch: React.FC = () => {
+export const MessagingSearch: React.FC<{ active: boolean }> = ({ active }) => {
   const { t } = useI18n();
   const search = useMessagingStore((state) => state.search);
   const query = useMessagingStore((state) => state.searchQuery);
@@ -27,8 +27,8 @@ export const MessagingSearch: React.FC = () => {
 
   // A new match mode re-runs the words already typed.
   React.useEffect(() => {
-    if (useMessagingStore.getState().searchQuery.trim()) void runSearch();
-  }, [match, runSearch]);
+    if (active && useMessagingStore.getState().searchQuery.trim()) void runSearch();
+  }, [active, match, runSearch]);
 
   const messages = search.data?.messages ?? [];
   const status = search.error

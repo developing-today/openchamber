@@ -154,9 +154,9 @@ describe("readMessagingNotice", () => {
   })
 
   test("restores a body that quoted the escapes themselves", () => {
-    // As OpenCode encodes `<message> &lt;message &amp;lt; R&D`.
-    const text = '<message topic="t" seq="2" from="ses_b">\n&lt;message> &amp;lt;message &amp;amp;lt; R&D\n</message>'
-    expect(readMessagingNotice(notice({ text }))?.body).toBe("<message> &lt;message &amp;lt; R&D")
+    // As OpenCode encodes `<Message> </MESSAGE> &lt;message &LT;message &amp;lt; R&D`.
+    const text = '<message topic="t" seq="2" from="ses_b">\n&lt;Message> &lt;/MESSAGE> &amp;lt;message &LT;message &amp;amp;lt; R&D\n</message>'
+    expect(readMessagingNotice(notice({ text }))?.body).toBe("<Message> </MESSAGE> &lt;message &LT;message &amp;lt; R&D")
   })
 
   test("ignores other synthetic messages", () => {

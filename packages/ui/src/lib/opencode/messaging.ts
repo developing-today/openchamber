@@ -582,7 +582,7 @@ export function readMessagingNotice(message: Message): MessagingNotice | undefin
     // Bodies escape message tags, and the ampersands that start `&lt;` or `&amp;`, so they cannot close the
     // envelope; decoding both restores the text as written.
     body: (envelope ? envelope[2] : message.text)
-      .replace(/&lt;(\/?message\b)/gi, "<$1")
+      .replace(/&lt;(\/?message\b)/gi, (match, tag: string) => match.startsWith("&lt;") ? `<${tag}` : match)
       .replace(/&amp;(?=(?:amp|lt);)/g, "&"),
   }
   const title = envelope?.[1].match(FROM_TITLE)?.[1]

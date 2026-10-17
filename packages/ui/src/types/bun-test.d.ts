@@ -67,6 +67,7 @@ declare module "bun:test" {
     function useFakeTimers(): void;
     function useRealTimers(): void;
     function advanceTimersByTime(ms: number): void;
+    function runOnlyPendingTimers(): void;
   }
 }
 

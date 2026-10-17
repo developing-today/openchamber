@@ -283,3 +283,32 @@ Project colours are six-digit hex from the same presets as agents
 (`iconBackgroundForProjectColor`). Projects saved by older builds may carry a
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
+
+## The messaging page
+
+`messaging/MessagingPage.tsx` edits the `messaging` section of OpenCode's
+config through the OpenChamber route `/api/config/messaging`, which writes the
+same file as the web search choice (`OPENCODE_CONFIG`, else the user's
+`opencode.json`). OpenCode applies a changed section without a restart. Like
+the web search page it reports writes through `reportSettingsSaveState`, and a
+failed write rolls the page back and raises a toast
+(`stores/useMessagingSettingsStore.ts`). Text fields write on blur or Enter.
+
+Config writes run serially and reads wait for admitted writes to settle.
+Failed writes restore the last server-confirmed section after the newest
+pending edit fails. Switching runtime retires queued writes with a failed
+result; a write already sent finishes against its original host and cannot
+change the new host's page. Variable values are scoped to the runtime and
+selected session. A failed read retains values only within that scope.
+
+- The model section reads OpenCode's live model status, and re-reads it every
+  two seconds while the model downloads or starts. Choosing a size writes the
+  config and also selects it in the running OpenCode, so the status follows at
+  once. A size the hardware cannot run is shown disabled.
+- Presets and constants show the built-in value as the placeholder; a field
+  left empty removes the override. Global variables are not config: they go
+  through OpenCode's messaging API and apply to every session at once.
+- A project config that sets `messaging` wins over the file the page writes,
+  so the page says which file and locks its controls.
+- Against an OpenCode without messaging the page still edits the config, and
+  hides the model section and the presets, which need OpenCode to read.

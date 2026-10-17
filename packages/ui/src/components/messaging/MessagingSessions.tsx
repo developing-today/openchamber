@@ -154,7 +154,7 @@ const SessionNodeRow: React.FC<{ node: MessagingSessionNode; label?: string; det
   );
 };
 
-const ChainSection: React.FC<{ sessionID: string }> = ({ sessionID }) => {
+const ChainSection: React.FC<{ sessionID: string; active: boolean }> = ({ sessionID, active }) => {
   const { t } = useI18n();
   const chain = useMessagingStore((state) => state.chain);
   const detail = useMessagingStore((state) => state.chainDetail);
@@ -162,8 +162,8 @@ const ChainSection: React.FC<{ sessionID: string }> = ({ sessionID }) => {
   const loadChain = useMessagingStore((state) => state.loadChain);
 
   React.useEffect(() => {
-    void loadChain(sessionID);
-  }, [detail, loadChain, sessionID]);
+    if (active) void loadChain(sessionID);
+  }, [active, detail, loadChain, sessionID]);
 
   const nodes = chain.data?.chain ?? [];
   return (
@@ -197,7 +197,7 @@ const ChainSection: React.FC<{ sessionID: string }> = ({ sessionID }) => {
   );
 };
 
-const FindSection: React.FC = () => {
+const FindSection: React.FC<{ active: boolean }> = ({ active }) => {
   const { t } = useI18n();
   const sessions = useMessagingStore((state) => state.sessions);
   const findQuery = useMessagingStore((state) => state.findQuery);
@@ -207,8 +207,8 @@ const FindSection: React.FC = () => {
 
   // Opens on the sessions active most recently, in every project.
   React.useEffect(() => {
-    if (useMessagingStore.getState().sessions.key === null) void findSessions();
-  }, [findSessions]);
+    if (active && useMessagingStore.getState().sessions.key === null) void findSessions();
+  }, [active, findSessions]);
 
   return (
     <section className="space-y-1">
@@ -254,7 +254,7 @@ const LogEntryRow: React.FC<{ entry: MessagingLogEntry }> = ({ entry }) => {
   );
 };
 
-const LogSection: React.FC<{ sessionID: string }> = ({ sessionID }) => {
+const LogSection: React.FC<{ sessionID: string; active: boolean }> = ({ sessionID, active }) => {
   const { t } = useI18n();
   const log = useMessagingStore((state) => state.log);
   const op = useMessagingStore((state) => state.logOp);
@@ -266,8 +266,8 @@ const LogSection: React.FC<{ sessionID: string }> = ({ sessionID }) => {
 
   // Text searches run on Enter; everything else reads as soon as it changes.
   React.useEffect(() => {
-    void loadLog(sessionID);
-  }, [loadLog, op, parts, sessionID]);
+    if (active) void loadLog(sessionID);
+  }, [active, loadLog, op, parts, sessionID]);
 
   const togglePart = (part: MessagingLogPart) => {
     const next = parts.includes(part) ? parts.filter((item) => item !== part) : MESSAGING_LOG_PARTS.filter((item) => item === part || parts.includes(item));
@@ -325,13 +325,13 @@ const LogSection: React.FC<{ sessionID: string }> = ({ sessionID }) => {
  * details on demand), a search across every session, and the session's log
  * with the parts to include. Any session listed here can be messaged.
  */
-export const MessagingSessions: React.FC<{ sessionID: string | null }> = ({ sessionID }) => {
+export const MessagingSessions: React.FC<{ sessionID: string | null; active: boolean }> = ({ sessionID, active }) => {
   const { t } = useI18n();
   return (
     <div className="space-y-5">
-      {sessionID ? <ChainSection sessionID={sessionID} /> : <MessagingStatusLine text={t('messaging.sessions.noSession')} />}
-      <FindSection />
-      {sessionID ? <LogSection sessionID={sessionID} /> : null}
+      {sessionID ? <ChainSection sessionID={sessionID} active={active} /> : <MessagingStatusLine text={t('messaging.sessions.noSession')} />}
+      <FindSection active={active} />
+      {sessionID ? <LogSection sessionID={sessionID} active={active} /> : null}
     </div>
   );
 };

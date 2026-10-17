@@ -31,7 +31,7 @@ const TABS: Array<{ id: MessagingTab; icon: IconName; labelKey: I18nKey }> = [
  * messaging routes. Its sections and the search toggle fill the panel header.
  * Against an OpenCode without messaging it says so and offers to check again.
  */
-export const MessagingPanel: React.FC<{ className?: string }> = ({ className }) => {
+export const MessagingPanel: React.FC<{ className?: string; active?: boolean }> = ({ className, active = true }) => {
   const { t } = useI18n();
   const inPanelHeader = useInContextPanelHeader();
   const isMobile = useUIStore((state) => state.isMobile);
@@ -41,10 +41,13 @@ export const MessagingPanel: React.FC<{ className?: string }> = ({ className }) 
   const tab = useMessagingStore((state) => state.tab);
   const searchOpen = useMessagingStore((state) => state.searchOpen);
   const setView = useMessagingStore((state) => state.setView);
+  const mountView = useMessagingStore((state) => state.mountView);
 
   React.useEffect(() => {
+    if (!active) return;
     void checkSupport();
-  }, [checkSupport]);
+    return mountView();
+  }, [active, checkSupport, mountView]);
 
   // The panel's own width decides the topic layout, however it got wide.
   const [rootNode, setRootNode] = React.useState<HTMLDivElement | null>(null);
@@ -127,11 +130,11 @@ export const MessagingPanel: React.FC<{ className?: string }> = ({ className }) 
         </div>
       );
     }
-    if (searchOpen) return <div className="h-full overflow-y-auto p-3"><MessagingSearch /></div>;
-    if (tab === 'topics') return <MessagingTopics sessionID={sessionID} split={split} />;
+    if (searchOpen) return <div className="h-full overflow-y-auto p-3"><MessagingSearch active={active} /></div>;
+    if (tab === 'topics') return <MessagingTopics sessionID={sessionID} split={split} active={active} />;
     return (
       <div className="h-full overflow-y-auto p-3">
-        {tab === 'inbox' ? <MessagingInbox /> : <MessagingSessions sessionID={sessionID} />}
+        {tab === 'inbox' ? <MessagingInbox active={active} /> : <MessagingSessions sessionID={sessionID} active={active} />}
       </div>
     );
   })();

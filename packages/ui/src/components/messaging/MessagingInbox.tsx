@@ -49,18 +49,18 @@ const InboxItem: React.FC<{ message: MessagingMessage }> = ({ message }) => {
 };
 
 /**
- * Messages sessions sent up to the person (`type: "user"`), newest first,
+ * Messages sessions sent up to the person through their user topics, newest first,
  * from every project. Each one can be answered in place: the reply goes to
  * the session that wrote it.
  */
-export const MessagingInbox: React.FC = () => {
+export const MessagingInbox: React.FC<{ active: boolean }> = ({ active }) => {
   const { t } = useI18n();
   const inbox = useMessagingStore((state) => state.inbox);
   const loadInbox = useMessagingStore((state) => state.loadInbox);
 
   React.useEffect(() => {
-    void loadInbox();
-  }, [loadInbox]);
+    if (active) void loadInbox();
+  }, [active, loadInbox]);
 
   const messages = inbox.data ?? [];
   const status = inbox.error

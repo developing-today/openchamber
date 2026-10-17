@@ -31,7 +31,7 @@ type ConfigState =
   | { kind: 'failed'; scope: string; error: string };
 
 type ModelState = { status: MessagingModelStatus | null; error: string | null; starting: boolean };
-type VarsState = { data: MessagingVars | null; error: string | null };
+type VarsState = { key: string | null; data: MessagingVars | null; error: string | null };
 
 type MessagingSettingsStore = {
   config: ConfigState;
@@ -60,26 +60,39 @@ let revision = 0;
 let loadedDirectory: string | null | undefined;
 let modelGeneration = 0;
 let varsGeneration = 0;
+let runtimeGeneration = 0;
+let writeTail = Promise.resolve(true);
+let savedConfig: MessagingConfig = {};
+
+const varsKey = (sessionID: string | null): string => JSON.stringify([getRuntimeKey(), sessionID, true]);
 
 export const useMessagingSettingsStore = create<MessagingSettingsStore>()((set, get) => ({
   config: { kind: 'idle' },
   model: { status: null, error: null, starting: false },
-  vars: { data: null, error: null },
+  vars: { key: null, data: null, error: null },
 
   load: async (directory) => {
     loadedDirectory = directory;
     const scope = getMessagingSettingsScope(directory);
     const generation = ++readGeneration;
-    const revisionAtStart = revision;
     const current = get().config;
     if (!(current.kind === 'ready' && current.scope === scope)) set({ config: { kind: 'loading', scope } });
+    // A config event can precede a save response. Read only after every admitted write settles.
+    while (true) {
+      const writes = writeTail;
+      await writes;
+      if (generation !== readGeneration) return;
+      if (writes === writeTail) break;
+    }
+    const revisionAtStart = revision;
     try {
       const snapshot = await readMessagingConfig(directory);
       // A change made while this read was in flight is newer than what it saw.
       if (generation !== readGeneration || revision !== revisionAtStart) return;
+      savedConfig = snapshot.config;
       set({ config: { kind: 'ready', scope, snapshot } });
     } catch (caught) {
-      if (generation !== readGeneration) return;
+      if (generation !== readGeneration || revision !== revisionAtStart) return;
       const latest = get().config;
       if (latest.kind === 'ready' && latest.scope === scope) return;
       set({ config: { kind: 'failed', scope, error: failureText(caught instanceof Error ? caught : new Error(String(caught))) } });
@@ -89,25 +102,36 @@ export const useMessagingSettingsStore = create<MessagingSettingsStore>()((set, 
   update: async (change) => {
     const current = get().config;
     if (current.kind !== 'ready') return false;
-    const previous = current.snapshot.config;
-    const next = change(previous);
+    const next = change(current.snapshot.config);
     revision += 1;
     const mine = revision;
+    const runtime = runtimeGeneration;
     set({ config: { ...current, snapshot: { ...current.snapshot, config: next } } });
     reportSettingsSaveState('saving');
-    try {
-      await writeMessagingConfig(next);
-      reportSettingsSaveState('saved');
-      return true;
-    } catch (caught) {
-      console.warn('[messaging] failed to save the settings', caught);
-      reportSettingsSaveState('error');
-      const latest = get().config;
-      if (mine === revision && latest.kind === 'ready' && latest.scope === current.scope) {
-        set({ config: { ...latest, snapshot: { ...latest.snapshot, config: previous } } });
+    const write = writeTail.then(async () => {
+      // Queued writes retired by a runtime switch fail without reaching the new host.
+      if (runtime !== runtimeGeneration) return false;
+      try {
+        await writeMessagingConfig(next);
+        if (runtime !== runtimeGeneration) return true;
+        savedConfig = next;
+        if (mine === revision) reportSettingsSaveState('saved');
+        return true;
+      } catch (caught) {
+        if (runtime !== runtimeGeneration) return false;
+        console.warn('[messaging] failed to save the settings', caught);
+        if (mine === revision) {
+          reportSettingsSaveState('error');
+          const latest = get().config;
+          if (latest.kind === 'ready' && latest.scope === current.scope) {
+            set({ config: { ...latest, snapshot: { ...latest.snapshot, config: savedConfig } } });
+          }
+        }
+        return false;
       }
-      return false;
-    }
+    });
+    writeTail = write;
+    return write;
   },
 
   loadModel: async () => {
@@ -115,10 +139,10 @@ export const useMessagingSettingsStore = create<MessagingSettingsStore>()((set, 
     try {
       const status = await getMessagingModelStatus();
       if (generation !== modelGeneration) return;
-      set((state) => ({ model: { ...state.model, status, error: null } }));
+      set({ model: { status, error: null, starting: false } });
     } catch (caught) {
       if (generation !== modelGeneration) return;
-      set((state) => ({ model: { ...state.model, error: failureText(caught instanceof Error ? caught : new Error(String(caught))) } }));
+      set((state) => ({ model: { ...state.model, error: failureText(caught instanceof Error ? caught : new Error(String(caught))), starting: false } }));
     }
   },
 
@@ -140,32 +164,41 @@ export const useMessagingSettingsStore = create<MessagingSettingsStore>()((set, 
     try {
       const status = await configureMessagingModel({ tier });
       if (generation !== modelGeneration) return;
-      set((state) => ({ model: { ...state.model, status, error: null } }));
+      set({ model: { status, error: null, starting: false } });
     } catch (caught) {
       if (generation !== modelGeneration) return;
-      set((state) => ({ model: { ...state.model, error: failureText(caught instanceof Error ? caught : new Error(String(caught))) } }));
+      set((state) => ({ model: { ...state.model, error: failureText(caught instanceof Error ? caught : new Error(String(caught))), starting: false } }));
     }
   },
 
   loadVars: async (sessionID) => {
     const generation = ++varsGeneration;
+    const key = varsKey(sessionID);
+    set((state) => ({ vars: { key, data: state.vars.key === key ? state.vars.data : null, error: null } }));
     try {
       const data = await listMessagingVars({ as: sessionID ?? undefined, values: true });
       if (generation !== varsGeneration) return;
-      set({ vars: { data, error: null } });
+      set({ vars: { key, data, error: null } });
     } catch (caught) {
       if (generation !== varsGeneration) return;
-      set((state) => ({ vars: { data: state.vars.data, error: failureText(caught instanceof Error ? caught : new Error(String(caught))) } }));
+      set((state) => ({ vars: { key, data: state.vars.key === key ? state.vars.data : null, error: failureText(caught instanceof Error ? caught : new Error(String(caught))) } }));
     }
   },
 
   setGlobalVar: async (name, value, sessionID) => {
+    const runtime = getRuntimeKey();
+    const generation = runtimeGeneration;
+    const key = varsKey(sessionID);
     try {
       await setMessagingVar({ scope: 'global', name, value });
-      void get().loadVars(sessionID);
+      if (runtime === getRuntimeKey() && generation === runtimeGeneration && (get().vars.key === key || get().vars.key === null)) {
+        void get().loadVars(sessionID);
+      }
       return true;
     } catch (caught) {
-      set((state) => ({ vars: { data: state.vars.data, error: failureText(caught instanceof Error ? caught : new Error(String(caught))) } }));
+      if (runtime === getRuntimeKey() && generation === runtimeGeneration && get().vars.key === key) {
+        set((state) => ({ vars: { ...state.vars, error: failureText(caught instanceof Error ? caught : new Error(String(caught))) } }));
+      }
       return false;
     }
   },
@@ -178,6 +211,9 @@ export const refreshMessagingSettingsIfLoaded = async (): Promise<void> => {
 };
 
 subscribeRuntimeEndpointChanged(() => {
+  runtimeGeneration += 1;
+  writeTail = Promise.resolve(true);
+  savedConfig = {};
   loadedDirectory = undefined;
   readGeneration += 1;
   modelGeneration += 1;
@@ -185,6 +221,6 @@ subscribeRuntimeEndpointChanged(() => {
   useMessagingSettingsStore.setState({
     config: { kind: 'idle' },
     model: { status: null, error: null, starting: false },
-    vars: { data: null, error: null },
+    vars: { key: null, data: null, error: null },
   });
 });

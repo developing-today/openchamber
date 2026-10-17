@@ -98,7 +98,7 @@ const OpenTopicField: React.FC<{ sessionID: string | null }> = ({ sessionID }) =
   );
 };
 
-const TopicList: React.FC<{ sessionID: string | null }> = ({ sessionID }) => {
+const TopicList: React.FC<{ sessionID: string | null; active: boolean }> = ({ sessionID, active }) => {
   const { t } = useI18n();
   const topics = useMessagingStore((state) => state.topics);
   const scope = useMessagingStore((state) => state.topicScope);
@@ -108,8 +108,8 @@ const TopicList: React.FC<{ sessionID: string | null }> = ({ sessionID }) => {
   const openTopicAt = useMessagingStore((state) => state.openTopicAt);
 
   React.useEffect(() => {
-    void loadTopics(sessionID);
-  }, [loadTopics, scope, sessionID]);
+    if (active) void loadTopics(sessionID);
+  }, [active, loadTopics, scope, sessionID]);
 
   // Topics in use first, newest first; a session's standard topics nobody used yet follow.
   const list = React.useMemo(() => {
@@ -188,10 +188,13 @@ const TopicSettingsDialog: React.FC<{
   const [draftWriter, setDraftWriter] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const wasOpen = React.useRef(false);
 
   // Each opening starts from what OpenCode reports now.
   React.useEffect(() => {
-    if (!open) return;
+    const opened = open && !wasOpen.current;
+    wasOpen.current = open;
+    if (!opened) return;
     setMode(topic.mode);
     setWriters(topic.writers);
     setDescription(topic.description ?? '');
@@ -347,7 +350,7 @@ const TopicSettingsDialog: React.FC<{
   );
 };
 
-const TopicThread: React.FC<{ topicName: string; sessionID: string | null; withBack: boolean }> = ({ topicName, sessionID, withBack }) => {
+const TopicThread: React.FC<{ topicName: string; sessionID: string | null; withBack: boolean; active: boolean }> = ({ topicName, sessionID, withBack, active }) => {
   const { t } = useI18n();
   const thread = useMessagingStore((state) => state.thread);
   const topic = useMessagingStore((state) => state.topic);
@@ -363,11 +366,11 @@ const TopicThread: React.FC<{ topicName: string; sessionID: string | null; withB
   const label = useTopicLabel(topicName);
 
   React.useEffect(() => {
-    void loadTopic(topicName);
-  }, [loadTopic, topicName]);
+    if (active) void loadTopic(topicName);
+  }, [active, loadTopic, topicName]);
   React.useEffect(() => {
-    void loadThread(topicName);
-  }, [loadThread, topicName, showHidden]);
+    if (active) void loadThread(topicName);
+  }, [active, loadThread, topicName, showHidden]);
 
   const threadKey = JSON.stringify([topicName, showHidden]);
   const messages = thread.key === threadKey ? thread.data?.messages ?? [] : [];
@@ -469,7 +472,7 @@ const TopicThread: React.FC<{ topicName: string; sessionID: string | null; withB
  * listed before first use), or every topic. A wide panel shows the list and
  * the open topic side by side; a narrow one swaps between them.
  */
-export const MessagingTopics: React.FC<{ sessionID: string | null; split: boolean }> = ({ sessionID, split }) => {
+export const MessagingTopics: React.FC<{ sessionID: string | null; split: boolean; active: boolean }> = ({ sessionID, split, active }) => {
   const { t } = useI18n();
   const openTopic = useMessagingStore((state) => state.openTopic);
 
@@ -477,11 +480,11 @@ export const MessagingTopics: React.FC<{ sessionID: string | null; split: boolea
     return (
       <div className="flex h-full min-h-0">
         <div className="h-full flex-shrink-0 overflow-y-auto border-e border-border/60 p-3" style={{ width: LIST_WIDTH_PX }}>
-          <TopicList sessionID={sessionID} />
+          <TopicList sessionID={sessionID} active={active} />
         </div>
         <div className="h-full min-w-0 flex-1 p-3">
           {openTopic ? (
-            <TopicThread key={openTopic} topicName={openTopic} sessionID={sessionID} withBack={false} />
+            <TopicThread key={openTopic} topicName={openTopic} sessionID={sessionID} withBack={false} active={active} />
           ) : (
             <div className="flex h-full items-center justify-center px-6 text-center typography-meta text-muted-foreground">
               {t('messaging.thread.selectHint')}
@@ -494,11 +497,11 @@ export const MessagingTopics: React.FC<{ sessionID: string | null; split: boolea
 
   return openTopic ? (
     <div className="h-full min-h-0 p-3">
-      <TopicThread key={openTopic} topicName={openTopic} sessionID={sessionID} withBack />
+      <TopicThread key={openTopic} topicName={openTopic} sessionID={sessionID} withBack active={active} />
     </div>
   ) : (
     <div className="h-full overflow-y-auto p-3">
-      <TopicList sessionID={sessionID} />
+      <TopicList sessionID={sessionID} active={active} />
     </div>
   );
 };

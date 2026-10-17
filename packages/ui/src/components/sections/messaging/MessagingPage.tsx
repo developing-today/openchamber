@@ -621,6 +621,9 @@ export const MessagingPage: React.FC = () => {
       {support.kind === 'unsupported' ? (
         <SettingsSection divider={false}>
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.messaging.state.unsupported')}</p>
+          <Button type="button" variant="outline" size="xs" onClick={() => void checkSupport({ force: true })}>
+            {t('settings.messaging.actions.retry')}
+          </Button>
         </SettingsSection>
       ) : null}
       {snapshot ? (
