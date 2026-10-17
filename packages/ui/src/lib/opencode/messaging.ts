@@ -579,8 +579,11 @@ export function readMessagingNotice(message: Message): MessagingNotice | undefin
     type: parsed.data.type ?? "message",
     toYou: parsed.data.audience !== undefined,
     agentSees: parsed.data.audience !== "user",
-    // Bodies escape message tags so they cannot close the envelope; show them as written.
-    body: (envelope ? envelope[2] : message.text).replace(/&lt;(\/?message\b)/gi, "<$1"),
+    // Bodies escape message tags, and the ampersands that start `&lt;` or `&amp;`, so they cannot close the
+    // envelope; decoding both restores the text as written.
+    body: (envelope ? envelope[2] : message.text)
+      .replace(/&lt;(\/?message\b)/gi, "<$1")
+      .replace(/&amp;(?=(?:amp|lt);)/g, "&"),
   }
   const title = envelope?.[1].match(FROM_TITLE)?.[1]
   if (title) notice.fromTitle = unescapeAttribute(title)
