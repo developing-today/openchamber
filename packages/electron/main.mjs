@@ -18,7 +18,7 @@ import { createTrayController } from './tray.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
-import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
+import { resolveAttachedLocalServerUrl, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
 import {
@@ -66,7 +66,7 @@ import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { requestRemoteHostUpdate } from './remote-host-update.mjs';
-import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
+import { assertUpdaterCapability, readPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
@@ -491,7 +491,7 @@ const prepareForQuit = () => {
 // no_new_privs process can no longer run; see linux-relaunch.mjs.
 const isLinuxPackageInstall = () => process.platform === 'linux'
   && app.isPackaged
-  && ['deb', 'rpm'].includes(readLinuxPackageType());
+  && ['deb', 'rpm'].includes(readPackageType());
 
 const relaunchApp = () => {
   if (isLinuxPackageInstall()) relaunchAfterExit();
@@ -1508,9 +1508,53 @@ const inheritUserShellEnv = async () => {
   }
 };
 
+const userDataOverridden = () => Boolean(String(process.env.OPENCHAMBER_DESKTOP_USER_DATA_DIR || '').trim());
+
 const shouldSkipLocalServer = async () => {
   await inheritUserShellEnv();
   return process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
+};
+
+// A loopback OPENCHAMBER_SERVER_URL with OPENCHAMBER_SKIP_LOCAL_SERVER=1 is this
+// machine's server run outside the app (a service manager's `openchamber
+// serve`). It stands in for the in-process server as Local, so the window keeps
+// the local-only capabilities and the desktop-local client identity.
+const attachedLocalServerUrl = () => resolveAttachedLocalServerUrl({
+  skipLocalServer: process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1',
+  serverUrl: process.env.OPENCHAMBER_SERVER_URL || '',
+});
+
+// OPENCHAMBER_SERVER_URL when it names another instance rather than Local.
+const remoteEnvTargetUrl = () => (
+  attachedLocalServerUrl() ? null : normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '')
+);
+
+const attachLocalServer = async (url) => {
+  if (!(await waitForHealth(url, 30_000))) {
+    log.warn(`[desktop] attached local server ${url} is not answering yet; opening it anyway`);
+  }
+  // isLocalRuntimeUrl() reads this to issue the desktop-local client kind.
+  state.sidecarUrl = url;
+  // A server behind a UI password admits this app once it holds a desktop-local
+  // client token. Mint one from OPENCHAMBER_UI_PASSWORD, the same variable the
+  // server reads, so a service-managed server needs no interactive login. Every
+  // launch re-mints: the token expires, and the dedupe key reuses one record.
+  const password = String(process.env.OPENCHAMBER_UI_PASSWORD || '');
+  if (password) {
+    try {
+      const result = await loginRemoteAndIssueClientToken({ url, password, trustDevice: true });
+      if (result.ok) {
+        await mutateSettingsRoot((root) => {
+          root.desktopLocalClientToken = result.token;
+        });
+      } else {
+        log.warn(`[desktop] attached local server refused OPENCHAMBER_UI_PASSWORD (status ${result.status})`);
+      }
+    } catch (error) {
+      log.warn('[desktop] could not sign in to the attached local server:', error);
+    }
+  }
+  return url;
 };
 
 const spawnLocalServer = async () => {
@@ -3350,7 +3394,7 @@ const showSplashConnecting = (hostLabel) => {
 // environment and no remote or SSH default instance. Those keep the splash
 // until resolved, because it reports the connection attempt.
 const isPlainLocalBoot = () => {
-  if (normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '')) return false;
+  if (remoteEnvTargetUrl()) return false;
   const { defaultHostId } = readDesktopHostsConfig();
   return !defaultHostId || defaultHostId === LOCAL_HOST_ID;
 };
@@ -3370,7 +3414,10 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
   if (onPlainLocalBoot && usePackagedUi && !skipLocalServer && isPlainLocalBoot()) {
     onPlainLocalBoot(buildPackagedUiUrl('/index.html'));
   }
-  const localUrl = skipLocalServer
+  const attachedUrl = attachedLocalServerUrl();
+  const localUrl = attachedUrl
+    ? await attachLocalServer(attachedUrl)
+    : skipLocalServer
     ? null
     : startupProbePlan.probeHmrApi && await waitForHealth(hmrApiUrl, 5_000, 100)
       ? hmrApiUrl
@@ -3403,7 +3450,7 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
   let requestHeaders = {};
   let remoteProbe = null;
 
-  const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
+  const envTarget = remoteEnvTargetUrl();
   let config = readDesktopHostsConfig();
   // A default SSH instance is reachable only through its tunnel: open it
   // before the probe, and boot Local when it cannot be opened.
@@ -3509,7 +3556,8 @@ const compareSemver = (left, right) => {
 };
 
 const setupAutoUpdater = () => {
-  if (!app.isPackaged) {
+  // A Nix build has no update feed: assertUpdaterCapability() refuses its checks.
+  if (!app.isPackaged || readPackageType() === 'nix') {
     return;
   }
   autoUpdater.autoDownload = false;
@@ -3646,7 +3694,7 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
         // This install reports its own failure through the await.
         autoUpdater.off('error', fail);
         await installLinuxPackage({
-          packageType: readLinuxPackageType(),
+          packageType: readPackageType(),
           file: state.pendingUpdate?.downloadedFile,
         });
         settled = true;
@@ -5077,7 +5125,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const nextConfigInput = args.input || args.config || {};
       await writeDesktopHostsConfig(nextConfigInput);
       const updatedConfig = readDesktopHostsConfig();
-      const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
+      const envTarget = remoteEnvTargetUrl();
       if (Object.prototype.hasOwnProperty.call(nextConfigInput, 'localClientToken') && isLocalRuntimeUrl(state.apiBaseUrl || state.sidecarUrl || state.localOrigin || '')) {
         state.clientToken = readDesktopLocalClientToken();
       }
@@ -5193,6 +5241,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
+      // The renderer checks on every start; a Nix build has nothing to offer.
+      if (app.isPackaged && readPackageType() === 'nix') {
+        return { available: false, currentVersion: APP_VERSION, version: null, body: null, date: null };
+      }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
@@ -6304,7 +6356,10 @@ app.whenReady().then(async () => {
   applyDesktopMiniChatGlobalShortcut();
   applyDesktopQuakeModeShortcut();
 
-  if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged) {
+  // The login item belongs to the bundle id, which an isolated launch
+  // (OPENCHAMBER_DESKTOP_USER_DATA_DIR) shares with the installed app: re-registering
+  // from it would point the user's login item at this copy.
+  if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged && !userDataOverridden()) {
     const openAtLogin = loginItemSettings?.openAtLogin === true;
     app.setLoginItemSettings({
       openAtLogin,

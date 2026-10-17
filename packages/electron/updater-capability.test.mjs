@@ -57,3 +57,13 @@ test('accepts a writable packaged AppImage', () => {
     access: () => {},
   }));
 });
+
+test('rejects updates for packaged Nix builds on every platform', () => {
+  for (const platform of ['darwin', 'linux']) {
+    assert.throws(
+      () => assertUpdaterCapability({ platform, packaged: true, appImagePath: '', packageType: 'nix' }),
+      /installed with Nix/,
+    );
+  }
+  assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'darwin', packaged: false, packageType: 'nix' }));
+});

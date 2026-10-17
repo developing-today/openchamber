@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // electron-builder writes this file into the resources of .deb and .rpm builds;
-// electron-updater reads the same file to pick its package installer.
-export const readLinuxPackageType = (resourcesPath = process.resourcesPath) => {
+// electron-updater reads the same file to pick its package installer. Nix builds
+// (nix/desktop-darwin.nix) write "nix".
+export const readPackageType = (resourcesPath = process.resourcesPath) => {
   try {
     return fs.readFileSync(path.join(resourcesPath, 'package-type'), 'utf8').trim();
   } catch {
@@ -15,10 +16,14 @@ export const assertUpdaterCapability = ({
   platform = process.platform,
   packaged,
   appImagePath = process.env.APPIMAGE,
-  packageType = readLinuxPackageType(),
+  packageType = readPackageType(),
   access = fs.accessSync,
   stat = fs.statSync,
 } = {}) => {
+  // The Nix store is read-only; the Nix configuration that built the app updates it.
+  if (packaged && packageType === 'nix') {
+    throw new Error('This OpenChamber was installed with Nix. Update it through your Nix configuration.');
+  }
   if (platform !== 'linux' || !packaged) return;
 
   if (!appImagePath) {

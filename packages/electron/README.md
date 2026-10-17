@@ -299,6 +299,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 | `OPENCHAMBER_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
 | `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
 | `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery. The host switcher then lists no Local entry |
+| `OPENCHAMBER_SERVER_URL` | Opens this instance instead of the default one. With `OPENCHAMBER_SKIP_LOCAL_SERVER=1` and a loopback origin (`http://127.0.0.1:<port>`, `localhost`, `[::1]`, no sub-path), Desktop treats it as its Local server (a service-managed `openchamber serve` for the same user): it keeps the local-only capabilities and the `desktop-local` client identity, and when `OPENCHAMBER_UI_PASSWORD` is set it signs in with it at startup to mint the local client token |
 | `OPENCHAMBER_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
 | `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT` | Development only: opens Chromium's DevTools protocol on this loopback port so a debugger can attach to the dev window; ignored in packaged builds |
