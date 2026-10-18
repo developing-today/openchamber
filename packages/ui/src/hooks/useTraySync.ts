@@ -11,6 +11,7 @@ import {
   type BlockingPermissionRequest,
 } from '@/sync/global-blocking-requests';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
+import { resolveBlockingRequestRoot } from '@/sync/blocking-request-root';
 import { useNotificationStore } from '@/sync/notification-store';
 import { respondToPermission } from '@/sync/session-actions';
 import { canSavePermission } from '@/components/chat/permissionSummary';
@@ -59,10 +60,15 @@ type TraySession = {
 type TrayApproval = {
   kind: 'permission' | 'form';
   id: string;
+  // The session that asked: a reply goes to it, and its title names the row.
   sessionId: string;
   sessionTitle: string;
   label: string;
-  directory: string;
+  // Where the tray opens the request: the top-level session above the one that
+  // asked, whose composer docks every request in its tree. A page that waits
+  // for an answer is drawn only in its own session, so it opens there.
+  openSessionId: string;
+  openDirectory: string;
   // Whether responding "always" would remember anything. Forms never can, and a
   // permission can only when the request carries save patterns, so the tray can
   // drop the "Allow always" item instead of offering a no-op.
@@ -117,6 +123,12 @@ const permissionLabel = (request: BlockingPermissionRequest): string => {
 };
 
 const formLabel = (request: BlockingFormRequest): string => request.title.trim() || 'Question';
+
+// The directory is the top-level session's own, else the one the request came from.
+const answeredFrom = (sessionId: string, directory: string): Pick<TrayApproval, 'openSessionId' | 'openDirectory'> => {
+  const root = resolveBlockingRequestRoot(sessionId);
+  return { openSessionId: root.sessionID, openDirectory: root.directory ?? directory };
+};
 
 // The tray lists sessions by activity alone; pins only order the sidebar.
 const NO_PINNED_SESSIONS = new Set<string>();
@@ -272,14 +284,14 @@ const collectLiveData = (): LiveData => {
       for (const request of requests ?? []) {
         if (!request?.id) continue;
         const sid = request.sessionID || sessionId;
-        approvals.push({ kind: 'permission', id: request.id, sessionId: sid, sessionTitle: '', label: permissionLabel(request), directory, canSave: canSavePermission(request.save) });
+        approvals.push({ kind: 'permission', id: request.id, sessionId: sid, sessionTitle: '', label: permissionLabel(request), ...answeredFrom(sid, directory), canSave: canSavePermission(request.save) });
       }
     }
     for (const [sessionId, requests] of Object.entries(state.form ?? {})) {
       for (const request of requests ?? []) {
         if (!request?.id) continue;
         const sid = request.sessionID || sessionId;
-        approvals.push({ kind: 'form', id: request.id, sessionId: sid, sessionTitle: '', label: formLabel(request), directory, canSave: false });
+        approvals.push({ kind: 'form', id: request.id, sessionId: sid, sessionTitle: '', label: formLabel(request), ...answeredFrom(sid, directory), canSave: false });
       }
     }
   }
@@ -402,14 +414,19 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     for (const request of pending.permissions) {
       if (seen.has(request.id)) continue;
       seen.add(request.id);
-      approvals.push({ kind: 'permission', id: request.id, sessionId, sessionTitle, label: permissionLabel(request), directory: pending.directory, canSave: canSavePermission(request.save) });
+      approvals.push({ kind: 'permission', id: request.id, sessionId, sessionTitle, label: permissionLabel(request), ...answeredFrom(sessionId, pending.directory), canSave: canSavePermission(request.save) });
     }
-    // A page that waits for the user's answer is listed like a form: the tray
-    // only opens the session for either.
-    for (const request of [...pending.forms, ...pending.pages]) {
+    for (const request of pending.forms) {
       if (seen.has(request.id)) continue;
       seen.add(request.id);
-      approvals.push({ kind: 'form', id: request.id, sessionId, sessionTitle, label: formLabel(request), directory: pending.directory, canSave: false });
+      approvals.push({ kind: 'form', id: request.id, sessionId, sessionTitle, label: formLabel(request), ...answeredFrom(sessionId, pending.directory), canSave: false });
+    }
+    // A page that waits for the user's answer is listed like a form, but only
+    // its own session draws it, so the tray opens that one.
+    for (const request of pending.pages) {
+      if (seen.has(request.id)) continue;
+      seen.add(request.id);
+      approvals.push({ kind: 'form', id: request.id, sessionId, sessionTitle, label: formLabel(request), openSessionId: sessionId, openDirectory: pending.directory, canSave: false });
     }
   }
 

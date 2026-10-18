@@ -119,6 +119,7 @@ import {
   type SessionMaterializationRequest,
 } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
+import { resolveBlockingRequestRoot } from "./blocking-request-root"
 import { revealRequest } from "./request-reveal"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
@@ -579,9 +580,14 @@ const getFormToastKey = (sessionID?: string, requestID?: string) => {
 /** A pending form has no question text on the wire — only the form's title. */
 const FORM_TOAST_DESCRIPTION = "Agent is waiting for your input"
 
-/** "Open session" on a question or permission toast also brings that request into view. */
+/**
+ * "Open session" on a question or permission toast opens the top-level session
+ * above the one that asked, whose composer docks every request in its tree,
+ * and brings that request into view there.
+ */
 const openRequestFromToast = (sessionID: string, directory: string, requestID: string) => {
-  openSessionFromToast(sessionID, directory)
+  const root = resolveBlockingRequestRoot(sessionID)
+  openSessionFromToast(root.sessionID, root.directory ?? directory)
   revealRequest(requestID)
 }
 

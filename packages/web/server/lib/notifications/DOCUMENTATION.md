@@ -49,7 +49,8 @@ This module provides notification message preparation utilities for the web serv
   - `maybeSendPushForTrigger(payload)`
 - Owns:
   - completion/error/question/permission trigger routing (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
-  - session parent cache for subtask suppression
+  - where a permission or question notification opens: the top-level session above the session that asked, whose composer docks every request in its tree, found by walking `parentID` through `GET /api/session/:id` and the session parent cache. Native notifications, the UI broadcast, web push (`data.url`, `data.sessionId`) and APNs (`data.sessionId`) all carry it. The text, the tag and `sessionName` still describe the session that asked. The event's `directory` goes only with a notification that opens that session itself; for an ancestor the app resolves the directory from its own session list. A waiting page opens its own session, the only one that draws it, and the walk stops at the highest session whose parent could be read
+  - session parent cache for subtask suppression and for the walk above
   - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
   - an MCP elicitation form (session id `global`, owned by no session) notifies without a session: no session title lookup, and the deep link opens the app
   - template resolution and fallback behavior

@@ -326,6 +326,23 @@ export const createNotificationTriggerRuntime = (deps) => {
     return false;
   };
 
+  // Where an alert about a permission request or question opens: the
+  // top-level session above the one that asked, whose composer docks every
+  // request in its tree. The walk stops at the highest session whose parent
+  // could be read. The event names the directory of the session that asked;
+  // for an ancestor the app looks up that session's own.
+  const resolveAskTarget = async (sessionId, directory) => {
+    let current = sessionId;
+    const seen = new Set();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const parent = await fetchSessionParentId(current, directory);
+      if (!parent) break;
+      current = parent;
+    }
+    return { sessionId: current, directory: current === sessionId ? directory : undefined };
+  };
+
   // v2 replaced questions with forms: the form's title is the ask, and the
   // first field carries the detail a question used to put in its body.
   const readFormAsk = (payload) => {
@@ -671,6 +688,10 @@ export const createNotificationTriggerRuntime = (deps) => {
         // under the `global` sentinel, which no session record carries, so the
         // notification opens the app instead of a session that cannot load.
         const formSessionId = sessionId === LOCATION_SCOPED_FORM_SESSION_ID ? undefined : sessionId;
+        // A waiting page is drawn only in its own session, so it opens there.
+        const target = formSessionId && payload.type === 'form.created'
+          ? await resolveAskTarget(formSessionId, notificationDirectory)
+          : { sessionId: formSessionId, directory: notificationDirectory };
 
         let title = /plan\s*mode/i.test(header)
           ? 'Switch to plan mode'
@@ -702,8 +723,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             tag: `question-${sessionId}`,
-            sessionId: formSessionId,
-            directory: notificationDirectory,
+            sessionId: target.sessionId,
+            directory: target.directory,
             requireHidden: settings.notificationMode !== 'always',
           };
           const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
@@ -717,8 +738,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             phoneBody: phoneBodyOf('Question', questionText || header),
             tag: `question-${sessionId}`,
             data: {
-              url: buildSessionDeepLinkUrl(formSessionId),
-              sessionId: formSessionId,
+              url: buildSessionDeepLinkUrl(target.sessionId),
+              sessionId: target.sessionId,
               sessionName,
               type: 'question',
             },
@@ -807,6 +828,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         const fallbackMessage = permissionText
           || (typeof sessionTitle === 'string' && sessionTitle.trim().length > 0 ? sessionTitle.trim() : '')
           || 'Agent is waiting for your approval';
+        const target = await resolveAskTarget(sessionId, notificationDirectory);
 
         let title = 'Permission required';
         let body = fallbackMessage;
@@ -834,8 +856,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
-            sessionId,
-            directory: notificationDirectory,
+            sessionId: target.sessionId,
+            directory: target.directory,
             requireHidden: settings.notificationMode !== 'always',
           };
           const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
@@ -853,8 +875,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             phoneBody: permissionPhoneBody,
             tag: `permission-${sessionId}`,
             data: {
-              url: buildSessionDeepLinkUrl(sessionId),
-              sessionId,
+              url: buildSessionDeepLinkUrl(target.sessionId),
+              sessionId: target.sessionId,
               sessionName,
               type: 'permission',
             },

@@ -150,10 +150,10 @@ describe('Dock badge with the macOS menu bar disabled', () => {
 // patterns, so every approval source has to carry the flag. The cross-directory
 // index feeds the tray from two inputs — live events and the host seed — and the
 // seed is the one that arrives already parsed.
-describe('tray approvals carry whether a permission can be remembered', () => {
+describe('tray approvals', () => {
   let dom: Window;
   let root: Root;
-  const snapshots: Array<{ approvals?: Array<{ id: string; canSave: boolean }> }> = [];
+  const snapshots: Array<{ approvals?: Array<{ id: string; canSave: boolean; sessionId: string; sessionTitle: string; openSessionId?: string; openDirectory?: string }> }> = [];
   const invoke = async (command: string, args?: unknown) => {
     if (command === 'desktop_tray_update') snapshots.push(args as never);
     return null;
@@ -216,5 +216,30 @@ describe('tray approvals carry whether a permission can be remembered', () => {
     await flush();
 
     expect(canSaveById()).toEqual({ 'seed-save': true, 'seed-once': false });
+  });
+
+  // A subagent's permission or form is answered from the top-level session
+  // above it, whose composer docks every request in its tree. A page that
+  // waits for an answer is drawn only in its own session.
+  test('a nested subagent\'s requests open the root, and its waiting page opens its own session', async () => {
+    useGlobalSessionsStore.getState().applySnapshot([session('root'), session('child', 'root'), session('grandchild', 'child')], [], 'ready');
+    await act(async () => root.render(<Harness />));
+    seedGlobalBlockingRequests([{
+      sessionId: 'grandchild',
+      directory: '/project',
+      permissions: [{ id: 'perm', sessionID: 'grandchild', action: 'bash', resources: ['echo ok'] }],
+      forms: [{ id: 'form', sessionID: 'grandchild', title: 'Pick a layout' }],
+      pages: [{ id: 'page', sessionID: 'grandchild', title: 'Review the page' }],
+    }]);
+    await flush();
+
+    const approvals = (snapshots.at(-1)?.approvals ?? []).map(({ id, sessionId, sessionTitle, openSessionId, openDirectory }) => ({
+      id, sessionId, sessionTitle, openSessionId, openDirectory,
+    }));
+    expect(approvals).toEqual([
+      { id: 'perm', sessionId: 'grandchild', sessionTitle: 'grandchild', openSessionId: 'root', openDirectory: '/project' },
+      { id: 'form', sessionId: 'grandchild', sessionTitle: 'grandchild', openSessionId: 'root', openDirectory: '/project' },
+      { id: 'page', sessionId: 'grandchild', sessionTitle: 'grandchild', openSessionId: 'grandchild', openDirectory: '/project' },
+    ]);
   });
 });
