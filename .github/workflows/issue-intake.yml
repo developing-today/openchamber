@@ -6,9 +6,13 @@ on:
   issue_comment:
     types: [created]
 
+# Comment runs never cancel an active run, so with the default single
+# queue a third triage/reproduce command on the same issue silently
+# replaces the pending second one. Queue every run.
 concurrency:
   group: issue-intake-${{ github.event_name }}-${{ github.event.issue.number }}
   cancel-in-progress: ${{ github.event_name == 'issues' }}
+  queue: max
 
 jobs:
   # Every new issue gets intake. A comment command starts the agent on the
