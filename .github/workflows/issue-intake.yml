@@ -6,12 +6,17 @@ on:
   issue_comment:
     types: [created]
 
-# Comment runs never cancel an active run, so with the default single
-# queue a third triage/reproduce command on the same issue silently
-# replaces the pending second one. Queue every run.
+# queue: max combined with cancel-in-progress: true is a workflow
+# validation error, and an expression that evaluates to true for the
+# issues event failed every such run at startup (#84). So no event
+# cancels: an issues run gets its own group (the run_id segment), starts
+# at once, and can neither cancel nor be cancelled. Comment runs share
+# one group per issue and queue: max keeps every triage/reproduce
+# command — with the default single queue a third command on the same
+# issue silently replaces the pending second one (#77).
 concurrency:
-  group: issue-intake-${{ github.event_name }}-${{ github.event.issue.number }}
-  cancel-in-progress: ${{ github.event_name == 'issues' }}
+  group: issue-intake-${{ github.event_name }}-${{ github.event.issue.number }}-${{ github.event_name == 'issues' && github.run_id || 'shared' }}
+  cancel-in-progress: false
   queue: max
 
 jobs:

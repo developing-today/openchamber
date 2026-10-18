@@ -12,11 +12,18 @@ concurrency:
   # PR conversation comments arrive as `issue_comment` events, so their PR number
   # is exposed as `github.event.issue.number`. Keep comment-triggered runs in a
   # separate group so skipped non-command comments do not cancel active reviews.
-  group: pr-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
-  # Comment runs never cancel an active run, so with the default single
-  # queue a third review command on the same PR silently replaces the
-  # pending second one. Queue every run.
+  # queue: max combined with cancel-in-progress: true is a workflow
+  # validation error, and an expression that evaluates to true for
+  # pull_request_target failed every such run at startup (#84). So no
+  # event cancels: a pull_request_target run gets its own group (the
+  # run_id segment), starts at once, and can neither cancel nor be
+  # cancelled — a rapid synchronize can therefore leave two reviews
+  # running side by side where the stale one used to be cancelled.
+  # Comment runs share one group per PR and queue: max keeps every
+  # review command — with the default single queue a third command on
+  # the same PR silently replaces the pending second one (#77).
+  group: pr-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name == 'pull_request_target' && github.run_id || 'shared' }}
+  cancel-in-progress: false
   queue: max
 
 jobs:
