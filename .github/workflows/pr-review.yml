@@ -28,9 +28,26 @@ jobs:
     outputs:
       allowed: ${{ steps.access.outputs.allowed }}
     steps:
+      # The review bot needs this repository's own GitHub App. A repository
+      # that has not installed it has no OC_REVIEW_APP_* secrets: detect that
+      # here (the values themselves are never printed) so the automation job
+      # skips cleanly instead of failing in its token step on every PR (#61).
+      - name: Check review app configuration
+        id: review-app
+        env:
+          REVIEW_APP_ID: ${{ secrets.OC_REVIEW_APP_ID }}
+          REVIEW_APP_PRIVATE_KEY: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$REVIEW_APP_ID" ] && [ -n "$REVIEW_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::OpenChamber review app is not configured for this repository (OC_REVIEW_APP_ID / OC_REVIEW_APP_PRIVATE_KEY secrets are unset); skipping bot review."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate access-check token
         id: app-token
-        if: github.event_name != 'pull_request_target'
+        if: github.event_name != 'pull_request_target' && steps.review-app.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
@@ -43,7 +60,13 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           EVENT_NAME: ${{ github.event_name }}
           COMMENTER: ${{ github.event.comment.user.login }}
+          REVIEW_APP_CONFIGURED: ${{ steps.review-app.outputs.configured }}
         run: |
+          if [ "$REVIEW_APP_CONFIGURED" != "true" ]; then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [ "$EVENT_NAME" = "pull_request_target" ]; then
             echo "allowed=true" >> "$GITHUB_OUTPUT"
             exit 0
