@@ -9,8 +9,7 @@ import type { FormRequest } from '@/lib/opencode/model';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
-import { useSessions } from '@/sync/sync-context';
-import { isSubagentRequest } from '@/sync/scoped-blocking-requests';
+import { useSubagentRequest } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -49,12 +48,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
-    const sessions = useSessions(currentSessionDirectory ?? undefined);
-
-    const isFromSubagent = React.useMemo(
-        () => isSubagentRequest(sessions, form.sessionID, currentSessionId),
-        [form.sessionID, currentSessionId, sessions],
-    );
+    const isFromSubagent = useSubagentRequest(form.sessionID, currentSessionId, currentSessionDirectory ?? undefined);
 
     const fields = form.fields;
     // The card shows every field at once, so an external link is on screen

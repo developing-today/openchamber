@@ -1,8 +1,7 @@
 import React from 'react';
 import type { PermissionReply, PermissionRequest } from '@/types/permission';
 import { useChatColumnActions, useChatSessionSelection } from './chatColumnSession';
-import { useSessions } from '@/sync/sync-context';
-import { isSubagentRequest } from '@/sync/scoped-blocking-requests';
+import { useSubagentRequest } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { canSavePermission } from './permissionSummary';
 
@@ -58,11 +57,7 @@ export const permissionFeedbackKeyAction = (
 /** The request was raised by a subagent below the session the user is looking at, at any depth. */
 export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
   const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
-  const sessions = useSessions(currentSessionDirectory ?? undefined);
-  return React.useMemo(
-    () => isSubagentRequest(sessions, permission.sessionID, currentSessionId),
-    [permission.sessionID, currentSessionId, sessions],
-  );
+  return useSubagentRequest(permission.sessionID, currentSessionId, currentSessionDirectory ?? undefined);
 };
 
 /**

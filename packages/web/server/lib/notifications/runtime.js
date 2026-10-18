@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
@@ -5,6 +6,14 @@ import { truncateNotificationText } from './message.js';
 
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
+
+// What the parent walks read from an OpenCode session record: its parent and
+// the directory it runs in now. A missing or malformed location only leaves
+// the directory unknown.
+const sessionLineageSchema = z.object({
+  parentID: z.string().nullish(),
+  location: z.object({ directory: z.string() }).nullish().catch(null),
+});
 
 export const createNotificationTriggerRuntime = (deps) => {
   const {
@@ -275,12 +284,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     setCachedSessionParentId(sessionId, directory, parentID);
   };
 
-  const fetchSessionParentId = async (sessionId, directory) => {
-    if (!sessionId) return undefined;
-
-    const cached = getCachedSessionParentId(sessionId, directory);
-    if (cached !== undefined) return cached;
-
+  // A session's parent and current directory, read from OpenCode; undefined
+  // when it could not be read. Directories are compared without trailing
+  // separators.
+  const fetchSessionLineage = async (sessionId, directory) => {
     try {
       const base = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
       const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
@@ -295,19 +302,31 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (!response.ok) {
         return undefined;
       }
-      const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
-      if (!session || typeof session !== 'object') {
+      const parsed = sessionLineageSchema.safeParse(unwrapOpenCodeResponse(await response.json().catch(() => null)));
+      if (!parsed.success) {
         return undefined;
       }
-
-      const parentID = typeof session.parentID === 'string' && session.parentID.length > 0
-        ? session.parentID
-        : null;
-      setCachedSessionParentId(sessionId, directory, parentID);
-      return parentID;
+      const located = parsed.data.location?.directory.trim() ?? '';
+      return {
+        parentID: parsed.data.parentID || null,
+        // Trailing separators go, but a root such as `/` stays a directory rather than reading as none.
+        directory: located.replace(/[\\/]+$/, '') || located.slice(0, 1) || null,
+      };
     } catch {
       return undefined;
     }
+  };
+
+  const fetchSessionParentId = async (sessionId, directory) => {
+    if (!sessionId) return undefined;
+
+    const cached = getCachedSessionParentId(sessionId, directory);
+    if (cached !== undefined) return cached;
+
+    const lineage = await fetchSessionLineage(sessionId, directory);
+    if (!lineage) return undefined;
+    setCachedSessionParentId(sessionId, directory, lineage.parentID);
+    return lineage.parentID;
   };
 
   // Mirrors client-side autoRespondsPermission: a session auto-accepts if it
@@ -324,6 +343,29 @@ export const createNotificationTriggerRuntime = (deps) => {
       current = parent;
     }
     return false;
+  };
+
+  // Where an alert about a permission request or question opens: the highest
+  // session above the one that asked that still runs in the same directory.
+  // Its composer docks every request raised below it from that directory's
+  // store, while a subagent moved to another directory takes its requests to
+  // that directory's store, which no dock above the move reads. Records are
+  // read fresh, since a move changes a session's directory, and the walk stops
+  // at the first one it cannot read.
+  const resolveAskSessionId = async (sessionId, directory) => {
+    const asking = await fetchSessionLineage(sessionId, directory);
+    if (!asking?.directory) return sessionId;
+    let target = sessionId;
+    let parentId = asking.parentID;
+    const seen = new Set([sessionId]);
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = await fetchSessionLineage(parentId, directory);
+      if (parent?.directory !== asking.directory) break;
+      target = parentId;
+      parentId = parent.parentID;
+    }
+    return target;
   };
 
   // v2 replaced questions with forms: the form's title is the ask, and the
@@ -671,6 +713,10 @@ export const createNotificationTriggerRuntime = (deps) => {
         // under the `global` sentinel, which no session record carries, so the
         // notification opens the app instead of a session that cannot load.
         const formSessionId = sessionId === LOCATION_SCOPED_FORM_SESSION_ID ? undefined : sessionId;
+        // A waiting page is drawn only in its own session, so it opens there.
+        const openSessionId = formSessionId && payload.type === 'form.created'
+          ? await resolveAskSessionId(formSessionId, notificationDirectory)
+          : formSessionId;
 
         let title = /plan\s*mode/i.test(header)
           ? 'Switch to plan mode'
@@ -702,7 +748,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             tag: `question-${sessionId}`,
-            sessionId: formSessionId,
+            sessionId: openSessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
@@ -717,8 +763,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             phoneBody: phoneBodyOf('Question', questionText || header),
             tag: `question-${sessionId}`,
             data: {
-              url: buildSessionDeepLinkUrl(formSessionId),
-              sessionId: formSessionId,
+              url: buildSessionDeepLinkUrl(openSessionId),
+              sessionId: openSessionId,
               sessionName,
               type: 'question',
             },
@@ -807,6 +853,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         const fallbackMessage = permissionText
           || (typeof sessionTitle === 'string' && sessionTitle.trim().length > 0 ? sessionTitle.trim() : '')
           || 'Agent is waiting for your approval';
+        const openSessionId = await resolveAskSessionId(sessionId, notificationDirectory);
 
         let title = 'Permission required';
         let body = fallbackMessage;
@@ -834,7 +881,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
-            sessionId,
+            sessionId: openSessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
@@ -853,8 +900,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             phoneBody: permissionPhoneBody,
             tag: `permission-${sessionId}`,
             data: {
-              url: buildSessionDeepLinkUrl(sessionId),
-              sessionId,
+              url: buildSessionDeepLinkUrl(openSessionId),
+              sessionId: openSessionId,
               sessionName,
               type: 'permission',
             },

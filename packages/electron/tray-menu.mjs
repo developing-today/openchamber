@@ -36,6 +36,14 @@ const approvalLabel = (approval) => {
   return `${icon} ${who} — ${what}`;
 };
 
+// A request opens where it is answered, which the renderer names as
+// `openSessionId`: for a subagent's request, the highest session above it in
+// the same directory. A snapshot from an older OpenChamber on a remote host has
+// none and opens the session that asked.
+const openApprovalAction = (approval) => (approval.openSessionId
+  ? { type: 'focus-session', sessionId: approval.openSessionId, directory: approval.openDirectory || '' }
+  : { type: 'focus-session', sessionId: approval.sessionId, directory: approval.directory || '' });
+
 export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
   const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
@@ -62,13 +70,13 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
             { type: 'separator' },
             { label: 'Deny', click: () => onAction({ type: 'respond-permission', sessionId: approval.sessionId, id: approval.id, response: 'reject' }) },
             { type: 'separator' },
-            { label: 'Open in app', click: () => onAction({ type: 'focus-session', sessionId: approval.sessionId, directory: approval.directory || '' }) },
+            { label: 'Open in app', click: () => onAction(openApprovalAction(approval)) },
           ],
         };
       }
       return {
         label: approvalLabel(approval),
-        click: () => onAction({ type: 'focus-session', sessionId: approval.sessionId, directory: approval.directory || '' }),
+        click: () => onAction(openApprovalAction(approval)),
       };
     };
     for (const approval of approvals.slice(0, MAX_APPROVALS)) {
@@ -173,7 +181,7 @@ export const trayMenuKey = (snapshot) => {
   return JSON.stringify({
     h: typeof snapshot.instanceName === 'string' ? snapshot.instanceName : '',
     s: sessions.map((s) => `${s.id}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
-    a: approvals.map((a) => `${a.id}|${a.kind}|${a.sessionId}|${a.sessionTitle}|${a.label}|${a.directory}|${a.canSave ? 1 : 0}`),
+    a: approvals.map((a) => `${a.id}|${a.kind}|${a.sessionId}|${a.sessionTitle}|${a.label}|${a.openSessionId}|${a.openDirectory}|${a.directory}|${a.canSave ? 1 : 0}`),
     u: usage.mode || '',
     g: groups.map((g) => `${g.provider}|${g.status}|${(Array.isArray(g.rows) ? g.rows : []).map((r) => `${r.label}|${r.value}`).join(',')}`),
   });

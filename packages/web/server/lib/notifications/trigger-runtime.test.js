@@ -256,6 +256,183 @@ describe('phone text for permissions and questions', () => {
   });
 });
 
+// A permission request or question raised by a subagent at any depth is
+// answered from the highest session above it in the same directory, whose
+// composer docks every request below it, so the alert opens that session. Its
+// text still names the session that asked.
+describe('alerts about a nested subagent\'s request', () => {
+  // OpenCode answers `GET /api/session/:id` as `{ data }`, with the session's
+  // current directory as `location.directory`. The default tree is root →
+  // child → grandchild, all in /repo.
+  const sameDirectory = {
+    ses_root: { directory: '/repo' },
+    ses_child: { parentID: 'ses_root', directory: '/repo' },
+    ses_grandchild: { parentID: 'ses_child', directory: '/repo' },
+  };
+  const stubLineage = (records = sameDirectory) => vi.stubGlobal('fetch', vi.fn(async (input) => {
+    const id = decodeURIComponent(new URL(String(input)).pathname.replace('/api/session/', ''));
+    const record = records[id];
+    if (!record) return { ok: false, json: async () => null };
+    return { ok: true, json: async () => ({ data: { id, parentID: record.parentID, location: { directory: record.directory } } }) };
+  }));
+  const makeNestedRuntime = () => {
+    const emitDesktopNotification = vi.fn(() => true);
+    const broadcastUiNotification = vi.fn();
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const sendApnsToAllUiSessions = vi.fn(async () => undefined);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnQuestion: true }),
+      buildTemplateVariables: async () => ({ session_name: 'Level two' }),
+      resolveNotificationTemplate: (template, variables) => template.replace('{last_message}', variables.last_message ?? ''),
+      shouldApplyResolvedTemplateMessage: () => true,
+      emitDesktopNotification,
+      broadcastUiNotification,
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions,
+      isAnyInteractiveClientVisible: () => false,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getIsSessionAutoAccepting: async () => false,
+    });
+    return { runtime, emitDesktopNotification, broadcastUiNotification, sendPushToAllUiSessions, sendApnsToAllUiSessions };
+  };
+  const trigger = async (runtime, payload, delivered) => {
+    vi.useFakeTimers();
+    try {
+      await runtime.maybeSendPushForTrigger(payload);
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.waitFor(() => expect(delivered).toHaveBeenCalled());
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  it('opens a grandchild\'s permission request in the root on every channel', async () => {
+    stubLineage();
+    try {
+      const { runtime, emitDesktopNotification, broadcastUiNotification, sendPushToAllUiSessions, sendApnsToAllUiSessions } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'permission.asked',
+        properties: { sessionID: 'ses_grandchild', directory: '/repo', id: 'per_1', action: 'bash', resources: ['echo ok'] },
+      }, sendApnsToAllUiSessions);
+
+      const native = emitDesktopNotification.mock.calls[0][0];
+      expect(native).toMatchObject({ kind: 'permission', sessionId: 'ses_root', directory: '/repo', tag: 'permission-ses_grandchild:per_1' });
+      expect(broadcastUiNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_root' });
+      expect(sendPushToAllUiSessions.mock.calls[0][0].data).toMatchObject({ url: '/?session=ses_root', sessionId: 'ses_root', sessionName: 'Level two' });
+      expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ body: 'Level two', data: { sessionId: 'ses_root' } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('opens a grandchild\'s question in the root', async () => {
+    stubLineage();
+    try {
+      const { runtime, emitDesktopNotification, sendPushToAllUiSessions } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'form.created',
+        properties: { sessionID: 'ses_grandchild', directory: '/repo', form: { id: 'frm_1', sessionID: 'ses_grandchild', title: 'Pick a layout', fields: [] } },
+      }, sendPushToAllUiSessions);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ kind: 'question', sessionId: 'ses_root', tag: 'question-ses_grandchild' });
+      expect(sendPushToAllUiSessions.mock.calls[0][0].data).toMatchObject({ url: '/?session=ses_root', sessionId: 'ses_root', sessionName: 'Level two' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps a top-level session\'s own request in that session and its directory', async () => {
+    stubLineage();
+    try {
+      const { runtime, emitDesktopNotification } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'permission.asked',
+        properties: { sessionID: 'ses_root', directory: '/repo', id: 'per_2', action: 'bash', resources: ['ls'] },
+      }, emitDesktopNotification);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_root', directory: '/repo' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('opens the root for a tree in the filesystem root directory', async () => {
+    stubLineage({
+      ses_root: { parentID: undefined, directory: '/' },
+      ses_child: { parentID: 'ses_root', directory: '/' },
+      ses_grandchild: { parentID: 'ses_child', directory: '/' },
+    });
+    try {
+      const { runtime, emitDesktopNotification } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'permission.asked',
+        properties: { sessionID: 'ses_grandchild', directory: '/', id: 'per_3', action: 'bash', resources: ['ls'] },
+      }, emitDesktopNotification);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_root', directory: '/' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // A moved subagent's requests live in its new directory, and an ancestor's
+  // dock reads only its own directory.
+  it('opens a moved subagent\'s request in the highest session of its new directory', async () => {
+    stubLineage({
+      ses_root: { directory: '/repo' },
+      ses_child: { parentID: 'ses_root', directory: '/worktree' },
+      ses_grandchild: { parentID: 'ses_child', directory: '/worktree' },
+    });
+    try {
+      const { runtime, emitDesktopNotification, sendPushToAllUiSessions } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'permission.asked',
+        properties: { sessionID: 'ses_grandchild', directory: '/worktree', id: 'per_3', action: 'bash', resources: ['ls'] },
+      }, sendPushToAllUiSessions);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_child', directory: '/worktree' });
+      expect(sendPushToAllUiSessions.mock.calls[0][0].data).toMatchObject({ url: '/?session=ses_child', sessionId: 'ses_child' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps a question in its own session when the subagent above it moved away', async () => {
+    stubLineage({
+      ses_root: { directory: '/repo' },
+      ses_child: { parentID: 'ses_root', directory: '/elsewhere' },
+      ses_grandchild: { parentID: 'ses_child', directory: '/repo' },
+    });
+    try {
+      const { runtime, emitDesktopNotification } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'form.created',
+        properties: { sessionID: 'ses_grandchild', directory: '/repo', form: { id: 'frm_2', sessionID: 'ses_grandchild', title: 'Pick a layout', fields: [] } },
+      }, emitDesktopNotification);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_grandchild', directory: '/repo' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('opens a subagent\'s waiting page in its own session, the only one that draws it', async () => {
+    stubLineage();
+    try {
+      const { runtime, emitDesktopNotification } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'openchamber:page-waiting',
+        properties: { sessionID: 'ses_grandchild', directory: '/repo', page: { id: 'call_1', title: 'Review the page' } },
+      }, emitDesktopNotification);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_grandchild', directory: '/repo' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('subagent finish with subagent notifications off', () => {
   const makeSubtaskRuntime = () => {
     const emitDesktopNotification = vi.fn(() => true);

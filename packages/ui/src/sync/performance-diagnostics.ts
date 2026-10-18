@@ -21,6 +21,7 @@ export type SyncPerformanceCounters = {
   orderingPublications: number
   timingPublications: number
   liveSessionAggregateRuns: number
+  sessionIndexReads: number
   sidebarStructureBuilds: number
   sidebarOrderBuilds: number
   sidebarOrderMetadataEntries: number
@@ -64,6 +65,7 @@ const createCounters = (): SyncPerformanceCounters => ({
   orderingPublications: 0,
   timingPublications: 0,
   liveSessionAggregateRuns: 0,
+  sessionIndexReads: 0,
   sidebarStructureBuilds: 0,
   sidebarOrderBuilds: 0,
   sidebarOrderMetadataEntries: 0,

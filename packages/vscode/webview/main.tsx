@@ -19,6 +19,7 @@ import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { permissionPolicyWireSchema, policySnapshotFromWire } from '@openchamber/ui/stores/utils/permissionAutoAccept';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
+import { resolveBlockingRequestRoot } from '@openchamber/ui/sync/blocking-request-root';
 import type { AssistantMessage, Part } from '@openchamber/ui/lib/opencode/model';
 import { syncEventSessionID, type SyncEvent } from '@openchamber/ui/lib/opencode/events';
 import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/dom';
@@ -2064,6 +2065,8 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     }
 
     // Forms replaced questions in OpenCode 2.x: one titled request the user answers.
+    // A form or permission request opens in the highest session above the one
+    // that asked in the same directory, whose composer docks every request below it.
     if (syncEvent.type === 'form.created') {
       if (!settings.notifyOnQuestion) return;
       const header = syncEvent.properties.form.title;
@@ -2074,7 +2077,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       showOpenChamberNotification({
         title,
         body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : header || 'Agent is waiting for your response',
-        sessionId,
+        sessionId: resolveBlockingRequestRoot(sessionId).sessionID,
         requireHidden,
       });
       return;
@@ -2093,7 +2096,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       showOpenChamberNotification({
         title,
         body: shouldApplyTemplateMessage(template.message, body, permissionVariables) ? body : fallbackMessage,
-        sessionId,
+        sessionId: resolveBlockingRequestRoot(sessionId).sessionID,
         requireHidden,
       });
     }

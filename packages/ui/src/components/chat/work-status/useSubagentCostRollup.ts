@@ -10,7 +10,6 @@ export type SubagentCostRollup = {
   /** Everything the subagents cost between them: `totalCost - ownCost`. */
   subagentCost: number;
   subagentCount: number;
-  perChildCost: Map<string, number>;
 };
 
 const EMPTY_ROLLUP: SubagentCostRollup = {
@@ -18,7 +17,6 @@ const EMPTY_ROLLUP: SubagentCostRollup = {
   ownCost: 0,
   subagentCost: 0,
   subagentCount: 0,
-  perChildCost: new Map(),
 };
 
 function countDescendants(id: string, childrenByParent: Map<string, Session[]>, visited: Set<string>): number {
@@ -43,13 +41,8 @@ export function computeRollup(liveSessions: Session[], sessionId: string | null)
   const childrenByParent = buildChildrenIndex(liveSessions);
   const totalCost = computeSubtreeCost(sessionId, sessionsById, childrenByParent);
 
-  const perChildCost = new Map<string, number>();
-  let subagentCost = 0;
-  for (const child of childrenByParent.get(sessionId) ?? []) {
-    const childSubtree = computeSubtreeCost(child.id, sessionsById, childrenByParent);
-    perChildCost.set(child.id, childSubtree);
-    subagentCost += childSubtree;
-  }
+  const subagentCost = (childrenByParent.get(sessionId) ?? [])
+    .reduce((sum, child) => sum + computeSubtreeCost(child.id, sessionsById, childrenByParent), 0);
 
   // Derived by subtraction rather than read back off the session, so the split
   // always adds up to the total the panel shows even if a cycle guard trimmed
@@ -57,7 +50,7 @@ export function computeRollup(liveSessions: Session[], sessionId: string | null)
   const ownCost = totalCost - subagentCost;
   const subagentCount = countDescendants(sessionId, childrenByParent, new Set());
 
-  return { totalCost, ownCost, subagentCost, subagentCount, perChildCost };
+  return { totalCost, ownCost, subagentCost, subagentCount };
 }
 
 /**

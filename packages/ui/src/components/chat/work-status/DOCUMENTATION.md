@@ -111,8 +111,8 @@ which requests only providers enabled for this panel.
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
-| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
-| Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
+| Subagents | every session below the viewed one in `useAllLiveSessions` (`parentID`, at any depth) + `useAllSessionStatuses`; each row's cost is its subagent's total with everything that one launched | |
+| Subagent blockers | directory `permission` / `question` maps | one subscription covers every subagent |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
@@ -142,9 +142,11 @@ Rows are ordered newest first by creation time, never by last activity, which
 reshuffled them on every step and moved them under the pointer. Rows group by
 state first: blockers, then running, then unknown status, then finished (done
 or failed, with no pending blocker). Creation order holds within each group, so
-a fully finished list reads as it did at launch.
-The section derives per-row cost with `computeRollup` over the live-session list
-it already holds instead of opening a second subscription through the hook.
+a fully finished list reads as it did at launch. These rules order siblings at
+every level, and the subagents a subagent launched follow its row directly, one
+tree step (12px, as in the sidebar's session tree) further in.
+The section builds the tree and each row's cost from the live-session list it
+already holds instead of opening a second subscription through the cost hook.
 
 Hovering or focusing a row shows its session model's catalog display name,
 falling back to the formatted model ID. Missing model metadata produces no
@@ -426,10 +428,12 @@ Its expanded list is capped at eight rows and scrolls independently, so a
 session with many subagents does not crowd every section below it out of the
 panel.
 
-Each row is a direct child and speaks for everything it launched: a permission
-request or question raised by a subagent below it marks the child's row, and a
-child counts as working while any of them runs. Nested subagents have no rows of
-their own; opening the child shows them.
+Every subagent below the viewed session has a row, nested under the subagent
+that launched it, so a chain of subagents reads as a tree. Each row still
+speaks for everything below it: a permission request or question raised
+further down marks its own row and the row of every subagent above it, and a
+subagent counts as working while any subagent below it runs. The heading
+counts every row, and how many of them are working.
 
 ## Collapsed Usage headline
 

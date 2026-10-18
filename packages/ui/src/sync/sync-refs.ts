@@ -9,6 +9,7 @@ import type { OpenCodeClient } from "@opencode/client"
 import type { Config } from "@/lib/opencode/model"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
+import { countSyncPerformance } from "./performance-diagnostics"
 import type { State } from "./types"
 
 let _childStores: ChildStoreManager | null = null
@@ -94,6 +95,7 @@ export function getAllSyncSessions() {
 export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][number]> {
   const stores = _childStores
   if (!stores) return cachedSessionsById
+  countSyncPerformance("sessionIndexReads")
 
   let changed = cachedSessionManager !== stores || cachedSessionSlices.size !== stores.children.size
   for (const [directory, store] of stores.children) {
