@@ -22,9 +22,13 @@ const EMPTY_ROLLUP: SubagentCostRollup = {
 function countDescendants(id: string, childrenByParent: Map<string, Session[]>, visited: Set<string>): number {
   if (visited.has(id)) return 0;
   visited.add(id);
-  const kids = childrenByParent.get(id) ?? [];
-  let count = kids.length;
-  for (const kid of kids) count += countDescendants(kid.id, childrenByParent, visited);
+  let count = 0;
+  for (const kid of childrenByParent.get(id) ?? []) {
+    // A kid that is already visited closes a parent cycle; it is counted at
+    // its first visit, not again here.
+    if (visited.has(kid.id)) continue;
+    count += 1 + countDescendants(kid.id, childrenByParent, visited);
+  }
   return count;
 }
 
@@ -41,8 +45,12 @@ export function computeRollup(liveSessions: Session[], sessionId: string | null)
   const childrenByParent = buildChildrenIndex(liveSessions);
   const totalCost = computeSubtreeCost(sessionId, sessionsById, childrenByParent);
 
+  // One visited set, seeded with the root, is shared across the per-child
+  // walks: a fresh set per child lets a walk climb back through a parent
+  // cycle and count the root's own cost as subagent spend.
+  const visited = new Set<string>([sessionId]);
   const subagentCost = (childrenByParent.get(sessionId) ?? [])
-    .reduce((sum, child) => sum + computeSubtreeCost(child.id, sessionsById, childrenByParent), 0);
+    .reduce((sum, child) => sum + computeSubtreeCost(child.id, sessionsById, childrenByParent, visited), 0);
 
   // Derived by subtraction rather than read back off the session, so the split
   // always adds up to the total the panel shows even if a cycle guard trimmed
