@@ -1,18 +1,20 @@
 {
-  "directory": "/private/var/folders/k9/k2ksrtk174g4lmbcnfvn4xv40000gp/T/opencode/messaging-policy-SgPSKE",
+  "directory": "/private/var/folders/k9/k2ksrtk174g4lmbcnfvn4xv40000gp/T/opencode/messaging-policy-uErle1",
   "checks": [
     "Enterprise reads stay available; writes and removal return 403 enterprise_mode without changing the config file",
+    "A project under the global config directory does not treat global config as a project override",
     "The live OpenCode config applies the project override and OpenChamber names its owning file",
     "The browser names the project override and disables model settings",
+    "The live explicit config wins beneath the global directory and Settings reports no project lock",
     "A normal write succeeds without removing the project lock or overriding the live project value",
     "Hosted mobile also names the override and keeps its Messaging controls disabled",
     "Removing the project override reloads the explicit config without a restart and unlocks the browser controls"
   ],
   "pageErrors": [],
-  "coreUrl": "http://127.0.0.1:57137",
+  "coreUrl": "http://127.0.0.1:63087",
   "servers": {
-    "normal": "http://127.0.0.1:57147",
-    "enterprise": "http://127.0.0.1:57146"
+    "normal": "http://127.0.0.1:63091",
+    "enterprise": "http://127.0.0.1:63092"
   },
   "result": "passed",
   "cleanedUp": true
