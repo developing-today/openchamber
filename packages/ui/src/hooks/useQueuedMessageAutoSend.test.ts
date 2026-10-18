@@ -1,33 +1,22 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { Agent, Message, Session } from '@/lib/opencode/model';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { Message, Session } from '@/lib/opencode/model';
 import type { QueuedMessage } from '../stores/messageQueueStore';
 import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
+import { useSessionUIStore, type SessionUIState } from '@/sync/session-ui-store';
 
-let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
 
-const getVisibleAgentsMock = mock(() => visibleAgents);
-
-mock.module('@/stores/useConfigStore', () => ({
-  useConfigStore: {
-    getState: () => ({
-      getVisibleAgents: getVisibleAgentsMock,
-    }),
-  },
-}));
-
-mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: {
-    getState: () => ({
-      sendMessage: (...args: unknown[]) => {
-        sendMessageCalls.push(args);
-        return Promise.resolve();
-      },
-      sessionAbortFlags: new Map(),
-    }),
-  },
-}));
+// Swap sendMessage on the real store and restore it after each test.
+// mock.module('@/sync/session-ui-store') stayed registered for every later
+// test file in the process and broke them, because the stub has no setState
+// and none of the real actions (#46). The config store mock is gone too:
+// nothing under test reads it.
+const originalSendMessage = useSessionUIStore.getState().sendMessage;
+const fakeSendMessage = (...args: Parameters<SessionUIState['sendMessage']>): Promise<void> => {
+  sendMessageCalls.push([...args]);
+  return Promise.resolve();
+};
 
 import {
   buildQueuedAutoSendPayload,
@@ -225,8 +214,12 @@ describe('resolveQueuedSessionStatusType', () => {
 
 describe('buildQueuedAutoSendPayload', () => {
   beforeEach(() => {
-    visibleAgents = [];
     sendMessageCalls.length = 0;
+    useSessionUIStore.setState({ sendMessage: fakeSendMessage });
+  });
+
+  afterEach(() => {
+    useSessionUIStore.setState({ sendMessage: originalSendMessage });
   });
 
   test('returns only the first queued message for auto-send', () => {
