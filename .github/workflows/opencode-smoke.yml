@@ -33,6 +33,10 @@ on:
           - INFO
           - DEBUG
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   smoke:
     name: provider smoke
