@@ -3256,6 +3256,10 @@ describe('git remote arguments with option-like names', () => {
 
     const { remote, repository } = createRepositoryWithRemote();
     addOptionLikeRemote(repository, remote);
+    // Fetch only creates refs/remotes/<remote>/HEAD on git >= 2.50
+    // (fetch.followRemoteHEAD); on older git the default branch the service
+    // reports comes from that symref, so set it explicitly (#55).
+    runGit(repository, ['remote', 'set-head', '-a', '--', OPTION_LIKE_REMOTE]);
     const head = runGit(repository, ['rev-parse', 'HEAD']).trim();
     runGit(repository, ['update-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/gone`, head]);
 
