@@ -43,6 +43,20 @@ describe('computeRollup', () => {
     expect(result.totalCost).toBe(5);
   });
 
+  test('counts each subagent once and keeps the root own cost when the session is in a parent cycle', () => {
+    const cyclic: Session[] = [
+      makeSession('root', 1, 'b'),
+      makeSession('a', 2, 'root'),
+      makeSession('b', 3, 'a'),
+    ];
+    const result = computeRollup(cyclic, 'root');
+    expect(result.totalCost).toBe(6);
+    expect(result.subagentCount).toBe(2);
+    expect(result.ownCost).toBe(1);
+    expect(result.subagentCost).toBe(5);
+    expect(result.ownCost + result.subagentCost).toBe(result.totalCost);
+  });
+
   test('returns null total for a null sessionId', () => {
     const result = computeRollup(sessions, null);
     expect(result.totalCost).toBeNull();
