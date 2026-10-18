@@ -78,9 +78,9 @@ describe('page action scripts', () => {
 
   test('typing refuses button-like and hidden inputs but accepts text-like ones', () => {
     const win = new Window({ url: 'https://example.test/' });
-    const runType = (selector: string): string => JSON.stringify(new Function(
+    const runType = (selector: string, typed = 'hello'): string => JSON.stringify(new Function(
       'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
-      `return ${buildTypeScript({ selector, value: 'hello', submit: false })}`,
+      `return ${buildTypeScript({ selector, value: typed, submit: false })}`,
     )(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event));
 
     for (const type of ['submit', 'button', 'radio', 'hidden', 'file']) {
@@ -92,10 +92,10 @@ describe('page action scripts', () => {
       expect(runType('#field')).toContain('"ok":true');
       expect(win.document.querySelector('input')?.value).toBe('hello');
     }
-    // A number field is text-like too; it just rejects non-numeric values
-    // itself, as it does for a user typing letters into it.
+    // A number field is text-like too, and keeps a numeric value.
     win.document.body.innerHTML = '<input type="number" id="field">';
-    expect(runType('#field')).toContain('"ok":true');
+    expect(runType('#field', '42')).toContain('"ok":true');
+    expect(win.document.querySelector('input')?.value).toBe('42');
     // No type attribute reads back as 'text', in the page and to the user.
     win.document.body.innerHTML = '<input id="field">';
     expect(runType('#field')).toContain('"ok":true');
@@ -103,6 +103,22 @@ describe('page action scripts', () => {
     win.document.body.innerHTML = '<textarea id="field"></textarea>';
     expect(runType('#field')).toContain('"ok":true');
     expect(win.document.querySelector('textarea')?.value).toBe('hello');
+  });
+
+  test('typing reports failure when the field rejects the value', () => {
+    // Issue #68: a number field handed letters ends up empty, as it does for
+    // a person typing them, but the type script reported success anyway —
+    // the agent then acts on a value that never landed.
+    const win = new Window({ url: 'https://example.test/' });
+    win.document.body.innerHTML = '<input type="number" id="field">';
+    const runType = new Function(
+      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
+      `return ${buildTypeScript({ selector: '#field', value: 'hello', submit: false })}`,
+    );
+    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
+    expect(JSON.stringify(result)).toContain('"ok":false');
+    expect(JSON.stringify(result)).toContain('did not keep the typed value');
+    expect(win.document.querySelector('input')?.value).toBe('');
   });
 
   test('whitespace regexes survive interpolation', () => {

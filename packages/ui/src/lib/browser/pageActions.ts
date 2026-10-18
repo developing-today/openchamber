@@ -325,6 +325,16 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
   target.dispatchEvent(new Event('input', { bubbles: true }));
   target.dispatchEvent(new Event('change', { bubbles: true }));
 
+  // A field can refuse what it was given: a number field handed letters ends
+  // up empty, exactly as it does for a person typing them. Success reported
+  // anyway would have the agent act on a value that never landed, so read
+  // back what the field actually holds — after input/change, when a handler
+  // that reformats the value has had its say — and fail in the open instead.
+  var held = target.isContentEditable ? (target.textContent || '') : target.value;
+  if (held !== value) {
+    return { ok: false, error: selector + ' did not keep the typed value; it now holds ' + JSON.stringify(held) };
+  }
+
   if (${submit ? 'true' : 'false'}) {
     var enter = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true };
     target.dispatchEvent(new KeyboardEvent('keydown', enter));
