@@ -16,6 +16,10 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-macos-dmg-arm64-electron:
     name: Build Electron DMG (arm64, ${{ inputs.macos_version }})

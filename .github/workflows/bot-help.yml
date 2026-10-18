@@ -4,6 +4,10 @@ on:
   issue_comment:
     types: [created]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   help:
     if: github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '@openchamber-bot help' || startsWith(github.event.comment.body, '@openchamber-bot help '))
