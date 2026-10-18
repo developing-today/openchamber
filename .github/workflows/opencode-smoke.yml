@@ -33,9 +33,14 @@ on:
           - INFO
           - DEBUG
 
+# workflow_dispatch always runs on the dispatched branch, so a
+# workflow+ref group cannot tell two smoke runs apart: a dispatch
+# with a different model/version could replace another's pending
+# run. Key by the distinguishing inputs and queue every run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.model }}-${{ inputs.opencode_version }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   smoke:

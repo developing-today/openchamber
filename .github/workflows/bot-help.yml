@@ -4,9 +4,14 @@ on:
   issue_comment:
     types: [created]
 
+# github.ref is the default branch for issue_comment, so a
+# workflow+ref group is one shared group for every issue: with the
+# default single queue a third help command silently replaces the
+# pending second one. Key by issue and queue every run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   help:

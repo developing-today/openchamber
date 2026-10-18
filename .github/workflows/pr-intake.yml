@@ -19,8 +19,13 @@ on:
 permissions:
   contents: read
 
+# github.ref is the default branch for pull_request_target and
+# issue_comment events, so a workflow+ref group would put every PR in
+# one group and let unrelated PRs cancel each other. Key by the target
+# PR instead; push sweeps (which relabel every open PR) get a unique
+# group per run via run_id. Same-PR synchronize still supersedes.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
