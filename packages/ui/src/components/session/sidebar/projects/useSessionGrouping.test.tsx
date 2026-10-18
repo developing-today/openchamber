@@ -252,10 +252,14 @@ describe('useSessionGrouping malformed hierarchy fallbacks', () => {
       [
         session('active-parent'),
         session('active-child', 'active-parent'),
+        session('active-grandchild', 'active-child'),
         archived(session('archived-child-of-active', 'active-parent')),
         archived(session('archived-parent')),
         archived(session('archived-child', 'archived-parent')),
         session('live-child-of-archived', 'archived-parent'),
+        // "Archive all" archives roots only, so whole live subtrees sit under one.
+        session('live-grandchild-of-archived', 'live-child-of-archived'),
+        session('live-great-grandchild-of-archived', 'live-grandchild-of-archived'),
         session('child-of-unloaded', 'not-loaded'),
       ],
       '/workspace',
@@ -267,7 +271,7 @@ describe('useSessionGrouping malformed hierarchy fallbacks', () => {
     const rootGroup = groups.find((group) => group.isMain);
     const archiveGroup = groups.find((group) => group.isArchivedBucket);
     expect(rootGroup?.sessions.map((node) => node.session.id)).toEqual(['active-parent', 'child-of-unloaded']);
-    expect(collectIds(rootGroup?.sessions ?? [])).toEqual(['active-parent', 'active-child', 'child-of-unloaded']);
+    expect(collectIds(rootGroup?.sessions ?? [])).toEqual(['active-parent', 'active-child', 'active-grandchild', 'child-of-unloaded']);
     expect(collectIds(archiveGroup?.sessions ?? [])).toEqual(['archived-parent']);
   });
 });

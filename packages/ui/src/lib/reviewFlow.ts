@@ -19,6 +19,7 @@ import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '
 import { useSelectionStore } from '@/sync/selection-store';
 import { resolveSendSelection, useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncMessages, getSyncParts, getSyncSessionStatus, getSyncSessions, registerSessionDirectory } from '@/sync/sync-refs';
+import { computeSubtreeIds } from '@/sync/scoped-blocking-requests';
 import { markPendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from '@/lib/sessionKnowledgeApi';
@@ -109,18 +110,18 @@ const getLatestAssistantTextMessage = (
 };
 
 /**
- * The turn is over only when the session is idle and none of its subagents is
- * still running. A parent goes idle while a background subagent works; OpenCode
- * then hands the result back and the parent runs again, so the reply it left
- * at that pause is not the finished work. Child statuses come from the same
- * live directory store as the parent's.
+ * The turn is over only when the session is idle and none of its subagents, at
+ * any depth, is still running. A parent goes idle while a background subagent
+ * works; OpenCode then hands the result back and the parent runs again, so the
+ * reply it left at that pause is not the finished work. Subagent statuses come
+ * from the same live directory store as the parent's.
  */
 const isSessionIdle = (sessionID: string, directory: string): boolean => {
   if (getSyncSessionStatus(sessionID, directory)?.type !== 'idle') return false;
-  return !getSyncSessions(directory).some((session) => {
-    if (session.parentID !== sessionID) return false;
-    const childStatus = getSyncSessionStatus(session.id, directory);
-    return childStatus !== undefined && childStatus.type !== 'idle';
+  return ![...computeSubtreeIds(getSyncSessions(directory), sessionID)].some((id) => {
+    if (id === sessionID) return false;
+    const status = getSyncSessionStatus(id, directory);
+    return status !== undefined && status.type !== 'idle';
   });
 };
 

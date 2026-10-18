@@ -26,4 +26,25 @@ describe("selectNewChildSessions", () => {
 
     expect(added.map((entry) => entry.id)).toEqual(["fresh"])
   })
+
+  test("adds subsessions at any depth, including below a child the store already has", () => {
+    const listed = [
+      session("grandchild", "child"),
+      session("child", "root"),
+      session("great-grandchild", "grandchild"),
+      session("elsewhere", "other"),
+    ]
+
+    const added = selectNewChildSessions(listed, new Set(["child"]), new Set(["root"]), () => false)
+
+    expect(added.map((entry) => entry.id)).toEqual(["grandchild", "great-grandchild"])
+  })
+
+  test("skips everything below a child the global cache knows as archived", () => {
+    const listed = [session("stale", "root"), session("below-stale", "stale")]
+
+    const added = selectNewChildSessions(listed, new Set(), new Set(["root"]), (id) => id === "stale")
+
+    expect(added).toEqual([])
+  })
 })

@@ -128,6 +128,28 @@ describe('subagent status rows', () => {
     expect(rowContent().querySelector('span[title]')).not.toBeNull();
   });
 
+  test('shows a nested subagent\'s blockers and work on the row of the child that launched it', async () => {
+    const grandchild: Session = { ...child, id: 'grandchild', parentID: child.id, title: 'Grandchild' };
+    await publish({
+      session: [parent, child, grandchild],
+      sessionStatusReady: true,
+      session_status: { child: { type: 'idle' }, grandchild: { type: 'busy' } },
+    });
+    expect(container.querySelectorAll('button[aria-label]')).toHaveLength(1);
+    expect(icon()).toBe('#oc-record-circle');
+    expect(row().getAttribute('aria-label')).toContain('is working');
+    await publish({
+      // SAFETY: fixtures carry only the fields the section reads (their presence per session).
+      permission: { grandchild: [{ id: 'permission', sessionID: 'grandchild', action: 'bash', resources: ['*'], metadata: {} } as PermissionRequest] },
+    });
+    expect(icon()).toBe('#oc-alert');
+    expect(rowContent().textContent).toContain('needs permission');
+    await publish({ permission: {}, form: { grandchild: [{ ...childForm, sessionID: 'grandchild' }] } });
+    expect(rowContent().textContent).toContain('asked a question');
+    await publish({ form: {}, session_status: { child: { type: 'idle' }, grandchild: { type: 'idle' } } });
+    expect(icon()).toBe('#oc-checkbox-circle');
+  });
+
   test('orders rows newest first by creation and sinks finished ones', async () => {
     const older: Session = { ...child, id: 'older', title: 'Older', time: { created: 2, updated: 50 } };
     const newer: Session = { ...child, id: 'newer', title: 'Newer', time: { created: 3, updated: 10 } };

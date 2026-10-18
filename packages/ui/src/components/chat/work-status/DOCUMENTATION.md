@@ -423,6 +423,11 @@ Its expanded list is capped at eight rows and scrolls independently, so a
 session with many subagents does not crowd every section below it out of the
 panel.
 
+Each row is a direct child and speaks for everything it launched: a permission
+request or question raised by a subagent below it marks the child's row, and a
+child counts as working while any of them runs. Nested subagents have no rows of
+their own; opening the child shows them.
+
 ## Collapsed Usage headline
 
 Collapsed, the Usage section shows one quota rather than a mode word: the

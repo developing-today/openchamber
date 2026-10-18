@@ -2,6 +2,7 @@ import React from 'react';
 import type { PermissionReply, PermissionRequest } from '@/types/permission';
 import { useChatColumnActions, useChatSessionSelection } from './chatColumnSession';
 import { useSessions } from '@/sync/sync-context';
+import { isSubagentRequest } from '@/sync/scoped-blocking-requests';
 import * as sessionActions from '@/sync/session-actions';
 import { canSavePermission } from './permissionSummary';
 
@@ -54,15 +55,14 @@ export const permissionFeedbackKeyAction = (
   return isMobile ? null : 'submit';
 };
 
-/** The request was raised by a child of the session the user is looking at. */
+/** The request was raised by a subagent below the session the user is looking at, at any depth. */
 export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
   const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
   const sessions = useSessions(currentSessionDirectory ?? undefined);
-  return React.useMemo(() => {
-    if (!currentSessionId || permission.sessionID === currentSessionId) return false;
-    const sourceSession = sessions.find((session) => session.id === permission.sessionID);
-    return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-  }, [permission.sessionID, currentSessionId, sessions]);
+  return React.useMemo(
+    () => isSubagentRequest(sessions, permission.sessionID, currentSessionId),
+    [permission.sessionID, currentSessionId, sessions],
+  );
 };
 
 /**
