@@ -357,6 +357,25 @@ describe('alerts about a nested subagent\'s request', () => {
     }
   });
 
+  it('opens the root for a tree in the filesystem root directory', async () => {
+    stubLineage({
+      ses_root: { parentID: undefined, directory: '/' },
+      ses_child: { parentID: 'ses_root', directory: '/' },
+      ses_grandchild: { parentID: 'ses_child', directory: '/' },
+    });
+    try {
+      const { runtime, emitDesktopNotification } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'permission.asked',
+        properties: { sessionID: 'ses_grandchild', directory: '/', id: 'per_3', action: 'bash', resources: ['ls'] },
+      }, emitDesktopNotification);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_root', directory: '/' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   // A moved subagent's requests live in its new directory, and an ancestor's
   // dock reads only its own directory.
   it('opens a moved subagent\'s request in the highest session of its new directory', async () => {

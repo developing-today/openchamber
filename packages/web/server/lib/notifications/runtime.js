@@ -306,9 +306,11 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (!parsed.success) {
         return undefined;
       }
+      const located = parsed.data.location?.directory.trim() ?? '';
       return {
         parentID: parsed.data.parentID || null,
-        directory: parsed.data.location?.directory.trim().replace(/[\\/]+$/, '') || null,
+        // Trailing separators go, but a root such as `/` stays a directory rather than reading as none.
+        directory: located.replace(/[\\/]+$/, '') || located.slice(0, 1) || null,
       };
     } catch {
       return undefined;
