@@ -1,4 +1,3 @@
-import type { Session } from "@/lib/opencode/model"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { blockingRequestLineage, type SessionLookup } from "./scoped-blocking-requests"
 import { getAllSyncSessionMap } from "./sync-refs"
@@ -10,10 +9,11 @@ import { getAllSyncSessionMap } from "./sync-refs"
  * store dropped before its subagent asked. Docks and the alerts about a request
  * both use this lookup, so they agree on where the request is answered.
  */
-export const sessionRecordLookup = (
-  live: ReadonlyMap<string, Session> = getAllSyncSessionMap(),
-  cached: ReadonlyMap<string, Session> = useGlobalSessionsStore.getState().entityById,
-): SessionLookup => (sessionID) => live.get(sessionID) ?? cached.get(sessionID)
+export const sessionRecordLookup = (): SessionLookup => {
+  const live = getAllSyncSessionMap()
+  const cached = useGlobalSessionsStore.getState().entityById
+  return (sessionID) => live.get(sessionID) ?? cached.get(sessionID)
+}
 
 /**
  * The session a permission request or form is answered from: the last one in

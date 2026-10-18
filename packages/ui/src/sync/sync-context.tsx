@@ -46,7 +46,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
-import { setSyncRefs, getAllSyncSessions, getAllSyncSessionMap, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
+import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { upsertSessionRecord } from "./session-records"
@@ -3722,25 +3722,29 @@ export const collectComposerForms = (
 }
 
 /**
- * Follows the records a request's lineage reads (`sessionRecordLookup`): the
- * store that holds the requests, which holds its directory's sessions, and the
- * global session list, which keeps the sessions a store trimmed.
+ * Notifies when an input of a blocking-request lineage changes: the session
+ * slice of any directory store, which `getAllSyncSessionMap` indexes, the
+ * records of the global session list, or the permission and form slices of
+ * `store`, which holds the requests. Message, part and status updates notify
+ * nothing, so streamed deltas never run a lineage hook's snapshot.
  */
-const subscribeBlockingRequestLineage = (store: StoreApi<DirectoryStore>, notify: () => void) => {
-  const unsubscribeStore = store.subscribe(notify)
-  const unsubscribeGlobal = useGlobalSessionsStore.subscribe(notify)
+const subscribeBlockingRequestLineage = (
+  childStores: ChildStoreManager,
+  store: StoreApi<DirectoryStore>,
+  notify: () => void,
+) => {
+  const unsubscribers = [
+    childStores.subscribeAllSelected((state) => state.session, notify),
+    store.subscribe((state, previous) => {
+      if (state.permission !== previous.permission || state.form !== previous.form) notify()
+    }),
+    useGlobalSessionsStore.subscribe((state, previous) => {
+      if (state.entityById !== previous.entityById) notify()
+    }),
+  ]
   return () => {
-    unsubscribeStore()
-    unsubscribeGlobal()
+    for (const unsubscribe of unsubscribers) unsubscribe()
   }
-}
-
-type ScopedBlockingRequestCache<T extends { id: string }> = {
-  sessionID: string | null
-  requestsBySession: Record<string, T[] | undefined> | null
-  live: ReadonlyMap<string, Session> | null
-  cached: ReadonlyMap<string, Session> | null
-  result: T[]
 }
 
 function useScopedBlockingRequests<T extends { id: string }>(
@@ -3756,34 +3760,16 @@ function useScopedBlockingRequests<T extends { id: string }>(
   ) => T[] = collectScopedBlockingRequests,
 ): T[] {
   const store = useDirectoryStore(directory)
-  const cacheRef = useRef<ScopedBlockingRequestCache<T>>({
-    sessionID: null,
-    requestsBySession: null,
-    live: null,
-    cached: null,
-    result: empty,
-  })
-  const getSnapshot = useCallback(() => {
-    const requestsBySession = selectRequestsBySession(store.getState())
-    const live = getAllSyncSessionMap()
-    const cached = useGlobalSessionsStore.getState().entityById
-    const cache = cacheRef.current
-    if (
-      cache.sessionID === sessionID
-      && cache.requestsBySession === requestsBySession
-      && cache.live === live
-      && cache.cached === cached
-    ) {
-      return cache.result
-    }
-
-    const next = collect(requestsBySession, sessionID, sessionRecordLookup(live, cached), empty)
-    const result = areRequestArraysReferentiallyEqual(cache.result, next) ? cache.result : next
-    cacheRef.current = { sessionID, requestsBySession, live, cached, result }
-    return result
-  }, [collect, empty, selectRequestsBySession, sessionID, store])
-  const subscribe = useCallback((notify: () => void) => subscribeBlockingRequestLineage(store, notify), [store])
-  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  // Runs only after the lineage subscription reports a change; renders in
+  // between reuse the last result.
+  return useLiveSyncSelector(
+    useCallback(
+      () => collect(selectRequestsBySession(store.getState()), sessionID, sessionRecordLookup(), empty),
+      [collect, empty, selectRequestsBySession, sessionID, store],
+    ),
+    areRequestArraysReferentiallyEqual,
+    useCallback((childStores: ChildStoreManager, notify: () => void) => subscribeBlockingRequestLineage(childStores, store, notify), [store]),
+  )
 }
 
 export function useScopedBlockingPermissions(sessionID: string | null, directory?: string): PermissionRequest[] {
@@ -3797,12 +3783,14 @@ export function useScopedBlockingForms(sessionID: string | null, directory?: str
 /** A docked request comes from a subagent below the viewed session, by the lineage the dock follows. */
 export function useSubagentRequest(requestSessionID: string, viewedSessionID: string | null, directory?: string): boolean {
   const store = useDirectoryStore(directory)
-  const getSnapshot = useCallback(
-    () => isSubagentRequest(requestSessionID, viewedSessionID, sessionRecordLookup()),
-    [requestSessionID, viewedSessionID],
+  return useLiveSyncSelector(
+    useCallback(
+      () => isSubagentRequest(requestSessionID, viewedSessionID, sessionRecordLookup()),
+      [requestSessionID, viewedSessionID],
+    ),
+    Object.is,
+    useCallback((childStores: ChildStoreManager, notify: () => void) => subscribeBlockingRequestLineage(childStores, store, notify), [store]),
   )
-  const subscribe = useCallback((notify: () => void) => subscribeBlockingRequestLineage(store, notify), [store])
-  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 const sessionsByIdCache = new WeakMap<State["session"], Map<string, Session>>()

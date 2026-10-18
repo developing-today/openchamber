@@ -8,15 +8,16 @@ import { toast } from "@/components/ui"
 import type { PermissionRequest, Session } from "@/lib/opencode/model"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { getSyncPerformanceDiagnostics, setSyncPerformanceDiagnosticsEnabled } from "../performance-diagnostics"
 import { setSessionOpener } from "../session-navigation"
 import { useSessionUIStore } from "../session-ui-store"
 import { createEventRoutingIndex, handleEvent, SyncProvider, useScopedBlockingPermissions, useSubagentRequest } from "../sync-context"
 import { getSyncChildStores } from "../sync-refs"
 
 // A directory store trims its oldest sessions when a new one arrives, and
-// nothing restores them when a request comes in later. The toast about a
-// grandchild's request must still open a session whose dock shows it, even
-// though the directory store no longer lists the parent that links the two.
+// nothing restores them when a request comes in later. The dock of the session
+// a toast opens must still show a grandchild's request, and must follow every
+// place the missing parent's record can come back from.
 
 const directory = "/trimmed-ask"
 // OpenCode session ids descend with time, so the store's id order puts the newest first.
@@ -28,6 +29,7 @@ const session = (id: string, created: number, parentID?: string): Session => ({
 const root = session("ses_3", 1)
 const child = session("ses_2", 2, root.id)
 const grandchild = session("ses_1", 3, child.id)
+const request: PermissionRequest = { id: "per_1", sessionID: grandchild.id, action: "bash", resources: ["echo hi"], metadata: {} }
 
 // The output lists the dock's requests and whether the grandchild's carries the "From subagent" label there.
 const DockProbe: React.FC<{ sessionId: string | null }> = ({ sessionId }) => {
@@ -36,7 +38,7 @@ const DockProbe: React.FC<{ sessionId: string | null }> = ({ sessionId }) => {
   return <output data-from-subagent={fromSubagent}>{permissions.map((permission) => permission.id).join(",")}</output>
 }
 
-describe("the dock a toast opens after the request's parent was trimmed", () => {
+describe("the dock of a nested subagent's request after its parent was trimmed", () => {
   let win: Window
   let reactRoot: Root
   let container: HTMLElement
@@ -53,6 +55,13 @@ describe("the dock a toast opens after the request's parent was trimmed", () => 
   const render = (sessionId: string | null) => act(async () => reactRoot.render(
     <SyncProvider sdk={sdk} directory={directory}><DockProbe sessionId={sessionId} /></SyncProvider>,
   ))
+  const docked = () => container.querySelector("output")?.textContent
+  const fromSubagent = () => container.querySelector("output")?.getAttribute("data-from-subagent")
+  const directoryStore = () => {
+    const store = getSyncChildStores().getChild(directory)
+    if (!store) throw new Error("Expected the directory store")
+    return store
+  }
 
   beforeEach(async () => {
     win = new Window({ url: "http://localhost" })
@@ -80,6 +89,7 @@ describe("the dock a toast opens after the request's parent was trimmed", () => 
   })
 
   afterEach(async () => {
+    setSyncPerformanceDiagnosticsEnabled(false)
     await act(async () => reactRoot.unmount())
     await win.happyDOM.close()
     restoreGlobals()
@@ -89,10 +99,9 @@ describe("the dock a toast opens after the request's parent was trimmed", () => 
 
   afterAll(() => toastSpy.mockRestore())
 
-  test("still docks the grandchild's request", async () => {
+  test("is the root's, where the toast opens, and shows the request there", async () => {
     const childStores = getSyncChildStores()
-    const store = childStores.getChild(directory)
-    if (!store) throw new Error("Expected the directory store")
+    const store = directoryStore()
     const routingIndex = createEventRoutingIndex()
     useGlobalSessionsStore.getState().applySnapshot([root, child, grandchild], [], "ready")
     await act(async () => store.setState({ session: [grandchild, child, root], limit: 2, permission: {}, form: {} }))
@@ -114,19 +123,51 @@ describe("the dock a toast opens after the request's parent was trimmed", () => 
     expect(opened).toEqual([root.id])
 
     await render(root.id)
-    expect(container.querySelector("output")?.textContent).toBe("per_1")
-    expect(container.querySelector("output")?.getAttribute("data-from-subagent")).toBe("true")
+    expect(docked()).toBe("per_1")
+    expect(fromSubagent()).toBe("true")
   })
 
   test("shows the request once the global session list brings the missing parent", async () => {
-    const store = getSyncChildStores().getChild(directory)
-    if (!store) throw new Error("Expected the directory store")
-    const request: PermissionRequest = { id: "per_1", sessionID: grandchild.id, action: "bash", resources: ["echo hi"], metadata: {} }
+    const store = directoryStore()
     await render(root.id)
     await act(async () => store.setState({ session: [grandchild, root], permission: { [grandchild.id]: [request] }, form: {} }))
-    expect(container.querySelector("output")?.textContent).toBe("")
+    expect(docked()).toBe("")
 
     await act(async () => useGlobalSessionsStore.getState().applySnapshot([root, child, grandchild], [], "ready"))
-    expect(container.querySelector("output")?.textContent).toBe("per_1")
+    expect(docked()).toBe("per_1")
+  })
+
+  // A project's store also lists the sessions of its worktrees, so a resync
+  // there, after a reconnect for example, can bring back a parent this store
+  // dropped.
+  test("shows the request once another directory's store brings the missing parent", async () => {
+    const store = directoryStore()
+    await render(root.id)
+    await act(async () => store.setState({ session: [grandchild, root], permission: { [grandchild.id]: [request] }, form: {} }))
+    expect(docked()).toBe("")
+    expect(fromSubagent()).toBe("false")
+
+    await act(async () => getSyncChildStores().ensureChild("/trimmed-ask-project", { bootstrap: false }).setState({ session: [child] }))
+    expect(docked()).toBe("per_1")
+    expect(fromSubagent()).toBe("true")
+  })
+
+  test("leaves the cross-directory session index alone while a message streams, and still follows its requests", async () => {
+    const store = directoryStore()
+    await render(root.id)
+    await act(async () => store.setState({ session: [grandchild, child, root], permission: { [grandchild.id]: [request] }, form: {} }))
+    expect(docked()).toBe("per_1")
+
+    setSyncPerformanceDiagnosticsEnabled(true)
+    // A streamed text delta changes only the message's parts.
+    await act(async () => store.setState({
+      part: { msg_1: [{ id: "prt_1", sessionID: root.id, messageID: "msg_1", type: "text", text: "Streaming" }] },
+    }))
+    expect(getSyncPerformanceDiagnostics()?.sessionIndexReads).toBe(0)
+    expect(docked()).toBe("per_1")
+
+    // A change to the requests alone still reaches the dock.
+    await act(async () => store.setState({ permission: {} }))
+    expect(docked()).toBe("")
   })
 })
