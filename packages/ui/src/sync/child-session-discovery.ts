@@ -11,9 +11,9 @@ import type { Session } from "@/lib/opencode/model"
  * server before the user archived a parent still carries the children without
  * `time.archived`, and adding them back would show them as active orphans until
  * the next refresh. The global sessions cache learns about an archive before
- * the archive action resolves, so a child it already lists as archived is a
- * stale copy and is dropped here, along with everything below it. Credit for
- * spotting the race: #2580.
+ * the archive action resolves, so a session it already lists as archived,
+ * watched parent or listed child, is a stale copy: nothing below it is added.
+ * Credit for spotting the race: #2580.
  */
 export const selectNewChildSessions = (
   listed: readonly Session[],
@@ -32,6 +32,7 @@ export const selectNewChildSessions = (
   const visited = new Set(parentIds)
   const queue = [...parentIds]
   for (const parentId of queue) {
+    if (isKnownArchived(parentId)) continue
     for (const session of childrenByParent.get(parentId) ?? []) {
       if (visited.has(session.id) || isKnownArchived(session.id)) continue
       visited.add(session.id)

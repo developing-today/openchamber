@@ -47,4 +47,12 @@ describe("selectNewChildSessions", () => {
 
     expect(added).toEqual([])
   })
+
+  test("adds nothing below a watched parent archived while the listing was in flight", () => {
+    const listed = [session("child", "root"), session("grandchild", "child")]
+
+    const added = selectNewChildSessions(listed, new Set(["child"]), new Set(["root"]), (id) => id === "root")
+
+    expect(added).toEqual([])
+  })
 })

@@ -15,7 +15,7 @@ import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewSt
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { usePermissionStore } from '@/stores/permissionStore';
-import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
+import { getSessionLiveActivity, optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
 import { resolveSendSelection, useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncMessages, getSyncParts, getSyncSessionStatus, getSyncSessions, registerSessionDirectory } from '@/sync/sync-refs';
@@ -113,16 +113,14 @@ const getLatestAssistantTextMessage = (
  * The turn is over only when the session is idle and none of its subagents, at
  * any depth, is still running. A parent goes idle while a background subagent
  * works; OpenCode then hands the result back and the parent runs again, so the
- * reply it left at that pause is not the finished work. Subagent statuses come
- * from the same live directory store as the parent's.
+ * reply it left at that pause is not the finished work. A subagent whose status
+ * no live source covers yet counts as still working: an unknown status is not
+ * an idle one.
  */
 const isSessionIdle = (sessionID: string, directory: string): boolean => {
   if (getSyncSessionStatus(sessionID, directory)?.type !== 'idle') return false;
-  return ![...computeSubtreeIds(getSyncSessions(directory), sessionID)].some((id) => {
-    if (id === sessionID) return false;
-    const status = getSyncSessionStatus(id, directory);
-    return status !== undefined && status.type !== 'idle';
-  });
+  return ![...computeSubtreeIds(getSyncSessions(directory), sessionID)]
+    .some((id) => id !== sessionID && getSessionLiveActivity(id) !== 'idle');
 };
 
 export const isAutoReviewRuntimeCurrent = (runtimeKey: string): boolean => runtimeKey === getRuntimeKey();
