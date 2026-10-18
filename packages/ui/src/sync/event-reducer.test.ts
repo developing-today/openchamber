@@ -4,6 +4,7 @@ import type { SyncEvent } from "@/lib/opencode/events"
 import type { Message, Part, PermissionRequest, Session } from "@/lib/opencode/model"
 import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 import { applyDirectoryEvent, reduceGlobalEvent } from "./event-reducer"
+import { collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { INITIAL_STATE, type State } from "./types"
 
 const session = (overrides: Partial<Session> = {}): Session => ({
@@ -493,6 +494,23 @@ describe("ordering and trimming", () => {
     })
 
     expect(draft.session.map((item) => item.id)).toEqual(["ses_1", "ses_5"])
+  })
+
+  test("trimming keeps every ancestor of a nested subagent's pending request, so the root's dock still reaches it", () => {
+    // root → child → grandchild, the grandchild waiting for permission. The
+    // root and the child are the oldest sessions here, so trimming by age
+    // alone cut the parent links the root's dock follows to the request.
+    const root = session({ id: "ses_8", title: "Root", time: { created: 1, updated: 1 } })
+    const child = session({ id: "ses_6", parentID: "ses_8", title: "Child", time: { created: 2, updated: 2 } })
+    const grandchild = session({ id: "ses_4", parentID: "ses_6", title: "Grandchild", time: { created: 3, updated: 3 } })
+    const unrelated = session({ id: "ses_2", title: "Unrelated", time: { created: 4, updated: 4 } })
+    const request = permission("perm_1", "ses_4")
+    const draft = state({ session: [unrelated, grandchild, child, root], limit: 1, permission: { ses_4: [request] } })
+
+    apply(draft, { type: "session.created", properties: { info: session({ id: "ses_1", title: "Newest", time: { created: 5, updated: 5 } }) } })
+
+    expect(draft.session.map((item) => item.id)).toEqual(["ses_1", "ses_4", "ses_6", "ses_8"])
+    expect(collectScopedBlockingRequests(draft.session, draft.permission, "ses_8", [])).toEqual([request])
   })
 })
 
