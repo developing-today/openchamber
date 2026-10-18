@@ -441,7 +441,7 @@ describe('web search choice', () => {
 
 describe('findWebSearchProjectOverride', () => {
   const userPath = '/home/u/.config/opencode/opencode.json';
-  const layers = (customConfig = {}) => ({ userConfig: { websearch: false }, projectConfig: {}, customConfig, paths: { userPath, projectPath: null } });
+  const layers = (customConfig = {}, customPath = null) => ({ userConfig: { websearch: false }, projectConfig: {}, customConfig, paths: { userPath, projectPath: null, customPath } });
 
   it('names the deepest project file that sets websearch', () => {
     const files = [
@@ -457,12 +457,21 @@ describe('findWebSearchProjectOverride', () => {
     expect(findWebSearchProjectOverride(layers(), [])).toBeNull();
   });
 
-  it('is null when OPENCODE_CONFIG sets websearch too, since it wins', () => {
-    expect(findWebSearchProjectOverride(layers({ websearch: { provider: 'exa' } }), [{ path: '/repo/opencode.json', config: { websearch: false } }])).toBeNull();
+  it('keeps the project override when OPENCODE_CONFIG sets websearch too', () => {
+    expect(findWebSearchProjectOverride(layers({ websearch: { provider: 'exa' } }, '/custom/opencode.json'), [{ path: '/repo/opencode.json', config: { websearch: false } }])).toBe('/repo/opencode.json');
   });
 
   it('ignores the user config showing up among project files', () => {
     expect(findWebSearchProjectOverride(layers(), [{ path: userPath, config: { websearch: false } }])).toBeNull();
+  });
+
+  it('is unlocked when the winning project file is the Settings write target', () => {
+    const target = '/repo/app/opencode.json';
+    const files = [
+      { path: target, config: { websearch: false } },
+      { path: '/repo/opencode.json', config: { websearch: { provider: 'exa' } } },
+    ];
+    expect(findWebSearchProjectOverride(layers({ websearch: false }, target), files)).toBeNull();
   });
 });
 

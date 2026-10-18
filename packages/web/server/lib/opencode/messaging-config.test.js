@@ -44,11 +44,35 @@ describe('getMessagingConfig', () => {
     expect(getMessagingConfig(path.join(tempDir, 'repo')).projectPath).toBeNull();
   });
 
-  it('reports no project override when OPENCODE_CONFIG sets messaging too', () => {
+  it('keeps the project override when OPENCODE_CONFIG sets messaging too', () => {
     writeJson(configPath, { messaging: { vars: { a: 'b' } } });
     const projectDir = path.join(tempDir, 'repo');
     writeJson(path.join(projectDir, 'opencode.json'), { messaging: { session_start: '' } });
+    expect(getMessagingConfig(projectDir).projectPath).toBe(path.join(projectDir, 'opencode.json'));
+  });
+
+  it('does not lock the winning project file when Settings writes that file', () => {
+    const projectDir = path.join(tempDir, 'repo', 'app');
+    process.env.OPENCODE_CONFIG = path.join(projectDir, 'opencode.json');
+    writeJson(process.env.OPENCODE_CONFIG, { messaging: { session_start: '' } });
+    writeJson(path.join(tempDir, 'repo', 'opencode.json'), { messaging: { embedding: 'off' } });
     expect(getMessagingConfig(projectDir).projectPath).toBeNull();
+  });
+
+  it('ranks every .opencode config above direct configs, including deeper ones', () => {
+    const projectDir = path.join(tempDir, 'repo', 'app');
+    writeJson(configPath, { warming: false });
+    writeJson(path.join(projectDir, 'opencode.jsonc'), { messaging: { search: { match: 'regex' } } });
+    writeJson(path.join(tempDir, 'repo', '.opencode', 'opencode.json'), { messaging: { search: { match: 'exact' } } });
+    expect(getMessagingConfig(projectDir).projectPath).toBe(path.join(tempDir, 'repo', '.opencode', 'opencode.json'));
+  });
+
+  it('includes config files above the worktree root', () => {
+    const projectDir = path.join(tempDir, 'repo', 'app');
+    fs.mkdirSync(path.join(tempDir, 'repo', '.git'), { recursive: true });
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeJson(path.join(tempDir, 'opencode.json'), { messaging: { embedding: 'off' } });
+    expect(getMessagingConfig(projectDir).projectPath).toBe(path.join(tempDir, 'opencode.json'));
   });
 });
 

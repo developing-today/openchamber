@@ -357,7 +357,10 @@ Bridge surface (`bridge-config-runtime.ts`), matching the web routes:
   `false`, `null` (remove the key), `"random"` or a provider id, written with
   the shared `writeWebSearchSelection` to `OPENCODE_CONFIG` or the user config.
   `{ method: "GET", directory }` returns `{ projectPath }` from the shared
-  `findWebSearchProjectOverride`: the project config that overrides that write.
+  `findWebSearchProjectOverride`: the discovered config that overrides that write.
+  It follows the server's precedence and ancestor discovery documented in
+  `packages/web/server/lib/opencode/DOCUMENTATION.md`, including when
+  `OPENCODE_CONFIG` also sets the choice.
 - `api:config/warming` — `PUT /api/config/warming`; `{ enabled }` turns session
   warming on (`true`, keeping a hand-tuned object) or off (removes the key),
   written with the shared `writeWarmingEnabled` to the same file.

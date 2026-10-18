@@ -46,6 +46,29 @@ describe('VS Code entity modules speak OpenCode 2 shapes', () => {
     delete process.env.OPENCODE_CONFIG;
   });
 
+  test('web search locks follow OpenCode config precedence', async () => {
+    const { getWebSearchSource } = await loadConfig();
+    const previous = process.env.OPENCODE_CONFIG;
+    const projectPath = write('opencode.json', JSON.stringify({ websearch: false }));
+    try {
+      process.env.OPENCODE_CONFIG = write('custom.json', JSON.stringify({ websearch: { provider: 'exa' } }));
+      assert.equal(getWebSearchSource(projectDir).projectPath, projectPath);
+
+      process.env.OPENCODE_CONFIG = projectPath;
+      assert.equal(getWebSearchSource(projectDir).projectPath, null);
+
+      const hiddenPath = write('.opencode/opencode.json', JSON.stringify({ websearch: false }));
+      write('app/opencode.jsonc', JSON.stringify({ websearch: { provider: 'exa' } }));
+      assert.equal(getWebSearchSource(path.join(projectDir, 'app')).projectPath, hiddenPath);
+
+      fs.mkdirSync(path.join(projectDir, 'repo', '.git'), { recursive: true });
+      assert.equal(getWebSearchSource(path.join(projectDir, 'repo')).projectPath, hiddenPath);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_CONFIG;
+      else process.env.OPENCODE_CONFIG = previous;
+    }
+  });
+
   test('reads a v1 agent markdown file and answers the v2 shape', async () => {
     const { getAgentConfig } = await loadConfig();
     write('.opencode/agent/reviewer.md', [
