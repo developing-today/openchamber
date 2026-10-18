@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,26 +6,52 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import type { RuntimeAPIs, TerminalAPI } from '@/lib/api/types';
 import { useTerminalStore } from '@/stores/useTerminalStore';
+import { useTerminalSessionKeepalive } from './useTerminalSessionKeepalive';
 
 const touchCalls: string[][] = [];
 
-const terminal = {
+const unavailable = (): never => {
+  throw new Error('Terminal keepalive must not call this runtime API');
+};
+
+const terminal: TerminalAPI = {
   touchSessions: async (sessionIds: string[]) => {
     touchCalls.push(sessionIds);
   },
+  createSession: unavailable,
+  connect: unavailable,
+  sendInput: unavailable,
+  resize: unavailable,
+  close: unavailable,
 };
 
-mock.module('@/hooks/useRuntimeAPIs', () => ({
-  useRuntimeAPIs: () => ({ terminal }),
-}));
+// Real runtime APIs through the context the app itself uses: mock.module
+// stays registered for every later test file in the process and breaks
+// them (#46), so the fixture terminal arrives via RuntimeAPIContext.
+const runtimeApis: RuntimeAPIs = {
+  runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+  terminal,
+  get git() { return unavailable(); },
+  get sourceControl() { return unavailable(); },
+  get files() { return unavailable(); },
+  get settings() { return unavailable(); },
+  get permissions() { return unavailable(); },
+  get notifications() { return unavailable(); },
+};
 
-const { useTerminalSessionKeepalive } = await import('./useTerminalSessionKeepalive');
-
-const HookHarness = () => {
+const KeepaliveProbe = () => {
   useTerminalSessionKeepalive();
   return null;
 };
+
+const HookHarness = () => (
+  <RuntimeAPIContext.Provider value={runtimeApis}>
+    <KeepaliveProbe />
+  </RuntimeAPIContext.Provider>
+);
 
 describe('useTerminalSessionKeepalive', () => {
   let windowInstance: Window;
@@ -35,11 +61,18 @@ describe('useTerminalSessionKeepalive', () => {
   const originalClearInterval = globalThis.clearInterval;
   const scheduledIntervals = new Map<number, { delay: number; callback: () => void }>();
   let nextIntervalId = 1;
+  const globalNames = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+  let originalGlobals = new Map<string, PropertyDescriptor | undefined>();
 
   beforeEach(() => {
     windowInstance = new Window({ url: 'http://localhost/' });
     scheduledIntervals.clear();
     nextIntervalId = 1;
+    // Capture the globals this suite replaces so afterEach can put them
+    // back: leaving a happy-dom window installed makes later test files
+    // load against it (for example useConfigStore reads a bare
+    // `localStorage` global once `window` exists) and fail at load (#46).
+    originalGlobals = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
     Object.assign(globalThis, {
       window: windowInstance,
       document: windowInstance.document,
@@ -120,6 +153,10 @@ describe('useTerminalSessionKeepalive', () => {
       writable: true,
       value: originalClearInterval,
     });
+    for (const [name, descriptor] of originalGlobals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
     useTerminalStore.getState().clearAll();
   });
 
