@@ -39,4 +39,33 @@ describe('resolveNextAttentionEntry', () => {
   test('returns null when the open session is the only one needing attention', () => {
     expect(resolveNextAttentionEntry(entries.slice(0, 1), 'a1', isAttention)).toBeNull();
   });
+
+  test('returns a session whose project entry precedes its attention entry', () => {
+    const reordered = [
+      entry('a1', 'project-a:main'),
+      entry('a1', 'activity:approvals'),
+      entry('a2', 'activity:approvals'),
+    ];
+    expect(resolveNextAttentionEntry(reordered, null, isAttention)?.sessionId).toBe('a1');
+    expect(resolveNextAttentionEntry(reordered, 'a1', isAttention)?.sessionId).toBe('a2');
+  });
+
+  test('returns the only attention session when its project entry comes first', () => {
+    const reordered = [
+      entry('a1', 'project-a:main'),
+      entry('a1', 'activity:approvals'),
+    ];
+    expect(resolveNextAttentionEntry(reordered, 'w1', isAttention)?.sessionId).toBe('a1');
+    expect(resolveNextAttentionEntry(reordered, 'a1', isAttention)).toBeNull();
+  });
+
+  test('steps from the open session at its attention entry position when drawn project-first', () => {
+    const reordered = [
+      entry('a1', 'project-a:main'),
+      entry('a2', 'activity:approvals'),
+      entry('a1', 'activity:approvals'),
+    ];
+    expect(resolveNextAttentionEntry(reordered, 'a2', isAttention)?.sessionId).toBe('a1');
+    expect(resolveNextAttentionEntry(reordered, 'a1', isAttention)?.sessionId).toBe('a2');
+  });
 });
