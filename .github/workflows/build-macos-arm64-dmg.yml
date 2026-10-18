@@ -16,9 +16,14 @@ on:
         required: false
         default: ""
 
+# workflow_dispatch always runs on the dispatched branch, so a
+# workflow+ref group cannot tell two builds apart: a dispatch with
+# different inputs could replace another's pending run. Key by the
+# distinguishing inputs and queue every run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.macos_version }}-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   build-macos-dmg-arm64-electron:

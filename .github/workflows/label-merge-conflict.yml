@@ -9,8 +9,11 @@ on:
 
 permissions: {}
 
+# github.ref is the default branch for pull_request_target, so a
+# workflow+ref group would let one PR's run cancel another's. Key by
+# PR number; push/dispatch sweeps get a unique group per run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:

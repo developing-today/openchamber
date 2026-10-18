@@ -19,8 +19,13 @@ on:
 permissions:
   contents: write
 
+# A workflow_dispatch run shares github.ref with push runs on the
+# same branch, and its distinguishing input is release_tag: without
+# it, a dispatch for one tag could cancel a push run (or another
+# dispatch for a different tag). Key by event and tag; same-event
+# pushes to main still supersede each other as intended.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.event.release.tag_name || inputs.release_tag }}
   cancel-in-progress: true
 
 jobs:
