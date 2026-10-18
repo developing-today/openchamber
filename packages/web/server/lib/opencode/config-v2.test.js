@@ -441,7 +441,7 @@ describe('web search choice', () => {
 
 describe('findWebSearchProjectOverride', () => {
   const userPath = '/home/u/.config/opencode/opencode.json';
-  const layers = (customConfig = {}, customPath = null) => ({ userConfig: { websearch: false }, projectConfig: {}, customConfig, paths: { userPath, projectPath: null, customPath } });
+  const layers = (customConfig = {}, customPath = null, userOverridePath = null) => ({ userConfig: { websearch: false }, projectConfig: {}, customConfig, paths: { userPath, projectPath: null, customPath, userOverridePath } });
 
   it('names the deepest project file that sets websearch', () => {
     const files = [
@@ -463,6 +463,23 @@ describe('findWebSearchProjectOverride', () => {
 
   it('ignores the user config showing up among project files', () => {
     expect(findWebSearchProjectOverride(layers(), [{ path: userPath, config: { websearch: false } }])).toBeNull();
+  });
+
+  it('excludes global JSON and JSONC files even when Settings writes an explicit config', () => {
+    const userOverridePath = '/home/u/.config/opencode/opencode.jsonc';
+    const files = [
+      { path: userOverridePath, config: { websearch: false } },
+      { path: userPath, config: { websearch: { provider: 'exa' } } },
+    ];
+    expect(findWebSearchProjectOverride(layers({}, '/custom/opencode.json', userOverridePath), files)).toBeNull();
+  });
+
+  it('continues to the winning project file after excluding global files', () => {
+    const files = [
+      { path: userPath, config: { websearch: false } },
+      { path: '/home/opencode.json', config: { websearch: { provider: 'exa' } } },
+    ];
+    expect(findWebSearchProjectOverride(layers({}, '/custom/opencode.json'), files)).toBe('/home/opencode.json');
   });
 
   it('is unlocked when the winning project file is the Settings write target', () => {

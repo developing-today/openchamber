@@ -177,7 +177,7 @@ export interface WebSearchConfigLayers {
   userConfig: object | null;
   projectConfig: object | null;
   customConfig: object | null;
-  paths: { userPath: string | null; projectPath: string | null; customPath?: string | null };
+  paths: { userPath: string | null; userOverridePath?: string | null; projectPath: string | null; customPath?: string | null };
 }
 export function findWebSearchProjectOverride(
   layers: WebSearchConfigLayers,
