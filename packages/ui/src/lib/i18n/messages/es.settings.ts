@@ -1352,6 +1352,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.new_chat.label": "Nueva sesión",
   "settings.openchamber.keyboardShortcuts.action.switch_session_previous.label": "Sesión anterior",
   "settings.openchamber.keyboardShortcuts.action.switch_session_next.label": "Sesión siguiente",
+  "settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label": "Sesión siguiente que necesita atención",
   "settings.openchamber.keyboardShortcuts.action.session_history_back.label": "Atrás en el historial de sesiones",
   "settings.openchamber.keyboardShortcuts.action.session_history_forward.label": "Adelante en el historial de sesiones",
   "settings.openchamber.keyboardShortcuts.action.archive_current_session.label": "Archivar sesión actual",

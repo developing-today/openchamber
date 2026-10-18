@@ -70,6 +70,7 @@ import { partitionSidebarZones, reuseUnchangedPartition, type SidebarZonePartiti
 import { useSidebarLiveStates, type LiveStateCandidate } from '../zones/useSidebarLiveStates';
 import { useOpenSessionHoldTracking, useOpenSessionOverride } from '../zones/openSessionHold';
 import { useSessionLeavePlanner } from '../zones/useSessionLeavePlanner';
+import { useNextAttentionSession } from '../zones/useNextAttentionSession';
 
 // A branch without a live change request is asked again when something could
 // have opened one: an agent turn finishing in its directory (at once), or the
@@ -997,6 +998,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     [ownership.bySessionId],
   );
   useSessionLeavePlanner(!topology.isVSCode, { layout: sidebarLayout, rowModel: sidebarRowModel, projectIdOf: projectIdOfSession });
+  useNextAttentionSession(!topology.isVSCode, { rowModel: sidebarRowModel, onOpen: selectSessionForProject });
   // An empty worktree group or folder is always open; a collapse saved from
   // when it had sessions is dropped, so the next session there shows at once.
   // Collapsing is the user's call again once there is something to hide.

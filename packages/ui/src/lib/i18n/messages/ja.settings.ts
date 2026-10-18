@@ -1385,6 +1385,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '新しい Session',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '前のセッション',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '次のセッション',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': '対応が必要な次のセッション',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': 'セッション履歴を戻る',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': 'セッション履歴を進む',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': '現在のセッションをアーカイブ',

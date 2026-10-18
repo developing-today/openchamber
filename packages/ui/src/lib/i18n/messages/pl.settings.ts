@@ -873,6 +873,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'Nowa sesja',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'Poprzednia sesja',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'Następna sesja',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': 'Następna sesja wymagająca uwagi',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': 'Wstecz w historii sesji',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': 'Dalej w historii sesji',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': 'Zarchiwizuj bieżącą sesję',

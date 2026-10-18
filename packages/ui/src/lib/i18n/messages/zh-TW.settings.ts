@@ -1241,6 +1241,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '新建工作階段',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '上一個工作階段',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '下一個工作階段',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': '下一個需要處理的工作階段',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': '在工作階段歷程中返回',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': '在工作階段歷程中前進',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': '封存目前的工作階段',

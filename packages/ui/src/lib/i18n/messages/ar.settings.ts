@@ -1355,6 +1355,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'جلسة جديدة',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'الجلسة السابقة',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'الجلسة التالية',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': 'الجلسة التالية التي تحتاج إلى انتباه',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': 'رجوع في سجل الجلسات',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': 'تقدّم في سجل الجلسات',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': 'أرشفة الجلسة الحالية',
