@@ -119,8 +119,10 @@ const getLatestAssistantTextMessage = (
  */
 const isSessionIdle = (sessionID: string, directory: string): boolean => {
   if (getSyncSessionStatus(sessionID, directory)?.type !== 'idle') return false;
-  return ![...computeSubtreeIds(getSyncSessions(directory), sessionID)]
-    .some((id) => id !== sessionID && getSessionLiveActivity(id) !== 'idle');
+  for (const id of computeSubtreeIds(getSyncSessions(directory), sessionID)) {
+    if (id !== sessionID && getSessionLiveActivity(id) !== 'idle') return false;
+  }
+  return true;
 };
 
 export const isAutoReviewRuntimeCurrent = (runtimeKey: string): boolean => runtimeKey === getRuntimeKey();

@@ -150,6 +150,16 @@ describe('subagent status rows', () => {
     expect(icon()).toBe('#oc-checkbox-circle');
   });
 
+  test('keeps a child working while the global status store sees a nested subagent running', async () => {
+    const grandchild: Session = { ...child, id: 'grandchild', parentID: child.id, title: 'Grandchild' };
+    await publish({ session: [parent, child, grandchild], sessionStatusReady: true, session_status: { child: { type: 'idle' } } });
+    expect(icon()).toBe('#oc-checkbox-circle');
+    await act(async () => useGlobalSessionStatusStore.setState({
+      statusById: new Map([['grandchild', { directory, status: { type: 'busy' } }]]),
+    }));
+    expect(icon()).toBe('#oc-record-circle');
+  });
+
   test('orders rows newest first by creation and sinks finished ones', async () => {
     const older: Session = { ...child, id: 'older', title: 'Older', time: { created: 2, updated: 50 } };
     const newer: Session = { ...child, id: 'newer', title: 'Newer', time: { created: 3, updated: 10 } };

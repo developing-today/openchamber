@@ -24,9 +24,9 @@ export const selectNewChildSessions = (
   const childrenByParent = new Map<string, Session[]>()
   for (const session of listed) {
     if (!session?.id || !session.parentID) continue
-    const siblings = childrenByParent.get(session.parentID) ?? []
-    siblings.push(session)
-    childrenByParent.set(session.parentID, siblings)
+    const siblings = childrenByParent.get(session.parentID)
+    if (siblings) siblings.push(session)
+    else childrenByParent.set(session.parentID, [session])
   }
   const added: Session[] = []
   const visited = new Set(parentIds)

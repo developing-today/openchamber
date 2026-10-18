@@ -26,8 +26,6 @@ type Props = {
 
 const SECTION_ID = 'subagents';
 
-const isRunningStatus = (type: string | undefined): boolean => type === 'busy' || type === 'retry';
-
 const SubagentDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const hasDuration = useHasSessionActivityDuration(sessionId, true);
   return hasDuration ? <SessionActivityDuration sessionId={sessionId} running /> : null;
@@ -79,15 +77,17 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   // child, so a child seen going busy and then settling is known to be idle
   // even when the directory snapshot does not cover it. The last turn's
   // outcome outlives the live status: a child that went idle after an error
-  // reads as failed, not done. Joined to a string so the selector stays
-  // stable while nothing about these children changes.
-  const observedChildren = useGlobalSessionStatusStore(React.useCallback((state) => children
-    .flatMap((child) => {
-      if (state.statusById.has(child.id)) return [`${child.id}\tbusy`];
-      const observed = state.observedById.get(child.id);
-      return observed ? [`${child.id}\t${observed.outcome === 'failed' ? 'failed' : 'settled'}`] : [];
+  // reads as failed, not done. Nested subagents are read the same way, since a
+  // running one keeps its child's row working. Joined to a string so the
+  // selector stays stable while nothing about these sessions changes.
+  const observedChildren = useGlobalSessionStatusStore(React.useCallback((state) => [...subtreeByChild.values()]
+    .flat()
+    .flatMap((id) => {
+      if (state.statusById.has(id)) return [`${id}\tbusy`];
+      const observed = state.observedById.get(id);
+      return observed ? [`${id}\t${observed.outcome === 'failed' ? 'failed' : 'settled'}`] : [];
     })
-    .join('\n'), [children]));
+    .join('\n'), [subtreeByChild]));
 
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -130,14 +130,20 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     if (id && observed) observedById.set(id, observed);
   }
   const panelDirectory = normalizePath(directory);
+  // A session runs while its live status says so or, with no live status yet,
+  // while the global store saw it go busy. The same test covers the child and
+  // everything it launched.
+  const isRunning = (id: string): boolean => {
+    const type = statuses[id]?.type;
+    return type === 'busy' || type === 'retry' || (!type && observedById.get(id) === 'busy');
+  };
   const rows = children.map((child) => {
     const subtree = subtreeByChild.get(child.id) ?? [child.id];
     const blocked = subtree.some((id) => (permissions[id]?.length ?? 0) > 0);
     const asked = subtree.some((id) => (forms[id]?.length ?? 0) > 0);
     const status = statuses[child.id]?.type;
     const observed = observedById.get(child.id);
-    const busy = isRunningStatus(status) || (!status && observed === 'busy')
-      || subtree.some((id) => id !== child.id && isRunningStatus(statuses[id]?.type));
+    const busy = subtree.some(isRunning);
     const failed = !busy && observed === 'failed';
     // The snapshot only speaks for its own directory. Paths are compared
     // normalized: OpenCode may report a child's directory with a trailing
