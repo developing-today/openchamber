@@ -15,8 +15,27 @@ jobs:
     permissions:
       issues: write
     steps:
+      # The bot needs this repository's own GitHub App. A repository
+      # that has not installed it has no OC_REVIEW_APP_* secrets: detect that
+      # here (the values themselves are never printed) so the help command
+      # skips cleanly instead of failing in its token step (#73; same gate
+      # pr-review got in #62 and issue-intake got in #66).
+      - name: Check bot app configuration
+        id: review-app
+        env:
+          REVIEW_APP_ID: ${{ secrets.OC_REVIEW_APP_ID }}
+          REVIEW_APP_PRIVATE_KEY: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$REVIEW_APP_ID" ] && [ -n "$REVIEW_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::OpenChamber bot app is not configured for this repository (OC_REVIEW_APP_ID / OC_REVIEW_APP_PRIVATE_KEY secrets are unset); skipping bot help."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate bot app token
         id: app-token
+        if: steps.review-app.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
@@ -24,6 +43,7 @@ jobs:
 
       - name: Acknowledge help command
         id: reaction
+        if: steps.review-app.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COMMENT_ID: ${{ github.event.comment.id }}
@@ -38,6 +58,7 @@ jobs:
           echo "reaction_id=$reaction_id" >> "$GITHUB_OUTPUT"
 
       - name: Post help
+        if: steps.review-app.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}

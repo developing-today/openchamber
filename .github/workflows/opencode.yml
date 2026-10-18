@@ -26,19 +26,40 @@ jobs:
       pull-requests: read
       issues: read
     steps:
+      # The bot needs this repository's own GitHub App. A repository
+      # that has not installed it has no OC_REVIEW_APP_* secrets: detect that
+      # here (the values themselves are never printed) so the command
+      # skips cleanly instead of failing in its token step (#73; same gate
+      # pr-review got in #62 and issue-intake got in #66).
+      - name: Check bot app configuration
+        id: review-app
+        env:
+          REVIEW_APP_ID: ${{ secrets.OC_REVIEW_APP_ID }}
+          REVIEW_APP_PRIVATE_KEY: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$REVIEW_APP_ID" ] && [ -n "$REVIEW_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::OpenChamber bot app is not configured for this repository (OC_REVIEW_APP_ID / OC_REVIEW_APP_PRIVATE_KEY secrets are unset); skipping opencode."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate bot app token
         id: app-token
+        if: steps.review-app.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
           private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
 
       - name: Checkout repository
+        if: steps.review-app.outputs.configured == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Run opencode
+        if: steps.review-app.outputs.configured == 'true'
         uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a # github-v1.2.19
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
