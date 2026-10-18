@@ -4,7 +4,8 @@ import type { SessionSidebarNavigationEntry } from '../sessionSidebarRowModel';
  * The next session that needs attention, for the keyboard shortcut: the first
  * attention-section entry in the order the sidebar draws them, after the one
  * open now, wrapping around at the end. A session drawn twice (its zone and
- * its project) counts once, at its first place. When the open session is not
+ * its project) counts once, at its attention entry's place, whichever section
+ * the sidebar draws first. When the open session is not
  * itself in an attention section — or none is open — the first attention
  * entry wins. Null when nothing needs attention.
  */
@@ -16,9 +17,10 @@ export const resolveNextAttentionEntry = (
   const seen = new Set<string>();
   const attention: SessionSidebarNavigationEntry[] = [];
   for (const entry of entries) {
+    if (!isAttentionContainer(entry.containerKey)) continue;
     if (seen.has(entry.sessionId)) continue;
     seen.add(entry.sessionId);
-    if (isAttentionContainer(entry.containerKey)) attention.push(entry);
+    attention.push(entry);
   }
   if (attention.length === 0) return null;
   const currentIndex = currentSessionId === null
