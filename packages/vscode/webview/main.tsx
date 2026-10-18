@@ -2065,8 +2065,8 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     }
 
     // Forms replaced questions in OpenCode 2.x: one titled request the user answers.
-    // A form or permission request opens in the top-level session above the one
-    // that asked, whose composer docks every request in its tree.
+    // A form or permission request opens in the highest session above the one
+    // that asked in the same directory, whose composer docks every request below it.
     if (syncEvent.type === 'form.created') {
       if (!settings.notifyOnQuestion) return;
       const header = syncEvent.properties.form.title;

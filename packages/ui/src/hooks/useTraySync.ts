@@ -64,9 +64,10 @@ type TrayApproval = {
   sessionId: string;
   sessionTitle: string;
   label: string;
-  // Where the tray opens the request: the top-level session above the one that
-  // asked, whose composer docks every request in its tree. A page that waits
-  // for an answer is drawn only in its own session, so it opens there.
+  // Where the tray opens the request: the highest session above the one that
+  // asked in the same directory, whose composer docks every request below it.
+  // A page that waits for an answer is drawn only in its own session, so it
+  // opens there.
   openSessionId: string;
   openDirectory: string;
   // Whether responding "always" would remember anything. Forms never can, and a
@@ -124,7 +125,7 @@ const permissionLabel = (request: BlockingPermissionRequest): string => {
 
 const formLabel = (request: BlockingFormRequest): string => request.title.trim() || 'Question';
 
-// The directory is the top-level session's own, else the one the request came from.
+// The directory is the asking session's own, else the one the request came from.
 const answeredFrom = (sessionId: string, directory: string): Pick<TrayApproval, 'openSessionId' | 'openDirectory'> => {
   const root = resolveBlockingRequestRoot(sessionId);
   return { openSessionId: root.sessionID, openDirectory: root.directory ?? directory };

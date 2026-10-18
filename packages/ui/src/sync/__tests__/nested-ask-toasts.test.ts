@@ -13,7 +13,8 @@ import { createEventRoutingIndex, handleEvent } from "../sync-context"
 import { setSyncRefs } from "../sync-refs"
 
 // A permission request or form raised by a subagent at any depth is docked in
-// the composer of the top-level session above it, so its toast opens that one.
+// the composer of the highest session above it in the same directory, the
+// top-level one here, so its toast opens that one.
 
 const session = (id: string, parentID?: string): Session => ({
   id, parentID, directory: "/repo", projectID: "project", title: id,

@@ -257,16 +257,23 @@ describe('phone text for permissions and questions', () => {
 });
 
 // A permission request or question raised by a subagent at any depth is
-// answered from the top-level session above it, whose composer docks every
-// request in its tree, so the alert opens that session. Its text still names
-// the session that asked.
+// answered from the highest session above it in the same directory, whose
+// composer docks every request below it, so the alert opens that session. Its
+// text still names the session that asked.
 describe('alerts about a nested subagent\'s request', () => {
-  // OpenCode answers `GET /api/session/:id` as `{ data }`: root → child → grandchild.
-  const parentById = { ses_root: undefined, ses_child: 'ses_root', ses_grandchild: 'ses_child' };
-  const stubLineage = () => vi.stubGlobal('fetch', vi.fn(async (input) => {
+  // OpenCode answers `GET /api/session/:id` as `{ data }`, with the session's
+  // current directory as `location.directory`. The default tree is root →
+  // child → grandchild, all in /repo.
+  const sameDirectory = {
+    ses_root: { directory: '/repo' },
+    ses_child: { parentID: 'ses_root', directory: '/repo' },
+    ses_grandchild: { parentID: 'ses_child', directory: '/repo' },
+  };
+  const stubLineage = (records = sameDirectory) => vi.stubGlobal('fetch', vi.fn(async (input) => {
     const id = decodeURIComponent(new URL(String(input)).pathname.replace('/api/session/', ''));
-    if (!(id in parentById)) return { ok: false, json: async () => null };
-    return { ok: true, json: async () => ({ data: { id, parentID: parentById[id] } }) };
+    const record = records[id];
+    if (!record) return { ok: false, json: async () => null };
+    return { ok: true, json: async () => ({ data: { id, parentID: record.parentID, location: { directory: record.directory } } }) };
   }));
   const makeNestedRuntime = () => {
     const emitDesktopNotification = vi.fn(() => true);
@@ -310,9 +317,7 @@ describe('alerts about a nested subagent\'s request', () => {
       }, sendApnsToAllUiSessions);
 
       const native = emitDesktopNotification.mock.calls[0][0];
-      expect(native).toMatchObject({ kind: 'permission', sessionId: 'ses_root', tag: 'permission-ses_grandchild:per_1' });
-      // The event names the grandchild's directory; the app finds the root's own.
-      expect(native.directory).toBeUndefined();
+      expect(native).toMatchObject({ kind: 'permission', sessionId: 'ses_root', directory: '/repo', tag: 'permission-ses_grandchild:per_1' });
       expect(broadcastUiNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_root' });
       expect(sendPushToAllUiSessions.mock.calls[0][0].data).toMatchObject({ url: '/?session=ses_root', sessionId: 'ses_root', sessionName: 'Level two' });
       expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ body: 'Level two', data: { sessionId: 'ses_root' } });
@@ -347,6 +352,47 @@ describe('alerts about a nested subagent\'s request', () => {
       }, emitDesktopNotification);
 
       expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_root', directory: '/repo' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // A moved subagent's requests live in its new directory, and an ancestor's
+  // dock reads only its own directory.
+  it('opens a moved subagent\'s request in the highest session of its new directory', async () => {
+    stubLineage({
+      ses_root: { directory: '/repo' },
+      ses_child: { parentID: 'ses_root', directory: '/worktree' },
+      ses_grandchild: { parentID: 'ses_child', directory: '/worktree' },
+    });
+    try {
+      const { runtime, emitDesktopNotification, sendPushToAllUiSessions } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'permission.asked',
+        properties: { sessionID: 'ses_grandchild', directory: '/worktree', id: 'per_3', action: 'bash', resources: ['ls'] },
+      }, sendPushToAllUiSessions);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_child', directory: '/worktree' });
+      expect(sendPushToAllUiSessions.mock.calls[0][0].data).toMatchObject({ url: '/?session=ses_child', sessionId: 'ses_child' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps a question in its own session when the subagent above it moved away', async () => {
+    stubLineage({
+      ses_root: { directory: '/repo' },
+      ses_child: { parentID: 'ses_root', directory: '/elsewhere' },
+      ses_grandchild: { parentID: 'ses_child', directory: '/repo' },
+    });
+    try {
+      const { runtime, emitDesktopNotification } = makeNestedRuntime();
+      await trigger(runtime, {
+        type: 'form.created',
+        properties: { sessionID: 'ses_grandchild', directory: '/repo', form: { id: 'frm_2', sessionID: 'ses_grandchild', title: 'Pick a layout', fields: [] } },
+      }, emitDesktopNotification);
+
+      expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_grandchild', directory: '/repo' });
     } finally {
       vi.unstubAllGlobals();
     }

@@ -34,9 +34,9 @@ describe('tray approval submenu', () => {
   });
 });
 
-// A subagent's request is answered from the top-level session above it, whose
-// composer docks every request in its tree; the reply still goes to the
-// subagent that asked, and the row still names it.
+// A subagent's request is answered from the session the renderer names as
+// `openSessionId`; the reply still goes to the subagent that asked, and the
+// row still names it.
 describe('tray approvals from a nested subagent', () => {
   const fromGrandchild = (overrides) => ({
     id: 'p1', kind: 'permission', sessionId: 'grandchild', sessionTitle: 'Level two', label: 'bash: echo ok',

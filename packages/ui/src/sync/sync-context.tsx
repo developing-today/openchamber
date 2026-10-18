@@ -581,9 +581,9 @@ const getFormToastKey = (sessionID?: string, requestID?: string) => {
 const FORM_TOAST_DESCRIPTION = "Agent is waiting for your input"
 
 /**
- * "Open session" on a question or permission toast opens the top-level session
- * above the one that asked, whose composer docks every request in its tree,
- * and brings that request into view there.
+ * "Open session" on a question or permission toast opens the highest session
+ * above the one that asked in the same directory, whose composer docks every
+ * request below it, and brings that request into view there.
  */
 const openRequestFromToast = (sessionID: string, directory: string, requestID: string) => {
   const root = resolveBlockingRequestRoot(sessionID)

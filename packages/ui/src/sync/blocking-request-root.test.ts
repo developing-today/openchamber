@@ -14,11 +14,25 @@ const known = (...sessions: Session[]) => useGlobalSessionsStore.getState().appl
 describe("the session a blocking request is answered from", () => {
   afterEach(() => useGlobalSessionsStore.getState().resetForRuntimeSwitch())
 
-  test("is the top-level session above a request raised at any depth, in that session's directory", () => {
-    known(session("root", undefined, "/root-dir"), session("child", "root"), session("grandchild", "child"), session("great", "grandchild"))
+  test("is the top-level session above a request raised at any depth in one directory", () => {
+    known(session("root"), session("child", "root"), session("grandchild", "child"), session("great", "grandchild"))
 
-    expect(resolveBlockingRequestRoot("great")).toEqual({ sessionID: "root", directory: "/root-dir" })
-    expect(resolveBlockingRequestRoot("root")).toEqual({ sessionID: "root", directory: "/root-dir" })
+    expect(resolveBlockingRequestRoot("great")).toEqual({ sessionID: "root", directory: "/repo" })
+    expect(resolveBlockingRequestRoot("root")).toEqual({ sessionID: "root", directory: "/repo" })
+  })
+
+  // A moved subagent's requests live in its new directory's store, and an
+  // ancestor's dock reads only its own directory's store.
+  test("stays in the directory of a subagent that moved, below the ancestors it left", () => {
+    known(session("root"), session("child", "root", "/worktree"), session("grandchild", "child", "/worktree"))
+
+    expect(resolveBlockingRequestRoot("grandchild")).toEqual({ sessionID: "child", directory: "/worktree" })
+  })
+
+  test("stops below an intermediate subagent that moved to another directory", () => {
+    known(session("root"), session("child", "root", "/elsewhere"), session("grandchild", "child"))
+
+    expect(resolveBlockingRequestRoot("grandchild")).toEqual({ sessionID: "grandchild", directory: "/repo" })
   })
 
   test("stops at the highest session this client knows", () => {

@@ -3,23 +3,31 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/
 import { getAllSyncSessionMap } from "./sync-refs"
 
 /**
- * The session a permission request or form is answered from: the top-level
- * session above the one that raised it. That session's composer docks every
- * request raised anywhere in its tree, so each alert about one opens it there.
- * The walk climbs through the sessions this client holds a record for and
- * stops at the highest of them; `directory` is that session's own, or null
- * when it holds no record of the session that asked either.
+ * The session a permission request or form is answered from: the highest
+ * session above the one that raised it that still runs in the same directory.
+ * Its composer docks every request raised below it from that directory's
+ * store. A subagent moved to another directory takes its requests to that
+ * directory's store, which no dock above the move reads, so the walk stops
+ * before an ancestor in another directory. It climbs only through sessions
+ * this client holds a record for; `directory` is the asking session's own, or
+ * null when no record of that session, or no directory on it, is held.
  */
 export const resolveBlockingRequestRoot = (sessionID: string) => {
   const live = getAllSyncSessionMap()
   const cached = useGlobalSessionsStore.getState().entityById
   const recordOf = (id: string | undefined): Session | undefined => (id ? live.get(id) ?? cached.get(id) : undefined)
-  let root = recordOf(sessionID)
-  if (!root) return { sessionID, directory: null }
-  const seen = new Set([root.id])
-  for (let parent = recordOf(root.parentID); parent && !seen.has(parent.id); parent = recordOf(parent.parentID)) {
+  const asking = recordOf(sessionID)
+  const directory = asking ? resolveGlobalSessionDirectory(asking) : null
+  if (!asking || directory === null) return { sessionID, directory }
+  let root = asking
+  const seen = new Set([asking.id])
+  for (
+    let parent = recordOf(asking.parentID);
+    parent && !seen.has(parent.id) && resolveGlobalSessionDirectory(parent) === directory;
+    parent = recordOf(parent.parentID)
+  ) {
     seen.add(parent.id)
     root = parent
   }
-  return { sessionID: root.id, directory: resolveGlobalSessionDirectory(root) }
+  return { sessionID: root.id, directory }
 }

@@ -36,10 +36,10 @@ const approvalLabel = (approval) => {
   return `${icon} ${who} — ${what}`;
 };
 
-// A request opens where it is answered: the top-level session above a
-// subagent that asked, which the renderer names as `openSessionId`. A snapshot
-// from an older OpenChamber on a remote host has none and opens the session
-// that asked.
+// A request opens where it is answered, which the renderer names as
+// `openSessionId`: for a subagent's request, the highest session above it in
+// the same directory. A snapshot from an older OpenChamber on a remote host has
+// none and opens the session that asked.
 const openApprovalAction = (approval) => (approval.openSessionId
   ? { type: 'focus-session', sessionId: approval.openSessionId, directory: approval.openDirectory || '' }
   : { type: 'focus-session', sessionId: approval.sessionId, directory: approval.directory || '' });

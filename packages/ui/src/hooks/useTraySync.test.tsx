@@ -218,9 +218,9 @@ describe('tray approvals', () => {
     expect(canSaveById()).toEqual({ 'seed-save': true, 'seed-once': false });
   });
 
-  // A subagent's permission or form is answered from the top-level session
-  // above it, whose composer docks every request in its tree. A page that
-  // waits for an answer is drawn only in its own session.
+  // A subagent's permission or form is answered from the highest session above
+  // it in the same directory, the top-level one here. A page that waits for an
+  // answer is drawn only in its own session.
   test('a nested subagent\'s requests open the root, and its waiting page opens its own session', async () => {
     useGlobalSessionsStore.getState().applySnapshot([session('root'), session('child', 'root'), session('grandchild', 'child')], [], 'ready');
     await act(async () => root.render(<Harness />));
