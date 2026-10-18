@@ -152,7 +152,8 @@ describe('subagent status rows', () => {
 
   test('keeps a child working while the global status store sees a nested subagent running', async () => {
     const grandchild: Session = { ...child, id: 'grandchild', parentID: child.id, title: 'Grandchild' };
-    await publish({ session: [parent, child, grandchild], sessionStatusReady: true, session_status: { child: { type: 'idle' } } });
+    // The directory store can still report idle after the global store saw the session go busy.
+    await publish({ session: [parent, child, grandchild], sessionStatusReady: true, session_status: { child: { type: 'idle' }, grandchild: { type: 'idle' } } });
     expect(icon()).toBe('#oc-checkbox-circle');
     await act(async () => useGlobalSessionStatusStore.setState({
       statusById: new Map([['grandchild', { directory, status: { type: 'busy' } }]]),

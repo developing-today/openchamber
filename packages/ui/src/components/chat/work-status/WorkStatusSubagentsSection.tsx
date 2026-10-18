@@ -130,12 +130,13 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     if (id && observed) observedById.set(id, observed);
   }
   const panelDirectory = normalizePath(directory);
-  // A session runs while its live status says so or, with no live status yet,
-  // while the global store saw it go busy. The same test covers the child and
-  // everything it launched.
+  // A session runs while its live status or the global store says so. The
+  // global store can learn of a busy turn before the directory snapshot does,
+  // so a busy report outranks an idle one, as in `getSessionLiveActivity`. The
+  // same test covers the child and everything it launched.
   const isRunning = (id: string): boolean => {
     const type = statuses[id]?.type;
-    return type === 'busy' || type === 'retry' || (!type && observedById.get(id) === 'busy');
+    return type === 'busy' || type === 'retry' || observedById.get(id) === 'busy';
   };
   const rows = children.map((child) => {
     const subtree = subtreeByChild.get(child.id) ?? [child.id];

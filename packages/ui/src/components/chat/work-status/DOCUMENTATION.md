@@ -127,8 +127,11 @@ Subagent status uses the Tasks section's leading icons: blue for busy/retrying,
 green for idle, and a neutral clock while status is unknown. A successful status
 snapshot also establishes idle for omitted sessions in that same directory,
 compared as normalized paths and skipping sessions whose status was invalidated.
-The global status store fills the gap for children the snapshot does not cover:
-a child it holds as busy runs, and one it saw settle is idle (or failed).
+The global status store fills the gaps. A session it holds as busy runs even
+while the directory still reports it idle, because the global store can hear of
+a new turn first. A child it saw settle is idle (or failed) when the snapshot
+does not cover it. A row reads its nested subagents the same way, so a running
+descendant keeps the child's row working.
 Permission requests and questions take precedence with a warning icon and text.
 Running rows reuse `SessionActivityDuration` and its shared one-second ticker
 for the current turn's elapsed time, including retries and waiting within that
