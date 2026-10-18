@@ -1,21 +1,21 @@
 import React, { act } from 'react';
-import { expect, mock, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
+import { toast } from '@/components/ui';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { NotificationPayload } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 import { createWebNotificationsAPI } from '../../../web/src/api/notifications';
 
-const infoToasts: Array<{ title: string; id?: string; description?: string }> = [];
+const infoToasts: Array<{ message: Parameters<typeof toast.info>[0]; options: Parameters<typeof toast.info>[1] }> = [];
 
-mock.module('@/components/ui', () => ({
-  toast: {
-    info: (title: string, options?: { id?: string; description?: string }) => {
-      infoToasts.push({ title, id: options?.id, description: options?.description });
-    },
-  },
-}));
+// Spy on the real toast object: mock.module('@/components/ui') stays
+// registered for every later test file in the process and breaks them (#46).
+const infoToastSpy = spyOn(toast, 'info').mockImplementation((message, options) => {
+  infoToasts.push({ message, options });
+  return 'notification-toast';
+});
 
 class EventSourceFixture {
   static CLOSED = 2;
@@ -83,7 +83,7 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
     const pluginPayload = { title: 'Build done', body: 'Ready to review', kind: 'plugin', tag: 'plugin-build', requireHidden: true, showWhenFocused: true };
     await act(async () => source.emit(pluginPayload));
     expect(delivered).toEqual(['Done']);
-    expect(infoToasts).toEqual([{ title: 'Build done', id: 'plugin-build', description: 'Ready to review' }]);
+    expect(infoToasts).toEqual([{ message: 'Build done', options: { id: 'plugin-build', description: 'Ready to review' } }]);
 
     source.emit({ title: 123 });
     expect(delivered).toEqual(['Done']);
@@ -110,6 +110,7 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
     expect(delivered).toEqual(['Done', 'New runtime']);
     expect(next.readyState).toBe(1); // Other control consumers still own it.
   } finally {
+    infoToastSpy.mockRestore();
     await act(async () => root.unmount());
     unsubscribeControl();
     configureRuntimeUrlResolver({});
