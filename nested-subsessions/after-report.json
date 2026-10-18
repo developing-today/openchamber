@@ -1,0 +1,172 @@
+{
+  "label": "after",
+  "result": "passed",
+  "checks": [
+    "The scripted model attached to the simulated provider",
+    "The general subagent saw the subagent tool and launched a grandchild",
+    "Root, child and grandchild all stay running while the grandchild waits for permission",
+    "The root's permission dock labels the grandchild's request as coming from a subagent",
+    "Work Status shows the grandchild's permission on the Level one row",
+    "After the permission, the grandchild, child and root each finished with their scripted answers",
+    "With only the root archived, neither subsession appears as a row of its own"
+  ],
+  "observed": {
+    "fromSubagentLabel": true,
+    "levelOneNeedsPermission": true
+  },
+  "leakedRows": 0,
+  "pageErrors": [],
+  "cleanedUp": true,
+  "requests": [
+    {
+      "kind": "title",
+      "reason": "stop"
+    },
+    {
+      "kind": "level-0",
+      "answered": false,
+      "tools": [
+        "edit",
+        "glob",
+        "grep",
+        "mcpx_discover",
+        "mcpx_exec",
+        "mcpx_project",
+        "mcpx_retract",
+        "plan_info",
+        "pty",
+        "question",
+        "read",
+        "shell",
+        "skill",
+        "subagent",
+        "webfetch",
+        "websearch",
+        "write",
+        "execute"
+      ],
+      "reason": "tool-calls"
+    },
+    {
+      "kind": "level-1",
+      "answered": false,
+      "tools": [
+        "edit",
+        "glob",
+        "grep",
+        "mcpx_discover",
+        "mcpx_exec",
+        "mcpx_project",
+        "mcpx_retract",
+        "plan_info",
+        "pty",
+        "read",
+        "shell",
+        "skill",
+        "subagent",
+        "webfetch",
+        "websearch",
+        "write",
+        "execute"
+      ],
+      "reason": "tool-calls"
+    },
+    {
+      "kind": "level-2",
+      "answered": false,
+      "tools": [
+        "edit",
+        "glob",
+        "grep",
+        "mcpx_discover",
+        "mcpx_exec",
+        "mcpx_project",
+        "mcpx_retract",
+        "plan_info",
+        "pty",
+        "read",
+        "shell",
+        "skill",
+        "subagent",
+        "webfetch",
+        "websearch",
+        "write",
+        "execute"
+      ],
+      "reason": "tool-calls"
+    },
+    {
+      "kind": "level-2",
+      "answered": true,
+      "tools": [
+        "edit",
+        "glob",
+        "grep",
+        "mcpx_discover",
+        "mcpx_exec",
+        "mcpx_project",
+        "mcpx_retract",
+        "plan_info",
+        "pty",
+        "read",
+        "shell",
+        "skill",
+        "subagent",
+        "webfetch",
+        "websearch",
+        "write",
+        "execute"
+      ],
+      "reason": "stop"
+    },
+    {
+      "kind": "level-1",
+      "answered": true,
+      "tools": [
+        "edit",
+        "glob",
+        "grep",
+        "mcpx_discover",
+        "mcpx_exec",
+        "mcpx_project",
+        "mcpx_retract",
+        "plan_info",
+        "pty",
+        "read",
+        "shell",
+        "skill",
+        "subagent",
+        "webfetch",
+        "websearch",
+        "write",
+        "execute"
+      ],
+      "reason": "stop"
+    },
+    {
+      "kind": "level-0",
+      "answered": true,
+      "tools": [
+        "edit",
+        "glob",
+        "grep",
+        "mcpx_discover",
+        "mcpx_exec",
+        "mcpx_project",
+        "mcpx_retract",
+        "plan_info",
+        "pty",
+        "question",
+        "read",
+        "shell",
+        "skill",
+        "subagent",
+        "webfetch",
+        "websearch",
+        "write",
+        "execute"
+      ],
+      "reason": "stop"
+    }
+  ]
+}
