@@ -11,7 +11,8 @@ import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
-import { computeSubtreeIds } from "./scoped-blocking-requests"
+import { blockingRequestLineage, computeSubtreeIds, type SessionLookup } from "./scoped-blocking-requests"
+import { sessionRecordLookup } from "./blocking-request-root"
 import { opencodeClient, type SyntheticContextInput } from "@/lib/opencode/client"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
@@ -2367,10 +2368,27 @@ export async function dismissPermission(
 }
 
 /**
+ * The sessions of one store whose pending requests a send from `sessionId`
+ * supersedes: its subtree in that store's session list, and every session
+ * whose requests its dock shows, which can sit below a parent the store
+ * trimmed.
+ */
+const supersededRequestSessions = (
+  sessions: Session[],
+  requestSessionIds: string[],
+  sessionId: string,
+  lookup: SessionLookup,
+): string[] => {
+  const subtree = computeSubtreeIds(sessions, sessionId)
+  return requestSessionIds.filter((id) => subtree.has(id) || blockingRequestLineage(id, lookup).includes(sessionId))
+}
+
+/**
  * Dismiss every pending permission for the session subtree rooted at `sessionId`
- * (the session itself plus any subagent children). Used by the chat send path:
- * sending a message while a permission prompt is open must cancel/supersede the
- * open permission so it cannot linger or block the new turn.
+ * (the session itself plus any subagent below it, and every request its dock
+ * shows). Used by the chat send path: sending a message while a permission
+ * prompt is open must cancel/supersede the open permission so it cannot linger
+ * or block the new turn.
  *
  * The permissions are removed from the local store OPTIMISTICALLY (before any
  * network call) so the prompt disappears instantly instead of waiting on the
@@ -2394,15 +2412,12 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
   if (!stores) return false
 
   const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; permission: PermissionRequest }> = []
+  const lookup = sessionRecordLookup()
   for (const [, store] of stores.children) {
     const state = store.getState()
-    const scopedIds = computeSubtreeIds(state.session, sessionId)
-    if (scopedIds.size === 0) continue
     const permissionsBySession = state.permission ?? {}
-    for (const scopedId of scopedIds) {
-      const requests = permissionsBySession[scopedId]
-      if (!requests) continue
-      for (const request of requests) {
+    for (const scopedId of supersededRequestSessions(state.session, Object.keys(permissionsBySession), sessionId, lookup)) {
+      for (const request of permissionsBySession[scopedId] ?? []) {
         toDismiss.push({ store, sessionId: scopedId, permission: request })
       }
     }
@@ -2488,9 +2503,10 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
 
 /**
  * Cancel every pending form for the session subtree rooted at `sessionId` (the
- * session itself plus any subagent children). Used by the chat send path:
- * sending a message while a form is open must supersede it so it cannot linger
- * or strand the session in a half-answered state.
+ * session itself plus any subagent below it, and every form its dock shows).
+ * Used by the chat send path: sending a message while a form is open must
+ * supersede it so it cannot linger or strand the session in a half-answered
+ * state.
  *
  * The forms are removed from the local store OPTIMISTICALLY (before any network
  * call) so the prompt disappears instantly instead of waiting on the round
@@ -2514,15 +2530,12 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   if (!stores) return false
 
   const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; form: FormRequest }> = []
+  const lookup = sessionRecordLookup()
   for (const [, store] of stores.children) {
     const state = store.getState()
-    const scopedIds = computeSubtreeIds(state.session, sessionId)
-    if (scopedIds.size === 0) continue
     const formsBySession: Record<string, FormRequest[]> = state.form ?? {}
-    for (const scopedId of scopedIds) {
-      const requests = formsBySession[scopedId]
-      if (!requests) continue
-      for (const request of requests) {
+    for (const scopedId of supersededRequestSessions(state.session, Object.keys(formsBySession), sessionId, lookup)) {
+      for (const request of formsBySession[scopedId] ?? []) {
         toDismiss.push({ store, sessionId: scopedId, form: request })
       }
     }

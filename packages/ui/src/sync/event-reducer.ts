@@ -758,9 +758,9 @@ export function applyDirectoryEvent(
 function trimSessions(draft: State) {
   if (draft.session.length <= draft.limit) return
   // Sessions with a pending permission or form stay and do not count toward
-  // the limit, and so does every ancestor of one: the composer of each
-  // session above a request finds it by following parent links through this
-  // list, at any depth.
+  // the limit, and so does every ancestor of one: the walk from a request to
+  // the session that docks it climbs through their records, and this list
+  // holds them when the global session list does not.
   const kept = blockingSessionsWithAncestors(draft)
   // Drop the oldest by creation time. The array is sorted by id, and session
   // ids descend with time, so its head holds the newest session: trimming by

@@ -46,7 +46,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
-import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
+import { setSyncRefs, getAllSyncSessions, getAllSyncSessionMap, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { upsertSessionRecord } from "./session-records"
@@ -119,7 +119,7 @@ import {
   type SessionMaterializationRequest,
 } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
-import { resolveBlockingRequestRoot } from "./blocking-request-root"
+import { resolveBlockingRequestRoot, sessionRecordLookup } from "./blocking-request-root"
 import { revealRequest } from "./request-reveal"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
@@ -130,7 +130,12 @@ import { formatMessage, useI18nStore } from "@/lib/i18n"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
 import { listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from "@/stores/globalSessions"
-import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
+import {
+  areRequestArraysReferentiallyEqual,
+  collectScopedBlockingRequests,
+  isSubagentRequest,
+  type SessionLookup,
+} from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
@@ -3698,28 +3703,43 @@ const selectPermissionRequestsBySession = (state: State) => state.permission
 const selectFormRequestsBySession = (state: State) => state.form
 
 /**
- * Forms for the composer of `sessionID`: the session subtree's own, then the
- * directory's location-scoped ones. A location-scoped form has no session to
- * be viewed from, so every session of its directory offers it; the answer is
- * still sent to that directory's OpenCode instance because the reply
- * resolves its directory from the store that holds the form.
+ * Forms for the composer of `sessionID`: the ones whose lineage reaches that
+ * session, then the directory's location-scoped ones. A location-scoped form
+ * has no session to be viewed from, so every session of its directory offers
+ * it; the answer is still sent to that directory's OpenCode instance because
+ * the reply resolves its directory from the store that holds the form.
  */
 export const collectComposerForms = (
-  sessions: Session[],
   formsBySession: Record<string, FormRequest[] | undefined>,
   sessionID: string | null,
+  lookup: SessionLookup,
   empty: FormRequest[],
 ): FormRequest[] => {
-  const own = collectScopedBlockingRequests(sessions, formsBySession, sessionID, empty)
+  const own = collectScopedBlockingRequests(formsBySession, sessionID, lookup, empty)
   const locationScoped = sessionID ? formsBySession[LOCATION_SCOPED_FORM_SESSION_ID] : undefined
   if (!locationScoped || locationScoped.length === 0) return own
   return own === empty ? locationScoped : [...own, ...locationScoped]
 }
 
+/**
+ * Follows the records a request's lineage reads (`sessionRecordLookup`): the
+ * store that holds the requests, which holds its directory's sessions, and the
+ * global session list, which keeps the sessions a store trimmed.
+ */
+const subscribeBlockingRequestLineage = (store: StoreApi<DirectoryStore>, notify: () => void) => {
+  const unsubscribeStore = store.subscribe(notify)
+  const unsubscribeGlobal = useGlobalSessionsStore.subscribe(notify)
+  return () => {
+    unsubscribeStore()
+    unsubscribeGlobal()
+  }
+}
+
 type ScopedBlockingRequestCache<T extends { id: string }> = {
   sessionID: string | null
-  sessions: Session[] | null
   requestsBySession: Record<string, T[] | undefined> | null
+  live: ReadonlyMap<string, Session> | null
+  cached: ReadonlyMap<string, Session> | null
   result: T[]
 }
 
@@ -3729,43 +3749,41 @@ function useScopedBlockingRequests<T extends { id: string }>(
   selectRequestsBySession: (state: State) => Record<string, T[] | undefined>,
   empty: T[],
   collect: (
-    sessions: Session[],
     requestsBySession: Record<string, T[] | undefined>,
     sessionID: string | null,
+    lookup: SessionLookup,
     empty: T[],
   ) => T[] = collectScopedBlockingRequests,
 ): T[] {
+  const store = useDirectoryStore(directory)
   const cacheRef = useRef<ScopedBlockingRequestCache<T>>({
     sessionID: null,
-    sessions: null,
     requestsBySession: null,
+    live: null,
+    cached: null,
     result: empty,
   })
+  const getSnapshot = useCallback(() => {
+    const requestsBySession = selectRequestsBySession(store.getState())
+    const live = getAllSyncSessionMap()
+    const cached = useGlobalSessionsStore.getState().entityById
+    const cache = cacheRef.current
+    if (
+      cache.sessionID === sessionID
+      && cache.requestsBySession === requestsBySession
+      && cache.live === live
+      && cache.cached === cached
+    ) {
+      return cache.result
+    }
 
-  return useDirectorySync(
-    useCallback((state: State) => {
-      const requestsBySession = selectRequestsBySession(state)
-      const cache = cacheRef.current
-      if (
-        cache.sessionID === sessionID
-        && cache.sessions === state.session
-        && cache.requestsBySession === requestsBySession
-      ) {
-        return cache.result
-      }
-
-      const next = collect(state.session, requestsBySession, sessionID, empty)
-      const result = areRequestArraysReferentiallyEqual(cache.result, next) ? cache.result : next
-      cacheRef.current = {
-        sessionID,
-        sessions: state.session,
-        requestsBySession,
-        result,
-      }
-      return result
-    }, [collect, empty, selectRequestsBySession, sessionID]),
-    directory,
-  )
+    const next = collect(requestsBySession, sessionID, sessionRecordLookup(live, cached), empty)
+    const result = areRequestArraysReferentiallyEqual(cache.result, next) ? cache.result : next
+    cacheRef.current = { sessionID, requestsBySession, live, cached, result }
+    return result
+  }, [collect, empty, selectRequestsBySession, sessionID, store])
+  const subscribe = useCallback((notify: () => void) => subscribeBlockingRequestLineage(store, notify), [store])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 export function useScopedBlockingPermissions(sessionID: string | null, directory?: string): PermissionRequest[] {
@@ -3774,6 +3792,17 @@ export function useScopedBlockingPermissions(sessionID: string | null, directory
 
 export function useScopedBlockingForms(sessionID: string | null, directory?: string): FormRequest[] {
   return useScopedBlockingRequests(sessionID, directory, selectFormRequestsBySession, EMPTY_FORM_REQUESTS, collectComposerForms)
+}
+
+/** A docked request comes from a subagent below the viewed session, by the lineage the dock follows. */
+export function useSubagentRequest(requestSessionID: string, viewedSessionID: string | null, directory?: string): boolean {
+  const store = useDirectoryStore(directory)
+  const getSnapshot = useCallback(
+    () => isSubagentRequest(requestSessionID, viewedSessionID, sessionRecordLookup()),
+    [requestSessionID, viewedSessionID],
+  )
+  const subscribe = useCallback((notify: () => void) => subscribeBlockingRequestLineage(store, notify), [store])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 const sessionsByIdCache = new WeakMap<State["session"], Map<string, Session>>()

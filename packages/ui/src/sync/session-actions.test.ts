@@ -370,6 +370,7 @@ mock.module("./session-deletion-cleanup", () => ({
 }))
 
 mock.module("./sync-refs", () => ({
+  getAllSyncSessionMap: () => new Map(),
   getSyncSessionDirectory: () => null,
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
@@ -3109,6 +3110,28 @@ describe("dismissOpenFormsForSession", () => {
     formCancelError = null
   })
 
+  afterEach(() => {
+    globalActiveSessions = []
+  })
+
+  test("cancels a nested subagent's form after the store trimmed the parent between them", async () => {
+    const root = sessionFixture("session-a")
+    const grandchild = { ...sessionFixture("session-grandchild"), parentID: "session-child" }
+    globalActiveSessions = [root, { ...sessionFixture("session-child"), parentID: "session-a" }, grandchild]
+    const store = createStore({}, {
+      session: [grandchild, root],
+      form: { "session-grandchild": [buildForm("q-grandchild", "session-grandchild")] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-grandchild"])
+    expect(store.getState().form["session-grandchild"]).toBe(undefined)
+  })
+
   test("returns false and rejects nothing when no forms are pending", async () => {
     const store = createStore({}, { session: [{ id: "session-a", time: { created: 1 } } as Session] })
     const childStores = createChildStores([["/test/project", store]])
@@ -3270,6 +3293,30 @@ describe("dismissOpenPermissionsForSession", () => {
   beforeEach(() => {
     replyCalls.length = 0
     permissionReplyError = null
+  })
+
+  afterEach(() => {
+    globalActiveSessions = []
+  })
+
+  // The global session list still holds a parent the directory store dropped,
+  // so the root's dock shows its grandchild's request, and a send from the
+  // root supersedes every request its dock shows.
+  test("rejects a nested subagent's permission after the store trimmed the parent between them", async () => {
+    const root = sessionFixture("session-a")
+    const grandchild = { ...sessionFixture("session-grandchild"), parentID: "session-child" }
+    globalActiveSessions = [root, { ...sessionFixture("session-child"), parentID: "session-a" }, grandchild]
+    const store = createStore({ "session-grandchild": [buildPermission("perm-grandchild", "session-grandchild")] }, {
+      session: [grandchild, root],
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenPermissionsForSession } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    expect(await dismissOpenPermissionsForSession("session-a")).toBe(true)
+    expect(replyCalls.filter((call) => call.method === "permission.reply").map((call) => call.params.requestID)).toEqual(["perm-grandchild"])
+    expect(store.getState().permission["session-grandchild"]).toBe(undefined)
   })
 
   test("returns false and rejects nothing when no permissions are pending", async () => {

@@ -1,33 +1,32 @@
 import type { Session } from "@/lib/opencode/model"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { blockingRequestLineage, type SessionLookup } from "./scoped-blocking-requests"
 import { getAllSyncSessionMap } from "./sync-refs"
 
 /**
- * The session a permission request or form is answered from: the highest
- * session above the one that raised it that still runs in the same directory.
- * Its composer docks every request raised below it from that directory's
- * store. A subagent moved to another directory takes its requests to that
- * directory's store, which no dock above the move reads, so the walk stops
- * before an ancestor in another directory. It climbs only through sessions
- * this client holds a record for; `directory` is the asking session's own, or
- * null when no record of that session, or no directory on it, is held.
+ * Where every blocking-request lineage reads session records: the directory
+ * stores first, then the global session list. A directory store drops its
+ * oldest sessions past its limit, and the global list still holds a parent the
+ * store dropped before its subagent asked. Docks and the alerts about a request
+ * both use this lookup, so they agree on where the request is answered.
+ */
+export const sessionRecordLookup = (
+  live: ReadonlyMap<string, Session> = getAllSyncSessionMap(),
+  cached: ReadonlyMap<string, Session> = useGlobalSessionsStore.getState().entityById,
+): SessionLookup => (sessionID) => live.get(sessionID) ?? cached.get(sessionID)
+
+/**
+ * The session a permission request or form is answered from: the last one in
+ * its lineage, the highest session above the one that raised it that still
+ * runs in the same directory, whose composer docks it. `directory` is the
+ * asking session's own, or null when no record of that session, or no
+ * directory on it, is held.
  */
 export const resolveBlockingRequestRoot = (sessionID: string) => {
-  const live = getAllSyncSessionMap()
-  const cached = useGlobalSessionsStore.getState().entityById
-  const recordOf = (id: string | undefined): Session | undefined => (id ? live.get(id) ?? cached.get(id) : undefined)
-  const asking = recordOf(sessionID)
-  const directory = asking ? resolveGlobalSessionDirectory(asking) : null
-  if (!asking || directory === null) return { sessionID, directory }
-  let root = asking
-  const seen = new Set([asking.id])
-  for (
-    let parent = recordOf(asking.parentID);
-    parent && !seen.has(parent.id) && resolveGlobalSessionDirectory(parent) === directory;
-    parent = recordOf(parent.parentID)
-  ) {
-    seen.add(parent.id)
-    root = parent
+  const lookup = sessionRecordLookup()
+  const asking = lookup(sessionID)
+  return {
+    sessionID: blockingRequestLineage(sessionID, lookup).at(-1) ?? sessionID,
+    directory: asking ? resolveGlobalSessionDirectory(asking) : null,
   }
-  return { sessionID: root.id, directory }
 }
