@@ -66,6 +66,15 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.switch_session_next.label',
     },
     {
+      // mod+k leader like the other open/go actions; `j` steps down the
+      // sidebar's attention sections, in the order they are drawn.
+      id: 'open_next_attention_session',
+      defaultBinding: 'mod+k j',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label',
+    },
+    {
       // Browser-style back/forward over the sessions opened in this window.
       id: 'session_history_back',
       defaultBinding: 'mod+[',

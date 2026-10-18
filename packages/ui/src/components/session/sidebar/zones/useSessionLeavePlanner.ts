@@ -10,7 +10,7 @@ import { requestSidebarReveal } from './sidebarReveal';
 const ZONE_CONTAINER_PREFIX = 'activity:';
 
 /** Lists of sessions that need the user; Other active only runs or finished. */
-const isAttentionContainer = (containerKey: string): boolean => {
+export const isAttentionContainer = (containerKey: string): boolean => {
   if (!containerKey.startsWith(ZONE_CONTAINER_PREFIX)) return false;
   const key = containerKey.slice(ZONE_CONTAINER_PREFIX.length);
   return isSidebarSectionKey(key) && isSidebarAttentionZoneKey(key) && key !== 'other-active';

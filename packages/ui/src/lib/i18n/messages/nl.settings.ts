@@ -1385,6 +1385,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'Nieuwe sessie',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'Vorige sessie',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'Volgende sessie',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': 'Volgende sessie die aandacht nodig heeft',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': 'Terug in sessiegeschiedenis',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': 'Vooruit in sessiegeschiedenis',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': 'Huidige sessie archiveren',

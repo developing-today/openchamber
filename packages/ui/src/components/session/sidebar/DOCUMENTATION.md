@@ -14,7 +14,8 @@ kept at this root in `types.ts` and `utils.tsx`.
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
 - `zones/` owns the attention zones (which live state pulls a session into
   which zone), the open session's hold, what the open session does after Done
-  or Archive, section dragging, and saving the layout. The layout value itself
+  or Archive, the next-attention shortcut's target, section dragging, and
+  saving the layout. The layout value itself
   (`sidebarLayout`) is defined in `stores/sidebarLayout.ts`.
 - `sessionSidebarRowModel.ts` owns the ordered, mode-neutral projection for
   Chats, Pinned, In work, the attention zones, projects, groups, folders,

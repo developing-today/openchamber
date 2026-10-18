@@ -1352,6 +1352,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '새 세션',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '이전 세션',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '다음 세션',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': '주의가 필요한 다음 세션',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': '세션 기록에서 뒤로',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': '세션 기록에서 앞으로',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': '현재 세션 보관',

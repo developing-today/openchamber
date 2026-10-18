@@ -2469,6 +2469,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.switch_session_tab.suffix': ' + 1…9',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'Önceki session',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'Sonraki session',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': 'Dikkat gerektiren sonraki session',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': 'Session geçmişinde geri',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': 'Session geçmişinde ileri',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': 'Geçerli session\'ı arşivle',

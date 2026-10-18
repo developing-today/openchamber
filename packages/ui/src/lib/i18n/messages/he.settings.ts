@@ -1355,6 +1355,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'הפעלה חדשה',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'ההפעלה הקודמת',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'ההפעלה הבאה',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': 'ההפעלה הבאה שזקוקה לתשומת לב',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': 'אחורה בהיסטוריית ההפעלות',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': 'קדימה בהיסטוריית ההפעלות',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': 'העבר את ההפעלה הנוכחית לארכיון',

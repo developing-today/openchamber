@@ -1352,6 +1352,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '新建会话',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': '上一个会话',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': '下一个会话',
+  'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label': '下一个需要处理的会话',
   'settings.openchamber.keyboardShortcuts.action.session_history_back.label': '在会话历史中后退',
   'settings.openchamber.keyboardShortcuts.action.session_history_forward.label': '在会话历史中前进',
   'settings.openchamber.keyboardShortcuts.action.archive_current_session.label': '归档当前会话',

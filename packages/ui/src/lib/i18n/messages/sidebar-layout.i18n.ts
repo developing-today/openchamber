@@ -1,6 +1,7 @@
 /** Sessions sidebar layout: section order, attention sections, the open session's hold, the List layout — merged into each locale's main dictionary. */
 export const sidebarLayoutI18n = {
   en: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'No session needs attention right now.',
     'sessions.sidebar.zone.approvals': 'Approvals',
     'sessions.sidebar.zone.questions': 'Questions',
     'sessions.sidebar.zone.blocked': 'Blocked',
@@ -57,6 +58,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Classic layout',
   },
   de: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Keine Sitzung braucht gerade Aufmerksamkeit.',
     'sessions.sidebar.zone.approvals': 'Freigaben',
     'sessions.sidebar.zone.questions': 'Fragen',
     'sessions.sidebar.zone.blocked': 'Blockiert',
@@ -113,6 +115,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Klassische Anordnung',
   },
   fr: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Aucune session ne nécessite votre attention pour le moment.',
     'sessions.sidebar.zone.approvals': 'Approbations',
     'sessions.sidebar.zone.questions': 'Questions ouvertes',
     'sessions.sidebar.zone.blocked': 'Bloquées',
@@ -169,6 +172,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Disposition classique',
   },
   nl: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Geen sessie heeft op dit moment aandacht nodig.',
     'sessions.sidebar.zone.approvals': 'Goedkeuringen',
     'sessions.sidebar.zone.questions': 'Vragen',
     'sessions.sidebar.zone.blocked': 'Geblokkeerd',
@@ -225,6 +229,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Klassieke indeling',
   },
   es: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Ninguna sesión necesita atención ahora mismo.',
     'sessions.sidebar.zone.approvals': 'Aprobaciones',
     'sessions.sidebar.zone.questions': 'Preguntas',
     'sessions.sidebar.zone.blocked': 'Bloqueadas',
@@ -281,6 +286,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Diseño clásico',
   },
   ja: {
+    'sessions.sidebar.attention.noneNeedsAttention': '今、対応が必要なセッションはありません。',
     'sessions.sidebar.zone.approvals': '承認',
     'sessions.sidebar.zone.questions': '質問',
     'sessions.sidebar.zone.blocked': 'ブロック中',
@@ -337,6 +343,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'クラシックレイアウト',
   },
   'pt-BR': {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Nenhuma sessão precisa de atenção agora.',
     'sessions.sidebar.zone.approvals': 'Aprovações',
     'sessions.sidebar.zone.questions': 'Perguntas',
     'sessions.sidebar.zone.blocked': 'Bloqueadas',
@@ -393,6 +400,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Disposição clássica',
   },
   uk: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Жодна сесія зараз не потребує уваги.',
     'sessions.sidebar.zone.approvals': 'Схвалення',
     'sessions.sidebar.zone.questions': 'Запитання',
     'sessions.sidebar.zone.blocked': 'Заблоковані',
@@ -449,6 +457,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Класичне компонування',
   },
   ko: {
+    'sessions.sidebar.attention.noneNeedsAttention': '지금 주의가 필요한 세션이 없습니다.',
     'sessions.sidebar.zone.approvals': '승인',
     'sessions.sidebar.zone.questions': '질문',
     'sessions.sidebar.zone.blocked': '차단됨',
@@ -505,6 +514,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': '클래식 레이아웃',
   },
   pl: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Żadna sesja nie wymaga teraz uwagi.',
     'sessions.sidebar.zone.approvals': 'Zatwierdzenia',
     'sessions.sidebar.zone.questions': 'Pytania',
     'sessions.sidebar.zone.blocked': 'Zablokowane',
@@ -561,6 +571,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Klasyczny układ',
   },
   'zh-CN': {
+    'sessions.sidebar.attention.noneNeedsAttention': '目前没有需要处理的会话。',
     'sessions.sidebar.zone.approvals': '待批准',
     'sessions.sidebar.zone.questions': '待回答',
     'sessions.sidebar.zone.blocked': '已阻塞',
@@ -617,6 +628,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': '经典布局',
   },
   'zh-TW': {
+    'sessions.sidebar.attention.noneNeedsAttention': '目前沒有需要處理的工作階段。',
     'sessions.sidebar.zone.approvals': '待核准',
     'sessions.sidebar.zone.questions': '待回答',
     'sessions.sidebar.zone.blocked': '已阻塞',
@@ -673,6 +685,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': '經典版面配置',
   },
   tr: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'Şu anda dikkat gerektiren session yok.',
     'sessions.sidebar.zone.approvals': 'Onaylar',
     'sessions.sidebar.zone.questions': 'Sorular',
     'sessions.sidebar.zone.blocked': 'Engellenenler',
@@ -729,6 +742,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'Klasik düzen',
   },
   ar: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'لا توجد جلسة تحتاج إلى انتباه الآن.',
     'sessions.sidebar.zone.approvals': 'الموافقات',
     'sessions.sidebar.zone.questions': 'الأسئلة',
     'sessions.sidebar.zone.blocked': 'العالقة',
@@ -785,6 +799,7 @@ export const sidebarLayoutI18n = {
     'sessions.sidebar.header.layout.classic': 'التخطيط الكلاسيكي',
   },
   he: {
+    'sessions.sidebar.attention.noneNeedsAttention': 'אין כעת הפעלה שזקוקה לתשומת לב.',
     'sessions.sidebar.zone.approvals': 'אישורים',
     'sessions.sidebar.zone.questions': 'שאלות',
     'sessions.sidebar.zone.blocked': 'חסומות',

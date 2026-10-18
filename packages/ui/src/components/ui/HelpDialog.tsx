@@ -142,6 +142,11 @@ export const HelpDialog: React.FC = () => {
           icon: 'list-unordered',
           keys: '',
         },
+        {
+          id: 'open_next_attention_session',
+          icon: 'alarm-warning',
+          keys: '',
+        },
         { id: 'focus_input', descriptionKey: "helpDialog.item.focusChatInput", icon: "text", keys: '' },
         {
           id: 'toggle_prompt_navigator',

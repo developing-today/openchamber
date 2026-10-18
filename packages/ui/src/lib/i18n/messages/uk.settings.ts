@@ -1352,6 +1352,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.new_chat.label": "Нова сесія",
   "settings.openchamber.keyboardShortcuts.action.switch_session_previous.label": "Попередня сесія",
   "settings.openchamber.keyboardShortcuts.action.switch_session_next.label": "Наступна сесія",
+  "settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label": "Наступна сесія, що потребує уваги",
   "settings.openchamber.keyboardShortcuts.action.session_history_back.label": "Назад в історії сесій",
   "settings.openchamber.keyboardShortcuts.action.session_history_forward.label": "Вперед в історії сесій",
   "settings.openchamber.keyboardShortcuts.action.archive_current_session.label": "Архівувати поточну сесію",
