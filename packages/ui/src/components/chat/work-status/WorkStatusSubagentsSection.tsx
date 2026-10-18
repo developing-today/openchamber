@@ -12,6 +12,7 @@ import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { normalizePath } from '@/lib/pathNormalization';
+import { computeSubtreeIds } from '@/sync/scoped-blocking-requests';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { formatCost } from './subagentCost';
@@ -32,8 +33,9 @@ const SubagentDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
 
 /**
  * Running subagents and, more importantly, their blockers: a permission request
- * raised by a child session has no representation in the transcript, so this
- * panel is the only place it becomes visible.
+ * raised by a child session, or by a subagent any level below it, has no
+ * representation in the transcript, so this panel is the only place it becomes
+ * visible. Each row speaks for the child and everything it launched.
  */
 export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
@@ -52,6 +54,12 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   // child row shown here rather than disappearing. Computed from the list
   // already held: the hook would open a second live-session subscription.
   const { perChildCost } = React.useMemo(() => computeRollup(liveSessions, sessionId), [liveSessions, sessionId]);
+  // The subagents a child launched block and keep it busy too, so its row
+  // reads their requests and status along with its own.
+  const subtreeByChild = React.useMemo(
+    () => new Map(children.map((child) => [child.id, [...computeSubtreeIds(liveSessions, child.id)]])),
+    [children, liveSessions],
+  );
 
   // One subscription covers every child: per-session hooks would multiply
   // store subscriptions by the number of subagents.
@@ -69,15 +77,17 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   // child, so a child seen going busy and then settling is known to be idle
   // even when the directory snapshot does not cover it. The last turn's
   // outcome outlives the live status: a child that went idle after an error
-  // reads as failed, not done. Joined to a string so the selector stays
-  // stable while nothing about these children changes.
-  const observedChildren = useGlobalSessionStatusStore(React.useCallback((state) => children
-    .flatMap((child) => {
-      if (state.statusById.has(child.id)) return [`${child.id}\tbusy`];
-      const observed = state.observedById.get(child.id);
-      return observed ? [`${child.id}\t${observed.outcome === 'failed' ? 'failed' : 'settled'}`] : [];
+  // reads as failed, not done. Nested subagents are read the same way, since a
+  // running one keeps its child's row working. Joined to a string so the
+  // selector stays stable while nothing about these sessions changes.
+  const observedChildren = useGlobalSessionStatusStore(React.useCallback((state) => [...subtreeByChild.values()]
+    .flat()
+    .flatMap((id) => {
+      if (state.statusById.has(id)) return [`${id}\tbusy`];
+      const observed = state.observedById.get(id);
+      return observed ? [`${id}\t${observed.outcome === 'failed' ? 'failed' : 'settled'}`] : [];
     })
-    .join('\n'), [children]));
+    .join('\n'), [subtreeByChild]));
 
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -120,12 +130,21 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     if (id && observed) observedById.set(id, observed);
   }
   const panelDirectory = normalizePath(directory);
+  // A session runs while its live status or the global store says so. The
+  // global store can learn of a busy turn before the directory snapshot does,
+  // so a busy report outranks an idle one, as in `getSessionLiveActivity`. The
+  // same test covers the child and everything it launched.
+  const isRunning = (id: string): boolean => {
+    const type = statuses[id]?.type;
+    return type === 'busy' || type === 'retry' || observedById.get(id) === 'busy';
+  };
   const rows = children.map((child) => {
-    const blocked = (permissions[child.id]?.length ?? 0) > 0;
-    const asked = (forms[child.id]?.length ?? 0) > 0;
+    const subtree = subtreeByChild.get(child.id) ?? [child.id];
+    const blocked = subtree.some((id) => (permissions[id]?.length ?? 0) > 0);
+    const asked = subtree.some((id) => (forms[id]?.length ?? 0) > 0);
     const status = statuses[child.id]?.type;
     const observed = observedById.get(child.id);
-    const busy = status === 'busy' || status === 'retry' || (!status && observed === 'busy');
+    const busy = subtree.some(isRunning);
     const failed = !busy && observed === 'failed';
     // The snapshot only speaks for its own directory. Paths are compared
     // normalized: OpenCode may report a child's directory with a trailing

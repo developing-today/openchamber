@@ -173,16 +173,24 @@ export const useSessionGrouping = (args: Args) => {
         return { session, children: childNodes, worktree: getSessionWorktree(session) };
       };
 
-      // A subsession is shown only nested under its active parent. Under an
-      // archived parent, or archived itself, it is hidden rather than promoted
-      // to a row of its own: subsessions are the agent's, restored with their
-      // parent. One whose parent is not loaded yet stays visible as a root.
+      // A subsession is shown only nested under its active ancestors. Archived
+      // itself, or under an archived ancestor at any depth, it is hidden rather
+      // than promoted to a row of its own: subsessions are the agent's,
+      // restored with their parent. One whose parent is not loaded yet stays
+      // visible as a root.
       const isHiddenSubsession = (session: Session): boolean => {
-        const parentID = session.parentID;
-        if (!parentID) return false;
+        if (!session.parentID) return false;
         if (isArchivedSession(session)) return true;
-        const parentSession = sessionMap.get(parentID);
-        return Boolean(parentSession && isArchivedSession(parentSession));
+        const visited = new Set([session.id]);
+        let parentID: Session['parentID'] = session.parentID;
+        while (parentID && !visited.has(parentID)) {
+          const parentSession = sessionMap.get(parentID);
+          if (!parentSession) return false;
+          if (isArchivedSession(parentSession)) return true;
+          visited.add(parentID);
+          parentID = parentSession.parentID;
+        }
+        return false;
       };
 
       const rootCandidates = sortedProjectSessions.filter((session) => {

@@ -10,6 +10,7 @@ import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
 import { useSessions } from '@/sync/sync-context';
+import { isSubagentRequest } from '@/sync/scoped-blocking-requests';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -50,11 +51,10 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
     const sessions = useSessions(currentSessionDirectory ?? undefined);
 
-    const isFromSubagent = React.useMemo(() => {
-        if (!currentSessionId || form.sessionID === currentSessionId) return false;
-        const sourceSession = sessions.find((session) => session.id === form.sessionID);
-        return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-    }, [form.sessionID, currentSessionId, sessions]);
+    const isFromSubagent = React.useMemo(
+        () => isSubagentRequest(sessions, form.sessionID, currentSessionId),
+        [form.sessionID, currentSessionId, sessions],
+    );
 
     const fields = form.fields;
     // The card shows every field at once, so an external link is on screen

@@ -15,10 +15,11 @@ import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewSt
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { usePermissionStore } from '@/stores/permissionStore';
-import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
+import { getSessionLiveActivity, optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
 import { resolveSendSelection, useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncMessages, getSyncParts, getSyncSessionStatus, getSyncSessions, registerSessionDirectory } from '@/sync/sync-refs';
+import { computeSubtreeIds } from '@/sync/scoped-blocking-requests';
 import { markPendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from '@/lib/sessionKnowledgeApi';
@@ -109,19 +110,19 @@ const getLatestAssistantTextMessage = (
 };
 
 /**
- * The turn is over only when the session is idle and none of its subagents is
- * still running. A parent goes idle while a background subagent works; OpenCode
- * then hands the result back and the parent runs again, so the reply it left
- * at that pause is not the finished work. Child statuses come from the same
- * live directory store as the parent's.
+ * The turn is over only when the session is idle and none of its subagents, at
+ * any depth, is still running. A parent goes idle while a background subagent
+ * works; OpenCode then hands the result back and the parent runs again, so the
+ * reply it left at that pause is not the finished work. A subagent whose status
+ * no live source covers yet counts as still working: an unknown status is not
+ * an idle one.
  */
 const isSessionIdle = (sessionID: string, directory: string): boolean => {
   if (getSyncSessionStatus(sessionID, directory)?.type !== 'idle') return false;
-  return !getSyncSessions(directory).some((session) => {
-    if (session.parentID !== sessionID) return false;
-    const childStatus = getSyncSessionStatus(session.id, directory);
-    return childStatus !== undefined && childStatus.type !== 'idle';
-  });
+  for (const id of computeSubtreeIds(getSyncSessions(directory), sessionID)) {
+    if (id !== sessionID && getSessionLiveActivity(id) !== 'idle') return false;
+  }
+  return true;
 };
 
 export const isAutoReviewRuntimeCurrent = (runtimeKey: string): boolean => runtimeKey === getRuntimeKey();

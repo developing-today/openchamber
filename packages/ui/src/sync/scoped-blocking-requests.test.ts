@@ -4,6 +4,7 @@ import type { Session } from "@/lib/opencode/model"
 import {
   areRequestArraysReferentiallyEqual,
   collectScopedBlockingRequests,
+  isSubagentRequest,
 } from "./scoped-blocking-requests"
 
 const session = (id: string, parentID?: string): Session => ({ id, parentID }) as Session
@@ -50,5 +51,22 @@ describe("scoped blocking requests", () => {
     expect(areRequestArraysReferentiallyEqual([first, second], [first, second])).toBe(true)
     expect(areRequestArraysReferentiallyEqual([first, second], [second, first])).toBe(false)
     expect(areRequestArraysReferentiallyEqual([first], [{ id: "perm_1" }])).toBe(false)
+  })
+
+  test("attributes requests from subagents at any depth below the viewed session", () => {
+    const sessions = [
+      session("ses_root"),
+      session("ses_child", "ses_root"),
+      session("ses_grandchild", "ses_child"),
+      session("ses_sibling"),
+    ]
+
+    expect(isSubagentRequest(sessions, "ses_child", "ses_root")).toBe(true)
+    expect(isSubagentRequest(sessions, "ses_grandchild", "ses_root")).toBe(true)
+    expect(isSubagentRequest(sessions, "ses_grandchild", "ses_child")).toBe(true)
+    expect(isSubagentRequest(sessions, "ses_root", "ses_root")).toBe(false)
+    expect(isSubagentRequest(sessions, "ses_root", "ses_child")).toBe(false)
+    expect(isSubagentRequest(sessions, "ses_sibling", "ses_root")).toBe(false)
+    expect(isSubagentRequest(sessions, "ses_child", null)).toBe(false)
   })
 })

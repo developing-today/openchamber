@@ -25,6 +25,12 @@ export const computeSubtreeIds = (sessions: Session[], rootId: string): Set<stri
   return ids
 }
 
+/** The request comes from a subagent below the viewed session, at any depth. */
+export const isSubagentRequest = (sessions: Session[], requestSessionId: string, viewedSessionId: string | null): boolean => {
+  if (!viewedSessionId || requestSessionId === viewedSessionId) return false
+  return computeSubtreeIds(sessions, viewedSessionId).has(requestSessionId)
+}
+
 export const areRequestArraysReferentiallyEqual = <T extends BlockingRequest>(left: T[], right: T[]): boolean => {
   if (left === right) return true
   if (left.length !== right.length) return false
