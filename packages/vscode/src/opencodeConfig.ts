@@ -1808,25 +1808,25 @@ export const getWebSearchSource = (workingDirectory?: string) => ({
 });
 
 const PROJECT_CONFIG_NAMES = [
-  path.join('.opencode', 'opencode.jsonc'),
-  path.join('.opencode', 'opencode.json'),
-  'opencode.jsonc',
-  'opencode.json',
+  [path.join('.opencode', 'opencode.jsonc'), path.join('.opencode', 'opencode.json')],
+  ['opencode.jsonc', 'opencode.json'],
 ];
 
-/** Mirror of the web server's `readProjectConfigFiles`: existing project configs, deepest first; unreadable ones skipped. */
+/** Mirror of the web server's `readProjectConfigFiles`: discovered configs in descending precedence, through the filesystem root. */
 const readProjectConfigFiles = (workingDirectory?: string): Array<{ path: string; config: Record<string, unknown> }> => {
   if (!workingDirectory) return [];
-  const root = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+  const ancestors = getAncestors(workingDirectory);
   const files: Array<{ path: string; config: Record<string, unknown> }> = [];
-  for (const base of getAncestors(workingDirectory, root)) {
-    for (const name of PROJECT_CONFIG_NAMES) {
-      const filePath = path.join(base, name);
-      if (!fs.existsSync(filePath)) continue;
-      try {
-        files.push({ path: filePath, config: readConfigFile(filePath) });
-      } catch {
-        // Skipped: an unreadable file can't be told apart from one without the key.
+  for (const names of PROJECT_CONFIG_NAMES) {
+    for (const base of ancestors) {
+      for (const name of names) {
+        const filePath = path.join(base, name);
+        if (!fs.existsSync(filePath)) continue;
+        try {
+          files.push({ path: filePath, config: readConfigFile(filePath) });
+        } catch {
+          // Skipped: an unreadable file can't be told apart from one without the key.
+        }
       }
     }
   }

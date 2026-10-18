@@ -2,7 +2,6 @@ import path from 'path';
 import fs from 'fs';
 import {
   AGENT_SCOPE,
-  findWorktreeRoot,
   getAncestors,
   getJsonWriteTarget,
   readConfigFile,
@@ -48,29 +47,29 @@ export function getWebSearchSource(directory) {
 }
 
 const PROJECT_CONFIG_NAMES = [
-  path.join('.opencode', 'opencode.jsonc'),
-  path.join('.opencode', 'opencode.json'),
-  'opencode.jsonc',
-  'opencode.json',
+  [path.join('.opencode', 'opencode.jsonc'), path.join('.opencode', 'opencode.json')],
+  ['opencode.jsonc', 'opencode.json'],
 ];
 
 /**
- * Every existing project config file OpenCode merges for `directory`, deepest
- * first, from the directory up to its worktree root. An unreadable file is
- * skipped: it can't be told apart from one without the key.
+ * Every existing config OpenCode discovers from `directory` to the filesystem
+ * root, highest priority first: all .opencode files, then all direct files,
+ * deepest first within each group. Unreadable files are skipped.
  */
 export function readProjectConfigFiles(directory) {
   if (!directory) return [];
-  const root = findWorktreeRoot(directory) || path.resolve(directory);
+  const ancestors = getAncestors(directory);
   const files = [];
-  for (const base of getAncestors(directory, root)) {
-    for (const name of PROJECT_CONFIG_NAMES) {
-      const filePath = path.join(base, name);
-      if (!fs.existsSync(filePath)) continue;
-      try {
-        files.push({ path: filePath, config: readConfigFile(filePath) });
-      } catch {
-        // Skipped; see above.
+  for (const names of PROJECT_CONFIG_NAMES) {
+    for (const base of ancestors) {
+      for (const name of names) {
+        const filePath = path.join(base, name);
+        if (!fs.existsSync(filePath)) continue;
+        try {
+          files.push({ path: filePath, config: readConfigFile(filePath) });
+        } catch {
+          // Skipped; see above.
+        }
       }
     }
   }
