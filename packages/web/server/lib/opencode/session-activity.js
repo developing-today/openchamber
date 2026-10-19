@@ -16,7 +16,6 @@ import { z } from 'zod';
 
 const CHILDREN_PAGE_SIZE = 50;
 const CHILDREN_MAX_PAGES = 8;
-const MAX_SUBAGENT_DEPTH = 8;
 const sessionLineageSchema = z.object({ id: z.string().min(1), parentID: z.string().min(1).nullish() });
 
 export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch }) => {
@@ -79,8 +78,9 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
 
   /**
    * Queue delivery waits for running descendants, including nested subagents.
-   * A chain deeper than `MAX_SUBAGENT_DEPTH` counts as unrelated, as in the
-   * UI's ancestor walk, so a deep tree elsewhere cannot hold every queue.
+   * Chains count at any depth, as in the UI's ancestor walk. OpenCode's
+   * `experimental.subagent_depth` has no upper bound, and the visited set
+   * ends a walk whose parent links form a cycle.
    */
   const hasWorkingDescendants = async (sessionId, statuses) => {
     const parents = new Map();
@@ -90,7 +90,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
       if (activeId === sessionId) continue;
       let current = activeId;
       const visited = new Set();
-      for (let depth = 0; current && depth < MAX_SUBAGENT_DEPTH; depth += 1) {
+      while (current) {
         if (signal.aborted) return null;
         if (visited.has(current)) {
           unknown = true;

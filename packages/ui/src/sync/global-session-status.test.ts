@@ -258,6 +258,20 @@ describe("background subagent keeps its parent's turn open", () => {
     expect(timing().settledMs.has("parent")).toBe(true)
   })
 
+  test("a subagent deeper than eight levels still counts, and a parent cycle ends the walk", () => {
+    const parents = new Map<string, string>()
+    for (let depth = 1; depth <= 12; depth += 1) {
+      parents.set(`child_${depth}`, depth === 1 ? "root" : `child_${depth - 1}`)
+    }
+    const resolve = (id: string) => parents.get(id)
+    expect(hasActiveSubagent("root", new Set(["child_12"]), resolve)).toBe(true)
+    expect(hasActiveSubagent("unrelated", new Set(["child_12"]), resolve)).toBe(false)
+
+    const cycle = new Map([["a", "b"], ["b", "a"]])
+    expect(hasActiveSubagent("root", new Set(["a"]), (id) => cycle.get(id))).toBe(false)
+    expect(hasActiveSubagent("b", new Set(["a"]), (id) => cycle.get(id))).toBe(true)
+  })
+
   test("a caller can resolve nested lineage without changing the display resolver", () => {
     const parents = new Map([["grandchild", "nested-child"], ["nested-child", "nested-parent"]])
     const active = new Set(["grandchild"])

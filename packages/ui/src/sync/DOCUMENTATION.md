@@ -77,8 +77,11 @@ of button visibility.
 ## Ownership map
 
 Queue delivery uses `hasActiveSubagent` with an explicit parent resolver over
-the cached sync session index. This keeps the 8-level ancestor walk shared
+the cached sync session index. This keeps the ancestor walk shared
 with display activity while leaving the global display resolver unchanged.
+The walk counts ancestors at any depth and ends on a parent cycle through a
+visited set. OpenCode's `experimental.subagent_depth` has no upper bound, so
+the walk has no depth cap.
 The VS Code queue gate and its live inputs are documented in
 `../stores/DOCUMENTATION.md`.
 
