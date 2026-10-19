@@ -1043,3 +1043,41 @@ describe('plan progress and session', () => {
     expect(moved.plan.progress).toEqual({ done: 2, total: 2 });
   });
 });
+
+describe('atomic write rename retry', () => {
+  const epermError = () => {
+    const error = new Error('operation not permitted');
+    error.code = 'EPERM';
+    return error;
+  };
+
+  test('a write lands when the first rename fails with EPERM', async () => {
+    let renameCalls = 0;
+    const flaky = createProjectContextRuntime({
+      fsPromises: {
+        ...fsPromises,
+        rename: async (from, to) => {
+          renameCalls += 1;
+          if (renameCalls === 1) throw epermError();
+          return fsPromises.rename(from, to);
+        },
+      },
+      path, projectsDirPath, createId: () => `todo-${++idCounter}`,
+    });
+
+    const { todo } = await flaky.createTodo(PROJECT_ID, { text: 'retry me' });
+
+    expect(renameCalls).toBe(2);
+    expect((await flaky.readContext(PROJECT_ID)).todos.map((entry) => entry.id)).toEqual([todo.id]);
+  });
+
+  test('a rename that keeps failing with EPERM surfaces the error and leaves no temp file', async () => {
+    const failing = createProjectContextRuntime({
+      fsPromises: { ...fsPromises, rename: async () => { throw epermError(); } },
+      path, projectsDirPath, createId: () => `todo-${++idCounter}`,
+    });
+
+    await expect(failing.createTodo(PROJECT_ID, { text: 'doomed' })).rejects.toMatchObject({ code: 'EPERM' });
+    expect(await fsPromises.readdir(path.join(projectsDirPath, PROJECT_ID))).toEqual([]);
+  });
+});

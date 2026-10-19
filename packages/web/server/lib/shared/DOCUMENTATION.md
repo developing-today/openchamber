@@ -53,6 +53,23 @@ Variants that answer differently for real inputs stay with their owner.
 | `new Map()` | false | false | true | false | `null` |
 | `Object.create(null)` | false | false | true | false | `null` |
 
+## Atomic rename
+
+`atomic-rename.js` holds the rename retry for atomic writes, shared by the
+agent-memory, project-context, and walkthrough stores. On Windows, renaming
+a temp file over a destination another process is reading fails with `EPERM`
+(also seen as `EACCES` or `EBUSY`), and giving up loses the write.
+
+- `renameWithRetry(rename, source, destination)`: async; retries only those
+  three codes with 10/25/50/100 ms delays, then surfaces the last error.
+- `renameSyncWithRetry(renameSync, source, destination)`: the same policy
+  for synchronous callers; the wait between attempts uses `Atomics.wait`.
+
+The caller passes its own rename function, so a store that receives
+`fsPromises` by injection keeps that seam. Every other error code throws on
+the first attempt. Temp-file cleanup stays with the caller, which owns the
+temp path.
+
 ## What stays out
 
 These look adjacent but are not the same predicate, so each keeps its private
