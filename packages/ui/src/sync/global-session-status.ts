@@ -82,12 +82,16 @@ export const setSessionParentResolver = (resolver: SessionParentResolver): void 
   resolveSessionParentId = resolver;
 };
 
-/** Subagents nest; a deeper chain than this is treated as unrelated. */
-const MAX_SUBAGENT_DEPTH = 8;
-
+/**
+ * Subagents nest with no fixed depth limit. OpenCode's
+ * `experimental.subagent_depth` has no upper bound, so a chain of any length
+ * counts. The visited set ends the walk when the parent links form a cycle.
+ */
 const forEachAncestorId = (sessionId: string, visit: (ancestorId: string) => void, resolveParentId: SessionParentResolver = resolveSessionParentId): void => {
+  const visited = new Set<string>([sessionId]);
   let current = resolveParentId(sessionId);
-  for (let depth = 0; current && depth < MAX_SUBAGENT_DEPTH; depth += 1) {
+  while (current && !visited.has(current)) {
+    visited.add(current);
     visit(current);
     current = resolveParentId(current);
   }

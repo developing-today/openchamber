@@ -79,14 +79,14 @@ describe('queue descendant activity', () => {
     expect(reads).toEqual(['a', 'b']);
   });
 
-  it('accepts an eighth-level descendant and treats a deeper chain as unrelated', async () => {
+  it('accepts a descendant deeper than eight levels', async () => {
     const sessions = {};
-    for (let depth = 1; depth <= 9; depth += 1) sessions[`child_${depth}`] = { id: `child_${depth}`, parentID: depth === 1 ? 'root' : `child_${depth - 1}` };
+    for (let depth = 1; depth <= 12; depth += 1) sessions[`child_${depth}`] = { id: `child_${depth}`, parentID: depth === 1 ? 'root' : `child_${depth - 1}` };
     const { probe, reads } = createProbe(sessions);
     expect(await probe.hasWorkingDescendants('root', { child_8: running })).toBe(true);
     expect(reads).toHaveLength(8);
-    expect(await probe.hasWorkingDescendants('root', { child_9: running })).toBe(false);
-    expect(reads).toHaveLength(16);
+    expect(await probe.hasWorkingDescendants('root', { child_12: running })).toBe(true);
+    expect(reads).toHaveLength(8 + 12);
   });
 
   it('uses one deadline for the entire lineage walk', async () => {
