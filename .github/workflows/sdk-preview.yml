@@ -15,9 +15,15 @@ on:
 permissions:
   contents: read
 
+# workflow_dispatch always runs on the dispatched branch, so a
+# constant group cannot tell two publishes apart: a dispatch for a
+# different preview number could replace another's pending run, and
+# that preview version would never publish. Key by the distinguishing
+# inputs and queue every run.
 concurrency:
-  group: sdk-preview-publish
+  group: sdk-preview-publish-${{ inputs.preview_number }}-${{ inputs.dry_run }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:

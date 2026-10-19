@@ -95,7 +95,7 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Next-attention shortcut for sessions drawn project-first | 2026-10-18 | #71                   |
 | `browser.type` checks the value landed                   | 2026-10-18 | #70                   |
 | Bot workflows skip when their app is not configured      | 2026-10-18 | #62, #66, #74         |
-| Concurrency groups per PR, issue or input                | 2026-10-18 | #58, #76, #78         |
+| Concurrency groups per PR, issue or input                | 2026-10-18 | #58, #76, #78, #86    |
 | Test isolation fixes for the UI suite                    | 2026-10-18 | #53, #57, #63         |
 | Contributing note on isolated test runs                  | 2026-10-18 | #50                   |
 | `queue: max` startup failure in issue-intake and pr-review fixed | 2026-10-18 | #84, #85          |
