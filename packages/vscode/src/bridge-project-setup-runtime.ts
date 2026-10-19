@@ -84,12 +84,32 @@ const readJsonDocumentIfPresent = async (filePath: string, missingCodes: string[
   return isObjectRecord(parsed) ? parsed : {};
 };
 
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_RETRY_DELAYS_MS = [10, 25, 50, 100];
+
+// On Windows, renaming over a destination another handle is reading fails
+// with EPERM and the update would be lost; retry briefly before giving up
+// (same fix as developing-today/opencode#85 for its TUI persistence helper).
+const renameWithRetry = async (source: string, destination: string): Promise<void> => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.promises.rename(source, destination);
+      return;
+    } catch (error) {
+      const delay = RENAME_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) throw error;
+      if (!(error instanceof Error) || !('code' in error) || !TRANSIENT_RENAME_CODES.has(String(error.code))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+};
+
 const writeJsonAtomic = async (filePath: string, text: string): Promise<void> => {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fs.promises.writeFile(tmp, text, 'utf8');
-    await fs.promises.rename(tmp, filePath);
+    await renameWithRetry(tmp, filePath);
   } catch (error) {
     await fs.promises.rm(tmp, { force: true }).catch(() => {});
     throw error;
