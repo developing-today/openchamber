@@ -12,7 +12,7 @@ Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs
 | ----------------------------------------------------------------------- | -------------------------------------------------------- |
 | [Releases and live validation](#releases-and-live-validation)           | No release since `v2.2.0`. Waiting on time on the Mac    |
 | [Sessions and sidebar](#sessions-and-sidebar)                           | Layout options for the phone and the session rows        |
-| [Nested subagents](#nested-subagents)                                   | Shipped, including the parent-cycle cost fix             |
+| [Nested subagents](#nested-subagents)                                   | Shipped, including the parent-cycle and any-depth fixes  |
 | [Agent control and worktrees](#agent-control-and-worktrees)             | Merged, and not yet run in a live app                    |
 | [Routing, knowledge and cost](#routing-knowledge-and-cost)              | Feature requests that depend on the OpenCode fork        |
 | [Sync and transport](#sync-and-transport)                               | Durable cursors, a transcript that blanks                |
@@ -42,7 +42,7 @@ Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs
 
 ## Nested subagents
 
-Subagents can launch subagents. Asks from any depth reach the root session, and Work Status nests running subagents under the one that started them.
+Subagents can launch subagents. Asks from any depth reach the root session, and Work Status nests running subagents under the one that started them. Ancestor walks count chains at any depth: the old 8-level cap is gone (#123).
 
 ## Agent control and worktrees
 
@@ -102,8 +102,11 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Session trees survive a parent cycle (mobile, header, relocation) | 2026-10-19 | #92, #94, #101, #103, #105 |
 | PR checks run on pushes to main                                   | 2026-10-19 | #95, #96                   |
 | Dispatch-workflow concurrency keyed by its inputs                 | 2026-10-19 | #97                        |
-| Atomic-write renames retry on transient Windows errors            | 2026-10-19 | #98, #99, #106             |
+| Atomic-write renames retry on transient Windows errors            | 2026-10-19 | #98, #99, #106, #117, #125 |
 | Sonner toast-pin test no longer flakes                            | 2026-10-19 | #107, #108                 |
 | Stale WSL docs removed; French onboarding fixed                   | 2026-10-19 | #109, #110, #111, #112     |
 | Least-privilege permissions in the remaining workflows            | 2026-10-19 | #113                       |
 | Timeout caps on every workflow job that can carry one             | 2026-10-19 | #67, #116, #118, #119      |
+| Subagent chains count at any depth (8-level cap removed)          | 2026-10-19 | #123, #126                 |
+| Root `.env` untracked (already covered by `.gitignore`)           | 2026-10-19 | #120, #121                 |
+| Jules upstream-sync dispatches queue with `queue: max`            | 2026-10-19 | #124                       |
