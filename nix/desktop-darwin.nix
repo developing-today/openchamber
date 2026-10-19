@@ -76,6 +76,13 @@ stdenvNoCC.mkDerivation {
     cp $electronSrc/dist-bundle/entry.mjs $electronSrc/dist-bundle/main.mjs \
       $electronSrc/dist-bundle/early-startup.mjs $resources/app/dist-bundle/
     ln -s $libexec/node_modules $resources/app/node_modules
+    # node_modules/@openchamber/web (built above) is a relative symlink to
+    # ../../packages/web, resolved from inside node_modules -- so it needs
+    # packages/ as a sibling of node_modules/ here too, or Electron's main
+    # process fails at startup with ERR_MODULE_NOT_FOUND on @openchamber/web
+    # (early-startup.mjs imports it; introduced in e601f1627, which this
+    # packaging was never updated for).
+    ln -s $libexec/packages $resources/app/packages
 
     # The same extraResources electron-builder copies (packages/electron/package.json).
     cp -R $electronSrc/resources/web-dist $resources/web-dist
