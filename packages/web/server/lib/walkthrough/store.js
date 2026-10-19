@@ -3,6 +3,7 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { PROMPT_VERSION, WALKTHROUGH_VERSION } from './schema.js';
 
 // Two artifacts with two different jobs.
@@ -57,7 +58,7 @@ const writeJsonAtomic = (filePath, value) => {
   const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   try {
     fs.writeFileSync(tmp, JSON.stringify(value), 'utf8');
-    fs.renameSync(tmp, filePath);
+    renameSyncWithRetry((from, to) => fs.renameSync(from, to), tmp, filePath);
     return true;
   } catch (error) {
     console.error('[walkthrough] failed to write store file:', error?.message || error);

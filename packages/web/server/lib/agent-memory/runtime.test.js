@@ -390,3 +390,47 @@ describe('user corrections', () => {
     expect(await runtime.update(PROJECT, 'absent', { body: 'x' })).toBeNull();
   });
 });
+
+describe('atomic write rename retry', () => {
+  const epermError = () => {
+    const error = new Error('operation not permitted');
+    error.code = 'EPERM';
+    return error;
+  };
+
+  test('a write lands when the first rename fails with EPERM', async () => {
+    let renameCalls = 0;
+    const flaky = createAgentMemoryRuntime({
+      fsPromises: {
+        ...fsPromises,
+        rename: async (from, to) => {
+          renameCalls += 1;
+          if (renameCalls === 1) throw epermError();
+          return fsPromises.rename(from, to);
+        },
+      },
+      path,
+      userConfigRoot: path.join(rootDir, 'config'),
+      projectsDirPath: path.join(rootDir, 'config', 'projects'),
+      createId: () => `mem-${++idCounter}`,
+    });
+
+    await flaky.create(GLOBAL, { title: 'Uses bun', body: 'Tests run with bun test.' });
+
+    expect(renameCalls).toBe(2);
+    expect((await flaky.read(GLOBAL)).entries.map((e) => e.title)).toEqual(['Uses bun']);
+  });
+
+  test('a rename that keeps failing with EPERM surfaces the error and leaves no temp file', async () => {
+    const failing = createAgentMemoryRuntime({
+      fsPromises: { ...fsPromises, rename: async () => { throw epermError(); } },
+      path,
+      userConfigRoot: path.join(rootDir, 'config'),
+      projectsDirPath: path.join(rootDir, 'config', 'projects'),
+      createId: () => `mem-${++idCounter}`,
+    });
+
+    await expect(failing.create(GLOBAL, { title: 'T', body: 'B' })).rejects.toMatchObject({ code: 'EPERM' });
+    expect(await fsPromises.readdir(path.join(rootDir, 'config'))).toEqual([]);
+  });
+});

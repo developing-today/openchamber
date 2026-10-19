@@ -12,6 +12,7 @@
  * directory never invalidates a reference.
  */
 
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { createPlanSummaryCache } from './plan-progress.js';
@@ -301,7 +302,7 @@ export const createProjectContextRuntime = (deps) => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
     try {
       await fsPromises.writeFile(temporaryPath, JSON.stringify(value, null, 2), 'utf8');
-      await fsPromises.rename(temporaryPath, filePath);
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
     } catch (error) {
       await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
       throw error;

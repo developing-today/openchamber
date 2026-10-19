@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
+import { renameSyncWithRetry, renameWithRetry } from './bridge-atomic-write';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -247,7 +248,7 @@ const writeJsonAtomic = async (filePath: string, text: string): Promise<void> =>
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fs.promises.writeFile(tmp, text, 'utf8');
-    await fs.promises.rename(tmp, filePath);
+    await renameWithRetry(tmp, filePath, (from, to) => fs.promises.rename(from, to));
   } catch (error) {
     await fs.promises.rm(tmp, { force: true }).catch(() => {});
     throw error;
@@ -259,7 +260,7 @@ const writeJsonAtomicSync = (filePath: string, text: string): void => {
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     fs.writeFileSync(tmp, text, 'utf8');
-    fs.renameSync(tmp, filePath);
+    renameSyncWithRetry(tmp, filePath, (from, to) => fs.renameSync(from, to));
   } catch (error) {
     try {
       fs.rmSync(tmp, { force: true });
