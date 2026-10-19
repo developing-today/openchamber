@@ -119,6 +119,7 @@ import {
   getSessionDirectory,
   getSessionTimestamp,
 } from './mobileSessionFields';
+import { buildMobileSessionTree } from './mobileSessionTree';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
@@ -1321,22 +1322,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const controlIndent = depth === null ? TIMELINE_CHAT_INDENT : treeTextLeft(depth);
     const alwaysVisibleIds = options?.alwaysVisibleIds;
 
-    // Group children by parent within this bucket, and treat sessions whose parent
-    // is not in this bucket as top-level so nothing is hidden.
-    const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
-    const childrenByParent = new Map<string, Session[]>();
-    for (const candidate of bucket.sessions) {
-      const parentId = getParentId(candidate);
-      if (parentId && idsInBucket.has(parentId)) {
-        const list = childrenByParent.get(parentId) ?? [];
-        list.push(candidate);
-        childrenByParent.set(parentId, list);
-      }
-    }
-    const roots = bucket.sessions.filter((entry) => {
-      const parentId = getParentId(entry);
-      return !parentId || !idsInBucket.has(parentId);
-    });
+    // Group children by parent within this bucket. Sessions whose parent is
+    // not in this bucket count as top-level, and sessions in a parent cycle
+    // become roots of their own so nothing in the bucket is hidden.
+    const { childrenByParent, roots } = buildMobileSessionTree(bucket.sessions);
 
     // The lanes of a run become one entry at the first lane's position.
     type RootEntry = { kind: 'session'; session: Session } | { kind: 'run'; run: MultiRunSummary };
@@ -1360,7 +1349,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const canShowFewer = pagedRoots.length > pageSize && remaining === 0;
 
     // Flat Chats rows have no chevron, so their subsessions never expand.
+    // A cycle root's children lead back to the root, so each session renders
+    // at most once per bucket and the recursion always ends.
+    const renderedSessionIds = new Set<string>();
     const renderNode = (session: Session, rowDepth: number | null): React.ReactNode => {
+      if (renderedSessionIds.has(session.id)) return null;
+      renderedSessionIds.add(session.id);
       const children = childrenByParent.get(session.id) ?? [];
       const hasChildren = children.length > 0;
       const expanded = rowDepth !== null && Boolean(expandedParents[session.id]);
