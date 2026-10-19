@@ -216,6 +216,25 @@ describe('collectSessionMoveDescendants', () => {
     expect(ids(collectSessionMoveDescendants(linked('root', null), []))).toEqual(['child']);
   });
 
+  test('a self-parented root is not its own descendant and the walk terminates', () => {
+    useGlobalSessionsStore.getState().upsertSessions([
+      linked('root', 'root'),
+      linked('child', 'root'),
+    ]);
+
+    expect(ids(collectSessionMoveDescendants(linked('root', 'root'), []))).toEqual(['child']);
+  });
+
+  test('a parent cycle through the root yields each other member once and terminates', () => {
+    useGlobalSessionsStore.getState().upsertSessions([
+      linked('root', 'b'),
+      linked('a', 'root'),
+      linked('b', 'a'),
+    ]);
+
+    expect(ids(collectSessionMoveDescendants(linked('root', 'b'), []))).toEqual(['a', 'b']);
+  });
+
   test('keeps the rendered descendants and their order, adding what only the cache knows', () => {
     const rendered = linked('live-child', 'root');
     useGlobalSessionsStore.getState().upsertSessions([
