@@ -3503,7 +3503,7 @@ export const dict = {
   'chat.messageBody.actions.contextPinFailed': 'Kontext konnte nicht angeheftet werden',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} unterstützt den von {files} benötigten Eingabetyp {modalities} nicht. Du kannst die Nachricht trotzdem senden, aber diese Anhänge werden möglicherweise ignoriert.',
   'projectActions.actions.autoDiscoverTooltip': 'Automatisch erkannte Aktionen',
-  'onboarding.localSetup.windows.stepInstallWslSuffix': 'WSL installieren',
+  'onboarding.localSetup.windows.stepInstallWslSuffix': '',
   'chat.goal.toast.distillFallback': 'Das Ziel überschritt das Limit und konnte nicht verdichtet werden — für die Auswertung wird eine gekürzte Version verwendet',
   'onboarding.localSetup.actions.checkAndContinue': 'Installation abgeschlossen, prüfen und fortfahren',
   'onboarding.localSetup.status.autoContinue': 'Wir fahren automatisch fort, sobald die Installation erkannt wurde.',
