@@ -57,6 +57,22 @@ stdenvNoCC.mkDerivation {
     libexec=$out/libexec/openchamber-desktop
     mkdir -p $libexec
     cp -R package.json packages node_modules $libexec/
+    chmod -R u+w $libexec/packages
+    # packages/sdk's own examples depend on @openchamber/sdk (to demonstrate
+    # its own API), so bun's workspace install gives each example its own
+    # node_modules/@openchamber/sdk -> (several ../.. up) back into
+    # packages/sdk itself -- a real filesystem symlink cycle. Harmless for
+    # anything that resolves node_modules normally (require/import never
+    # walks a whole tree), but anything that does walk the whole tree --
+    # notably nix-darwin's system activation, which materializes this
+    # derivation's app bundle with `rsync --copy-unsafe-links` -- recurses
+    # the cycle until paths exceed ENAMETOOLONG, burning CPU indefinitely
+    # without ever producing a usable bundle (reached through packages/web's
+    # own node_modules/@openchamber/sdk symlink, since the app needs
+    # packages/web). Examples are dev-only, never imported by the packaged
+    # app, so prune their node_modules here before anything downstream can
+    # walk into them.
+    find $libexec/packages -path '*/examples/*/node_modules' -prune -exec rm -rf {} +
 
     app=$out/Applications/OpenChamber.app
     mkdir -p $out/Applications
@@ -81,7 +97,9 @@ stdenvNoCC.mkDerivation {
     # packages/ as a sibling of node_modules/ here too, or Electron's main
     # process fails at startup with ERR_MODULE_NOT_FOUND on @openchamber/web
     # (early-startup.mjs imports it; introduced in e601f1627, which this
-    # packaging was never updated for).
+    # packaging was never updated for). The examples/*/node_modules symlink
+    # cycle that would otherwise make this unsafe for rsync to walk is
+    # pruned from $libexec/packages above.
     ln -s $libexec/packages $resources/app/packages
 
     # The same extraResources electron-builder copies (packages/electron/package.json).
