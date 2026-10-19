@@ -28,6 +28,7 @@ import { MobileToaster } from './MobileToaster';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useRouter } from '@/hooks/useRouter';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
@@ -75,6 +76,9 @@ import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
 import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
+import { IntegrationsCatalogView } from '@/components/views/IntegrationsCatalogView';
+import { WorktreesView } from '@/components/views/WorktreesView';
+import { SpacesView } from '@/components/views/SpacesView';
 import { ArchiveSessionsView } from '@/components/views/ArchiveView';
 import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
@@ -153,6 +157,24 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (runOverviewOpen) setSessionsSheetOpen(false);
   }, [runOverviewOpen]);
   const [activeSurface, setActiveSurface] = React.useState<MobileSurface | null>(null);
+  // Integrations, Worktrees and Spaces are full pages the desktop shell keeps
+  // in the UI store, opened from its menus (the project menu, the sidebar
+  // header). The mobile shell mounts the same pages from the same flags, so
+  // those menus work here too.
+  const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
+  const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+  const spacesPageProjectId = useUIStore((state) => state.spacesPageProjectId);
+  const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
+  const setIntegrationsCatalogOpen = useUIStore((state) => state.setIntegrationsCatalogOpen);
+  const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
+  const setSpacesPageProjectId = useUIStore((state) => state.setSpacesPageProjectId);
+  const enterpriseMode = useEnterpriseMode();
+  const storePageOpen = isIntegrationsCatalogOpen || worktreesPageProjectId !== null || spacesPageProjectId !== null;
+  const closeStorePages = React.useCallback(() => {
+    setIntegrationsCatalogOpen(false);
+    setWorktreesPageProjectId(null);
+    setSpacesPageProjectId(null);
+  }, [setIntegrationsCatalogOpen, setSpacesPageProjectId, setWorktreesPageProjectId]);
   // Phone right drawer with the workspace tabs; the tab persists across
   // open/close so the right-edge swipe reopens where the user left off.
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
@@ -383,6 +405,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (activeSurface === 'settings' && settingsBackRef.current?.()) {
       return true;
     }
+    if (storePageOpen) {
+      closeStorePages();
+      return true;
+    }
     if (activeSurface) {
       closeSurface();
       return true;
@@ -396,7 +422,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     return false;
-  }, [activeSurface, closeSurface, closeWorkspace, openPlan, sessionsSheetOpen, workspaceOpen]);
+  }, [activeSurface, closeStorePages, closeSurface, closeWorkspace, openPlan, sessionsSheetOpen, storePageOpen, workspaceOpen]);
 
   useNativeAndroidBackButton(handleNativeBack);
 
@@ -422,9 +448,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       onOpenScheduled: () => openSurface('scheduled'),
       onOpenArchive: () => openSurface('archive'),
       onOpenSourceBoard: () => openSurface('board'),
+      onOpenIntegrations: enterpriseMode ? undefined : () => setIntegrationsCatalogOpen(true),
       onOpenUpdate: showUpdateItem ? () => openSurface('update') : undefined,
     }),
-    [openSettingsSurface, openSurface, showCapacitorOnlyFeatures, showUpdateItem],
+    [enterpriseMode, openSettingsSurface, openSurface, setIntegrationsCatalogOpen, showCapacitorOnlyFeatures, showUpdateItem],
   );
 
   // A started run or a loop file to edit replaces the page: back to the chat,
@@ -755,6 +782,60 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           >
             <ErrorBoundary>
               <ArchiveSessionsView layout="mobile" onLeave={leaveArchive} />
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {isIntegrationsCatalogOpen ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeStorePages}
+            ariaLabel={t('integrationsCatalog.sidebar.open')}
+            title={t('integrationsCatalog.sidebar.open')}
+          >
+            <ErrorBoundary>
+              {/* The page is absolutely positioned; this keeps it inside the surface body, not the whole overlay. */}
+              <div className="relative h-full">
+                <IntegrationsCatalogView />
+              </div>
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {worktreesPageProjectId !== null ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeStorePages}
+            ariaLabel={t('sessions.sidebar.project.actions.manageWorktrees')}
+            title={t('sessions.sidebar.project.actions.manageWorktrees')}
+          >
+            <ErrorBoundary>
+              {/* The page is absolutely positioned; this keeps it inside the surface body, not the whole overlay. */}
+              <div className="relative h-full">
+                <WorktreesView />
+              </div>
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {isolatedSpacesEnabled && spacesPageProjectId !== null ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeStorePages}
+            ariaLabel={t('spaces.page.menuItem')}
+            title={t('spaces.page.menuItem')}
+          >
+            <ErrorBoundary>
+              {/* The page is absolutely positioned; this keeps it inside the surface body, not the whole overlay. */}
+              <div className="relative h-full">
+                <SpacesView />
+              </div>
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}
