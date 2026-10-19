@@ -120,6 +120,7 @@ import {
   getSessionTimestamp,
 } from './mobileSessionFields';
 import { buildMobileSessionTree } from './mobileSessionTree';
+import { buildRunLaneNode } from './mobileRunLaneTree';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
@@ -1106,16 +1107,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // the combined state of everything the run holds, as on the sidebar.
   const runLaneNodesByKey = React.useMemo(() => {
     const sessionById = new Map(sessions.map((session) => [session.id, session]));
-    const toNode = (session: Session): SessionNode => ({
-      session,
-      children: (childrenBySessionId.get(session.id) ?? []).map(toNode),
-      worktree: null,
-    });
     const nodes = new Map<string, SessionNode[]>();
     for (const run of runIndex.runs.values()) {
       nodes.set(run.key, run.memberIds.flatMap((id) => {
         const session = sessionById.get(id);
-        return session ? [toNode(session)] : [];
+        return session ? [buildRunLaneNode(childrenBySessionId, session)] : [];
       }));
     }
     return nodes;
