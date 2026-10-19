@@ -16,6 +16,7 @@ jobs:
   # The command starts the agent on the repository's model key, so it runs
   # only for people who can push here.
   gate:
+    timeout-minutes: 10
     if: github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '@openchamber-bot summarize' || startsWith(github.event.comment.body, '@openchamber-bot summarize '))
     runs-on: ubuntu-latest
     permissions: {}
@@ -73,6 +74,7 @@ jobs:
           esac
 
   summarize:
+    timeout-minutes: 15
     needs: gate
     if: needs.gate.outputs.allowed == 'true'
     runs-on: ubuntu-latest

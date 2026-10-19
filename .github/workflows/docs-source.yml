@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   validate-and-package:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     outputs:
       archive_name: ${{ steps.archive.outputs.archive_name }}

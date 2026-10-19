@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   label:
+    timeout-minutes: 10
     if: ${{ github.repository == 'openchamber/openchamber' }}
     runs-on: ubuntu-latest
     permissions:

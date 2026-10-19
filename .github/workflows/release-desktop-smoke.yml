@@ -44,6 +44,7 @@ permissions:
 
 jobs:
   build-macos-electron:
+    timeout-minutes: 90
     if: ${{ inputs.build_macos }}
     name: Build macOS Electron (${{ matrix.arch }})
     runs-on: macos-26
@@ -185,6 +186,7 @@ jobs:
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 
   build-windows-electron:
+    timeout-minutes: 90
     if: ${{ inputs.build_windows }}
     name: Build Windows Electron (${{ matrix.arch }})
     # Match the production release workflow. windows-latest currently resolves
@@ -279,6 +281,7 @@ jobs:
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 
   build-linux-electron:
+    timeout-minutes: 90
     if: ${{ inputs.build_linux }}
     name: Build Linux Electron (${{ matrix.arch }})
     strategy:
