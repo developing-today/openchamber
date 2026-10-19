@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18 and 2026-10-19.
 
 ## Areas
 
@@ -86,17 +86,24 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 
 ## Done
 
-| Title                                                    | Date       | Result                |
-| -------------------------------------------------------- | ---------- | --------------------- |
-| New sidebar layout: attention sections, movable sections | 2026-10-16 | #20                   |
-| Worktree start points and branch templates               | 2026-10-16 | #23                   |
-| Follow subsessions of subsessions                        | 2026-10-18 | `6247e7e`             |
-| Asks from nested subagents reach the root                | 2026-10-18 | #69, flake pin in #75 |
-| Next-attention shortcut for sessions drawn project-first | 2026-10-18 | #71                   |
-| `browser.type` checks the value landed                   | 2026-10-18 | #70                   |
-| Bot workflows skip when their app is not configured      | 2026-10-18 | #62, #66, #74         |
-| Concurrency groups per PR, issue or input                | 2026-10-18 | #58, #76, #78, #86    |
-| Test isolation fixes for the UI suite                    | 2026-10-18 | #53, #57, #63         |
-| Contributing note on isolated test runs                  | 2026-10-18 | #50                   |
-| `queue: max` startup failure in issue-intake and pr-review fixed | 2026-10-18 | #84, #85          |
-| Cost rollup survives a parent cycle                      | 2026-10-18 | #79, #88              |
+| Title                                                             | Date       | Result                     |
+| ----------------------------------------------------------------- | ---------- | -------------------------- |
+| New sidebar layout: attention sections, movable sections          | 2026-10-16 | #20                        |
+| Worktree start points and branch templates                        | 2026-10-16 | #23                        |
+| Follow subsessions of subsessions                                 | 2026-10-18 | `6247e7e`                  |
+| Asks from nested subagents reach the root                         | 2026-10-18 | #69, flake pin in #75      |
+| Next-attention shortcut for sessions drawn project-first          | 2026-10-18 | #71                        |
+| `browser.type` checks the value landed                            | 2026-10-18 | #70                        |
+| Bot workflows skip when their app is not configured               | 2026-10-18 | #62, #66, #74              |
+| Concurrency groups per PR, issue or input                         | 2026-10-18 | #58, #76, #78, #86         |
+| Test isolation fixes for the UI suite                             | 2026-10-18 | #53, #57, #63              |
+| Contributing note on isolated test runs                           | 2026-10-18 | #50                        |
+| `queue: max` startup failure in issue-intake and pr-review fixed  | 2026-10-18 | #84, #85                   |
+| Cost rollup survives a parent cycle                               | 2026-10-18 | #79, #88                   |
+| Session trees survive a parent cycle (mobile, header, relocation) | 2026-10-19 | #92, #94, #101, #103, #105 |
+| PR checks run on pushes to main                                   | 2026-10-19 | #95, #96                   |
+| Dispatch-workflow concurrency keyed by its inputs                 | 2026-10-19 | #97                        |
+| Atomic-write renames retry on transient Windows errors            | 2026-10-19 | #98, #99, #106             |
+| Sonner toast-pin test no longer flakes                            | 2026-10-19 | #107, #108                 |
+| Stale WSL docs removed; French onboarding fixed                   | 2026-10-19 | #109, #110, #111, #112     |
+| Least-privilege permissions in the remaining workflows            | 2026-10-19 | #113                       |
