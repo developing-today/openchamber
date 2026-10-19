@@ -71,6 +71,28 @@ describe('relocateRestoredSessionIfDirectoryMissing', () => {
     ]);
   });
 
+  test('a self-parented restored session still moves, once', async () => {
+    const sessions = [session('root', { parentID: 'root' })];
+    const { deps, moves } = setup({ sessions, availability: { [WORKTREE]: 'missing', [PROJECT]: 'available' } });
+
+    expect(await relocateRestoredSessionIfDirectoryMissing('root', deps)).toEqual({ outcome: 'moved', projectRoot: PROJECT });
+    expect(moves).toEqual([{ id: 'root', from: WORKTREE, to: PROJECT }]);
+  });
+
+  test('a restored session in a parent cycle moves itself and the other member, each once', async () => {
+    const sessions = [
+      session('root', { parentID: 'b' }),
+      session('b', { parentID: 'root' }),
+    ];
+    const { deps, moves } = setup({ sessions, availability: { [WORKTREE]: 'missing', [PROJECT]: 'available' } });
+
+    expect(await relocateRestoredSessionIfDirectoryMissing('root', deps)).toEqual({ outcome: 'moved', projectRoot: PROJECT });
+    expect(moves).toEqual([
+      { id: 'b', from: WORKTREE, to: PROJECT },
+      { id: 'root', from: WORKTREE, to: PROJECT },
+    ]);
+  });
+
   test('without a known, existing project root nothing moves', async () => {
     const noProject = setup({ sessions: [session('root')], availability: { [WORKTREE]: 'missing' }, projectRoot: null });
     expect(await relocateRestoredSessionIfDirectoryMissing('root', noProject.deps)).toEqual({ outcome: 'kept' });

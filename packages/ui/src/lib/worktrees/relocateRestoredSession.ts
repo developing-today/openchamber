@@ -65,8 +65,15 @@ const collectDescendantsInDirectory = (
     childrenByParent.set(session.parentID, siblings);
   }
   const descendants: Session[] = [];
+  // A restored session can carry a corrupted parent link (it can be its own
+  // parent, or a member of a parent cycle — the shapes #91 documents). The
+  // visited set, seeded with the root, keeps the walk from recursing forever
+  // on those links, the same guard getDescendantIds uses.
+  const visited = new Set<string>([root.id]);
   const visit = (parentId: string) => {
     for (const child of childrenByParent.get(parentId) ?? []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
       visit(child.id);
       if (normalizePath(child.directory) === directory) descendants.push(child);
     }
