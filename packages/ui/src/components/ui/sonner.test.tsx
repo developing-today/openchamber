@@ -17,6 +17,33 @@ describe('Toaster', () => {
     });
   };
 
+  // The pin lands from a MutationObserver callback, whose delivery a fixed
+  // settle cannot bound on a loaded runner: the toast exists before its
+  // styles are pinned. Wait for the condition the test asserts instead,
+  // and say so when it never arrives.
+  const waitForPinnedToast = async () => {
+    const deadline = Date.now() + 2_000;
+    for (;;) {
+      const toastElement = document.querySelector<HTMLElement>('[data-sonner-toast]');
+      if (
+        toastElement &&
+        toastElement.style.getPropertyPriority('box-shadow') === 'important' &&
+        toastElement.style.getPropertyPriority('outline') === 'important' &&
+        toastElement.getAttribute('tabindex') === '-1'
+      ) {
+        return toastElement;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          'toast elevation pin never arrived: toast was present but its box-shadow/outline were not pinned as !important within 2000ms',
+        );
+      }
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      });
+    }
+  };
+
   beforeEach(() => {
     windowInstance = new Window();
     Object.assign(globalThis, {
@@ -49,9 +76,8 @@ describe('Toaster', () => {
     await act(async () => {
       toast('Saved');
     });
-    await settle();
 
-    const toastElement = document.querySelector<HTMLElement>('[data-sonner-toast]');
+    const toastElement = await waitForPinnedToast();
     expect(toastElement).not.toBeNull();
     expect(toastElement?.style.getPropertyPriority('box-shadow')).toBe('important');
     expect(toastElement?.style.getPropertyPriority('outline')).toBe('important');
