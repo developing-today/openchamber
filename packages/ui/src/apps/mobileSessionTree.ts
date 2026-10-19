@@ -12,9 +12,11 @@ export type MobileSessionTree = {
     orphan still shows. A parent cycle has no root at all, so after the
     normal roots claim their descendants, each session nobody claimed
     becomes a root itself, in input order. Every session in the bucket
-    ends up reachable from exactly one root. Callers still guard their
-    rendering walk with a visited set, because a cycle root's children
-    lead back to the root. */
+    ends up reachable from exactly one root. The children map holds only
+    edges the render walk can follow: an edge back to a session already
+    claimed earlier in the walk is dropped, so the closing node of a
+    cycle and a self-parented session report no children. Callers still
+    guard their rendering walk with a visited set as a backstop. */
 export const buildMobileSessionTree = (sessions: readonly Session[]): MobileSessionTree => {
   const idsInBucket = new Set(sessions.map((entry) => entry.id));
   const childrenByParent = new Map<string, Session[]>();
@@ -54,5 +56,24 @@ export const buildMobileSessionTree = (sessions: readonly Session[]): MobileSess
     claimFrom(entry);
   }
 
-  return { childrenByParent, roots };
+  const renderableChildrenByParent = new Map<string, Session[]>();
+  const walked = new Set<string>();
+  const pruneFrom = (entry: Session): void => {
+    if (walked.has(entry.id)) return;
+    walked.add(entry.id);
+    const kept: Session[] = [];
+    for (const child of childrenByParent.get(entry.id) ?? []) {
+      if (walked.has(child.id)) continue;
+      kept.push(child);
+      pruneFrom(child);
+    }
+    if (kept.length > 0) {
+      renderableChildrenByParent.set(entry.id, kept);
+    }
+  };
+  for (const root of roots) {
+    pruneFrom(root);
+  }
+
+  return { childrenByParent: renderableChildrenByParent, roots };
 };

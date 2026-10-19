@@ -51,6 +51,27 @@ describe('buildMobileSessionTree', () => {
     expect(collectRenderedIds(tree)).toEqual(['root', 'child', 'orphan', 'a', 'b', 'self']);
   });
 
+  test('reports no renderable children for the closing node of a cycle or a self-parent', () => {
+    const tree = buildMobileSessionTree([
+      session('root'),
+      session('child', 'root'),
+      session('a', 'b'),
+      session('b', 'a'),
+      session('self', 'self'),
+      session('orphan', 'missing'),
+    ]);
+    const childIdsOf = (id: string): string[] => (tree.childrenByParent.get(id) ?? []).map((entry) => entry.id);
+
+    // The sheet derives its expand chevron from this map, so a session whose
+    // only child is already rendered above it must report no children.
+    expect(childIdsOf('root')).toEqual(['child']);
+    expect(childIdsOf('a')).toEqual(['b']);
+    expect(childIdsOf('b')).toEqual([]);
+    expect(childIdsOf('self')).toEqual([]);
+    expect(childIdsOf('orphan')).toEqual([]);
+    expect(collectRenderedIds(tree)).toEqual(['root', 'child', 'orphan', 'a', 'b', 'self']);
+  });
+
   test('keeps acyclic buckets unchanged', () => {
     const tree = buildMobileSessionTree([
       session('root'),
