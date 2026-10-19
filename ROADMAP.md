@@ -12,7 +12,7 @@ Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs
 | ----------------------------------------------------------------------- | -------------------------------------------------------- |
 | [Releases and live validation](#releases-and-live-validation)           | No release since `v2.2.0`. Waiting on time on the Mac    |
 | [Sessions and sidebar](#sessions-and-sidebar)                           | Layout options for the phone and the session rows        |
-| [Nested subagents](#nested-subagents)                                   | Shipped. One cost bug left                               |
+| [Nested subagents](#nested-subagents)                                   | Shipped, including the parent-cycle cost fix             |
 | [Agent control and worktrees](#agent-control-and-worktrees)             | Merged, and not yet run in a live app                    |
 | [Routing, knowledge and cost](#routing-knowledge-and-cost)              | Feature requests that depend on the OpenCode fork        |
 | [Sync and transport](#sync-and-transport)                               | Durable cursors, a transcript that blanks                |
@@ -43,10 +43,6 @@ Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs
 ## Nested subagents
 
 Subagents can launch subagents. Asks from any depth reach the root session, and Work Status nests running subagents under the one that started them.
-
-| Title                               | Horizon | Status   | Intent                                                                                                                                                                                    | Links |
-| ----------------------------------- | ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| Cost rollup survives a parent cycle | Now     | proposed | `computeRollup` counts the wrong subagents and misattributes the root's own cost when the viewed session sits in a parent cycle. `developing-today/opencode#77` is the same class of bug. | #79   |
 
 ## Agent control and worktrees
 
@@ -102,3 +98,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Concurrency groups per PR, issue or input                | 2026-10-18 | #58, #76, #78         |
 | Test isolation fixes for the UI suite                    | 2026-10-18 | #53, #57, #63         |
 | Contributing note on isolated test runs                  | 2026-10-18 | #50                   |
+| `queue: max` startup failure in issue-intake and pr-review fixed | 2026-10-18 | #84, #85          |
+| Cost rollup survives a parent cycle                      | 2026-10-18 | #79, #88              |
