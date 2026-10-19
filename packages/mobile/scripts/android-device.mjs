@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const APK_PATH = join(mobileRoot, 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+const APK_PATH = join(mobileRoot, 'android', 'app', 'build', 'outputs', 'apk', 'standard', 'debug', 'app-standard-debug.apk');
 const APP_ID = 'com.openchamber.app';
 const LAUNCH_ACTIVITY = `${APP_ID}/.MainActivity`;
 
@@ -50,10 +50,31 @@ const requireApk = () => {
   }
 };
 
+// Android reports the reason in the failure code. The two that mean "this APK cannot
+// replace the installed app" need the installed copy removed, and the phone's Package
+// Installer shows them only as "App not installed as package appears to be invalid".
+const INSTALL_FAILURE_HINTS = {
+  INSTALL_FAILED_UPDATE_INCOMPATIBLE:
+    'The installed app is signed with a different key. Its data goes with it on uninstall. Remove it, then install again: adb uninstall com.openchamber.app',
+  INSTALL_FAILED_VERSION_DOWNGRADE:
+    'The installed app has a higher versionCode than this build. Remove it, then install again: adb uninstall com.openchamber.app',
+  INSTALL_PARSE_FAILED_NO_CERTIFICATES:
+    'The APK is unsigned. Rebuild it; signing is set by the OPENCHAMBER_ANDROID_* environment.',
+};
+
 const install = () => {
   requireDevice();
   requireApk();
-  adb(['install', '-r', APK_PATH]);
+  const result = adb(['install', '-r', APK_PATH], { capture: true, allowFail: true });
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  if (result.status === 0) {
+    process.stdout.write(output);
+    return;
+  }
+  process.stderr.write(output);
+  const code = Object.keys(INSTALL_FAILURE_HINTS).find((name) => output.includes(name));
+  if (code) console.error(`[android] ${INSTALL_FAILURE_HINTS[code]}`);
+  throw new Error(`adb install exited with ${result.status ?? result.signal}`);
 };
 
 const launch = () => {
