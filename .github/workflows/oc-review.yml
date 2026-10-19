@@ -27,6 +27,7 @@ permissions:
 # job, not the sum.
 jobs:
   type-check:
+    timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,6 +41,7 @@ jobs:
         run: bun run type-check
 
   lint:
+    timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,6 +57,7 @@ jobs:
         run: bun run changelog:check
 
   tests:
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,6 +79,7 @@ jobs:
   # build's memory ceiling. The packages whose `build` is only a type-check (`tsc -b`)
   # (ui) or a no-op (electron) are covered by the type-check job.
   build:
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

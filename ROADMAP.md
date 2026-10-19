@@ -81,7 +81,6 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Title                        | Horizon | Status      | Intent                                                                                                                                  | Links |
 | ---------------------------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | UI tests pass in one process | Now     | in-progress | A combined `bun test` shows phantom failures from leaked module mocks. Several files are fixed and five failures remain in `src/hooks`. | #46   |
-| Timeout caps on every job    | Next    | proposed    | A hung job stops at its cap.                                                                                                            | #67   |
 | Anti-slop backlog            | Later   | planned     | 9,498 findings in 1,086 files, worked in three phases from the cheapest.                                                                | #80   |
 
 ## Done
@@ -107,3 +106,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Sonner toast-pin test no longer flakes                            | 2026-10-19 | #107, #108                 |
 | Stale WSL docs removed; French onboarding fixed                   | 2026-10-19 | #109, #110, #111, #112     |
 | Least-privilege permissions in the remaining workflows            | 2026-10-19 | #113                       |
+| Timeout caps on every workflow job                                | 2026-10-19 | #67, #116                  |

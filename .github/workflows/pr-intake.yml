@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   collect:
+    timeout-minutes: 10
     name: Collect pull requests
     if: ${{ github.repository == 'openchamber/openchamber' }}
     runs-on: ubuntu-latest
@@ -70,6 +71,7 @@ jobs:
             );
 
   intake:
+    timeout-minutes: 10
     name: Label PR ${{ matrix.target.number }}
     needs: collect
     if: ${{ needs.collect.outputs.targets != '[]' }}

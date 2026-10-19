@@ -23,6 +23,7 @@ jobs:
   # Every new issue gets intake. A comment command starts the agent on the
   # repository's model key, so it runs only for people who can push here.
   gate:
+    timeout-minutes: 10
     if: |
       github.event_name == 'issues' ||
       (github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '@openchamber-bot triage' || startsWith(github.event.comment.body, '@openchamber-bot triage ') || github.event.comment.body == '@openchamber-bot reproduce' || startsWith(github.event.comment.body, '@openchamber-bot reproduce ')))
@@ -88,6 +89,7 @@ jobs:
           esac
 
   intake:
+    timeout-minutes: 10
     needs: gate
     if: needs.gate.outputs.allowed == 'true'
     runs-on: ubuntu-latest

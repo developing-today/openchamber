@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   android-debug:
+    timeout-minutes: 60
     name: Android debug APK
     runs-on: ubuntu-24.04
     steps:
@@ -51,6 +52,7 @@ jobs:
           if-no-files-found: error
 
   ios-simulator:
+    timeout-minutes: 60
     name: iOS simulator app
     if: ${{ inputs.build_ios }}
     runs-on: macos-15

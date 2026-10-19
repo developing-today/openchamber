@@ -40,6 +40,7 @@ permissions:
 
 jobs:
   create-release:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create_release.outputs.id }}
@@ -89,6 +90,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-npm:
+    timeout-minutes: 30
     needs: create-release
     # Only the upstream repo publishes @openchamber/* to npm; forks ship desktop/mobile releases only.
     if: ${{ github.repository == 'openchamber/openchamber' && github.event.inputs.finish_published_release != 'true' }}
@@ -144,6 +146,7 @@ jobs:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   build-desktop-electron-macos:
+    timeout-minutes: 90
     needs: create-release
     # Manual only: chosen with build_macos, or by the finish path that adds macOS to a published release.
     if: ${{ github.event.inputs.build_macos == 'true' || github.event.inputs.finish_published_release == 'true' }}
@@ -297,6 +300,7 @@ jobs:
           retention-days: 1
 
   build-desktop-electron-windows:
+    timeout-minutes: 90
     needs: create-release
     # Manual only: chosen with build_windows.
     if: ${{ github.event.inputs.build_windows == 'true' && github.event.inputs.finish_published_release != 'true' }}
@@ -394,6 +398,7 @@ jobs:
           retention-days: 1
 
   build-desktop-electron-linux:
+    timeout-minutes: 90
     needs: create-release
     if: ${{ github.event.inputs.finish_published_release != 'true' }}
     strategy:
@@ -505,6 +510,7 @@ jobs:
           retention-days: 1
 
   publish-electron-linux:
+    timeout-minutes: 15
     needs: [create-release, build-desktop-electron-linux]
     runs-on: ubuntu-latest
     steps:
@@ -557,6 +563,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   combine-electron-manifests:
+    timeout-minutes: 15
     needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows]
     if: ${{ !cancelled() && needs.create-release.result == 'success' }}
     runs-on: ubuntu-latest
@@ -595,6 +602,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   mobile-release:
+    timeout-minutes: 180
     needs: create-release
     if: ${{ github.event.inputs.dry_run != 'true' }}
     uses: ./.github/workflows/mobile-release.yml
@@ -610,6 +618,7 @@ jobs:
     secrets: inherit
 
   finalize-release:
+    timeout-minutes: 15
     needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests, mobile-release]
     # Jobs a finishing run skips count as done; any failure still stops the release.
     if: ${{ !cancelled() && !failure() }}

@@ -30,6 +30,7 @@ permissions:
 
 jobs:
   build-macos-dmg-arm64-electron:
+    timeout-minutes: 90
     name: Build Electron DMG (arm64, ${{ inputs.macos_version }})
     runs-on: ${{ inputs.macos_version }}
     steps:
