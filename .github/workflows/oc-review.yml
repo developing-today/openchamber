@@ -3,10 +3,17 @@ name: pr checks
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # Merged code gets the same verification on main itself: without this, a
+  # merge that breaks main is only discovered by the next PR's run.
+  push:
+    branches: [main]
 
-# A new push to the same PR makes the older run pointless.
+# A new push to the same PR makes the older run pointless. Push runs have
+# no pull_request payload, so they fall back to the unique run_id (the
+# label-merge-conflict pattern): every merge keeps its own run instead of
+# sharing one group that a newer merge would cancel.
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number }}
+  group: pr-checks-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 # Four independent jobs on their own Blacksmith runners (same image as
