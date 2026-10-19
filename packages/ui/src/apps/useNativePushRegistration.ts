@@ -53,6 +53,7 @@ declare global {
 
 interface PushKeyPlugin {
   get(): Promise<{ key: string }>;
+  pushAvailable(): Promise<{ available: boolean }>;
 }
 
 const PushKey = registerPlugin<PushKeyPlugin>('PushKey');
@@ -65,6 +66,14 @@ const getPushKey = async (): Promise<string | undefined> => {
   const key = await PushKey.get().then((result) => result.key).catch(() => undefined);
   return key && PUSH_KEY_PATTERN.test(key) ? key : undefined;
 };
+
+/**
+ * Whether this native build has Firebase configured. Without it (a package with no client in
+ * google-services.json) the push plugin's register() throws on the native side, so the app must
+ * not call it. iOS and older Android builds have no answer and count as available.
+ */
+const isPushAvailable = async (): Promise<boolean> =>
+  PushKey.pushAvailable().then((result) => result.available).catch(() => true);
 
 const isNativePushPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -89,6 +98,7 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
     void import('@capacitor/push-notifications')
       .then(async ({ PushNotifications }) => {
         if (disposed) return;
+        if (!(await isPushAvailable())) return;
 
         let permission = await PushNotifications.checkPermissions().catch(() => null);
         if (permission?.receive !== 'granted') {
