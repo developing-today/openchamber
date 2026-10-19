@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { normalizeGitLabInstance } from './instance.js';
 import { isPlainObject, isString } from './validation.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const AUTH_VERSION = 2;
 const emptyState = () => ({ version: AUTH_VERSION, providers: { gitlab: { instances: {} } } });
@@ -147,7 +148,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     try {
       await fsImpl.writeFile(temporary, `${JSON.stringify(serializeState(state), null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
       await fsImpl.chmod(temporary, 0o600);
-      await fsImpl.rename(temporary, filePath);
+      await renameWithRetry((from, to) => fsImpl.rename(from, to), temporary, filePath);
     } catch (error) {
       await fsImpl.rm(temporary, { force: true }).catch(() => {});
       throw error;

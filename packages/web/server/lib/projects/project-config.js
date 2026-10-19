@@ -2,6 +2,7 @@ import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 
 import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
@@ -612,7 +613,7 @@ export const createProjectConfigRuntime = (deps) => {
     await fsPromises.mkdir(parentDirectory, { recursive: true });
     try {
       await fsPromises.writeFile(temporaryPath, JSON.stringify(document, null, 2), 'utf8');
-      await fsPromises.rename(temporaryPath, filePath);
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
     } catch (error) {
       await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
       throw error;
@@ -1080,7 +1081,7 @@ export const createProjectConfigRuntime = (deps) => {
         const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
         try {
           await fsPromises.writeFile(temporaryPath, serializeSharedProjectConfig(next), 'utf8');
-          await fsPromises.rename(temporaryPath, filePath);
+          await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
         } catch (error) {
           await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
           throw error;

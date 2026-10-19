@@ -35,6 +35,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { z } from 'zod';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 /** The service's bearer, set by `service.js` in every service environment. */
 export const SERVICE_TOKEN_ENV = 'OPENCHAMBER_SERVICE_TOKEN';
@@ -107,7 +108,7 @@ export const createGuestServiceRegistry = ({
     try {
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(tmp, JSON.stringify(record), { mode: 0o600 });
-      await fs.rename(tmp, filePath);
+      await renameWithRetry((from, to) => fs.rename(from, to), tmp, filePath);
     } catch (error) {
       await fs.rm(tmp, { force: true }).catch(() => {});
       console.warn(`[guests] could not record guest service pid ${pid} for crash recovery: ${error?.code ?? error?.message ?? error}`);

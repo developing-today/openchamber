@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 const STATE_VERSION = 1;
 
@@ -69,7 +70,7 @@ export const writeDrainingOpenCodeRecords = (drainingPath, records) => {
   mkdirSync(path.dirname(drainingPath), { recursive: true, mode: 0o700 });
   const tmpPath = `${drainingPath}.${process.pid}.tmp`;
   writeFileSync(tmpPath, `${JSON.stringify({ version: STATE_VERSION, draining: records }, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmpPath, drainingPath);
+  renameSyncWithRetry((from, to) => renameSync(from, to), tmpPath, drainingPath);
 };
 
 // Holds the managed password and agent-tool token, so the file is 0600 and never logged.
@@ -77,7 +78,7 @@ export const writeManagedOpenCodeState = (statePath, state) => {
   mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 });
   const tmpPath = `${statePath}.${process.pid}.tmp`;
   writeFileSync(tmpPath, `${JSON.stringify({ version: STATE_VERSION, ...state }, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmpPath, statePath);
+  renameSyncWithRetry((from, to) => renameSync(from, to), tmpPath, statePath);
 };
 
 export const clearManagedOpenCodeState = (statePath) => {

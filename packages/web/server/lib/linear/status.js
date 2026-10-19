@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { getLinearAuth, getLinearAuthFilePath, getLinearSessionCommentsEnabled } from './auth.js';
 import { createLinearIssueComment } from './issues.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
@@ -33,7 +34,7 @@ function writeJsonFile(filePath, payload) {
   } catch {
     // best-effort
   }
-  fs.renameSync(tmpFile, filePath);
+  renameSyncWithRetry((from, to) => fs.renameSync(from, to), tmpFile, filePath);
   try {
     fs.chmodSync(filePath, 0o600);
   } catch {

@@ -12,6 +12,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { requireSpaceId } from './labels.js';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { MAX_KEPT_OUTPUT_CHARACTERS, MAX_SETUP_COMMAND_LENGTH, MAX_SETUP_COMMANDS } from './space-setup.js';
 
 const RECORDS_DIRECTORY = path.join('spaces', 'records');
@@ -189,7 +190,7 @@ export function createSpaceRecords({ dataDir, logger = console }) {
     // Through a temporary name, so a crash in the middle never leaves half a record.
     const temporary = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(temporary, `${JSON.stringify(checked, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(temporary, file);
+    renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporary, file);
     return checked;
   };
 

@@ -22,6 +22,7 @@
  */
 
 import { asNonEmptyString } from '../shared/guards.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
 
@@ -180,7 +181,7 @@ export const createSessionMetadataStore = ({
     }
     const tmpPath = `${legacyPath}.${process.pid}.tmp`;
     await fsPromises.writeFile(tmpPath, JSON.stringify(Object.fromEntries(unmigrated)), 'utf8');
-    await fsPromises.rename(tmpPath, legacyPath);
+    await renameWithRetry((from, to) => fsPromises.rename(from, to), tmpPath, legacyPath);
   });
 
   /**

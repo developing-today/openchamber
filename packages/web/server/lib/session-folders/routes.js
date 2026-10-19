@@ -1,4 +1,5 @@
 import { isRecord as isObjectRecord } from '../shared/guards.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -210,7 +211,7 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
         await ensureDir();
         tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         await fsPromises.writeFile(tmp, outgoingSerialized, 'utf8');
-        await fsPromises.rename(tmp, filePath);
+        await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, filePath);
         saved = true;
         return res.json({ success: true });
       } catch (error) {

@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { asNonEmptyString } from '../shared/guards.js';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 const VERSION = 1;
 const FILE_NAME = 'skills-installed-sources.json';
@@ -97,7 +98,7 @@ const writeEntries = (entries) => {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify({ version: VERSION, entries }, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, target);
+  renameSyncWithRetry((from, to) => fs.renameSync(from, to), tmp, target);
 };
 
 /**

@@ -28,6 +28,7 @@ import {
   isAutoModel,
 } from './defaults.js';
 import { CLASSIFIER_SOURCES, parseCustomEndpointUrl } from './classifier.js';
+import { renameWithRetry, renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -162,7 +163,7 @@ const writeJsonFile = async (file, value, mode) => {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode });
-  await fs.rename(tmp, file);
+  await renameWithRetry((from, to) => fs.rename(from, to), tmp, file);
   if (mode) await fs.chmod(file, mode);
 };
 
@@ -187,7 +188,7 @@ const writeJsonFileSync = (file, value) => {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  renameSync(tmp, file);
+  renameSyncWithRetry((from, to) => renameSync(from, to), tmp, file);
 };
 
 const emptyFile = () => ({ version: FILE_VERSION });

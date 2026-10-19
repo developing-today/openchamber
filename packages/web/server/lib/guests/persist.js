@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 import { GUEST_CAPABILITIES } from '@openchamber/sdk';
 
@@ -254,7 +255,7 @@ const writeExtensionStoreUnlocked = async (
   await fs.mkdir(path.dirname(persistPath), { recursive: true });
   const tmp = `${persistPath}.tmp-${process.pid}-${Date.now()}-${(writeSequence += 1)}`;
   await fs.writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-  await fs.rename(tmp, persistPath);
+  await renameWithRetry((from, to) => fs.rename(from, to), tmp, persistPath);
   for (const listener of writeListeners) listener(persistPath);
 };
 

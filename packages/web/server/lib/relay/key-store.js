@@ -14,6 +14,7 @@
 // run", because a new key orphans every paired device and push binding.
 
 import { z } from 'zod';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const SLOTS = Object.freeze({
   signing: { field: 'signingKey', legacySettingsKey: 'relaySigningKey' },
@@ -92,7 +93,7 @@ export const createRelayKeyStore = ({
     try {
       await fsPromises.writeFile(tmp, JSON.stringify(store, null, 2), { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
-      await fsPromises.rename(tmp, filePath);
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, filePath);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
       throw error;

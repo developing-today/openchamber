@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -165,5 +166,41 @@ describe('git identity storage', () => {
     await owner.stop();
     expect(createGitIdentityStore({ filePath, lockWaitMs: 20 }).getProfiles()).toEqual([]);
     await expect(fs.stat(`${filePath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
+describe('atomic write rename retry', () => {
+  const epermError = () => Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+
+  it('a write lands when the first rename fails with EPERM', async () => {
+    const { filePath } = await setup();
+    let renameCalls = 0;
+    const flaky = createGitIdentityStore({
+      filePath,
+      fsImpl: {
+        ...fsSync,
+        renameSync: (from, to) => {
+          renameCalls += 1;
+          if (renameCalls === 1) throw epermError();
+          return fsSync.renameSync(from, to);
+        },
+      },
+    });
+
+    flaky.createProfile(complete('one'));
+
+    expect(renameCalls).toBe(2);
+    expect(flaky.getProfiles().map((entry) => entry.id)).toEqual(['one']);
+  });
+
+  it('a rename that keeps failing with EPERM surfaces the error and leaves no temp file', async () => {
+    const { filePath } = await setup();
+    const failing = createGitIdentityStore({
+      filePath,
+      fsImpl: { ...fsSync, renameSync: () => { throw epermError(); } },
+    });
+
+    expect(() => failing.createProfile(complete('one'))).toThrow(expect.objectContaining({ code: 'EPERM' }));
+    expect(fsSync.readdirSync(path.dirname(filePath)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 });

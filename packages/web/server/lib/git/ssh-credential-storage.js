@@ -4,6 +4,7 @@ import path from 'node:path';
 import { constants as fsConstants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const hasExactKeys = (value, keys) => {
   const actual = Object.keys(value);
@@ -78,7 +79,7 @@ export function createManagedSshCredentialStore({ filePath, fsImpl = fs, lockWai
     try {
       await fsImpl.writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       await fsImpl.chmod(temporary, 0o600);
-      await fsImpl.rename(temporary, filePath);
+      await renameWithRetry((from, to) => fsImpl.rename(from, to), temporary, filePath);
     } catch (error) {
       await fsImpl.rm(temporary, { force: true }).catch(() => {});
       throw error;

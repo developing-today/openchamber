@@ -56,7 +56,10 @@ Variants that answer differently for real inputs stay with their owner.
 ## Atomic rename
 
 `atomic-rename.js` holds the rename retry for atomic writes, shared by the
-agent-memory, project-context, and walkthrough stores. On Windows, renaming
+web server's temp-file-then-rename stores: agent-memory, project-context,
+walkthrough, the git/GitHub/GitLab and source-control credential stores,
+environment, linear, quota, routing, spaces, relay, guests, projects, and
+the other persisted-state writers under `server/lib`. On Windows, renaming
 a temp file over a destination another process is reading fails with `EPERM`
 (also seen as `EACCES` or `EBUSY`), and giving up loses the write.
 

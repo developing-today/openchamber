@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { constants as fsConstants } from 'node:fs';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 256;
@@ -485,7 +486,7 @@ export function createGitNetworkOperationStore({
     try {
       await fsImpl.writeFile(temporary, encoded, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       await fsImpl.chmod(temporary, 0o600);
-      await fsImpl.rename(temporary, filePath);
+      await renameWithRetry((from, to) => fsImpl.rename(from, to), temporary, filePath);
     } catch (error) {
       await fsImpl.rm(temporary, { force: true }).catch(() => {});
       throw error;

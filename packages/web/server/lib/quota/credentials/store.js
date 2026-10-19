@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { renameSyncWithRetry } from '../../shared/atomic-rename.js';
 
 const MANAGED_QUOTA_PROVIDERS = new Set(['exe-dev', 'cursor', 'zenmux']);
 
@@ -35,7 +36,7 @@ export const writeQuotaCredential = (providerId, credential) => {
   try {
     fs.writeFileSync(temporary, `${JSON.stringify(credential, null, 2)}\n`, { mode: 0o600 });
     fs.chmodSync(temporary, 0o600);
-    fs.renameSync(temporary, target);
+    renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporary, target);
     fs.chmodSync(target, 0o600);
   } finally {
     try { fs.unlinkSync(temporary); } catch {}

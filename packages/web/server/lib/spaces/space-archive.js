@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { requestedDirectories } from './dispatcher.js';
 
 import { SpaceError } from './errors.js';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { archivedChatOf, chatIdSchema } from './space-opencode.js';
 
 // The maintainer's call of 2026-09-30: at most this many chats of one space go to the archive.
@@ -108,7 +109,7 @@ export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, no
       fs.mkdirSync(root, { recursive: true, mode: 0o700 });
       const temporary = `${file}.${process.pid}.tmp`;
       fs.writeFileSync(temporary, `${JSON.stringify(entry, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-      fs.renameSync(temporary, file);
+      renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporary, file);
       entries.set(entry.spaceId, entry);
     }
     relock();

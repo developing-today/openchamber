@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLockSync } from '../source-control/file-lock.js';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 const FILE_NAME = 'git-identities.json';
 const legacyDataDir = () => path.join(os.homedir(), '.config', 'openchamber');
@@ -181,7 +182,7 @@ export function createGitIdentityStore({
         encoding: 'utf8', mode: 0o600, flag: 'wx',
       });
       fsImpl.chmodSync(temporary, 0o600);
-      fsImpl.renameSync(temporary, filePath);
+      renameSyncWithRetry((from, to) => fsImpl.renameSync(from, to), temporary, filePath);
     } catch (error) {
       try { fsImpl.rmSync(temporary, { force: true }); } catch {}
       throw error;

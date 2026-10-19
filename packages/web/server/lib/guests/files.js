@@ -2,6 +2,7 @@ import defaultFs from 'node:fs/promises';
 import defaultPath from 'node:path';
 
 import { GUEST_FILE_CONTENT_MAX, GUEST_FILE_LIST_MAX, GUEST_FILE_PATH_MAX, guestFileScope } from '@openchamber/sdk';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 /**
  * Guest file access. A relative path lives inside the open project and needs
@@ -204,7 +205,7 @@ const writeOperation = async (absolute, content, fsPromises, nodePath) => {
   const tmp = `${absolute}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fsPromises.writeFile(tmp, content, 'utf8');
-    await fsPromises.rename(tmp, absolute);
+    await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, absolute);
   } catch (error) {
     await fsPromises.unlink(tmp).catch(() => {});
     throw error;

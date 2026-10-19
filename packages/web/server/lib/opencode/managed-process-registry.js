@@ -46,6 +46,7 @@
 // package); it carries a parity implementation that reads/writes the SAME dir.
 
 import fsp from 'node:fs/promises';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -97,7 +98,7 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
       const filePath = path.join(dir, `${entry.pid}.json`);
       const tmp = `${filePath}.tmp-${process.pid}`;
       await fs.writeFile(tmp, JSON.stringify(entry, null, 2));
-      await fs.rename(tmp, filePath);
+      await renameWithRetry((from, to) => fs.rename(from, to), tmp, filePath);
     } catch {
       // Best-effort: a failed registry write must never break spawn/shutdown.
     }

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fetchExeDevUsage } from './exeDevQuota';
+import { renameSyncWithRetry } from './bridge-atomic-write';
 
 export type ManagedProvider = 'exe-dev' | 'cursor' | 'zenmux';
 type ManagedCredential = Record<string, string>;
@@ -36,7 +37,7 @@ export const writeCredential = (provider: ManagedProvider, value: ManagedCredent
   const dir = directory(); const file = target(provider); const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
   // Tighten only a directory this write created: an existing one keeps its ACLs.
   if (fs.mkdirSync(dir, { recursive: true, mode: 0o700 })) fs.chmodSync(dir, 0o700);
-  try { fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temp, file); fs.chmodSync(file, 0o600); }
+  try { fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); renameSyncWithRetry(temp, file, (from, to) => fs.renameSync(from, to)); fs.chmodSync(file, 0o600); }
   finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
   return credentialStatus(provider);
 };

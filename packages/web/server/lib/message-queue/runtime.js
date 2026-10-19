@@ -13,6 +13,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
@@ -347,7 +348,7 @@ export function createMessageQueueRuntime({
         const tmpPath = `${filePath}.${process.pid}.tmp`;
         // Queued prompts are conversation content: readable by the owner only.
         await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
-        await fs.promises.rename(tmpPath, filePath);
+        await renameWithRetry((from, to) => fs.promises.rename(from, to), tmpPath, filePath);
       })
       .catch((error) => {
         console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
