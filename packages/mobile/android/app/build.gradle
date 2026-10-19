@@ -7,6 +7,10 @@ def ciKeystorePassword = System.getenv('OPENCHAMBER_ANDROID_KEYSTORE_PASSWORD')
 def ciKeyAlias = System.getenv('OPENCHAMBER_ANDROID_KEY_ALIAS')
 def ciKeyPassword = System.getenv('OPENCHAMBER_ANDROID_KEY_PASSWORD')
 def hasCiSigning = ciKeystorePath && ciKeystorePassword && ciKeyAlias && ciKeyPassword
+// The release build is its own app, so it installs beside the default com.openchamber.app
+// (debug and CI installs) instead of replacing it. Its data, label and push identity are its own.
+def releaseSuffix = '.fork'
+def releasePackageName = 'com.openchamber.app' + releaseSuffix
 
 android {
     namespace "com.openchamber.app"
@@ -34,7 +38,18 @@ android {
         }
     }
     buildTypes {
+        // A phone that got the CI release cannot take a debug-keyed APK over it
+        // (signature mismatch: "App not installed"). With the same signing env as
+        // release, the debug build uses the release key so `android:install` updates
+        // that install in place. Without the env it stays on the debug key.
+        debug {
+            if (hasCiSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
         release {
+            applicationIdSuffix releaseSuffix
+            resValue "string", "app_name", "OpenChamber Fork"
             if (hasCiSigning) {
                 signingConfig signingConfigs.release
             }
@@ -73,4 +88,17 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// Google Services needs a client for each package in google-services.json. The release package
+// has none until Firebase is set up for it (add the package there and download the file again).
+// Until then the release build skips that step: it builds and installs, and push is off in it.
+def servicesFile = file('google-services.json')
+def servicesPackages = servicesFile.exists()
+    ? new groovy.json.JsonSlurper().parse(servicesFile).client.collect { it.client_info.android_client_info.package_name }
+    : []
+afterEvaluate {
+    if (!servicesPackages.contains(releasePackageName)) {
+        tasks.matching { it.name == 'processReleaseGoogleServices' }.configureEach { enabled = false }
+    }
 }
