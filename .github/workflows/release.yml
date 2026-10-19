@@ -602,7 +602,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   mobile-release:
-    timeout-minutes: 180
     needs: create-release
     if: ${{ github.event.inputs.dry_run != 'true' }}
     uses: ./.github/workflows/mobile-release.yml
