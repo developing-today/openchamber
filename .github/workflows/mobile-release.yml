@@ -60,9 +60,15 @@ on:
         default: false
         type: boolean
 
+# A group keyed only by release_tag cannot tell two releases apart:
+# a dispatch for the same tag with different version, build number or
+# platform inputs could replace another's pending run. Key by the
+# distinguishing inputs and queue every run. A dispatch with no tag
+# keeps its own run_id group, as before.
 concurrency:
-  group: mobile-release-${{ inputs.release_tag != '' && inputs.release_tag || github.run_id }}
+  group: mobile-release-${{ inputs.release_tag != '' && inputs.release_tag || github.run_id }}-${{ inputs.version_name }}-${{ inputs.build_number }}-${{ inputs.build_android }}-${{ inputs.build_ios }}-${{ inputs.upload_github_release }}
   cancel-in-progress: false
+  queue: max
 
 env:
   MOBILE_PACKAGE_DIR: packages/mobile
