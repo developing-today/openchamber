@@ -1,4 +1,5 @@
 import { isString } from '../shared/guards.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -181,7 +182,7 @@ export const createTrustedDirectoriesConfig = ({
     const target = pathImpl.join(directory, 'config');
     const temporary = `${target}.${crypto.randomUUID()}.tmp`;
     await fsImpl.writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
-    await fsImpl.rename(temporary, target);
+    await renameWithRetry((from, to) => fsImpl.rename(from, to), temporary, target);
     return target;
   };
   return async () => {

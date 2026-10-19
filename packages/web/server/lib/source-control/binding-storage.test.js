@@ -376,3 +376,40 @@ describe('source-control binding storage', () => {
     await expect(store.read('repo_one')).resolves.toMatchObject({ revision: 2, binding: { state: 'needs-attention' } });
   });
 });
+
+describe('atomic write rename retry', () => {
+  const epermError = () => Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+
+  it('a write lands when the first rename fails with EPERM', async () => {
+    const { filePath } = await makeStore();
+    let renameCalls = 0;
+    const flaky = createBindingStore({
+      filePath,
+      fsImpl: {
+        ...fs,
+        rename: async (from, to) => {
+          renameCalls += 1;
+          if (renameCalls === 1) throw epermError();
+          return fs.rename(from, to);
+        },
+      },
+    });
+
+    await flaky.compareAndSwap('repo_one', 0, bindingFor('github', 'github.com', 'one'));
+
+    expect(renameCalls).toBe(2);
+    await expect(createBindingStore({ filePath }).read('repo_one')).resolves.toMatchObject({ revision: 1, binding: { state: 'bound' } });
+  });
+
+  it('a rename that keeps failing with EPERM surfaces the error and leaves no temp file', async () => {
+    const { filePath } = await makeStore();
+    const failing = createBindingStore({
+      filePath,
+      fsImpl: { ...fs, rename: async () => { throw epermError(); } },
+    });
+
+    await expect(failing.compareAndSwap('repo_one', 0, bindingFor('github', 'github.com', 'one')))
+      .rejects.toMatchObject({ code: 'EPERM' });
+    expect((await fs.readdir(path.dirname(filePath))).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+});

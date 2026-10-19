@@ -192,3 +192,41 @@ describe('source-control auth storage', () => {
   });
 });
 
+
+describe('atomic write rename retry', () => {
+  const epermError = () => Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+
+  it('a write lands when the first rename fails with EPERM', async () => {
+    const { directory, filePath } = await makeStore();
+    let renameCalls = 0;
+    const flaky = createSourceControlAuthStore({
+      filePath,
+      fsImpl: {
+        ...fs,
+        rename: async (from, to) => {
+          renameCalls += 1;
+          if (renameCalls === 1) throw epermError();
+          return fs.rename(from, to);
+        },
+      },
+    });
+
+    const account = await flaky.setAccount('https://gitlab.example.com', { token: 'one', user: { id: 1, login: 'one' }, source: 'pat' });
+
+    expect(renameCalls).toBe(2);
+    await expect(flaky.readAccount('https://gitlab.example.com', account.id, account.credentialRevision)).resolves.toMatchObject({ token: 'one' });
+    expect(directory).toBe(path.dirname(filePath));
+  });
+
+  it('a rename that keeps failing with EPERM surfaces the error and leaves no temp file', async () => {
+    const { directory, filePath } = await makeStore();
+    const failing = createSourceControlAuthStore({
+      filePath,
+      fsImpl: { ...fs, rename: async () => { throw epermError(); } },
+    });
+
+    await expect(failing.setAccount('https://gitlab.example.com', { token: 'one', user: { id: 1, login: 'one' }, source: 'pat' }))
+      .rejects.toMatchObject({ code: 'EPERM' });
+    expect((await fs.readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+});

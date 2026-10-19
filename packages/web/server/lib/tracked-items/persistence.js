@@ -1,6 +1,7 @@
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { isPlainRecord, parseTrackedItem } from './items.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const FILE_NAME = 'tracked-items.json';
 const VERSION = 1;
@@ -33,7 +34,7 @@ export function createTrackedItemsPersistence({ dataDir, fs = fsPromises }) {
       // Temp file in the same directory, so the rename is atomic on one device.
       const tmpPath = `${filePath}.${process.pid}.tmp`;
       await fs.writeFile(tmpPath, JSON.stringify({ version: VERSION, items }), 'utf8');
-      await fs.rename(tmpPath, filePath);
+      await renameWithRetry((from, to) => fs.rename(from, to), tmpPath, filePath);
     },
   };
 }

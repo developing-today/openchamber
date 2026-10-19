@@ -1,4 +1,5 @@
 import { appendManagedPlugin } from './managed-plugin-config.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
@@ -64,7 +65,7 @@ export const createManagedConfigRuntime = ({
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
     try {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
-      await fsPromises.rename(tmp, filePath);
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, filePath);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
       throw error;

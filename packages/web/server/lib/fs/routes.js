@@ -3,6 +3,7 @@ import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import nodeFsPromises from 'node:fs/promises';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import nodePath from 'node:path';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
@@ -1427,7 +1428,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       try {
         await fsPromises.writeFile(tmp, content, 'utf8');
-        await fsPromises.rename(tmp, writePath);
+        await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, writePath);
       } catch (error) {
         await fsPromises.unlink(tmp).catch(() => {});
         throw error;
@@ -1524,7 +1525,7 @@ export const registerFsRoutes = (app, dependencies) => {
         if (streamError) throw streamError;
 
         if (overwrite) {
-          await fsPromises.rename(tmp, writePath);
+          await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, writePath);
         } else {
           // A same-directory hard link commits without replacing a target that
           // appeared after the existence check. The temp file is already fully

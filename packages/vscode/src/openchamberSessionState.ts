@@ -32,6 +32,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { renameWithRetry } from './bridge-atomic-write';
 
 const ARCHIVE_FILE_NAME = 'sessions-archive.json';
 const METADATA_FILE_NAME = 'sessions-metadata.json';
@@ -185,7 +186,7 @@ export const createSessionStateStore = ({
       // Temp file in the same directory so the rename is atomic on one device.
       const tmpPath = `${filePath}.${process.pid}.tmp`;
       await fsPromises.writeFile(tmpPath, JSON.stringify(value), 'utf8');
-      await fsPromises.rename(tmpPath, filePath);
+      await renameWithRetry(tmpPath, filePath, (from, to) => fsPromises.rename(from, to));
     };
     const next = writeChain.then(write, write);
     writeChain = next.catch(() => undefined);

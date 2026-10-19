@@ -17,6 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 
@@ -273,7 +274,7 @@ export function createDispatchResultsRuntime({
         await fs.promises.mkdir(dataDir, { recursive: true });
         const tmpPath = `${filePath}.${process.pid}.tmp`;
         await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
-        await fs.promises.rename(tmpPath, filePath);
+        await renameWithRetry((from, to) => fs.promises.rename(from, to), tmpPath, filePath);
       })
       .catch((error) => {
         console.warn('[dispatch-results] failed to persist pending results:', error?.message ?? error);

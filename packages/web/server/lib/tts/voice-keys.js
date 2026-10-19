@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 /**
  * API keys for voice services the user typed in Settings: OpenAI read-aloud,
@@ -76,6 +77,6 @@ export const updateVoiceKeys = (body) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, JSON.stringify(next, null, 2), { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(temporaryPath, filePath);
+  renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporaryPath, filePath);
   return describeVoiceKeys();
 };

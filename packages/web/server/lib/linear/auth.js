@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { isPlainObject, readEnv, readFiniteNumber, readTrimmedString } from './parse.js';
 
 const DEFAULT_LINEAR_CLIENT_ID = '91bbe26a69a2c8568d3683f1e01e776c';
@@ -63,7 +64,7 @@ function writeJsonFile(filePath, payload) {
   } catch {
     // best-effort
   }
-  fs.renameSync(tmpFile, filePath);
+  renameSyncWithRetry((from, to) => fs.renameSync(from, to), tmpFile, filePath);
   try {
     fs.chmodSync(filePath, 0o600);
   } catch {

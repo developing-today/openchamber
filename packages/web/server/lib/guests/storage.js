@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_TOTAL_BYTES, GUEST_STORAGE_VALUE_BYTES } from '@openchamber/sdk';
 
 const stores = new Map();
@@ -59,7 +60,7 @@ export const runGuestStorage = (persistPath, id, request, authorize) => {
     const temporary = `${file}.${randomUUID()}.tmp`;
     try {
       await fs.writeFile(temporary, data, { mode: 0o600, flag: 'wx' });
-      await fs.rename(temporary, file);
+      await renameWithRetry((from, to) => fs.rename(from, to), temporary, file);
     } finally {
       await fs.rm(temporary, { force: true });
     }

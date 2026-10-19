@@ -1,4 +1,5 @@
 import { isString } from '../shared/guards.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -185,7 +186,7 @@ export function createGitRepositoryCredentialRuntime({
     const temporary = `${target}.${crypto.randomUUID()}.tmp`;
     await fsPromises.writeFile(temporary, content, { encoding: 'utf8', mode });
     await fsPromises.chmod(temporary, mode);
-    await fsPromises.rename(temporary, target);
+    await renameWithRetry((from, to) => fsPromises.rename(from, to), temporary, target);
   };
 
   return Object.freeze({

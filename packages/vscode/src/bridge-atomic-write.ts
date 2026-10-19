@@ -5,7 +5,8 @@
 // a short backoff (10/25/50/100 ms); every other error throws on the first
 // attempt, and a rename that keeps failing surfaces its last error after the
 // final delay. Shared by the bridge runtimes that persist JSON state
-// (project-setup, settings) so the retry policy lives in one place.
+// (project-setup, settings, quota credentials, session state) so the retry
+// policy lives in one place.
 
 import fs from 'node:fs';
 

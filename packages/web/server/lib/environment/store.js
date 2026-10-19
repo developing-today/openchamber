@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { z } from 'zod';
 
 import {
@@ -118,7 +119,7 @@ export const createEnvironmentStore = ({ filePath }) => {
     fs.writeFileSync(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     // rename keeps the temporary file's mode, so an older, wider file is
     // replaced by a 0600 one.
-    fs.renameSync(temporaryPath, filePath);
+    renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporaryPath, filePath);
     cached = document;
   };
 

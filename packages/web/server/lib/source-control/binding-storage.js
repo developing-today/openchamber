@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { bindingSummary, parseBinding, parseBindingStore } from './binding-contract.js';
 import { createHttpsCredentialReference, parseGitCredentialReference } from '../git/credential-resolver.js';
@@ -42,7 +43,7 @@ export function createBindingStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }
     try {
       await fsImpl.writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
       await fsImpl.chmod(temporary, 0o600);
-      await fsImpl.rename(temporary, filePath);
+      await renameWithRetry((from, to) => fsImpl.rename(from, to), temporary, filePath);
     } catch (error) {
       await fsImpl.rm(temporary, { force: true }).catch(() => {});
       throw error;

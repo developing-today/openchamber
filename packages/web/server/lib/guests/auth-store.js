@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 const SETTING_KEY = /^[a-z][a-z0-9-]*$/;
@@ -102,7 +103,7 @@ const writeGuestAuthStoreUnlocked = async (store, persistPath) => {
   await fs.mkdir(path.dirname(persistPath), { recursive: true });
   const tmp = `${persistPath}.tmp-${process.pid}-${Date.now()}-${(writeSequence += 1)}`;
   await fs.writeFile(tmp, `${JSON.stringify(parsed.data, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  await fs.rename(tmp, persistPath);
+  await renameWithRetry((from, to) => fs.rename(from, to), tmp, persistPath);
   await fs.chmod(persistPath, 0o600);
 };
 

@@ -12,6 +12,7 @@
  */
 
 import { asNonEmptyString } from '../shared/guards.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
 
@@ -148,7 +149,7 @@ export const createArchiveStore = ({
     // a reader sees either the previous file or the complete new one.
     const tmpPath = `${filePath}.${process.pid}.tmp`;
     await fsPromises.writeFile(tmpPath, payload, 'utf8');
-    await fsPromises.rename(tmpPath, filePath);
+    await renameWithRetry((from, to) => fsPromises.rename(from, to), tmpPath, filePath);
   };
 
   /** Applies a batch and rolls the memory back when the file write fails. */

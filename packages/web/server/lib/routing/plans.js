@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 import { resolveOpenCodeDataDir } from './route-overrides-store.js';
 
@@ -121,7 +122,7 @@ export const writePlanStore = (value, dataDir) => {
   fs.mkdirSync(dir, { recursive: true });
   const temporary = `${store}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(valid, null, 2)}\n`);
-  fs.renameSync(temporary, store);
+  renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporary, store);
   return valid;
 };
 

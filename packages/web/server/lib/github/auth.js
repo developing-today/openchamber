@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { renameWithRetry, renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -184,7 +185,7 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
     try {
       await fsImpl.writeFile(temporary, `${JSON.stringify(serializeState(state), null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
       await fsImpl.chmod(temporary, 0o600);
-      await fsImpl.rename(temporary, filePath);
+      await renameWithRetry((from, to) => fsImpl.rename(from, to), temporary, filePath);
     } catch (error) {
       await fsImpl.rm(temporary, { force: true }).catch(() => {});
       throw error;
@@ -299,7 +300,7 @@ function writeSettingsFile(settings) {
   fsSync.mkdirSync(STORAGE_DIR, { recursive: true });
   const tmpFile = `${SETTINGS_FILE}.${process.pid}.${Date.now()}.tmp`;
   fsSync.writeFileSync(tmpFile, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
-  fsSync.renameSync(tmpFile, SETTINGS_FILE);
+  renameSyncWithRetry((from, to) => fsSync.renameSync(from, to), tmpFile, SETTINGS_FILE);
 }
 
 export const getGitHubAuth = () => authStore.getActive();

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 const resolveDataDir = () => (process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -39,7 +40,7 @@ export const writeDiskCache = (fileName, data) => {
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(tempPath, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tempPath, filePath);
+    renameSyncWithRetry((from, to) => fs.renameSync(from, to), tempPath, filePath);
     return true;
   } catch {
     try {
