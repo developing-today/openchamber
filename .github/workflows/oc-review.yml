@@ -16,6 +16,9 @@ concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 # Four independent jobs on their own Blacksmith runners (same image as
 # ubuntu-24.04, faster CPUs, colocated cache; the Blacksmith GitHub App is
 # installed on the openchamber org). None of them reads another's output: the
