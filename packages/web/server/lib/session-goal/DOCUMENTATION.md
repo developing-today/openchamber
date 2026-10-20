@@ -139,6 +139,81 @@ progress check judges against. `spec-writer.js` owns it.
   text. The UI builds the same text for goals it arms, so the wording must
   stay identical on both sides.
 
+## Goal writer jobs
+
+A composer send that goes through the goal writer is a job this server owns
+(`spec-jobs.js`), so the write survives a switch to another thread, a reload
+and a closed window. Structural template: the message queue (server state,
+persisted, revisioned, broadcast).
+
+- Job: `{ id, sessionId, directory, status, trigger, review, sendMode,
+  tokenBudget, message, composerOnly, spec, writer, sendConfig, error,
+  sending, outcome, attempt, createdAt, updatedAt }`. `status` is `writing`,
+  `ready`, `failed`, `sent` or `cancelled`; `trigger` is `armed` or
+  `auto-create`. `message` is the captured composer message in the queue
+  item's form (`content` as typed, `text` to deliver, `agentMention`,
+  `attachments`, `context`); `sendConfig` is the composer's model, agent and
+  effort when the job started, and `review`, `sendMode` and `tokenBudget` are
+  the settings of that moment. `writer` names who writes: `settings` (the
+  picked writer model and its effort), `session` (the session's model at its
+  default) or `small-model` (a session on Auto); after a write it names the
+  model that answered. `outcome` says how a sent job went out: `{ kind:
+  'spec', sendMode }` or `{ kind: 'original', withGoal }`. `writerInput`
+  (conversation and open items for a goal from the next message) and the
+  attachment payloads stay on the server: projections carry attachment names
+  and a context count.
+- One job per session. A second job while one is open is `409`; a new job
+  replaces a sent one. A sent job stays until it is dismissed, the session
+  starts another job, or 24 hours pass. At most 50 jobs; the oldest sent one
+  makes room, and with 50 open jobs a new one is `409`.
+- Writing: `writeGoalSpec` on the writer settings read when the write starts,
+  with the job's text, writer input and session model. A failure is `failed`
+  with the reason. Every redo, send of the original, cancel and stop aborts
+  the running write first, so an answer arriving after that is dropped.
+- Sending by the server: with review off, a written spec goes out at once;
+  `send` does the same for the user's choice on the card. The order is the
+  goal (objective file, then the goal record through `persistSessionGoal`,
+  `rewriteAll` off since the writer or the user settled the objective), the
+  model and agent switch (Auto resolved first), the instructions derived from
+  the text and the session's pending project knowledge as synthetic messages,
+  the prompt with the agent mention, then the goal reminder
+  (`buildGoalIntroText`, carrying the spec only when the message went out as
+  typed next to it). "Send original" stops a running write; an armed goal
+  then keeps the message as its objective, a goal from the next message sends
+  without one. A failed send leaves the job open with the reason and review
+  on, so nothing goes out again until the user picks; a goal saved before the
+  failure stays, as for any send that fails after its goal.
+- Sending through the composer: the server sends text, the agent mention and
+  derived instructions only. A message with attachments or attached context
+  (`composerOnly`) waits on the card even with review off; `claim` hands its
+  full message to the composer and shows the job as sending, and `settle`
+  records the outcome, or releases the job with the reason when the send
+  failed. A claim nobody settles expires after two minutes.
+- Back to edit: `edit` cancels an open job, stops its write and answers the
+  full message for the composer. An open job never ends without a send or an
+  edit, so its message is never dropped.
+- Restart: jobs live in `<data-dir>/goal-spec-jobs.json` (mode 0600,
+  atomic writes, a malformed file moved aside). Writes, sends and claims in
+  flight are memory only: a write the restart cut off starts again, and a
+  written spec that sends itself goes out, on load and on every hub
+  `connect`.
+- A deleted session cancels its job.
+- Routes (`/api/goals/spec-jobs`, before the generic proxy, JSON through the
+  `/api/goals` family): `GET` the snapshot `{ revision, jobs }`; `POST` start
+  `{ sessionId, directory, trigger, review, sendMode, tokenBudget?,
+  writerInput?, message, sendConfig }`; `POST /:jobId/send` with `{ kind:
+  'spec', sendMode, spec }` (the spec as edited) or `{ kind: 'original' }`;
+  `POST /:jobId/redo`; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
+  }`; `POST /:jobId/settle` with `{ outcome, spec?, error? }`; `DELETE
+  /:jobId` dismisses a sent job (an open one is `409`). Mutations answer `{
+  revision, job }`; refusals are `400`, `404` and `409`, a failed send `502`.
+- Every change broadcasts `openchamber:goal-spec-job.updated` with `{
+  revision, sessionId, job }` on the control stream (`job` is null once a sent
+  job is dismissed). The revision is global and monotonic, as the queue's.
+- Enterprise mode leaves the jobs open on the same terms as the writer route:
+  the writer reaches only models configured in OpenCode, and the job file
+  stays on this machine.
+
 ## Flow
 
 1. `createSessionGoalRuntime` subscribes to the global SSE hub (same pattern
