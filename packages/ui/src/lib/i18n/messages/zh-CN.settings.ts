@@ -586,6 +586,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': '此应用：{version}',
   'settings.openchamber.about.toast.serverLatestVersion': '服务器已是最新版 OpenChamber',
   'settings.openchamber.about.actions.checkForUpdates': '检查更新',
+  'settings.openchamber.about.actions.releaseAvailable': 'Release {version} available',
   'settings.openchamber.about.toast.latestVersion': '你已是最新版本',
   'settings.agents.sidebar.title': '智能体',
   'settings.agents.sidebar.total': '总计 {count}',

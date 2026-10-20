@@ -594,6 +594,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': 'Bu uygulama: {version}',
   'settings.openchamber.about.toast.serverLatestVersion': 'Sunucu en son OpenChamber sürümünde',
   'settings.openchamber.about.actions.checkForUpdates': 'Güncellemeleri kontrol et',
+  'settings.openchamber.about.actions.releaseAvailable': 'Release {version} available',
   'settings.openchamber.about.toast.latestVersion': 'En son sürümü kullanıyorsunuz',
   'settings.agents.sidebar.title': 'Agent\'lar',
   'settings.agents.sidebar.total': 'Toplam {count}',

@@ -3374,7 +3374,6 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.error.restartUnavailable': '업데이트 설치에는 OpenChamber 데스크톱 앱이 필요합니다.',
   'mobileUpdate.toast.available.title': 'OpenChamber 업데이트 사용 가능',
   'mobileUpdate.toast.available.description': 'Android용 버전 {version}이 준비되었습니다.',
-  'mobileUpdate.toast.actions.download': '다운로드',
   'mobileUpdate.toast.actions.dismiss': '닫기',
   'opencodeUpdate.toast.available.title': 'OpenCode 업데이트',
   'opencodeUpdate.toast.available.description': '버전 {version} 사용 가능.',

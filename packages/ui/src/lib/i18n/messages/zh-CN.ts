@@ -3340,7 +3340,6 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.error.restartUnavailable': '安装更新需要 OpenChamber 桌面应用。',
   'mobileUpdate.toast.available.title': 'OpenChamber 更新可用',
   'mobileUpdate.toast.available.description': '版本 {version} 已可用于 Android。',
-  'mobileUpdate.toast.actions.download': '下载',
   'mobileUpdate.toast.actions.dismiss': '忽略',
   'opencodeUpdate.toast.available.title': 'OpenCode 更新',
   'opencodeUpdate.toast.available.description': '版本 {version} 可用。',
