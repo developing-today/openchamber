@@ -345,7 +345,8 @@ sees only that final turn, so the report is its evidence.
   model), its effort, the prompt, review, send mode, rewrite all, and goal
   from next message. None of it exists in VS Code, which has no goal loop.
   - Model: with no pick, the line under the label names the model that writes
-    then, the composer's (`Session model: provider/model`).
+    then, the composer's (`Session model: provider/model`). On Auto it says
+    the small model writes, since the small-model chain treats Auto as no model.
   - Effort: `sessionGoalWriterVariant` in `useUIStore`, a picker of the picked
     model's levels from the provider catalog plus "Model default" (empty).
     Picking another model clears it; it is disabled while no model with levels

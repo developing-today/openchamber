@@ -261,6 +261,26 @@ describe('generateSmallModelText', () => {
     expect(result).toMatchObject({ providerID: 'openai', modelID: 'gpt-5.6-luna', source: 'session-model' });
   });
 
+  it('treats a session or request on Auto as naming no model', async () => {
+    // Auto (openchamber/auto) is OpenChamber's own choice; before, a session on
+    // Auto came back as the "session model" openchamber/auto, which OpenCode
+    // refuses. It now gets what a session naming no model gets.
+    const unnamed = await generateSmallModelText({ prompt: 'hi', directory: '/proj' });
+    expect(unnamed.providerID).not.toBe('openchamber');
+
+    const sessionOnAuto = await generateSmallModelText({
+      prompt: 'hi',
+      directory: '/proj',
+      preferredProviderID: 'openchamber',
+      preferredModelID: 'auto',
+    });
+    expect(sessionOnAuto).toMatchObject({ providerID: unnamed.providerID, modelID: unnamed.modelID, source: unnamed.source });
+    expect(lastGenerate().body.model.providerID).toBe(unnamed.providerID);
+
+    const requestedAuto = await generateSmallModelText({ prompt: 'hi', directory: '/proj', model: 'openchamber/auto' });
+    expect(requestedAuto).toMatchObject({ providerID: unnamed.providerID, modelID: unnamed.modelID, source: unnamed.source });
+  });
+
   it('prefers the small model of the session provider over the session model itself', async () => {
     state.models = [
       MODEL({ id: 'claude-sonnet-5', modelID: 'claude-sonnet-5', family: 'claude-sonnet' }),

@@ -92,6 +92,9 @@ Five things are decided here, in order:
    takes the caller's own model (`preferredModelID`) — `source:
    'session-model'`: costlier than a small model elsewhere, but never another
    provider's subscription. OpenCode's titles end the same way.
+   A caller on Auto (`openchamber/auto`, OpenChamber's own choice, which no
+   provider runs) names no provider or model here: a request for Auto, or a
+   session on Auto, gets what a caller naming nothing gets, never Auto itself.
 5. Otherwise `GET /api/model/default` — `source: 'default'`. This is
    OpenCode's default chat model, not a small one; it is the last resort, and
    only for a caller that named no provider or whose provider it is on. With

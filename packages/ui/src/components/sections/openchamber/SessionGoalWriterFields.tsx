@@ -21,6 +21,7 @@ import { modelVariantNames } from '@/lib/modelVariants';
 import { findCatalogModel } from '@/lib/opencode/model';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
+import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore, type SessionGoalAutoCreate, type SessionGoalWriterSendMode } from '@/stores/useUIStore';
 import { GoalWriterPromptEditor } from './GoalWriterPromptEditor';
@@ -176,6 +177,9 @@ const SessionGoalWriterModelField: React.FC<{ disabled: boolean }> = ({ disabled
   }, [catalog, parsed.modelId, parsed.providerId]);
 
   const sessionModel = sessionProviderId && sessionModelId ? `${sessionProviderId}/${sessionModelId}` : '';
+  // Auto is OpenChamber's own choice and runs on no provider, so on Auto the
+  // small model writes specs (small-model resolveSmallModel), and the line says so.
+  const sessionOnAuto = isAutoModel(sessionProviderId, sessionModelId);
 
   return (
     <>
@@ -184,7 +188,9 @@ const SessionGoalWriterModelField: React.FC<{ disabled: boolean }> = ({ disabled
         label={t('settings.openchamber.visual.goal.writer.modelLabel')}
         info={t('settings.openchamber.visual.goal.writer.modelInfo')}
         description={modelKnown && !model && sessionModel
-          ? t('settings.openchamber.visual.goal.writer.modelSessionInUse', { model: sessionModel })
+          ? sessionOnAuto
+            ? t('settings.openchamber.visual.goal.writer.modelSessionAuto')
+            : t('settings.openchamber.visual.goal.writer.modelSessionInUse', { model: sessionModel })
           : undefined}
       >
         <div className={cn(disabled && 'pointer-events-none opacity-50')} aria-disabled={disabled || undefined}>
