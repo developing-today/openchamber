@@ -206,6 +206,50 @@ describe('openchamber events', () => {
     }
   });
 
+  test('goal writer jobs read the server on every stream connection and apply updates in revision order', async () => {
+    const { subscribeGoalSpecJobSync } = await import('@/sync/goal-spec-job-sync');
+    const { getRuntimeKey } = await import('./runtime-switch');
+    const { useGoalSpecJobStore } = await import('@/stores/goalSpecJobStore');
+    const runtimeKey = getRuntimeKey();
+    useGoalSpecJobStore.getState().resetForRuntimeSwitch();
+    const job = (status: string, spec: string | null) => ({
+      id: 'job-1', sessionId: 'ses_goal', directory: '/repo', status, trigger: 'armed', review: true, sendMode: 'with-message',
+      tokenBudget: null, message: { content: 'Ship it', text: 'Ship it', attachments: [], contextCount: 0 }, composerOnly: false,
+      spec, writer: { source: 'session', providerID: 'p', modelID: 'm', variant: null }, sendConfig: { providerID: 'p', modelID: 'm' },
+      error: null, sending: false, outcome: null, attempt: 1, createdAt: 1, updatedAt: 1,
+    });
+    const originalFetch = globalThis.fetch;
+    let reads = 0;
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://runtime.test');
+      if (url.pathname === '/api/goals/spec-jobs') reads += 1;
+      return Response.json({ revision: 1, jobs: [job('writing', null)] });
+    }, originalFetch);
+    const unsubscribe = subscribeGoalSpecJobSync(runtimeKey);
+    const source = MockEventSource.instances[0];
+    const update = (revision: number, value: ReturnType<typeof job>) => source.onmessage?.({
+      data: JSON.stringify({ type: 'openchamber:goal-spec-job.updated', properties: { revision, sessionId: 'ses_goal', job: value } }),
+    });
+    try {
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready', properties: {} }) });
+      await useGoalSpecJobStore.getState().hydrate();
+      expect(reads).toBe(1);
+      expect(useGoalSpecJobStore.getState().jobs.ses_goal?.status).toBe('writing');
+
+      update(3, job('ready', 'Spec'));
+      update(2, job('writing', null));
+      expect(useGoalSpecJobStore.getState().jobs.ses_goal?.status).toBe('ready');
+
+      // A reconnect may have missed events: the server is read again.
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready', properties: {} }) });
+      await useGoalSpecJobStore.getState().hydrate();
+      expect(reads).toBe(2);
+    } finally {
+      unsubscribe();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('an expired session stops the stream from reconnecting until the user logs in', async () => {
     const { useAuthSessionStore } = await import('./runtime-auth-expiry');
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');

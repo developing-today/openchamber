@@ -405,6 +405,26 @@ Input history keeps both runtime-wide and runtime/directory/session buckets in o
 
 Server-owned queue acceptance records the original prompt and restorable attachments against its captured runtime/directory/session identity. Rejection records nothing. Automatic delivery and manual take do not record the accepted item again. VS Code retains recording at dispatch, using the full messages actually taken for sending.
 
+`goalSpecJobStore.ts` follows the goal writer jobs the web server owns
+(`packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Goal writer jobs*):
+one job per session, keyed by session id for the active runtime, nothing
+persisted. `hydrate()` reads `GET /api/goals/spec-jobs` on load and `resync()`
+reads it again on every connection of the control stream
+(`sync/goal-spec-job-sync.ts`), sharing one request; a reconnect during a read
+earns one trailing read. Updates arrive as
+`openchamber:goal-spec-job.updated` and every mutation answer carries the same
+`{ revision, job }`. The revision is the server's global counter: an update
+older than the one applied for its session is dropped, and a snapshot taken
+before a newer update arrived does not replace the job that update set. A
+failed read keeps the jobs shown; a failed action reads the server again and
+reports the server's reason. A cancelled job and a dismissed one (`job: null`)
+leave the store. A started job records its prompt in the session's input
+history, as an accepted queued message does. `claimJob` and `editJob` return
+the full captured message with its files decoded (`toAttachedFile`). Spec text
+edited on a card stays in `specEdits` per job and write attempt, so a thread
+switch keeps it. A runtime switch clears the jobs and drops reads and answers
+started before it. VS Code never reads the route: it has no goal loop.
+
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 
 ### `useTerminalStore.ts`

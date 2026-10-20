@@ -14,6 +14,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { useGoalSpecJobStore } from '@/stores/goalSpecJobStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
@@ -99,6 +100,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetSessionActivityTiming();
   usePermissionStore.getState().reset();
   useMessageQueueStore.getState().resetForRuntimeSwitch(detail.previousRuntimeKey);
+  useGoalSpecJobStore.getState().resetForRuntimeSwitch();
   useFileSearchStore.getState().resetForRuntimeSwitch();
   useGitStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   sessionEvents.cancelPendingGitRefreshes();

@@ -952,7 +952,10 @@ Queue recovery is independent of the directory-bootstrap debounce. The sync
 provider subscribes to `message-queue-sync.ts` for control-stream updates and
 requests a queue refresh on every main-stream connection or transport switch,
 including the first connection. The queue store coalesces these requests with
-bootstrap and owns snapshot ordering and legacy-upload lifetime.
+bootstrap and owns snapshot ordering and legacy-upload lifetime. Goal writer
+jobs ride the same control stream through `goal-spec-job-sync.ts`: they are
+read once when the provider mounts and again on every control-stream
+connection (`event-stream-ready`), the stream their updates come on.
 
 Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 
