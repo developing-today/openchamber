@@ -139,16 +139,55 @@ const fetchHealth = (port) => new Promise((resolve) => {
   request.on('error', () => resolve(null));
 });
 
+const readLogTail = (logPath, maxLines = 40) => {
+  try {
+    const lines = fs.readFileSync(logPath, 'utf8').split('\n');
+    return lines.slice(-maxLines).join('\n');
+  } catch {
+    return null;
+  }
+};
+
+// What a readiness timeout reports alongside the bare message: whether the server process is still
+// running or has exited (and how), what the pid file names, and the tail of the server log. Without
+// this a recurrence cannot be told apart as a crash, a hung start, or a merely slow start under load.
+const readinessDiagnostics = ({ child, logPath, pidFilePath }) => {
+  const lines = [];
+  if (child) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      lines.push(`server process ${child.pid} has exited (exit code ${child.exitCode}, signal ${child.signalCode})`);
+    } else {
+      lines.push(`server process ${child.pid} is still running`);
+    }
+  }
+  if (pidFilePath) {
+    const pid = readPid(pidFilePath);
+    if (pid === null) {
+      lines.push(fs.existsSync(pidFilePath)
+        ? `pid file ${pidFilePath} exists but does not name a pid`
+        : `pid file ${pidFilePath} does not exist`);
+    } else {
+      lines.push(`pid file ${pidFilePath} names pid ${pid}, which is ${isAlive(pid) ? 'alive' : 'not alive'}`);
+    }
+  }
+  if (logPath) {
+    const tail = readLogTail(logPath);
+    lines.push(tail === null ? `server log ${logPath} could not be read` : `last lines of server log ${logPath}:\n${tail}`);
+  }
+  return lines;
+};
+
 // A server took longer than the old 30 s to listen once, with the whole suite sharing the machine. The
 // longer budget covers that load. It is only a readiness wait, and every assertion stays as it was.
-const waitForReady = async (port, timeoutMs = 60_000) => {
+const waitForReady = async (port, { timeoutMs = 60_000, child = null, logPath = null, pidFilePath = null } = {}) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const health = await fetchHealth(port);
     if (health?.body?.isOpenCodeReady === true) return health.body;
     await sleep(200);
   }
-  throw new Error(`server on ${port} did not become ready within ${timeoutMs}ms`);
+  const diagnostics = readinessDiagnostics({ child, logPath, pidFilePath });
+  throw new Error([`server on ${port} did not become ready within ${timeoutMs}ms`, ...diagnostics].join('\n'));
 };
 
 const waitForExit = (child, timeoutMs = 15_000) => new Promise((resolve) => {
@@ -310,8 +349,8 @@ describeUnlessWindows('self-handoff across real processes', () => {
     const predecessor = startServer(sandbox, { port, name: 'predecessor' });
     const children = [predecessor.child];
     track(sandbox, port, children);
-    await waitForReady(port);
     const pidFile = sandbox.pidFilePath(port);
+    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
     const oldPid = readPid(pidFile);
     const openCodeBefore = readJson(sandbox.statePath);
 
@@ -356,6 +395,52 @@ describeUnlessWindows('self-handoff across real processes', () => {
     }, 120_000);
   }
 
+  // The readiness timeout must carry the evidence — server log tail, child exit state and pid-file
+  // state — so a CI recurrence says whether the server crashed, hung, or was merely slow (#131).
+  it('readiness timeout names the log tail, the exited child and the pid file', async () => {
+    const sandbox = await createSandbox();
+    cleanups.push(() => fsp.rm(sandbox.root, { recursive: true, force: true }));
+    const port = await freePort();
+    const logPath = sandbox.logPath('never-ready');
+    await fsp.writeFile(logPath, 'starting up\nmanaged launch: start\nstartup stalled marker\n');
+    const child = spawn(process.execPath, ['-e', 'process.exit(3)'], { stdio: 'ignore' });
+    await waitForExit(child, 15_000);
+    const pidFile = sandbox.pidFilePath(port);
+    await fsp.mkdir(path.dirname(pidFile), { recursive: true });
+    await fsp.writeFile(pidFile, `${child.pid}\n`);
+
+    const error = await waitForReady(port, { timeoutMs: 300, child, logPath, pidFilePath: pidFile }).then(
+      () => null,
+      (caught) => caught,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain(`server on ${port} did not become ready within 300ms`);
+    expect(error.message).toContain('startup stalled marker');
+    expect(error.message).toContain(`server process ${child.pid} has exited (exit code 3`);
+    expect(error.message).toContain(`names pid ${child.pid}, which is not alive`);
+  }, 30_000);
+
+  it('readiness timeout reports a still-running child and missing log and pid file', async () => {
+    const sandbox = await createSandbox();
+    cleanups.push(() => fsp.rm(sandbox.root, { recursive: true, force: true }));
+    const port = await freePort();
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    cleanups.push(async () => child.kill('SIGKILL'));
+
+    const error = await waitForReady(port, {
+      timeoutMs: 300,
+      child,
+      logPath: sandbox.logPath('missing'),
+      pidFilePath: sandbox.pidFilePath(port),
+    }).then(() => null, (caught) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain(`server process ${child.pid} is still running`);
+    expect(error.message).toContain('could not be read');
+    expect(error.message).toContain('does not exist');
+  }, 30_000);
+
   // (b) the managed OpenCode child keeps its pid and port across the handoff; the successor adopts it.
   it('keeps the OpenCode child on the same pid and port across the handoff', async () => {
     const run = await runHandoffUnderLoad();
@@ -379,8 +464,8 @@ describeUnlessWindows('self-handoff across real processes', () => {
     const predecessor = startServer(sandbox, { port, name: 'predecessor', env });
     const children = [predecessor.child];
     track(sandbox, port, children);
-    await waitForReady(port);
     const pidFile = sandbox.pidFilePath(port);
+    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
     const oldPid = readPid(pidFile);
     const openCodeBefore = readJson(sandbox.statePath);
 
@@ -416,7 +501,8 @@ describeUnlessWindows('self-handoff across real processes', () => {
     const predecessor = startServer(sandbox, { port, name: 'predecessor', env });
     const children = [predecessor.child];
     track(sandbox, port, children);
-    await waitForReady(port);
+    const pidFile = sandbox.pidFilePath(port);
+    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
 
     const refused = await runCli(sandbox, ['handoff', '--port', String(port)], env);
     expect(refused.code).toBe(2);
@@ -428,7 +514,7 @@ describeUnlessWindows('self-handoff across real processes', () => {
     await waitForExit(predecessor.child, 15_000);
     const successor = startServer(sandbox, { port, name: 'successor', env });
     children.push(successor.child);
-    await waitForReady(port);
+    await waitForReady(port, { child: successor.child, logPath: successor.logPath, pidFilePath: pidFile });
     await sleep(500);
     const counts = await client.stop();
     report({ run: 'negative-control', requests: counts.requests, ok: counts.ok, refused: counts.refused, failed: counts.failed, errors: counts.errors });
@@ -450,8 +536,8 @@ describeUnlessWindows('self-handoff across real processes', () => {
 
     const predecessor = startServer(sandbox, { port, name: 'predecessor', env: { NOTIFY_SOCKET: notifySocket } });
     track(sandbox, port, [predecessor.child]);
-    await waitForReady(port);
     const pidFile = sandbox.pidFilePath(port);
+    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
     const oldPid = readPid(pidFile);
 
     const cli = await runCli(sandbox, ['handoff', '--port', String(port)]);
