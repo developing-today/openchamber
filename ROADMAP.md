@@ -119,3 +119,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Desktop release pipeline cache aligned to v6.1.0                  | 2026-10-20 | #155, #156                 |
 | pr-intake github-script aligned to v8.0.0                         | 2026-10-20 | #157, #158                 |
 | Electron `build` bundles the main process (was a no-op stub)      | 2026-10-20 | #142, #159                 |
+| Jules action pinned to commit SHA (opencode#184 set)              | 2026-10-20 | #162                       |
