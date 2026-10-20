@@ -16,6 +16,12 @@ import { useI18n } from '@/lib/i18n';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS, SESSION_GOAL_MAX_AUTO_TURNS_LIMIT } from '@/lib/sessionGoalTurnLimit';
+import {
+  DEFAULT_SESSION_GOAL_CHECK_OBJECTIVE_CHAR_LIMIT,
+  DEFAULT_SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
+  SESSION_GOAL_CHAR_LIMIT_MAX,
+  SESSION_GOAL_CHAR_LIMIT_MIN,
+} from '@/lib/sessionGoalLimits';
 import { useUIStore, type SessionGoalChecker } from '@/stores/useUIStore';
 
 const openSmallModelSettings = (): void => {
@@ -114,3 +120,81 @@ export const SessionGoalMaxTurnsField: React.FC<{ disabled?: boolean }> = ({ dis
   );
 };
 
+
+interface CharLimitFieldProps {
+  settingsItem: string;
+  label: string;
+  info: string;
+  resetAria: string;
+  value: number;
+  defaultValue: number;
+  onChange: (value: number) => void;
+  disabled: boolean;
+}
+
+const CharLimitField: React.FC<CharLimitFieldProps> = ({ settingsItem, label, info, resetAria, value, defaultValue, onChange, disabled }) => {
+  const { t } = useI18n();
+  return (
+    <SettingsFieldRow settingsItem={settingsItem} label={label} info={info}>
+      <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+        <NumberInput
+          value={value}
+          onValueChange={(next) => onChange(Math.floor(next))}
+          min={SESSION_GOAL_CHAR_LIMIT_MIN}
+          max={SESSION_GOAL_CHAR_LIMIT_MAX}
+          step={1_000}
+          disabled={disabled}
+          className={SETTINGS_NUMBER_INPUT_CLASS}
+          aria-label={label}
+        />
+        <Button size="sm"
+          type="button"
+          variant="ghost"
+          onClick={() => onChange(defaultValue)}
+          disabled={disabled || value === defaultValue}
+          className={SETTINGS_ICON_BUTTON_CLASS}
+          aria-label={resetAria}
+          title={t('settings.common.actions.reset')}
+        >
+          <Icon name="restart" className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </SettingsFieldRow>
+  );
+};
+
+/**
+ * How long a goal may be before saving condenses it, and how much of it the
+ * progress check reads. A goal editor can switch the first off for one goal.
+ */
+export const SessionGoalLengthFields: React.FC<{ disabled?: boolean }> = ({ disabled = false }) => {
+  const { t } = useI18n();
+  const objectiveLimit = useUIStore((state) => state.sessionGoalObjectiveCharLimit);
+  const setObjectiveLimit = useUIStore((state) => state.setSessionGoalObjectiveCharLimit);
+  const checkLimit = useUIStore((state) => state.sessionGoalCheckObjectiveCharLimit);
+  const setCheckLimit = useUIStore((state) => state.setSessionGoalCheckObjectiveCharLimit);
+  return (
+    <>
+      <CharLimitField
+        settingsItem="chat.session-goal-length"
+        label={t('settings.openchamber.visual.goal.lengthLabel')}
+        info={t('settings.openchamber.visual.goal.lengthInfo')}
+        resetAria={t('settings.openchamber.visual.goal.lengthResetAria')}
+        value={objectiveLimit}
+        defaultValue={DEFAULT_SESSION_GOAL_OBJECTIVE_CHAR_LIMIT}
+        onChange={setObjectiveLimit}
+        disabled={disabled}
+      />
+      <CharLimitField
+        settingsItem="chat.session-goal-check-length"
+        label={t('settings.openchamber.visual.goal.checkLengthLabel')}
+        info={t('settings.openchamber.visual.goal.checkLengthInfo')}
+        resetAria={t('settings.openchamber.visual.goal.checkLengthResetAria')}
+        value={checkLimit}
+        defaultValue={DEFAULT_SESSION_GOAL_CHECK_OBJECTIVE_CHAR_LIMIT}
+        onChange={setCheckLimit}
+        disabled={disabled}
+      />
+    </>
+  );
+};

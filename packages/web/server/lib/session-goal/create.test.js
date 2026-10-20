@@ -5,6 +5,8 @@ const generateSmallModelTextMock = vi.fn(async () => ({ text: '' }));
 
 vi.mock('./objectives.js', () => ({
   GOAL_OBJECTIVE_CHAR_LIMIT: 5_000,
+  GOAL_OBJECTIVE_HARD_CAP: 1_000_000,
+  goalObjectiveLimits: () => ({ objective: 5_000, check: 20_000 }),
   writeObjective: writeObjectiveMock,
 }));
 

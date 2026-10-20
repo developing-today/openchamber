@@ -196,6 +196,14 @@ describe('generateSmallModelText', () => {
     });
   });
 
+  it('sends an effort level only with the model it was named for', async () => {
+    await generateSmallModelText({ prompt: 'hi', directory: '/proj', model: 'anthropic/claude-haiku-4-5', variant: 'low' });
+    expect(lastGenerate().body.model).toEqual({ id: 'claude-haiku-4-5', providerID: 'anthropic', variant: 'low' });
+
+    await generateSmallModelText({ prompt: 'hi', directory: '/proj', variant: 'low' });
+    expect(lastGenerate().body.model).toEqual({ id: 'claude-haiku-4-5', providerID: 'anthropic' });
+  });
+
   it('scopes the request to the directory', async () => {
     await generateSmallModelText({ prompt: 'hi', directory: '/proj/sub dir' });
 

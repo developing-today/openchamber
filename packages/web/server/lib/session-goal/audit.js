@@ -51,6 +51,21 @@ const excerptAnswer = (text) => (text.length <= ANSWER_HEAD_CHARS + ANSWER_TAIL_
   ? text
   : `${text.slice(0, ANSWER_HEAD_CHARS).trimEnd()}\n[…]\n${text.slice(-ANSWER_TAIL_CHARS).trimStart()}`);
 
+/**
+ * At most `limit` characters of the objective: a goal within it is passed
+ * whole, so the measured wording is unchanged; a longer one keeps its opening
+ * (what to build) and its close (Done when), which is what the check judges.
+ * Bounding it here keeps a long goal from pushing the answer and the closing
+ * instruction off the end of the small model's prompt.
+ */
+export const excerptObjective = (text, limit) => {
+  if (text.length <= limit) return text;
+  const marker = '\n[… middle of the objective left out for this check …]\n';
+  const head = Math.floor((limit - marker.length) * 0.4);
+  const tail = limit - marker.length - head;
+  return `${text.slice(0, head).trimEnd()}${marker}${text.slice(-tail).trimStart()}`;
+};
+
 /** The Jev request for one check. */
 export const buildJevAuditRequest = ({ objective, answer }) => ({
   state: { objective, answer: excerptAnswer(answer) },

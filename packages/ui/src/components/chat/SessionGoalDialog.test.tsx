@@ -7,6 +7,7 @@ import type { Session } from '@/lib/opencode/model';
 import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
+import { useGoalEditStore } from '@/stores/useGoalEditStore';
 
 // React DOM and the Base UI dialog probe for a DOM when first imported; without
 // one the dialog never mounts its popup. Give the probe a document, then
@@ -68,11 +69,12 @@ describe('SessionGoalDialog', () => {
   const stage = (record: Session) => act(async () => {
     store().setState({ session: [record] });
   });
+  let openChanges: boolean[] = [];
   const render = (open: boolean) => act(async () => root.render(
     <SyncProvider sdk={sdk} directory={directory}>
       <I18nProvider>
         <React.Profiler id="goal-dialog" onRender={() => { renders += 1; }}>
-          <SessionGoalDialog open={open} onOpenChange={() => undefined} sessionId={sessionId} directory={directory} />
+          <SessionGoalDialog open={open} onOpenChange={(next) => { openChanges.push(next); }} sessionId={sessionId} directory={directory} />
         </React.Profiler>
       </I18nProvider>
     </SyncProvider>,
@@ -80,6 +82,8 @@ describe('SessionGoalDialog', () => {
 
   beforeEach(() => {
     renders = 0;
+    openChanges = [];
+    useGoalEditStore.setState({ jobs: {}, drafts: {} });
     dom = installDom();
     root = createRoot(dom.container);
   });
@@ -113,5 +117,27 @@ describe('SessionGoalDialog', () => {
     await stage(session(2, 4));
 
     expect(document.body.textContent).toContain('4 continuations');
+  });
+
+  // Saving used to wait in the dialog for the goal writer, up to two minutes,
+  // with only a disabled button to show for it.
+  test('saving closes the dialog at once and hands the save to the card above the composer', async () => {
+    await render(false);
+    await stage(session(1, 1));
+    await render(true);
+
+    const objective = document.querySelector('textarea');
+    if (!objective) throw new Error('No objective field');
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      setValue?.call(objective, 'Ship it, with tests');
+      objective.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    const save = Array.from(document.querySelectorAll('button')).find((element) => element.textContent?.trim() === 'Save goal');
+    if (!save) throw new Error(`No Save button in: ${document.body.textContent}`);
+    await act(async () => { save.click(); });
+
+    expect(openChanges).toEqual([false]);
+    expect(useGoalEditStore.getState().jobs[sessionId]).toMatchObject({ draft: { objective: 'Ship it, with tests' } });
   });
 });

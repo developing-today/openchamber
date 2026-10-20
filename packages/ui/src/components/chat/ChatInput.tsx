@@ -15,6 +15,7 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
 import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
 import { GoalSpecDialog, type GoalSpecDialogRequest } from '@/components/chat/GoalSpecDialog';
+import { GoalEditStrip } from '@/components/chat/GoalEditStrip';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
@@ -1860,7 +1861,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     trigger: goalWriterPlan.trigger,
                     review: goalWriterPlan.review,
                     defaultSendMode: uiState.sessionGoalWriterSendMode,
-                    write: async (signal) => {
+                    sessionModel: providerIdToSend && modelIdToSend ? { providerID: providerIdToSend, modelID: modelIdToSend } : null,
+                    directory: goalTargetDirectory,
+                    write: async (signal, { writer, ignoreLimit }) => {
                         const context = goalWriterPlan.trigger === 'auto-create'
                             ? await collectGoalWriterContext({
                                 sessionId: sessionIdForContext,
@@ -1876,6 +1879,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             directory: goalTargetDirectory,
                             providerID: providerIdToSend,
                             modelID: modelIdToSend,
+                            writer,
+                            ignoreLimit,
                             signal,
                         });
                     },
@@ -2364,7 +2369,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const choice = options.goal;
             if (choice.kind === 'none') goalArm.setArmed(false);
             else if (choice.kind === 'unchanged') goalArm.setArmed(true, null, { settled: true });
-            else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message' });
+            else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message', ignoreLimit: choice.ignoreLimit });
         }
 
         const sendPromise = sendMessage(
@@ -4119,6 +4124,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             directory={currentSessionDirectoryForSync ?? currentDirectory}
         />
     ) : null;
+    // A goal edit still being written, or one that did not land, under the goal.
+    const goalEditRow = !isBtwActive ? (
+        <GoalEditStrip
+            sessionId={currentSessionId}
+            directory={currentSessionDirectoryForSync ?? currentDirectory}
+        />
+    ) : null;
     const revertRow = !isBtwActive && !newSessionDraftOpen ? (
         <RevertedMessagesStrip
             sessionId={currentSessionId}
@@ -4134,11 +4146,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRows = worktreeSetupRow || spaceWaitRow || goalRow || autoReviewRow || backgroundShellsRow || persistentTerminalsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    const composerTopRows = worktreeSetupRow || spaceWaitRow || goalRow || goalEditRow || autoReviewRow || backgroundShellsRow || persistentTerminalsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {worktreeSetupRow}
             {spaceWaitRow}
             {goalRow}
+            {goalEditRow}
             {autoReviewRow}
             {backgroundShellsRow}
             {persistentTerminalsRow}

@@ -24,7 +24,10 @@ credentials, the provider dispatch and the token refresh. Routes live under
   retracting it. An empty list is never cached: OpenCode 2 answers with one
   while it starts, and caching it hid every provider from the pickers.
 - `index.js` — `generateSmallModelText()`, `describeSmallModel()`,
-  `listAuthenticatedProviders(directory?)`.
+  `listAuthenticatedProviders(directory?)`. `generateSmallModelText` takes an
+  optional `variant` (effort level), sent to OpenCode as `model.variant` only
+  when `model` names the model explicitly; it is dropped for a model the
+  chain picked, since a level belongs to one model.
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).

@@ -4,9 +4,25 @@ import {
   buildJevAuditRequest,
   buildSmallModelAuditPrompt,
   decideProgress,
+  excerptObjective,
   readJevAnswers,
   readSmallModelAnswers,
 } from './audit.js';
+
+describe('objective excerpt for the check', () => {
+  it('passes an objective within the limit whole', () => {
+    expect(excerptObjective('short goal', 1_000)).toBe('short goal');
+  });
+
+  it('keeps the opening and the close of a longer one, within the limit', () => {
+    const objective = `## Objective\nBuild it.\n${'middle '.repeat(5_000)}\n## Done when\nTests pass.`;
+    const excerpt = excerptObjective(objective, 2_000);
+    expect(excerpt.length).toBeLessThanOrEqual(2_000);
+    expect(excerpt.startsWith('## Objective\nBuild it.')).toBe(true);
+    expect(excerpt.endsWith('## Done when\nTests pass.')).toBe(true);
+    expect(excerpt).toContain('middle of the objective left out');
+  });
+});
 
 describe('goal progress decision', () => {
   it('blocks whenever the turn waits on the user, even with all work reported done', () => {

@@ -139,7 +139,30 @@ describe('requestGoalSpec', () => {
       const result = await requestGoalSpec({
         request: 'Add dark mode', conversation: '', openItems: 'Open project todos:\n- a', directory: '/project', providerID: 'p', modelID: 'm',
       });
-      expect(result).toEqual({ ok: true, spec: '## Objective\nDark mode', providerID: 'p', modelID: 'm' });
+      // A server from before 2026-10 reports no effort level.
+      expect(result).toEqual({ ok: true, spec: '## Objective\nDark mode', providerID: 'p', modelID: 'm', variant: null });
+    } finally {
+      globalThis.fetch = originalFetch;
+      configureRuntimeUrlResolver({ apiBaseUrl: '' });
+    }
+  });
+
+  test('sends a writer picked in a goal window and the length limit choice', async () => {
+    const originalFetch = globalThis.fetch;
+    let body: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      body = await new Request(input, init).json();
+      return Response.json({ spec: 'spec', providerID: 'g', modelID: 'gem', variant: 'low' });
+    };
+    configureRuntimeUrlResolver({ apiBaseUrl: 'http://goal-writer.test' });
+    try {
+      const result = await requestGoalSpec({
+        request: 'Add dark mode', providerID: 'p', modelID: 'm', writer: { providerID: 'g', modelID: 'gem', variant: 'low' }, ignoreLimit: true,
+      });
+      expect(body).toEqual({
+        request: 'Add dark mode', providerID: 'p', modelID: 'm', writerProviderID: 'g', writerModelID: 'gem', writerVariant: 'low', ignoreLimit: true,
+      });
+      expect(result).toEqual({ ok: true, spec: 'spec', providerID: 'g', modelID: 'gem', variant: 'low' });
     } finally {
       globalThis.fetch = originalFetch;
       configureRuntimeUrlResolver({ apiBaseUrl: '' });

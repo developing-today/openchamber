@@ -1,4 +1,5 @@
 import type { Session } from '@/lib/opencode/model';
+import { SESSION_GOAL_CHAR_LIMIT_MAX } from '@/lib/sessionGoalLimits';
 
 // Session goal driven by the server's session-goal runtime, stored under
 // session.metadata.openchamber.goal. The UI writes goals (create/edit/
@@ -9,13 +10,13 @@ export type SessionGoalStatus = 'active' | 'paused' | 'blocked' | 'budgetLimited
 
 const SESSION_GOAL_STATUSES: SessionGoalStatus[] = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'];
 
-export const SESSION_GOAL_OBJECTIVE_CHAR_LIMIT = 5000;
-
 export interface SessionGoalPayload {
   id: string;
   objective: string;
   /** True when the objective text lives in a server-side file keyed by session id. */
   objectiveFile: boolean;
+  /** The user switched this goal's length limit off in the goal editor. */
+  ignoreObjectiveLimit: boolean;
   status: SessionGoalStatus;
   tokenBudget: number | null;
   tokensUsed: number;
@@ -55,8 +56,10 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
 
   return {
     id,
-    objective: objective.slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT),
+    // The limit is applied when a goal is saved; reading keeps what was saved.
+    objective: objective.slice(0, SESSION_GOAL_CHAR_LIMIT_MAX),
     objectiveFile,
+    ignoreObjectiveLimit: goal.ignoreObjectiveLimit === true,
     status: goal.status,
     tokenBudget,
     tokensUsed: asCount(goal.tokensUsed),

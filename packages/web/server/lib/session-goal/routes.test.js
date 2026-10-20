@@ -38,6 +38,17 @@ describe('POST /api/goals/spec', () => {
     }));
   });
 
+  it('passes a model, effort and limit choice made for this spec', async () => {
+    writeGoalSpecMock.mockResolvedValue({ spec: 'spec', providerID: 'google', modelID: 'gemini', variant: 'low' });
+    await request(createApp())
+      .post('/api/goals/spec')
+      .send({ request: 'Ship it', writerProviderID: 'google', writerModelID: 'gemini', writerVariant: 'low', ignoreLimit: true })
+      .expect(200);
+    expect(writeGoalSpecMock).toHaveBeenCalledWith(expect.objectContaining({
+      writerProviderID: 'google', writerModelID: 'gemini', writerVariant: 'low', ignoreLimit: true,
+    }));
+  });
+
   it('answers with the writer error status and code', async () => {
     writeGoalSpecMock.mockRejectedValue(Object.assign(new Error('a request is required to write a goal spec'), {
       statusCode: 400,
