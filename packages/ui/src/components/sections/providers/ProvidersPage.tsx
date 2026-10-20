@@ -26,12 +26,14 @@ import { requiresProviderAuth } from './providerAvailability';
 import { listConnectableProviders } from './connectableProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
+  findIntegrationForProvider,
+  isRouteProvider,
   providerHasCredentials,
+  ROUTE_PROVIDER_NAME_KEY,
   shouldAutoOpenAuthPanel,
   shouldShowApiKeyAuth,
   shouldShowModelsSection,
   usesMachineCredentials,
-  findIntegrationForProvider,
   getCredentialConnections,
   getKeyMethod,
   getSignInMethods,
@@ -84,6 +86,20 @@ const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<vo
 const ADD_PROVIDER_ID = '__add_provider__';
 /** Not an OpenCode provider id: the page for OpenChamber's own classification providers (Jev). */
 const CLASSIFICATION_PAGE_ID = '__classification__';
+
+/**
+ * Says a provider is off. Nothing under it is locked: its model choices can
+ * still be changed, and they apply again once the provider is back on.
+ */
+const DisabledNotice: React.FC = () => {
+  const { t } = useI18n();
+  return (
+    <div className="oc-tile mb-6 flex items-start gap-2 rounded-lg p-3">
+      <Icon name="pause" className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <p className="typography-meta text-foreground">{t('settings.providers.disabled.banner')}</p>
+    </div>
+  );
+};
 
 interface ProviderSourceInfo {
   exists: boolean;
@@ -162,7 +178,6 @@ export const ProvidersPage: React.FC = () => {
   const handleProviderDisabled = React.useCallback(async (providerId: string, disabled: boolean) => {
     try {
       setDisabledProviders(await setProviderDisabledRequest(providerId, disabled));
-      if (disabled) setSelectedProvider('');
       toast.success(disabled
         ? t('settings.providers.disabled.toast.disabled', { provider: providerId })
         : t('settings.providers.disabled.toast.enabled', { provider: providerId }));
@@ -170,7 +185,7 @@ export const ProvidersPage: React.FC = () => {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [loadProviders, setSelectedProvider, settingsDirectory, t]);
+  }, [loadProviders, settingsDirectory, t]);
   // Only the first read blocks the credential forms; a re-read keeps showing
   // the methods already known.
   const authLoading = catalog === null && !integrationsLoadFailed;
@@ -289,6 +304,10 @@ export const ProvidersPage: React.FC = () => {
   // auth panel instead of a false "Connected" summary. Respect an explicit Hide.
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
+      return;
+    }
+    // The routes provider signs in to nothing, so it never opens the auth panel.
+    if (isRouteProvider(selectedProviderId)) {
       return;
     }
     const sources = providerSources[selectedProviderId];
@@ -688,18 +707,54 @@ export const ProvidersPage: React.FC = () => {
     );
   }
 
+  const selectedDisabled = selectedProviderId !== '' && (disabledProviders?.includes(selectedProviderId) ?? false);
+  // Off and on live in one list, so this button, the card and the list at the
+  // bottom of the grid always agree. Models stay editable while a provider is off.
+  const disableToggle = disabledProviders !== null && selectedProviderId !== '' && !isAddMode && selectedProviderId !== CLASSIFICATION_PAGE_ID ? (
+    <Button
+      variant="outline"
+      size="xs"
+      className="!font-normal"
+      title={selectedDisabled ? undefined : t('settings.providers.disabled.disableHint')}
+      onClick={() => void handleProviderDisabled(selectedProviderId, !selectedDisabled)}
+    >
+      {selectedDisabled ? t('settings.providers.disabled.enable') : t('settings.providers.disabled.disable')}
+    </Button>
+  ) : null;
+
   if (!selectedProvider) {
+    // A turned-off provider OpenCode no longer lists still has its own page, so
+    // its card and the list at the bottom lead somewhere that says it is off.
+    if (!selectedDisabled) {
+      return (
+        <ProviderGrid
+          providers={providers}
+          integrations={integrations}
+          directory={settingsDirectory}
+          onSelect={setSelectedProvider}
+          onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
+          onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
+          disabledProviders={disabledProviders}
+          onSetProviderDisabled={(providerId, disabled) => void handleProviderDisabled(providerId, disabled)}
+        />
+      );
+    }
+    const unlistedName = findIntegrationForProvider(integrations ?? [], selectedProviderId)?.name || selectedProviderId;
     return (
-      <ProviderGrid
-        providers={providers}
-        integrations={integrations}
-        directory={settingsDirectory}
-        onSelect={setSelectedProvider}
-        onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
-        onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
-        disabledProviders={disabledProviders}
-        onEnableProvider={(providerId) => void handleProviderDisabled(providerId, false)}
-      />
+      <SettingsPageLayout
+        title={unlistedName}
+        titleLeading={(
+          <span className="flex items-center gap-2">
+            {backButton}
+            <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
+          </span>
+        )}
+        description={<span className="typography-settings-description font-mono text-muted-foreground">{selectedProviderId}</span>}
+        headerEnd={disableToggle}
+        showSaveStatus={false}
+      >
+        <DisabledNotice />
+      </SettingsPageLayout>
     );
   }
 
@@ -719,12 +774,15 @@ export const ProvidersPage: React.FC = () => {
     machineCredentials: usesMachineCredentials(selectedProvider),
   });
   const authStatusIncomplete = requiresProviderAuth(integrationsLoaded, hasCredentials, isEditableCustomProvider);
-  const showModelsSection = shouldShowModelsSection({
-    modelCount: providerModels.length,
-    integrationsLoaded,
-    hasCredentials,
-    isEditableCustomProvider,
-  });
+  const routeProvider = isRouteProvider(selectedProvider.id);
+  const showModelsSection = routeProvider
+    ? providerModels.length > 0
+    : shouldShowModelsSection({
+      modelCount: providerModels.length,
+      integrationsLoaded,
+      hasCredentials,
+      isEditableCustomProvider,
+    });
   const providerConnections = getProviderConnections(integrations ?? [], selectedProvider.id) ?? [];
   // Requests go through one integration only: the provider's own, or the one it
   // is bound to (OpenCode Go moves to the Console once you are signed in there).
@@ -771,8 +829,10 @@ export const ProvidersPage: React.FC = () => {
         title={selectedProvider.name || selectedProvider.id}
         titleLeading={providerTitleLeading}
         description={providerDescription}
+        headerEnd={disableToggle}
         showSaveStatus={false}
       >
+        {selectedDisabled ? <DisabledNotice /> : null}
         <CustomProviderForm
           mode="edit"
           existingProviderIDs={connectedProviderIds}
@@ -796,11 +856,14 @@ export const ProvidersPage: React.FC = () => {
 
   return (
     <SettingsPageLayout
-      title={selectedProvider.name || selectedProvider.id}
+      title={routeProvider ? t(ROUTE_PROVIDER_NAME_KEY) : selectedProvider.name || selectedProvider.id}
       titleLeading={providerTitleLeading}
       description={providerDescription}
+      headerEnd={disableToggle}
       showSaveStatus={false}
     >
+      {selectedDisabled ? <DisabledNotice /> : null}
+      {routeProvider ? null : (
       <SettingsSection
         title={t('settings.providers.accounts.title')}
         info={t('settings.providers.accounts.info')}
@@ -824,17 +887,6 @@ export const ProvidersPage: React.FC = () => {
                 }}
               >
                 {t('settings.providers.page.actions.edit')}
-              </Button>
-            ) : null}
-            {disabledProviders !== null ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                title={t('settings.providers.disabled.disableHint')}
-                onClick={() => void handleProviderDisabled(selectedProvider.id, true)}
-              >
-                {t('settings.providers.disabled.disable')}
               </Button>
             ) : null}
             {enterpriseLocked ? null : (
@@ -918,10 +970,12 @@ export const ProvidersPage: React.FC = () => {
           </div>
         )}
       </SettingsSection>
+      )}
 
       {showModelsSection ? (
       <SettingsSection
-        title={t('settings.providers.page.models.title')}
+        title={routeProvider ? t('settings.providers.routes.poolsTitle') : t('settings.providers.page.models.title')}
+        info={routeProvider ? t('settings.providers.routes.poolsInfo') : undefined}
         titleAccessory={
           <span className="typography-micro text-muted-foreground font-normal">
             ({providerModels.length})

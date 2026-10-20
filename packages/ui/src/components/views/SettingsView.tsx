@@ -13,6 +13,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { projectSettingsTabForSearchTarget, useProjectSettingsTabStore } from '@/components/sections/projects/projectSettingsTabs';
+import { routingTabForSearchTarget, useRoutingPageViewStore } from '@/components/sections/routing/routingTabs';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
@@ -490,6 +491,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     const projectTab = projectSettingsTabForSearchTarget(result.id);
     if (projectTab) {
       useProjectSettingsTabStore.getState().setTab(projectTab);
+    }
+
+    const routingTab = routingTabForSearchTarget(result.id);
+    if (routingTab) {
+      useRoutingPageViewStore.getState().setTab(routingTab);
     }
 
     return result.id;

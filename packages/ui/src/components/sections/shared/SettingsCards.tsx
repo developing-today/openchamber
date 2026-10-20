@@ -75,6 +75,8 @@ interface SettingsCardProps {
   actions?: readonly SettingsCardAction[];
   /** Accessible name for the ⋯ button. */
   actionsLabel?: string;
+  /** A button in the card's bottom corner; a sibling of the card, never inside it. */
+  footerAction?: React.ReactNode;
 }
 
 const ActionLabel: React.FC<{ action: SettingsCardAction }> = ({ action }) => (
@@ -84,7 +86,7 @@ const ActionLabel: React.FC<{ action: SettingsCardAction }> = ({ action }) => (
   </>
 );
 
-export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitle, description, badges, footer, muted, onOpen, actions, actionsLabel }) => {
+export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitle, description, badges, footer, muted, onOpen, actions, actionsLabel, footerAction }) => {
   const hasActions = (actions?.length ?? 0) > 0;
   const body = (
     <>
@@ -103,9 +105,9 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
           <div className="mt-1 line-clamp-2 typography-micro text-muted-foreground">{description}</div>
         ) : null}
       </div>
-      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasActions && 'pe-8')}>
+      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', footerAction ? 'pe-24' : hasActions && 'pe-8')}>
         {footer}
-        {onOpen && !hasActions ? (
+        {onOpen && !hasActions && !footerAction ? (
           <Icon
             name="arrow-right-s"
             className="ms-auto size-4 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-70 group-focus-visible:opacity-70"
@@ -130,6 +132,17 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
   ) : (
     <div className={cn(CARD_CLASS, 'oc-tile h-full')}>{body}</div>
   );
+
+  if (footerAction && !hasActions) {
+    // The footer button sits over the card as a sibling of the card button,
+    // like the ⋯ button, so the two stay separate controls.
+    return (
+      <div className="group relative h-full">
+        {card}
+        <div className="absolute bottom-3 inset-e-3">{footerAction}</div>
+      </div>
+    );
+  }
 
   if (!hasActions || !actions) return card;
 
