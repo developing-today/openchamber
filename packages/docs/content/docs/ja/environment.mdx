@@ -18,6 +18,15 @@ OpenCode、Git、ターミナル、[プロジェクトアクション](/ja/proje
 
 プロジェクトごとの変数や、`direnv export json` のように変数を出力するコマンドは、**設定 → プロジェクト** で追加できます。[プロジェクト](/ja/projects/#プロジェクトの環境)を参照してください。
 
+### 1Password のシークレット
+
+値にシークレットそのものを入れる代わりに、1Password の項目を参照させることができます。`op://Vault/item/field` の形式で入力します。例: `GITHUB_TOKEN` = `op://Vertex SRE/github_token/credential`。プロセスが必要とするときに、OpenChamber が [1Password CLI](https://developer.1password.com/docs/cli/)（`op read`）で読み取ります。シークレットはメモリ上にだけ保持され、`environment.json` に書き込まれることも、表示されることもありません。設定画面には参照が表示されます。
+
+- OpenCode は起動するたびに読み取ります。シークレットを更新した後は OpenCode を再起動してください。
+- Git、ターミナル、プロジェクトアクションは、次に開始するアクションで読み取り、5 分間再利用します。
+- 読み取れない参照はテキストとして渡されず、除外されます。設定画面にはその理由が表示されます。`op` がインストールされていない、1Password が応答しなかった、または参照を拒否した、のいずれかです。
+- OpenCode の設定で MCP サーバーやプロバイダーにシークレットを渡すには、ここで変数を設定し、設定ファイルから OpenCode の `{env:GITHUB_TOKEN}` で参照します。
+
 これらの変数は、自分で起動した OpenCode サーバーには渡りません。また、VS Code 拡張機能にはこの設定がありません。以下の変数はすべて、OpenChamber 自身が起動時に読み取ります。
 
 ## OpenChamber サーバー

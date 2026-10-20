@@ -31,12 +31,32 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   primary checkout, read from the `.git` file without running Git) and layers
   user variables, command output, then project variables. `forOpenCode()`
   answers `opencode service set env` variables under the user variables.
-  `applyToDirectory(dir, env)` is the overlay consumers call.
+  `applyToDirectory(dir, env)` is the overlay consumers call. `forDirectory`
+  reads vault references on a user action and otherwise uses the last value
+  read. `forOpenCodeResolved()` is `forOpenCode()` with references read, for
+  the launch itself; the launch fingerprint keeps the unresolved
+  `forOpenCode()`, so no secret is hashed or stored and a changed reference
+  still restarts OpenCode. `vaultStatus()` answers each reference's last read.
+- `vault.js`: vault references. A value matching `op://<vault>/<item>/<field>`
+  (optionally with a section) is read with `op read --no-newline` when a
+  process needs it (`createVaultResolver().resolve(variables, { refresh })`).
+  The secret stays in memory only. `refresh: true` reads a reference with no
+  value yet or one older than five minutes; `refresh: false` uses only what
+  an earlier read left, so Git status polling never starts `op`. A failed
+  read leaves the variable out (a stale good value is kept instead when
+  there is one) and records `{ state: 'failed', reason }` per variable:
+  `op-not-installed`, `timeout` (30 s), `op-read-failed`, `empty`. It warns
+  once per variable and reason, naming the variable only.
 - `opencode-service-env.js`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
   OpenCode contract; anything unexpected reads as no variables.
 - `routes.js`: `/api/environment` (user) and `/api/environment/projects/:id`
   (+ `/reload`). On the JSON-body allowlist in `opencode/core-routes.js`.
+  Every answer carries `references` (the variables whose value is a vault
+  reference, with the reference) and `vault` (each reference's last read).
+- The `openchamber` agent tool reaches the same store through
+  `../openchamber-control/environment-actions.js`: names, references and
+  their reads; it sets only a vault reference or removes a variable.
 
 ## Who receives what
 
@@ -56,7 +76,9 @@ token, PATH entries it needs) are applied after the user's variables and win.
 ## Invariants
 
 - **Values never leave the server.** Routes answer names and the command,
-  never a value. Nothing logs a value, the command's stdout or its stderr; a
+  never a value. A vault reference is the one exception: it names where a
+  secret is kept, not the secret, which is read by the server and never
+  returned. Nothing logs a value, the command's stdout or its stderr; a
   failed run logs the project id and the reason only.
 - **A spawn always goes ahead.** `forDirectory` never throws: a broken store,
   a failing command or a failed lookup applies what could be resolved and

@@ -163,6 +163,7 @@ import { createProviderActions } from './lib/openchamber-control/provider-action
 import { createConfigActions } from './lib/openchamber-control/config-actions.js';
 import { createIntegrationActions } from './lib/openchamber-control/integration-actions.js';
 import { createIntegrationServiceActions } from './lib/openchamber-control/integration-service-actions.js';
+import { createEnvironmentActions } from './lib/openchamber-control/environment-actions.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1548,6 +1549,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
+  resolveUserEnvironment: () => environmentRuntime.forOpenCodeResolved(),
 });
 
 // Quota lookups, voice keys and routing read provider credentials from the
@@ -1908,6 +1910,7 @@ const openChamberControlService = createOpenChamberControlService({
     }),
     createIntegrationActions({ readSettingsFromDiskMigrated, persistSettings }),
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
+    createEnvironmentActions({ store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects }),
   ],
 });
 

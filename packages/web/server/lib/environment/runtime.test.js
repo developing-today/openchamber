@@ -197,6 +197,26 @@ describe('environment runtime', () => {
     expect(runtime.forOpenCode()).toEqual({});
   });
 
+  it('reads vault references for the OpenCode launch only, and keeps the reference as its fingerprint', async () => {
+    await store.updateUser({ variables: { GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' } });
+    const resolve = vi.fn(async (variables) => Object.fromEntries(Object.entries(variables).map(([name, value]) => [name, value.startsWith('op://') ? 'ghp_secret' : value])));
+    let enterprise = false;
+    const runtime = createRuntime({ isEnterpriseMode: () => enterprise, vault: { resolve, status: () => ({}) } });
+    expect(runtime.forOpenCode()).toEqual({ GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' });
+    await expect(runtime.forOpenCodeResolved()).resolves.toEqual({ GITHUB_TOKEN: 'ghp_secret' });
+    expect(resolve).toHaveBeenLastCalledWith({ GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' }, { refresh: true });
+    enterprise = true;
+    await expect(runtime.forOpenCodeResolved()).resolves.toEqual({});
+  });
+
+  it('reads vault references for a directory on a user action, and not on a background read', async () => {
+    await store.updateUser({ variables: { GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' } });
+    const resolve = vi.fn(async (variables, { refresh }) => (refresh ? { GITHUB_TOKEN: 'ghp_secret' } : {}));
+    const runtime = createRuntime({ vault: { resolve, status: () => ({}) } });
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toEqual({ GITHUB_TOKEN: 'ghp_secret' });
+    expect(await runtime.forDirectory(projectPath, { refresh: false })).toBeNull();
+  });
+
   it('keeps spawns going when the store is broken, and says so once', async () => {
     fs.writeFileSync(path.join(root, 'environment.json'), 'broken');
     const runtime = createRuntime();

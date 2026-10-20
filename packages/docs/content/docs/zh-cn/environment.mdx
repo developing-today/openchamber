@@ -18,6 +18,15 @@ OpenChamber 会在启动时读取这些变量。对于开机启动服务，`open
 
 项目可以在 **设置 → 项目** 中添加自己的变量，或者添加一条输出这些变量的命令，例如 `direnv export json`。参阅[项目](/zh-cn/projects/#项目环境)。
 
+### 来自 1Password 的密钥
+
+值可以指向 1Password 中的条目，而不直接保存密钥：输入 `op://Vault/item/field`，例如 `GITHUB_TOKEN` = `op://Vertex SRE/github_token/credential`。当某个进程需要它时，OpenChamber 会用 [1Password CLI](https://developer.1password.com/docs/cli/)（`op read`）读取。密钥只保存在内存中，不会写入 `environment.json`，也不会显示；设置中显示的是引用。
+
+- OpenCode 每次启动时读取它。更换密钥后请重启 OpenCode。
+- Git、终端和项目操作会在你下一次启动操作时读取它，并在五分钟内重复使用。
+- 无法读取的引用会被直接略过，不会作为文本传下去。设置中会说明原因：没有安装 `op`、1Password 没有响应，或者它拒绝了该引用。
+- 要把密钥交给 OpenCode 配置中的 MCP 服务器或提供商，请在这里设置变量，然后在配置中用 OpenCode 的 `{env:GITHUB_TOKEN}` 引用它。
+
 这些变量不会传给你自己启动的 OpenCode 服务器，VS Code 扩展也没有这项设置。下面的所有变量都由 OpenChamber 本身在启动时读取。
 
 ## OpenChamber 服务器
