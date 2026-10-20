@@ -15,6 +15,7 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
 import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
 import { GoalSpecDialog, type GoalSpecDialogRequest } from '@/components/chat/GoalSpecDialog';
+import { GoalSpecJobCard } from '@/components/chat/GoalSpecJobCard';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
@@ -372,6 +373,8 @@ interface ChatInputProps {
     scrollToLatest?: () => void;
     active?: boolean;
     draftPresentationExiting?: boolean;
+    /** The session has no transcript yet, so its goal writer card sits above the composer. */
+    goalSpecCardAboveInput?: boolean;
 }
 
 // A new Chat's working directory moves from the Chats root to a prepared
@@ -420,6 +423,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     scrollToLatest,
     active = true,
     draftPresentationExiting = false,
+    goalSpecCardAboveInput = false,
 }) => {
     const { t } = useI18n();
     // The session this composer belongs to: its column's (see
@@ -1600,6 +1604,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             composerRef.current?.focus();
         }, 0);
     }, [restoreQueuedContext]);
+
+    // A goal writer job taken back from its card ("Back to edit") returns its
+    // message to this session's composer: the text after anything typed
+    // since, the files and the attached chips. A `/btw` composer leaves it
+    // waiting for the session's own.
+    const hasComposerEdit = useInputStore(React.useCallback((state) => (
+        Boolean(currentSessionId) && state.pendingComposerEdits.some((edit) => (
+            edit.sessionId === currentSessionId && edit.runtimeKey === activeRuntimeKey
+        ))
+    ), [activeRuntimeKey, currentSessionId]));
+    React.useEffect(() => {
+        if (!hasComposerEdit || !currentSessionId || isBtwActive) return;
+        const edit = useInputStore.getState().consumePendingComposerEdit(activeRuntimeKey, currentSessionId);
+        if (!edit) return;
+        restoreDraft(chatDraftIdentity, edit.content, new Set());
+        if (edit.attachments.length > 0) {
+            useInputStore.getState().restoreAttachedFiles(edit.attachments, chatDraftIdentity);
+        }
+        restoreQueuedContext(edit.context);
+        setTimeout(() => {
+            composerRef.current?.focus();
+        }, 0);
+    }, [activeRuntimeKey, chatDraftIdentity, currentSessionId, hasComposerEdit, isBtwActive, restoreDraft, restoreQueuedContext]);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
         // Force-sending from the queue during a busy session counts as steer
@@ -4321,6 +4348,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         )}
                     </h1>
                 </div>
+            ) : null}
+            {goalSpecCardAboveInput && currentSessionId && !isBtwActive ? (
+                <GoalSpecJobCard sessionId={currentSessionId} className="chat-input-column pb-2" />
             ) : null}
             <div className={cn('chat-input-column relative overflow-visible', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 {/* Comment mode shows only its own shell: the normal composer's

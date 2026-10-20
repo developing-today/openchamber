@@ -98,6 +98,16 @@ the "looks done" hint or the review offer, the suggestion
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
 
+A session with no transcript yet (a new chat whose first message went to the
+goal writer) shows its goal writer card (`GoalSpecJobCard`) above the composer
+box, inside the form: `ChatContainer` passes `goalSpecCardAboveInput` while it
+shows the empty surface, and once the transcript has a row the card is that
+transcript's last row. A goal writer job taken back for editing returns through
+`input-store.pendingComposerEdits`. The composer showing that session takes it
+(a `/btw` composer leaves it waiting), appends its text after anything typed
+since (`restoreDraft`), restores its files and puts its attached chips back,
+as editing a queued message does.
+
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
 which clears the revert and puts the messages and the agent's file changes

@@ -75,7 +75,7 @@ export type GoalSpecJob = z.infer<typeof jobSchema>;
 type GoalSpecJobSendMode = z.infer<typeof sendModeSchema>;
 
 /** What the user picked on the card. */
-type GoalSpecJobChoice =
+export type GoalSpecJobChoice =
     | { kind: 'spec'; sendMode: GoalSpecJobSendMode; spec: string }
     /** The message as typed, without a spec. */
     | { kind: 'original' };

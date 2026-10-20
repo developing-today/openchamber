@@ -7,6 +7,7 @@ import { create } from "zustand"
 import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
+import type { QueuedContextPart } from "@/stores/messageQueueStore"
 import { prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 
@@ -134,6 +135,17 @@ export type VSCodeActiveEditorFile = {
   selection: { startLine: number; endLine: number; text: string } | null
 }
 
+/** A message handed back to one session's composer to edit: a goal writer job taken back. */
+type PendingComposerEdit = {
+  runtimeKey: string
+  sessionId: string
+  /** The text as typed. */
+  content: string
+  attachments: AttachedFile[]
+  /** The chips it was sent with; the composer puts the attached ones back. */
+  context: QueuedContextPart[]
+}
+
 export type InputState = {
   pendingComposerRestore: {
     target: ChatDraftIdentity
@@ -141,6 +153,15 @@ export type InputState = {
     files: Array<{ url: string; mimeType: string; filename: string }>
   } | null
   consumePendingComposerRestore: (target: ChatDraftIdentity | null) => InputState["pendingComposerRestore"]
+  /**
+   * Messages handed back to the composer of their session, oldest first. A
+   * composer takes only its own session's, and none replaces another, so
+   * nothing is lost while that composer is not on screen.
+   */
+  pendingComposerEdits: PendingComposerEdit[]
+  requestComposerEdit: (edit: PendingComposerEdit) => void
+  /** Takes the oldest message waiting for this session's composer. */
+  consumePendingComposerEdit: (runtimeKey: string, sessionId: string) => PendingComposerEdit | null
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
   /**
@@ -211,6 +232,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (!pending || !target || getChatDraftIdentityKey(pending.target) !== getChatDraftIdentityKey(target)) return null
     set({ pendingComposerRestore: null })
     return pending
+  },
+  pendingComposerEdits: [],
+  requestComposerEdit: (edit) => set((state) => ({ pendingComposerEdits: [...state.pendingComposerEdits, edit] })),
+  consumePendingComposerEdit: (runtimeKey, sessionId) => {
+    const edits = get().pendingComposerEdits
+    const index = edits.findIndex((edit) => edit.runtimeKey === runtimeKey && edit.sessionId === sessionId)
+    if (index === -1) return null
+    set({ pendingComposerEdits: edits.filter((_, position) => position !== index) })
+    return edits[index]
   },
   pendingInputText: null,
   pendingInputMode: "replace",

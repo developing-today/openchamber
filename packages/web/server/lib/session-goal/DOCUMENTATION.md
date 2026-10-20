@@ -414,6 +414,31 @@ sees only that final turn, so the report is its evidence.
 - A writer request belongs to the composer it came from: switching the
   composer to another session or draft closes the dialog, and a late choice is
   dropped.
+- `stores/goalSpecJobStore.ts` follows the goal writer jobs above (snapshot on
+  load and on every control-stream connection, then updates in revision order;
+  `stores/DOCUMENTATION.md` has the ordering rules).
+- `components/chat/GoalSpecJobCard.tsx` shows a session's job: the last row of
+  its transcript (the list footer in `ChatContainer`, after
+  `SessionErrorNotice`), or above the composer while the session has no
+  transcript yet. It names the writer (the picked model with its effort, the
+  session's model at its default effort, or the small model until the model
+  that answered is known) and the state: writing (with "sent as soon as it is
+  written" when review is off), ready with the spec in an editable field (edits
+  stay per write attempt in the store), failed with the reason, sending, or
+  sent with how it went and a dismiss button (`DELETE`). Actions on an open
+  job: send in the default send mode or the other one, send the message as
+  typed (also while writing, which stops the writer; an armed goal keeps the
+  message as its objective, an automatic one goes without a goal), write again
+  (ready or failed), and back to edit. A message the server cannot send
+  (`composerOnly`: attachments or attached context) says it waits for the user.
+  `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
+  `sendMessage` with the full message assembled as a taken queued message
+  (`buildOutgoingMessage`) and the goal set on the arm store for that send
+  (whatever the user had armed comes back after), then `settle` with the
+  outcome, or with the reason when the send failed. Back to edit ends the job
+  (`edit`), hands the full message to that session's composer through
+  `input-store.pendingComposerEdits`, and arms the goal again for an armed job.
+  The job is the server's, so switching threads changes nothing.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
   the server only, so it lives in the settings file like the walkthrough
