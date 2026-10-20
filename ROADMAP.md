@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18 and 2026-10-19.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19 and 2026-10-20.
 
 ## Areas
 
@@ -115,3 +115,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | `queue: max` on stale, the last non-cancelling workflow           | 2026-10-20 | #133, #134                 |
 | Electron lint stub replaced with the shared oxlint command        | 2026-10-20 | #135, #136                 |
 | Electron `test:linux-desktop` smoke runs in pr checks             | 2026-10-20 | #137, #138                 |
+| Release pipeline actions aligned to the repo's v7 pins            | 2026-10-20 | #143, #144                 |
