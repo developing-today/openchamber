@@ -80,8 +80,12 @@ const INTEGRATION_SERVICE_ACTIONS = INTEGRATION_SERVICE_ACTION_DEFINITIONS.map((
 
 const GITLAB_DEFAULT_INSTANCE = 'https://gitlab.com';
 
-/** accessToken, refreshToken, token, clientSecret, password and the like; never tokenType or scope. */
-const SECRET_KEY = /(?:token|secret|password|passphrase)$/i;
+/**
+ * accessToken, refreshToken, clientSecret, password, apiKey, cookie and the
+ * like. Anchored at the end so tokenType, scope and the binding's credential
+ * references (which name a stored account, not a secret) stay.
+ */
+const SECRET_KEY = /(?:token|secret|password|passwd|passphrase|api[-_]?key|cookie|authorization)$/i;
 
 const badRequest = (message) => new OpenChamberControlError(message, 400);
 

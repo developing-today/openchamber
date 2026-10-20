@@ -20,7 +20,7 @@ const expectError = async (promise, status, pattern) => {
 
 /** Operations shaped like the route modules return them; every answer carries the seeded token under secret-named keys. */
 const makeOperations = () => {
-  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED };
+  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED, apiKey: SEED, api_key: SEED, cookie: SEED, authorization: SEED };
   const ok = (body) => ({ status: 200, body: { ...body, ...leak } });
   const guest = {
     id: 'acme', name: 'Acme', version: '1.0.0', source: 'git', enabled: true,
