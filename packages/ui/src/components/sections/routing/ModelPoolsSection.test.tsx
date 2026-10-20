@@ -1,42 +1,57 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
+import type { PoolProblems } from '@/lib/routing/modelRoutesApi';
+
+// The OpenChamber server as the section reaches it, behind `fetch`, so the
+// real client parses every pool and the tests read the bodies it sends.
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** The pools the server holds, by id: any JSON, as an OpenCode config can hold it. */
+interface ServerPools {
+  [id: string]: Json;
+}
+
+type PutBody = { routes?: ServerPools; tuning?: Json; force?: boolean };
 
 // Hand-rolled recorders rather than bun's `mock()`: its installed types omit
 // `.mock`/`mockClear`, while the runtime behaviour is all these tests need.
 const routeFetches: string[] = [];
-const routeSaves: unknown[] = [];
-const tuningSaves: unknown[] = [];
-let serverRoutes: Record<string, { targets: string[]; selection?: 'ordered' | 'round-robin' | 'weighted'; weights?: Record<string, number> }> = {};
-let serverTuning: unknown = null;
-let saveError: Error | null = null;
+const routeSaves: Json[] = [];
+const forcedSaves: boolean[] = [];
+const tuningSaves: Json[] = [];
+let serverRoutes: ServerPools = {};
+let serverTuning: Json = null;
+let serverProblems: PoolProblems = {};
+let saveError: string | null = null;
+// When set, a save that is not forced is refused with these problems.
+let refusal: PoolProblems | null = null;
 
-const fetchModelRoutes = async () => {
-  routeFetches.push('fetch');
-  return { routes: serverRoutes, tuning: serverTuning, available: true };
-};
-const saveModelRoutes = async (routes: unknown) => {
-  routeSaves.push(routes);
-  if (saveError) throw saveError;
-  serverRoutes = routes as typeof serverRoutes;
-  return { routes, tuning: serverTuning, available: true };
-};
-const saveModelRouteTuning = async (tuning: unknown) => {
-  tuningSaves.push(tuning);
-  if (saveError) throw saveError;
-  serverTuning = tuning;
-  return { routes: serverRoutes, tuning, available: true };
-};
-const fetchRouteStats = async () => ({ available: false, reason: 'no-database' });
+const reply = (body: string, status = 200) => new Response(body, { status, headers: { 'Content-Type': 'application/json' } });
+const serverState = () => JSON.stringify({ routes: serverRoutes, tuning: serverTuning, problems: serverProblems });
 
-mock.module('@/lib/routing/modelRoutesApi', () => ({
-  AUTONOMY_LEVELS: ['fixed', 'rules', 'adaptive', 'predictive', 'agent'],
-  fetchModelRoutes,
-  saveModelRoutes,
-  saveModelRouteTuning,
-  fetchRouteStats,
-}));
+const respond = (url: string, method: string, text: string): Response => {
+  if (url === '/api/model-routes' && method === 'GET') {
+    routeFetches.push('fetch');
+    return reply(serverState());
+  }
+  if (url === '/api/model-routes' && method === 'PUT') {
+    const body: PutBody = JSON.parse(text);
+    if (body.routes) {
+      routeSaves.push(body.routes);
+      forcedSaves.push(body.force === true);
+    }
+    if (body.tuning !== undefined) tuningSaves.push(body.tuning);
+    if (saveError) return reply(JSON.stringify({ error: saveError }), 500);
+    if (body.routes && refusal && body.force !== true) return reply(JSON.stringify({ error: 'refused', problems: refusal }), 400);
+    if (body.routes) serverRoutes = body.routes;
+    if (body.tuning !== undefined) serverTuning = body.tuning;
+    return reply(serverState());
+  }
+  if (url.startsWith('/api/model-routes/stats')) return reply(JSON.stringify({ available: false, reason: 'no-database' }));
+  return new Response('', { status: 404 });
+};
 
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
@@ -48,6 +63,7 @@ const DOM_GLOBAL_NAMES = [
   'Node',
   'Element',
   'HTMLElement',
+  'HTMLTextAreaElement',
   'Event',
   'KeyboardEvent',
   'MouseEvent',
@@ -71,6 +87,7 @@ const installDom = () => {
     Node: happyWindow.Node,
     Element: happyWindow.Element,
     HTMLElement: happyWindow.HTMLElement,
+    HTMLTextAreaElement: happyWindow.HTMLTextAreaElement,
     Event: happyWindow.Event,
     KeyboardEvent: happyWindow.KeyboardEvent,
     MouseEvent: happyWindow.MouseEvent,
@@ -113,6 +130,11 @@ const textModel = (id: string, cost: number, context: number) => ({
   limit: { context, output: 1000 },
 });
 
+// Lets the fetches a step started answer and React render what they returned.
+const settle = () => act(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+
 const renderSection = async () => {
   const dom = installDom();
   // Imported after the DOM exists: Base UI and react-dom read the window when their modules load.
@@ -127,6 +149,7 @@ const renderSection = async () => {
       </I18nProvider>,
     );
   });
+  await settle();
   return {
     dom,
     cleanup: async () => {
@@ -149,6 +172,16 @@ const typeInto = async (input: HTMLInputElement, value: string) => {
   await act(async () => {
     input.value = value;
     input.dispatchEvent(new Event('focusout', { bubbles: true }));
+  });
+  await settle();
+};
+
+// A textarea saves nothing until Apply, so it takes the edit the way React reads one: the native setter, then an input event.
+const editTextArea = async (textarea: HTMLTextAreaElement, value: string) => {
+  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  await act(async () => {
+    setValue?.call(textarea, value);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
 
@@ -178,6 +211,7 @@ const pickOption = async (container: HTMLElement, label: string, option: string)
     fire(item, 'mouseup');
     fire(item, 'click');
   });
+  await settle();
 };
 
 const expandPool = async (container: HTMLElement, poolName = 'kept') => {
@@ -190,6 +224,7 @@ const clickButton = async (container: HTMLElement, text: string) => {
   const button = [...container.querySelectorAll('button')].find((el) => el.textContent?.trim() === text);
   expect(button).toBeTruthy();
   await act(async () => button!.click());
+  await settle();
 };
 
 const openAdvanced = async (container: HTMLElement, poolName = 'kept') => {
@@ -203,10 +238,16 @@ describe('ModelPoolsSection', () => {
   beforeEach(() => {
     routeFetches.length = 0;
     routeSaves.length = 0;
+    forcedSaves.length = 0;
     tuningSaves.length = 0;
     serverRoutes = {};
     serverTuning = null;
+    serverProblems = {};
     saveError = null;
+    refusal = null;
+    spyOn(globalThis, 'fetch').mockImplementation(async (input, init) =>
+      respond(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : ''),
+    );
     useConfigStore.setState({
       providers: [
         {
@@ -220,6 +261,7 @@ describe('ModelPoolsSection', () => {
   });
 
   afterEach(async () => {
+    mock.restore();
     if (root) {
       const mounted = root;
       root = null;
@@ -244,15 +286,8 @@ describe('ModelPoolsSection', () => {
   test('a preset builds a pool from the catalog and saves it', async () => {
     const { dom, cleanup } = await renderSection();
     try {
-      const button = [...dom.container.querySelectorAll('button')].find((el) => el.textContent?.trim() === 'Cheapest first');
-      expect(button).toBeTruthy();
-      await act(async () => {
-        button!.click();
-      });
-      expect(routeSaves.length).toBe(1);
-      const saved = routeSaves[0] as Record<string, { targets: string[] }>;
-      expect(Object.keys(saved)).toEqual(['cheap-pool']);
-      expect(saved['cheap-pool'].targets).toEqual(['p/cheap', 'p/ dear']);
+      await clickButton(dom.container, 'Cheapest first');
+      expect(routeSaves).toEqual([{ 'cheap-pool': { targets: ['p/cheap', 'p/ dear'], autonomy: 'rules', selection: 'ordered' } }]);
       expect(dom.container.textContent).toContain('cheap-pool');
     } finally {
       await cleanup();
@@ -261,13 +296,10 @@ describe('ModelPoolsSection', () => {
 
   test('a failed save rolls back to the last server-confirmed state', async () => {
     serverRoutes = { kept: { targets: ['p/cheap'] } };
-    saveError = new Error('nope');
+    saveError = 'nope';
     const { dom, cleanup } = await renderSection();
     try {
-      const button = [...dom.container.querySelectorAll('button')].find((el) => el.textContent?.trim() === 'Cheapest first');
-      await act(async () => {
-        button!.click();
-      });
+      await clickButton(dom.container, 'Cheapest first');
       const text = dom.container.textContent ?? '';
       expect(text).toContain('kept');
       expect(text).not.toContain('cheap-pool');
@@ -283,8 +315,7 @@ describe('ModelPoolsSection', () => {
     try {
       await openAdvanced(dom.container);
       await typeInto(findInput(dom.container, 'Total requests before failover'), '3');
-      expect(routeSaves.length).toBe(1);
-      expect((routeSaves[0] as Record<string, { attempts?: number }>).kept.attempts).toBe(3);
+      expect(routeSaves).toEqual([{ kept: { targets: ['p/cheap'], attempts: 3 } }]);
     } finally {
       await cleanup();
     }
@@ -309,7 +340,7 @@ describe('ModelPoolsSection', () => {
     try {
       await openAdvanced(dom.container);
       await typeInto(findInput(dom.container, 'Hedge after (seconds)'), '2');
-      expect((routeSaves[0] as Record<string, { hedgeAfterMs?: number }>).kept.hedgeAfterMs).toBe(2000);
+      expect(routeSaves[0]).toEqual({ kept: { targets: ['p/cheap'], hedgeAfterMs: 2000 } });
     } finally {
       await cleanup();
     }
@@ -322,8 +353,7 @@ describe('ModelPoolsSection', () => {
       await openAdvanced(dom.container);
       await typeInto(findInput(dom.container, 'Requests per minute'), '60');
       await typeInto(findInput(dom.container, 'Soft limit (% of allowance)'), '80');
-      const saved = routeSaves.at(-1) as Record<string, { budgets?: Record<string, Record<string, number>> }>;
-      expect(saved.kept.budgets).toEqual({ 'p/cheap': { requestsPerMinute: 60, softLimit: 0.8 } });
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], budgets: { 'p/cheap': { requestsPerMinute: 60, softLimit: 0.8 } } } });
     } finally {
       await cleanup();
     }
@@ -335,9 +365,9 @@ describe('ModelPoolsSection', () => {
     try {
       await expandPool(dom.container);
       await typeInto(findInput(dom.container, 'Display name'), 'Budget pool');
-      expect((routeSaves.at(-1) as Record<string, { name?: string }>).kept.name).toBe('Budget pool');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], name: 'Budget pool' } });
       await typeInto(findInput(dom.container, 'Display name'), '');
-      expect((routeSaves.at(-1) as Record<string, { name?: string }>).kept.name).toBeUndefined();
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'] } });
     } finally {
       await cleanup();
     }
@@ -350,28 +380,23 @@ describe('ModelPoolsSection', () => {
       await expandPool(dom.container);
       await clickButton(dom.container, 'Options');
       await typeInto(findInput(dom.container, 'Default variant'), 'max');
-      expect((routeSaves.at(-1) as Record<string, { targets: unknown[] }>).kept.targets).toEqual([
-        { model: 'p/cheap', defaultVariant: 'max' },
-      ]);
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: [{ model: 'p/cheap', defaultVariant: 'max' }] } });
       await typeInto(findInput(dom.container, 'Pool variant'), 'low');
       await typeInto(findInput(dom.container, 'Target variant'), 'high');
       await clickButton(dom.container, 'Add remap');
-      expect((routeSaves.at(-1) as Record<string, { targets: unknown[] }>).kept.targets).toEqual([
-        { model: 'p/cheap', defaultVariant: 'max', variants: { low: 'high' } },
-      ]);
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: [{ model: 'p/cheap', defaultVariant: 'max', variants: { low: 'high' } }] } });
     } finally {
       await cleanup();
     }
   });
 
   test('removing a weighted target saves the pool without that target\'s weight', async () => {
-    // beforeEach gave the server an empty map; the pool is added to it.
-    Object.assign(serverRoutes, { kept: { targets: ['p/cheap', 'p/dear'], selection: 'weighted', weights: { 'p/cheap': 2, 'p/dear': 1 } } });
+    serverRoutes = { kept: { targets: ['p/cheap', 'p/dear'], selection: 'weighted', weights: { 'p/cheap': 2, 'p/dear': 1 } } };
     const { dom, cleanup } = await renderSection();
     try {
       await expandPool(dom.container);
       await clickButton(dom.container, 'Remove target');
-      expect(routeSaves.at(-1)).toMatchObject({
+      expect(routeSaves.at(-1)).toEqual({
         kept: { targets: ['p/dear'], selection: 'weighted', weights: { 'p/dear': 1 } },
       });
     } finally {
@@ -385,25 +410,24 @@ describe('ModelPoolsSection', () => {
     try {
       await openAdvanced(dom.container);
       await act(async () => findSwitch(dom.container, 'Never time out the first token').click());
-      expect((routeSaves.at(-1) as Record<string, { health?: { firstTokenTimeoutMs?: unknown } }>).kept.health).toEqual({
-        firstTokenTimeoutMs: false,
-      });
+      await settle();
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], health: { firstTokenTimeoutMs: false } } });
       await act(async () => findSwitch(dom.container, 'Never time out the first token').click());
-      expect((routeSaves.at(-1) as Record<string, { health?: unknown }>).kept.health).toBeUndefined();
+      await settle();
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'] } });
     } finally {
       await cleanup();
     }
   });
 
   test('the autonomy popup saves the level picked, and its default clears the level', async () => {
-    // beforeEach gave the server an empty map; the pool is added to it.
-    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'], autonomy: 'rules' } });
+    serverRoutes = { kept: { targets: ['p/cheap'], autonomy: 'rules' } };
     const { dom, cleanup } = await renderSection();
     try {
       await expandPool(dom.container);
       await pickOption(dom.container, 'Autonomy', 'Predictive');
-      expect(routeSaves.at(-1)).toMatchObject({ kept: { targets: ['p/cheap'], autonomy: 'predictive' } });
-      // toEqual ignores the undefined key the default leaves behind, which the JSON save drops anyway.
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], autonomy: 'predictive' } });
+      // The default leaves `autonomy: undefined` behind, which the JSON save drops.
       await pickOption(dom.container, 'Autonomy', 'Unset (full behavior)');
       expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'] } });
     } finally {
@@ -414,10 +438,11 @@ describe('ModelPoolsSection', () => {
   test('automatic review switch saves enabled and then explicitly disabled', async () => {
     const { dom, cleanup } = await renderSection();
     try {
-      const toggle = findSwitch(dom.container, 'Review routing history automatically');
-      await act(async () => toggle.click());
+      await act(async () => findSwitch(dom.container, 'Review routing history automatically').click());
+      await settle();
       expect(tuningSaves).toEqual([{ enabled: true }]);
       await act(async () => findSwitch(dom.container, 'Review routing history automatically').click());
+      await settle();
       expect(tuningSaves.at(-1)).toEqual({ enabled: false });
     } finally {
       await cleanup();
@@ -445,9 +470,95 @@ describe('ModelPoolsSection', () => {
     } as never);
     const { dom, cleanup } = await renderSection();
     try {
-      // Decisions render once the mocked fetch resolves.
-      await act(async () => {});
       expect(dom.container.textContent).toContain('hard');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a pool the editor cannot model is listed beside the others, edited only as JSON, and saved back untouched', async () => {
+    const hand: Json = { targets: [{ providerID: 'openai', model: 'gpt-6', variant: 'high' }], note: 'kept by hand' };
+    serverRoutes = { kept: { targets: ['p/cheap'] }, hand };
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(dom.container.textContent).toContain('kept');
+      expect(dom.container.textContent).toContain('hand');
+      expect(dom.container.textContent).toContain('JSON only');
+      await expandPool(dom.container, 'hand');
+      expect(dom.container.textContent).toContain('The editor can\'t show targets[0].providerID, so this pool is edited as JSON.');
+      expect(dom.container.querySelector('input[aria-label="Display name"]')).toBeNull();
+      expect(findByAriaLabel(dom.container, 'textarea', 'Raw JSON (expert)')).toBeTruthy();
+      await expandPool(dom.container, 'kept');
+      await typeInto(findInput(dom.container, 'Display name'), 'Budget pool');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], name: 'Budget pool' }, hand });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('applying JSON to a pool kept as JSON saves exactly what was typed', async () => {
+    serverRoutes = { hand: { targets: ['p/cheap'], note: 'kept by hand' } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container, 'hand');
+      const textarea = dom.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Raw JSON (expert)"]');
+      if (!textarea) throw new Error('no JSON view');
+      await editTextArea(textarea, '{"targets":["p/dear"],"note":"edited"}');
+      await clickButton(dom.container, 'Apply JSON');
+      expect(routeSaves.at(-1)).toEqual({ hand: { targets: ['p/dear'], note: 'edited' } });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a pool\'s problems show on it, saying whether OpenCode skips the pool', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'], attempts: 0, weights: { 'x/y': 2 } } };
+    serverProblems = {
+      kept: [
+        { message: 'route "kept" weight for "x/y" matches no target in the route', skipsPool: false },
+        { message: 'route "kept" attempts must be a whole number from 1 to 50', skipsPool: true },
+      ],
+    };
+    const { dom, cleanup } = await renderSection();
+    try {
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('OpenCode loads this pool, but OpenChamber could not check it: route "kept" weight for "x/y" matches no target in the route');
+      expect(text).toContain('OpenCode skips this pool: route "kept" attempts must be a whole number from 1 to 50');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a refused save names the problems, and Save anyway sends the same pools again with force', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'] } };
+    refusal = { 'cheap-pool': [{ message: 'route "cheap-pool" health.slowThreshold (6) cannot exceed health.sampleWindow (5)', skipsPool: false }] };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await clickButton(dom.container, 'Cheapest first');
+      let text = dom.container.textContent ?? '';
+      expect(text).toContain('Not saved. Fix these problems, or save anyway.');
+      expect(text).toContain('OpenCode loads this pool, but OpenChamber could not check it: route "cheap-pool" health.slowThreshold (6)');
+      // The list rolls back to what the server holds.
+      expect([...dom.container.querySelectorAll('button[aria-expanded]')].map((row) => row.textContent)).toEqual(['kept1 targets']);
+      await clickButton(dom.container, 'Save anyway');
+      expect(forcedSaves).toEqual([false, true]);
+      expect(routeSaves[1]).toEqual(routeSaves[0]);
+      text = dom.container.textContent ?? '';
+      expect(text).not.toContain('Not saved.');
+      expect(text).toContain('cheap-pool');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('review settings OpenChamber cannot read leave the pools loaded and are not offered for editing', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'] } };
+    serverTuning = { enabled: 'yes', notes: ['openai: back in 3 hours'] };
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(dom.container.textContent).toContain('kept');
+      expect(dom.container.textContent).toContain('OpenChamber can\'t read these settings. Edit them in opencode.json.');
+      expect(dom.container.querySelector('[role="switch"][aria-label="Review routing history automatically"]')).toBeNull();
     } finally {
       await cleanup();
     }

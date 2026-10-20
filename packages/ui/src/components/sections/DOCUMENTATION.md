@@ -284,6 +284,25 @@ Project colours are six-digit hex from the same presets as agents
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
 
+## Model pools on the Routing page
+
+`routing/ModelPoolsSection.tsx` edits OpenCode's `experimental.model_routes`
+through `/api/model-routes`; the server side is in
+`packages/web/server/lib/routing/DOCUMENTATION.md`, section "Model pools".
+
+- Every pool in the config is listed. A pool the structured editor cannot
+  represent shows "JSON only"; expanded, it shows one line naming the value the
+  editor cannot show, and its Raw JSON view, which is its only editor.
+- A save sends every pool. Pools the user did not edit go back as they were
+  read; only the edited pool drops the weights of targets it no longer has.
+- The problems the server finds stay visible under their pool, each saying
+  whether OpenCode skips the pool or loads it unchecked.
+- When the server refuses a save, the list rolls back to the last saved pools
+  and a notice names the problems, with Save anyway, which sends the same pools
+  again with `force`. The next edit replaces the notice.
+- Automatic review settings the client cannot read show a note in place of
+  their controls, so nothing here can overwrite them.
+
 ## The messaging page
 
 `messaging/MessagingPage.tsx` edits the `messaging` section of OpenCode's

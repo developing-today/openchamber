@@ -17,13 +17,19 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   AUTONOMY_LEVELS,
+  UNREADABLE_TUNING,
   fetchModelRoutes,
   fetchRouteStats,
+  modelRouteEntryJson,
+  readModelRouteJsonText,
   saveModelRouteTuning,
   saveModelRoutes,
   type HedgeAccuracy,
   type ModelRoute,
+  type ModelRouteEntry,
   type ModelRouteTuning,
+  type PoolProblem,
+  type PoolProblems,
   type RouteErrorGroup,
   type RouteTargetStats,
 } from '@/lib/routing/modelRoutesApi';
@@ -89,26 +95,21 @@ const TargetWait: React.FC<{ providerID: string; modelID: string }> = ({ provide
   );
 };
 
-/** One pool: its targets, its autonomy level, and an expert JSON view. */
-const PoolRow: React.FC<{
+/** A pool's structured editor: display name, autonomy, targets and the advanced options. */
+const PoolFields: React.FC<{
   id: string;
   route: ModelRoute;
   otherPoolIDs: string[];
-  expanded: boolean;
-  onToggle: () => void;
   onChange: (route: ModelRoute) => void;
-  onRemove: () => void;
-}> = ({ id, route, otherPoolIDs, expanded, onToggle, onChange, onRemove }) => {
+}> = ({ id, route, otherPoolIDs, onChange }) => {
   const { t } = useI18n();
   const [providerId, setProviderId] = React.useState('');
   const [modelId, setModelId] = React.useState('');
   const [pattern, setPattern] = React.useState('');
   const [patternUntil, setPatternUntil] = React.useState('');
-  const [jsonText, setJsonText] = React.useState<string | null>(null);
-  const [jsonError, setJsonError] = React.useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
 
-  const targets = route.targets ?? [];
+  const targets = route.targets;
   const addTarget = () => {
     if (!providerId || !modelId) return;
     const ref = `${providerId}/${modelId}`;
@@ -128,18 +129,209 @@ const PoolRow: React.FC<{
     setPatternUntil('');
   };
 
+  return (
+    <>
+      <SettingsStackedField label={t('settings.pools.name')} info={t('settings.pools.nameInfo')} controlClassName="max-w-none">
+        <CommitInput
+          label={t('settings.pools.name')}
+          value={route.name ?? ''}
+          placeholder={id}
+          onCommit={(next) => onChange({ ...route, name: next || undefined })}
+        />
+      </SettingsStackedField>
+      <SettingsStackedField label={t('settings.pools.autonomy')} info={t('settings.pools.autonomyInfo')} controlClassName="max-w-none">
+        <Select
+          value={route.autonomy ?? '__unset__'}
+          onValueChange={(next) => onChange({ ...route, autonomy: pickedAutonomy(next) })}
+        >
+          <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.autonomy')}>
+            <SelectValue placeholder={t('settings.pools.autonomyDefault')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__unset__">{t('settings.pools.autonomyDefault')}</SelectItem>
+            {AUTONOMY_LEVELS.map((level) => (
+              <SelectItem key={level} value={level}>
+                {t(`settings.pools.autonomy.${level}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingsStackedField>
+      <p className={SETTINGS_HELPER_CLASS}>{t(`settings.pools.autonomyHelp.${route.autonomy ?? 'unset'}`)}</p>
+      <div className="space-y-1">
+        {targets.map((target, index) => {
+          const until = targetUntil(target);
+          const concrete = concreteTarget(target);
+          const pool = routeReferenceID(target);
+          return (
+          <div key={`${targetLabel(target)}-${index}`} className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="typography-ui-label min-w-0 flex-1 truncate">
+                {pool !== null ? `${t('settings.pools.targetPool')}: ${pool}` : targetLabel(target)}
+                {until !== undefined ? (
+                  <span className="typography-meta text-muted-foreground">
+                    {` · ${t('settings.pools.pattern.untilLabel', { time: new Date(until).toLocaleString() })}`}
+                  </span>
+                ) : null}
+              </span>
+              {concrete ? <TargetWait providerID={concrete.providerID} modelID={concrete.modelID} /> : null}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onChange({ ...route, targets: targets.filter((_, i) => i !== index) })}
+              >
+                {t('settings.pools.removeTarget')}
+              </Button>
+            </div>
+            <PoolTargetOptions
+              target={target}
+              onChange={(next) => onChange({ ...route, targets: targets.map((entry, i) => (i === index ? next : entry)) })}
+            />
+          </div>
+          );
+        })}
+      </div>
+      {otherPoolIDs.length > 0 ? (
+        <SettingsStackedField label={t('settings.pools.addPoolTarget')} info={t('settings.pools.addPoolTargetInfo')} controlClassName="max-w-none">
+          <Select
+            value=""
+            onValueChange={(next) => onChange({ ...route, targets: [...targets, routeReference(next)] })}
+          >
+            <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.addPoolTarget')}>
+              <SelectValue placeholder={t('settings.pools.addPoolTargetPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              {otherPoolIDs.map((poolID) => (
+                <SelectItem key={poolID} value={poolID}>
+                  {poolID}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsStackedField>
+      ) : null}
+      <SettingsStackedField label={t('settings.pools.pattern.label')} info={t('settings.pools.pattern.info')} controlClassName="max-w-none">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+          <Input
+            value={pattern}
+            onChange={(event) => setPattern(event.target.value)}
+            placeholder={t('settings.pools.pattern.placeholder')}
+            aria-label={t('settings.pools.pattern.label')}
+            className="h-8 min-w-0 flex-1 rounded-md px-3"
+            maxLength={200}
+          />
+          <Input
+            type="datetime-local"
+            value={patternUntil}
+            onChange={(event) => setPatternUntil(event.target.value)}
+            aria-label={t('settings.pools.pattern.until')}
+            title={t('settings.pools.pattern.untilInfo')}
+            className="h-8 w-auto min-w-0 rounded-md px-2"
+          />
+          <Button size="sm" variant="outline" onClick={addPattern} disabled={!pattern.trim()}>
+            {t('settings.pools.pattern.add')}
+          </Button>
+        </div>
+      </SettingsStackedField>
+      <div className="flex w-full min-w-0 items-center gap-2">
+        <ModelSelector
+          providerId={providerId}
+          modelId={modelId}
+          onChange={(nextProvider, nextModel) => {
+            setProviderId(nextProvider);
+            setModelId(nextModel);
+          }}
+          className={cn(SETTINGS_CUSTOM_TRIGGER_CLASS, 'w-full')}
+          placeholder={t('settings.pools.addTargetPlaceholder')}
+        />
+        <Button size="sm" variant="outline" onClick={addTarget} disabled={!providerId || !modelId}>
+          {t('settings.pools.addTarget')}
+        </Button>
+      </div>
+      <div className="space-y-2">
+        <Button size="sm" variant="ghost" onClick={() => setAdvancedOpen((open) => !open)} aria-expanded={advancedOpen}>
+          {advancedOpen ? t('settings.pools.advanced.hide') : t('settings.pools.advanced.show')}
+        </Button>
+        {advancedOpen ? <PoolAdvancedFields route={route} onChange={onChange} /> : null}
+      </div>
+    </>
+  );
+};
+
+/** The pool as stored in opencode.json, as text. An edit applies when it parses as JSON; the server checks it on save. */
+const PoolJsonField: React.FC<{ entry: ModelRouteEntry; onApply: (entry: ModelRouteEntry) => void }> = ({ entry, onApply }) => {
+  const { t } = useI18n();
+  const [jsonText, setJsonText] = React.useState<string | null>(null);
+  const [jsonError, setJsonError] = React.useState<string | null>(null);
+
   const applyJson = () => {
     if (jsonText === null) return;
     try {
-      const parsed = JSON.parse(jsonText) as ModelRoute;
-      if (!parsed || !Array.isArray(parsed.targets)) throw new Error('targets must be an array');
+      const next = readModelRouteJsonText(jsonText);
       setJsonError(null);
       setJsonText(null);
-      onChange(parsed);
+      onApply(next);
     } catch (error) {
       setJsonError(error instanceof Error ? error.message : String(error));
     }
   };
+
+  return (
+    <>
+      <SettingsStackedField label={t('settings.pools.expertJson')} info={t('settings.pools.expertJsonInfo')} controlClassName="max-w-none">
+        <Textarea
+          value={jsonText ?? JSON.stringify(modelRouteEntryJson(entry), null, 2)}
+          onChange={(event) => setJsonText(event.target.value)}
+          aria-label={t('settings.pools.expertJson')}
+          rows={8}
+          className="w-full font-mono text-xs"
+          spellCheck={false}
+        />
+      </SettingsStackedField>
+      {jsonError ? <p className={SETTINGS_HELPER_CLASS}>{jsonError}</p> : null}
+      {jsonText !== null ? (
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={applyJson}>
+            {t('settings.pools.applyJson')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => { setJsonText(null); setJsonError(null); }}>
+            {t('settings.pools.discardJson')}
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
+};
+
+/** OpenChamber's warnings for a pool, each saying whether OpenCode leaves the pool out. */
+const PoolProblemLines: React.FC<{ problems: readonly PoolProblem[]; className: string }> = ({ problems, className }) => {
+  const { t } = useI18n();
+  return (
+    <>
+      {problems.map((problem, index) => (
+        <p key={index} className={cn('typography-meta', className)}>
+          {problem.skipsPool
+            ? t('settings.pools.problem.skipped', { problem: problem.message })
+            : t('settings.pools.problem.unchecked', { problem: problem.message })}
+        </p>
+      ))}
+    </>
+  );
+};
+
+/** One pool: its summary row, its warnings, and its editor when expanded. A pool the editor cannot show is edited as JSON only. */
+const PoolRow: React.FC<{
+  id: string;
+  entry: ModelRouteEntry;
+  problems: readonly PoolProblem[];
+  otherPoolIDs: string[];
+  expanded: boolean;
+  onToggle: () => void;
+  onChange: (entry: ModelRouteEntry) => void;
+  onRemove: () => void;
+}> = ({ id, entry, problems, otherPoolIDs, expanded, onToggle, onChange, onRemove }) => {
+  const { t } = useI18n();
+  const route = entry.kind === 'editable' ? entry.route : null;
 
   return (
     <div className="py-1">
@@ -151,163 +343,40 @@ const PoolRow: React.FC<{
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1.5 text-start hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="typography-ui-label font-medium text-foreground truncate">
-            {route.name || id}
+            {route?.name || id}
           </span>
           <span className="typography-meta text-muted-foreground truncate">
-            {t('settings.pools.targetCount', { count: targets.length })}
-            {route.autonomy ? ` · ${route.autonomy}` : ''}
+            {route ? t('settings.pools.targetCount', { count: route.targets.length }) : t('settings.pools.json.label')}
+            {route?.autonomy ? ` · ${route.autonomy}` : ''}
           </span>
         </button>
         <Button size="sm" variant="ghost" onClick={onRemove}>
           {t('settings.pools.remove')}
         </Button>
       </div>
+      {problems.length > 0 ? (
+        <div className="space-y-1 px-1">
+          <PoolProblemLines problems={problems} className="text-[var(--status-warning)]" />
+        </div>
+      ) : null}
       {expanded ? (
         <div className="space-y-4 px-1 pb-4 pt-2">
-          <SettingsStackedField label={t('settings.pools.name')} info={t('settings.pools.nameInfo')} controlClassName="max-w-none">
-            <CommitInput
-              label={t('settings.pools.name')}
-              value={route.name ?? ''}
-              placeholder={id}
-              onCommit={(next) => onChange({ ...route, name: next || undefined })}
+          {entry.kind === 'editable' ? (
+            <PoolFields
+              id={id}
+              route={entry.route}
+              otherPoolIDs={otherPoolIDs}
+              // A removed target takes its weight with it, so the edit is not refused for a weight without a target.
+              onChange={(next) => onChange({ kind: 'editable', route: withoutAbsentWeights(next) })}
             />
-          </SettingsStackedField>
-          <SettingsStackedField label={t('settings.pools.autonomy')} info={t('settings.pools.autonomyInfo')} controlClassName="max-w-none">
-            <Select
-              value={route.autonomy ?? '__unset__'}
-              onValueChange={(next) => onChange({ ...route, autonomy: pickedAutonomy(next) })}
-            >
-              <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.autonomy')}>
-                <SelectValue placeholder={t('settings.pools.autonomyDefault')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__unset__">{t('settings.pools.autonomyDefault')}</SelectItem>
-                {AUTONOMY_LEVELS.map((level) => (
-                  <SelectItem key={level} value={level}>
-                    {t(`settings.pools.autonomy.${level}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SettingsStackedField>
-          <p className={SETTINGS_HELPER_CLASS}>{t(`settings.pools.autonomyHelp.${route.autonomy ?? 'unset'}`)}</p>
-          <div className="space-y-1">
-            {targets.map((target, index) => {
-              const until = targetUntil(target);
-              const concrete = concreteTarget(target);
-              const pool = routeReferenceID(target);
-              return (
-              <div key={`${targetLabel(target)}-${index}`} className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="typography-ui-label min-w-0 flex-1 truncate">
-                    {pool !== null ? `${t('settings.pools.targetPool')}: ${pool}` : targetLabel(target)}
-                    {until !== undefined ? (
-                      <span className="typography-meta text-muted-foreground">
-                        {` · ${t('settings.pools.pattern.untilLabel', { time: new Date(until).toLocaleString() })}`}
-                      </span>
-                    ) : null}
-                  </span>
-                  {concrete ? <TargetWait providerID={concrete.providerID} modelID={concrete.modelID} /> : null}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => onChange({ ...route, targets: targets.filter((_, i) => i !== index) })}
-                  >
-                    {t('settings.pools.removeTarget')}
-                  </Button>
-                </div>
-                <PoolTargetOptions
-                  target={target}
-                  onChange={(next) => onChange({ ...route, targets: targets.map((entry, i) => (i === index ? next : entry)) })}
-                />
-              </div>
-              );
-            })}
-          </div>
-          {otherPoolIDs.length > 0 ? (
-            <SettingsStackedField label={t('settings.pools.addPoolTarget')} info={t('settings.pools.addPoolTargetInfo')} controlClassName="max-w-none">
-              <Select
-                value=""
-                onValueChange={(next) => onChange({ ...route, targets: [...targets, routeReference(next)] })}
-              >
-                <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.addPoolTarget')}>
-                  <SelectValue placeholder={t('settings.pools.addPoolTargetPlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {otherPoolIDs.map((poolID) => (
-                    <SelectItem key={poolID} value={poolID}>
-                      {poolID}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingsStackedField>
-          ) : null}
-          <SettingsStackedField label={t('settings.pools.pattern.label')} info={t('settings.pools.pattern.info')} controlClassName="max-w-none">
-            <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
-              <Input
-                value={pattern}
-                onChange={(event) => setPattern(event.target.value)}
-                placeholder={t('settings.pools.pattern.placeholder')}
-                aria-label={t('settings.pools.pattern.label')}
-                className="h-8 min-w-0 flex-1 rounded-md px-3"
-                maxLength={200}
-              />
-              <Input
-                type="datetime-local"
-                value={patternUntil}
-                onChange={(event) => setPatternUntil(event.target.value)}
-                aria-label={t('settings.pools.pattern.until')}
-                title={t('settings.pools.pattern.untilInfo')}
-                className="h-8 w-auto min-w-0 rounded-md px-2"
-              />
-              <Button size="sm" variant="outline" onClick={addPattern} disabled={!pattern.trim()}>
-                {t('settings.pools.pattern.add')}
-              </Button>
-            </div>
-          </SettingsStackedField>
-          <div className="flex w-full min-w-0 items-center gap-2">
-            <ModelSelector
-              providerId={providerId}
-              modelId={modelId}
-              onChange={(nextProvider, nextModel) => {
-                setProviderId(nextProvider);
-                setModelId(nextModel);
-              }}
-              className={cn(SETTINGS_CUSTOM_TRIGGER_CLASS, 'w-full')}
-              placeholder={t('settings.pools.addTargetPlaceholder')}
-            />
-            <Button size="sm" variant="outline" onClick={addTarget} disabled={!providerId || !modelId}>
-              {t('settings.pools.addTarget')}
-            </Button>
-          </div>
-          <div className="space-y-2">
-            <Button size="sm" variant="ghost" onClick={() => setAdvancedOpen((open) => !open)} aria-expanded={advancedOpen}>
-              {advancedOpen ? t('settings.pools.advanced.hide') : t('settings.pools.advanced.show')}
-            </Button>
-            {advancedOpen ? <PoolAdvancedFields route={route} onChange={onChange} /> : null}
-          </div>
-          <SettingsStackedField label={t('settings.pools.expertJson')} info={t('settings.pools.expertJsonInfo')} controlClassName="max-w-none">
-            <Textarea
-              value={jsonText ?? JSON.stringify(route, null, 2)}
-              onChange={(event) => setJsonText(event.target.value)}
-              aria-label={t('settings.pools.expertJson')}
-              rows={8}
-              className="w-full font-mono text-xs"
-              spellCheck={false}
-            />
-          </SettingsStackedField>
-          {jsonError ? <p className={SETTINGS_HELPER_CLASS}>{jsonError}</p> : null}
-          {jsonText !== null ? (
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={applyJson}>
-                {t('settings.pools.applyJson')}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => { setJsonText(null); setJsonError(null); }}>
-                {t('settings.pools.discardJson')}
-              </Button>
-            </div>
-          ) : null}
+          ) : (
+            <p className={SETTINGS_HELPER_CLASS}>
+              {entry.unreadablePath
+                ? t('settings.pools.json.reason', { path: entry.unreadablePath })
+                : t('settings.pools.json.reasonWhole')}
+            </p>
+          )}
+          <PoolJsonField entry={entry} onApply={onChange} />
         </div>
       ) : null}
     </div>
@@ -401,14 +470,17 @@ export const ModelPoolsSection: React.FC = () => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
   const decisions = useRoutingStore((state) => state.decisions);
-  const [routes, setRoutes] = React.useState<Record<string, ModelRoute> | null>(null);
+  const [routes, setRoutes] = React.useState<Record<string, ModelRouteEntry> | null>(null);
+  const [problems, setProblems] = React.useState<PoolProblems>({});
   const [drafts, setDrafts] = React.useState<Record<string, ModelRoute>>({});
-  const [tuning, setTuning] = React.useState<ModelRouteTuning | null>(null);
+  const [tuning, setTuning] = React.useState<ModelRouteTuning | null | typeof UNREADABLE_TUNING>(null);
+  // A save the server refused: what was sent, so Save anyway can send it again, and the problems it named.
+  const [refusal, setRefusal] = React.useState<{ routes: Record<string, ModelRouteEntry>; problems: PoolProblems } | null>(null);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [newId, setNewId] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const lastSavedRef = React.useRef<Record<string, ModelRoute> | null>(null);
+  const lastSavedRef = React.useRef<Record<string, ModelRouteEntry> | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -417,7 +489,8 @@ export const ModelPoolsSection: React.FC = () => {
         if (!cancelled && state.available) {
           lastSavedRef.current = state.routes;
           setRoutes(state.routes);
-          setTuning(state.tuning ?? null);
+          setProblems(state.problems);
+          setTuning(state.tuning);
         }
       })
       .catch((failure) => {
@@ -428,18 +501,25 @@ export const ModelPoolsSection: React.FC = () => {
     };
   }, []);
 
-  const persist = React.useCallback(async (next: Record<string, ModelRoute>) => {
+  const persist = React.useCallback(async (next: Record<string, ModelRouteEntry>, force = false) => {
     setRoutes(next);
+    setRefusal(null);
     setSaving(true);
+    // A failed or refused save rolls back to the last server-confirmed state,
+    // so the list never shows pools that were not written.
     try {
-      const payload = Object.fromEntries(Object.entries(next).map(([id, route]) => [id, withoutAbsentWeights(route)]));
-      const state = await saveModelRoutes(payload);
-      lastSavedRef.current = state.routes;
-      setRoutes(state.routes);
+      const result = await saveModelRoutes(next, { force });
+      if (result.kind === 'refused') {
+        if (lastSavedRef.current) setRoutes(lastSavedRef.current);
+        setRefusal({ routes: next, problems: result.problems });
+        setError(null);
+        return;
+      }
+      lastSavedRef.current = result.state.routes;
+      setRoutes(result.state.routes);
+      setProblems(result.state.problems);
       setError(null);
     } catch (failure) {
-      // A failed save rolls back to the last server-confirmed state so the
-      // list never shows pools that were not written.
       if (lastSavedRef.current) setRoutes(lastSavedRef.current);
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
@@ -451,7 +531,7 @@ export const ModelPoolsSection: React.FC = () => {
     setTuning(next);
     try {
       const state = await saveModelRouteTuning(next);
-      setTuning(state.tuning ?? null);
+      setTuning(state.tuning);
       setError(null);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -465,7 +545,7 @@ export const ModelPoolsSection: React.FC = () => {
       setError(t('settings.pools.preset.empty'));
       return;
     }
-    void persist({ ...routes, [PRESET_ROUTE_IDS[preset]]: { targets, autonomy: 'rules', selection: 'ordered' } });
+    void persist({ ...routes, [PRESET_ROUTE_IDS[preset]]: { kind: 'editable', route: { targets, autonomy: 'rules', selection: 'ordered' } } });
     setExpandedId(PRESET_ROUTE_IDS[preset]);
   };
 
@@ -478,7 +558,7 @@ export const ModelPoolsSection: React.FC = () => {
     setExpandedId(id);
   };
 
-  const withoutKey = (record: Record<string, ModelRoute>, id: string) =>
+  const withoutKey = <T,>(record: Record<string, T>, id: string): Record<string, T> =>
     Object.fromEntries(Object.entries(record).filter(([key]) => key !== id));
 
   const recentDecisions = React.useMemo(
@@ -486,11 +566,24 @@ export const ModelPoolsSection: React.FC = () => {
     [decisions],
   );
 
+  const draftEntries = Object.fromEntries(
+    Object.entries(drafts).map(([id, route]): [string, ModelRouteEntry] => [id, { kind: 'editable', route }]),
+  );
+
   return (
     <SettingsSection title={t('settings.pools.title')}>
       <div className={SETTINGS_FIELDS_STACK_CLASS}>
         <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.description')}</p>
         {error ? <p className={SETTINGS_HELPER_CLASS}>{error}</p> : null}
+        {refusal ? (
+          <div role="alert" className="space-y-2 rounded-lg bg-[var(--status-warning-background)] p-3">
+            <p className="typography-ui-label font-medium text-[var(--status-warning-text)]">{t('settings.pools.refused')}</p>
+            <PoolProblemLines problems={Object.values(refusal.problems).flat()} className="text-[var(--status-warning-text)]" />
+            <Button size="sm" variant="outline" onClick={() => void persist(refusal.routes, true)} disabled={saving}>
+              {t('settings.pools.saveAnyway')}
+            </Button>
+          </div>
+        ) : null}
         {routes === null ? (
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.loading')}</p>
         ) : (
@@ -503,21 +596,24 @@ export const ModelPoolsSection: React.FC = () => {
               ))}
             </div>
             <div className="divide-y divide-border/40 border-y border-border/40">
-              {Object.entries({ ...routes, ...drafts }).map(([id, route]) => {
+              {Object.entries({ ...routes, ...draftEntries }).map(([id, entry]) => {
                 const isDraft = id in drafts;
                 return (
                   <PoolRow
                     key={id}
                     id={id}
-                    route={route}
-                    otherPoolIDs={Object.keys(routes).filter(
-                      (other) => other !== id && !(route.targets ?? []).some((target) => routeReferenceID(target) === other),
-                    )}
+                    entry={entry}
+                    problems={problems[id] ?? []}
+                    otherPoolIDs={entry.kind === 'editable'
+                      ? Object.keys(routes).filter(
+                        (other) => other !== id && !entry.route.targets.some((target) => routeReferenceID(target) === other),
+                      )
+                      : []}
                     expanded={expandedId === id}
                     onToggle={() => setExpandedId((current) => (current === id ? null : id))}
                     onChange={(next) => {
-                      if (isDraft && (next.targets ?? []).length === 0) {
-                        setDrafts((current) => ({ ...current, [id]: next }));
+                      if (isDraft && next.kind === 'editable' && next.route.targets.length === 0) {
+                        setDrafts((current) => ({ ...current, [id]: next.route }));
                         return;
                       }
                       if (isDraft) setDrafts((current) => withoutKey(current, id));
@@ -552,7 +648,11 @@ export const ModelPoolsSection: React.FC = () => {
             </SettingsFieldRow>
             <div className="space-y-2">
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.tuning.title')}</p>
-              <RouteTuningFields tuning={tuning} onSave={(next) => void saveTuning(next)} />
+              {tuning === UNREADABLE_TUNING ? (
+                <p className="typography-meta text-[var(--status-warning)]">{t('settings.pools.tuning.unreadable')}</p>
+              ) : (
+                <RouteTuningFields tuning={tuning} onSave={(next) => void saveTuning(next)} />
+              )}
             </div>
             <PoolTelemetry />
             {recentDecisions.length > 0 ? (

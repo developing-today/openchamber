@@ -1,12 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   AUTONOMY_LEVELS,
+  modelRouteProblems,
+  modelRoutesProblems,
   readModelRoutes,
   registerModelRouteRoutes,
-  validateModelRoute,
+  reviewModelRoutesSave,
   validateModelRouteTuning,
-  validateModelRoutes,
 } from './model-routes.js';
+
+// The first problem a pool has, or null: what the validator returned before it reported every problem.
+const validateModelRoute = (id, route) => modelRouteProblems(id, route)[0]?.message ?? null;
 
 describe('validateModelRoute', () => {
   it('accepts a minimal ordered route', () => {
@@ -33,9 +37,8 @@ describe('validateModelRoute', () => {
     expect(validateModelRoute('x', { targets: ['a/b'], weights: { 'a/b': 0 } })).toMatch(/positive number/);
   });
 
-  it('rejects a non-object map', () => {
-    expect(validateModelRoutes(null)).toMatch(/must be an object/);
-    expect(validateModelRoutes({ ok: { targets: ['a/b'] } })).toBeNull();
+  it('reports nothing for a map of valid pools', () => {
+    expect(modelRoutesProblems({ ok: { targets: ['a/b'] } })).toEqual({});
   });
 });
 
@@ -169,7 +172,7 @@ describe('registerModelRouteRoutes', () => {
     registerModelRouteRoutes(app, deps);
     const response = res();
     await routes.get[0][1]({}, response);
-    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, path: '/u/opencode.json' });
+    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, path: '/u/opencode.json', problems: {} });
   });
 
   it('PUT writes tuning alone and removes it when null', async () => {
@@ -224,6 +227,16 @@ describe('registerModelRouteRoutes', () => {
     const response = res();
     await handler({ body: { routes: { x: { targets: [] } } } }, response);
     expect(response.out.status).toBe(400);
+    expect(deps.writeConfig).not.toHaveBeenCalled();
+  });
+
+  it('PUT refuses routes that are not a map of pools', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const response = res();
+    await handler({ body: { routes: ['a/b'] } }, response);
+    expect(response.out).toEqual({ status: 400, body: { error: 'routes must be an object of route definitions' } });
     expect(deps.writeConfig).not.toHaveBeenCalled();
   });
 
@@ -288,6 +301,177 @@ describe('registerModelRouteRoutes', () => {
     expect(response.out.status).toBeUndefined();
     expect(targetConfig.experimental.model_routes).toEqual(pools);
     expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json');
+  });
+
+  it('GET returns every pool and the problems of each one that has any, without refusing', async () => {
+    targetConfig.experimental.model_routes = {
+      good: { targets: ['a/b'] },
+      // A JSONC `1e999` reads as Infinity.
+      infinite: { targets: ['a/b'], weights: { 'a/b': Infinity } },
+      empty: { targets: [] },
+    };
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const response = res();
+    await routes.get[0][1]({}, response);
+    expect(response.out.status).toBeUndefined();
+    expect(Object.keys(response.out.body.routes)).toEqual(['good', 'infinite', 'empty']);
+    expect(response.out.body.problems).toEqual({
+      infinite: [{ message: 'route "infinite" weight for "a/b" must be a positive number', skipsPool: true }],
+      empty: [{ message: 'route "empty" needs at least one target', skipsPool: false }],
+    });
+  });
+
+  it('PUT writes a changed pool next to an unchanged one the validator refuses, which stays exactly as the config holds it', async () => {
+    // Everything here is accepted by OpenCode and refused by OpenChamber's validator.
+    const hand = {
+      targets: [{ providerID: 'openai', model: 'gpt-6', variant: 'high' }, 'c/d'],
+      autonomy: 'fixed',
+      selection: 'weighted',
+      weights: { 'x/y': 2 },
+      health: { sampleWindow: 2, slowThreshold: 4 },
+      note: 'written by hand',
+    };
+    targetConfig.experimental.model_routes = { hand, edited: { targets: ['a/b'] } };
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const response = res();
+    await handler({ body: { routes: { hand: structuredClone(hand), edited: { targets: ['a/b', 'c/d'] } } } }, response);
+    expect(response.out.status).toBeUndefined();
+    expect(targetConfig.experimental.model_routes.hand).toBe(hand);
+    expect(targetConfig.experimental.model_routes.edited).toEqual({ targets: ['a/b', 'c/d'] });
+    expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json');
+    expect(Object.keys(response.out.body.problems)).toEqual(['hand']);
+    expect(response.out.body.problems.hand).toHaveLength(5);
+    expect(response.out.body.problems.hand.every(({ skipsPool }) => skipsPool === false)).toBe(true);
+  });
+
+  it('PUT refuses a changed pool with problems and names them per pool; force writes it and returns them', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const sent = { old: { targets: ['a/b'] }, bad: { targets: ['a/b'], attempts: 0 } };
+    const problems = { bad: [{ message: 'route "bad" attempts must be a whole number from 1 to 50', skipsPool: true }] };
+
+    const refused = res();
+    await handler({ body: { routes: sent } }, refused);
+    expect(refused.out).toEqual({ status: 400, body: { error: problems.bad[0].message, problems } });
+    const notForced = res();
+    await handler({ body: { routes: sent, force: 'true' } }, notForced);
+    expect(notForced.out.status).toBe(400);
+    expect(deps.writeConfig).not.toHaveBeenCalled();
+
+    const forced = res();
+    await handler({ body: { routes: sent, force: true } }, forced);
+    expect(forced.out.status).toBeUndefined();
+    expect(targetConfig.experimental.model_routes).toEqual(sent);
+    expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json');
+    expect(forced.out.body.problems).toEqual(problems);
+  });
+
+  it('PUT counts a pool the client echoes back as unchanged although JSON turned Infinity into null', async () => {
+    const infinite = { targets: ['a/b'], weights: { 'a/b': Infinity } };
+    targetConfig.experimental.model_routes = { infinite };
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const echoed = JSON.parse(JSON.stringify(infinite));
+    expect(echoed.weights['a/b']).toBeNull();
+    const response = res();
+    await handler({ body: { routes: { infinite: echoed, added: { targets: ['c/d'] } } } }, response);
+    expect(response.out.status).toBeUndefined();
+    expect(targetConfig.experimental.model_routes.infinite).toBe(infinite);
+    expect(targetConfig.experimental.model_routes.added).toEqual({ targets: ['c/d'] });
+  });
+});
+
+describe('reviewModelRoutesSave', () => {
+  it('checks only the pools a save adds or changes, and keeps the stored copy of the rest', () => {
+    const stored = { kept: { targets: [] } };
+    const review = reviewModelRoutesSave({ kept: { targets: [] }, added: { targets: ['a/b'], attempts: 99 } }, stored);
+    expect(review.routes.kept).toBe(stored.kept);
+    expect(Object.keys(review.problems)).toEqual(['added']);
+    const changed = reviewModelRoutesSave({ kept: { targets: [], name: 'renamed' } }, stored);
+    expect(changed.problems.kept).toEqual([{ message: 'route "kept" needs at least one target', skipsPool: false }]);
+  });
+});
+
+describe('modelRouteProblems severity', () => {
+  const skipsPool = (route) => modelRouteProblems('x', route).map((problem) => problem.skipsPool);
+
+  it('marks what OpenCode loads anyway as a problem only OpenChamber has', () => {
+    expect(skipsPool({ targets: ['a/b'], attmepts: 2 })).toEqual([false]);
+    expect(skipsPool({ targets: [] })).toEqual([false]);
+    expect(skipsPool({ targets: ['a/b'], health: { sampleWindow: 2, slowThreshold: 3 } })).toEqual([false]);
+    expect(skipsPool({ targets: ['a/b'], weights: { 'c/d': 2 } })).toEqual([false]);
+    expect(skipsPool({ targets: ['a/b'], autonomy: 'fixed', selection: 'weighted' })).toEqual([false]);
+    expect(skipsPool({ targets: [{ model: 'a/b', defualtVariant: 'max' }] })).toEqual([false]);
+    expect(skipsPool({ targets: ['a/b'], health: { sampleWindo: 5 }, budgets: { 'a/b': { requestsPerDayy: 5 } } })).toEqual([false, false]);
+  });
+
+  it('marks what OpenCode\'s schema refuses as skipping the pool', () => {
+    expect(modelRouteProblems('bad id!', { targets: ['a/b'] })).toEqual([{ message: 'invalid route id "bad id!"', skipsPool: true }]);
+    expect(skipsPool([])).toEqual([true]);
+    expect(skipsPool({})).toEqual([true]);
+    expect(skipsPool({ targets: ['no-slash'] })).toEqual([true]);
+    expect(skipsPool({ targets: ['a/b'], name: 4 })).toEqual([true]);
+    expect(skipsPool({ targets: ['a/b'], attempts: 0 })).toEqual([true]);
+    expect(skipsPool({ targets: ['a/b'], autonomy: 'sentient' })).toEqual([true]);
+    expect(skipsPool({ targets: [{ model: 'a/b', variants: { low: 3 } }] })).toEqual([true]);
+    expect(skipsPool({ targets: ['a/b'], schedules: [{ factor: 0.5 }] })).toEqual([true]);
+  });
+
+  it('reports every problem in a pool, so one that skips it is not hidden behind one OpenCode accepts', () => {
+    expect(skipsPool({ targets: ['a/b'], attmepts: 2, weights: { 'a/b': Infinity } })).toEqual([false, true]);
+  });
+});
+
+describe('modelRouteProblems for the values OpenCode drops a pool for', () => {
+  it('flags an infinite weight, an infinite minimum rate and a target until past Number.MAX_SAFE_INTEGER', () => {
+    expect(modelRouteProblems('x', { targets: ['a/b'], weights: { 'a/b': Infinity } })).toEqual([
+      { message: 'route "x" weight for "a/b" must be a positive number', skipsPool: true },
+    ]);
+    expect(modelRouteProblems('x', { targets: ['a/b'], health: { minOutputTokensPerSecond: Infinity } })).toEqual([
+      { message: 'route "x" health.minOutputTokensPerSecond must be a positive number', skipsPool: true },
+    ]);
+    expect(modelRouteProblems('x', { targets: [{ model: 'a/b', until: Number.MAX_SAFE_INTEGER + 1 }] })).toEqual([
+      { message: 'route "x" has a bad target: its until must be a positive epoch-millisecond time', skipsPool: true },
+    ]);
+  });
+
+  it('still accepts the largest finite and safe values', () => {
+    expect(modelRouteProblems('x', { targets: ['a/b'], weights: { 'a/b': Number.MAX_VALUE } })).toEqual([]);
+    expect(modelRouteProblems('x', { targets: ['a/b'], health: { minOutputTokensPerSecond: Number.MAX_VALUE } })).toEqual([]);
+    expect(modelRouteProblems('x', { targets: [{ model: 'a/b', until: Number.MAX_SAFE_INTEGER }] })).toEqual([]);
+  });
+});
+
+describe('modelRouteProblems for OpenCode model selections', () => {
+  it('flags a { providerID, model } target, which OpenCode accepts, as one OpenChamber does not check', () => {
+    expect(modelRouteProblems('x', { targets: [{ providerID: 'openai', model: 'gpt-6', variant: 'high' }] })).toEqual([
+      { message: 'route "x" target "openai/gpt-6" is written as { providerID, model }, which OpenChamber does not check', skipsPool: false },
+    ]);
+    expect(modelRouteProblems('x', { targets: [{ model: { providerID: 'openai', model: 'gpt-6' }, defaultVariant: 'max' }] })).toEqual([
+      { message: 'route "x" target "openai/gpt-6" is written as { providerID, model }, which OpenChamber does not check', skipsPool: false },
+    ]);
+  });
+
+  it('names a key OpenCode drops from a selection', () => {
+    expect(modelRouteProblems('x', { targets: [{ providerID: 'openai', model: 'gpt-6', until: 1893575040000 }] })).toEqual([
+      { message: expect.stringMatching(/is written as \{ providerID, model \}/), skipsPool: false },
+      { message: expect.stringMatching(/has a bad target: unknown key "until" \(expected providerID, model, variant\)/), skipsPool: false },
+    ]);
+  });
+
+  it('skips the pool when the selection is malformed, as OpenCode does', () => {
+    expect(modelRouteProblems('x', { targets: [{ providerID: 'open/ai', model: 'gpt-6' }] }).some((problem) => problem.skipsPool)).toBe(true);
+    expect(modelRouteProblems('x', { targets: [{ providerID: 'openai', model: 'gpt-6#a#b' }] }).some((problem) => problem.skipsPool)).toBe(true);
+  });
+
+  it('matches a weight keyed by the provider and model of a selection target', () => {
+    const problems = modelRouteProblems('x', { targets: [{ providerID: 'openai', model: 'gpt-6', variant: 'high' }], weights: { 'openai/gpt-6': 2 } });
+    expect(problems.map(({ message }) => message)).toEqual([expect.stringMatching(/is written as \{ providerID, model \}/)]);
   });
 });
 
@@ -358,7 +542,7 @@ describe('validateModelRoute schedules', () => {
   it('accepts a pool with a schedule, and the map that holds it', () => {
     expect(validateModelRoute('peak', scheduled(peak))).toBeNull();
     expect(validateModelRoute('peak', scheduled())).toBeNull();
-    expect(validateModelRoutes({ plain: { targets: ['a/b'] }, peak: scheduled(peak, { when: {}, weight: 2 }) })).toBeNull();
+    expect(modelRoutesProblems({ plain: { targets: ['a/b'] }, peak: scheduled(peak, { when: {}, weight: 2 }) })).toEqual({});
   });
 
   it('accepts a weight, both factor and weight, or neither, as OpenCode\'s schema does', () => {
@@ -413,8 +597,10 @@ describe('validateModelRoute schedules', () => {
     expect(validateModelRoute('peak', scheduled({ ...peak, note: null }))).toMatch(/note must be a string/);
   });
 
-  it('fails the whole map on one bad schedule and names its pool', () => {
-    expect(validateModelRoutes({ plain: { targets: ['a/b'] }, peak: scheduled({ ...peak, factor: 0 }) })).toMatch(/^route "peak" schedule 1 factor/);
+  it('reports a bad schedule against its own pool only', () => {
+    const problems = modelRoutesProblems({ plain: { targets: ['a/b'] }, peak: scheduled({ ...peak, factor: 0 }) });
+    expect(Object.keys(problems)).toEqual(['peak']);
+    expect(problems.peak).toEqual([{ message: expect.stringMatching(/^route "peak" schedule 1 factor/), skipsPool: true }]);
   });
 });
 

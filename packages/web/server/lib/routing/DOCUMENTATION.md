@@ -253,8 +253,8 @@ Separate from Jev/Auto above: read-only views over OpenCode's own
 `{ available: false, reason }` instead of an empty result when the database,
 its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
 
-`model-routes.js` validates a pool before saving it and accepts `schedules` as
-OpenCode's schema defines them.
+`model-routes.js` checks each new or changed pool, `schedules` included,
+against OpenCode's schema and its own stricter rules before saving it.
 
 - `model-route-stats.js` — `GET /api/model-routes/stats`: aggregate counts,
   latencies, grouped errors and hedge win rates per target over a trailing
@@ -271,6 +271,42 @@ OpenCode's schema defines them.
   needs no telemetry, since it just compares the assistant messages' own
   `providerID`/`modelID`/`variant` (`packages/ui/src/components/chat/lib/turns/modelChange.ts`).
 
+## Model pools
+
+`model-routes.js` serves `/api/model-routes` (GET, PUT) over
+`experimental.model_routes` and `experimental.model_route_tuning`. No pool in
+the OpenCode config can fail a read or block a save of another pool.
+
+- **Problems.** `modelRouteProblems` reports every problem in one pool, each
+  with `skipsPool`. It is true where OpenCode's own schema refuses the value:
+  OpenCode decodes each pool on its own and leaves out one that fails
+  (`packages/core/src/config/normalize.ts`, `decodeMap`). Examples are
+  `Infinity` as a weight or as `minOutputTokensPerSecond`, and a target `until`
+  above `Number.MAX_SAFE_INTEGER` (OpenCode's `PositiveInt` is a safe
+  integer). It is false for OpenChamber's stricter checks of what OpenCode
+  loads anyway: an unknown key, which OpenCode drops; `slowThreshold` above
+  `sampleWindow`, which it clamps; a weight for a target the pool lacks and a
+  fixed pool's `selection`, which it ignores; an empty target list; and a target
+  written as `{ providerID, model }`, which OpenChamber does not check.
+- **GET** returns `routes`, `tuning`, `path` and `problems`, the problems of
+  each pool that has any, keyed by pool id. A read never refuses.
+- **PUT** compares each pool sent with the one the merged config holds, as JSON:
+  that is how the client received it, so a JSONC `1e999` read as `Infinity`
+  comes back as `null` and still counts as unchanged. An unchanged pool is
+  written exactly as the config holds it and is not checked
+  (`reviewModelRoutesSave`). When a new or changed pool has a problem, the save
+  answers 400 with `error` and `problems` for those pools and writes nothing;
+  with `force: true` it writes them and returns them in `problems` with the
+  other pools'. `tuning` is checked as a whole, and `force` does not apply to
+  it.
+
+The client (`packages/ui/src/lib/routing/modelRoutesApi.ts`) reads each pool on
+its own. A pool the structured editor cannot represent (a key it does not know
+anywhere in the pool, a value of another type, a `{ providerID, model }`
+target) becomes a `json` entry: the JSON as received, plus the path the editor
+stopped at, sent back unchanged unless the user edits that JSON. Review
+settings it cannot read come back as `unreadable`, and the pools still load.
+
 ## Tests
 
 `store.test.js` (defaults, deviation round-trip, the cache setting's default,
@@ -280,5 +316,7 @@ excerpts, decisions, cache holds and the warm window, endpoints, custom URL norm
 classifier fallback, rewrite and fallback
 paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send
-ahead of a stand-in proxy, the routes). The queue and auto-accept tests cover
-their hooks.
+ahead of a stand-in proxy, the routes), `model-routes.test.js` (every
+validator rule, which problems skip a pool, problems on a read, unchanged pools
+written as stored, a refused save and its forced retry). The queue and
+auto-accept tests cover their hooks.
