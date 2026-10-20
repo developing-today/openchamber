@@ -116,3 +116,6 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Electron lint stub replaced with the shared oxlint command        | 2026-10-20 | #135, #136                 |
 | Electron `test:linux-desktop` smoke runs in pr checks             | 2026-10-20 | #137, #138                 |
 | Release pipeline actions aligned to the repo's v7 pins            | 2026-10-20 | #143, #144                 |
+| Desktop release pipeline cache aligned to v6.1.0                  | 2026-10-20 | #155, #156                 |
+| pr-intake github-script aligned to v8.0.0                         | 2026-10-20 | #157, #158                 |
+| Electron `build` bundles the main process (was a no-op stub)      | 2026-10-20 | #142, #159                 |
