@@ -1070,6 +1070,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['thinking', 'variant', 'reasoning', 'effort', 'model', 'project metadata'],
   },
   {
+    id: 'projects.sidebar.work',
+    page: 'projects',
+    titleKey: 'settings.projects.sidebar.showInWork',
+    keywords: ['work', 'hide', 'visibility', 'sidebar', 'project metadata'],
+  },
+  {
+    id: 'projects.sidebar.all',
+    page: 'projects',
+    titleKey: 'settings.projects.sidebar.showInAllSessions',
+    keywords: ['all sessions', 'hide', 'visibility', 'sidebar', 'project metadata'],
+  },
+  {
     id: 'projects.icon',
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectIcon',

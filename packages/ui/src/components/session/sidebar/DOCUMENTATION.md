@@ -292,6 +292,8 @@ metadata-only changes update rows. See `lib/multirun/DOCUMENTATION.md`.
 
 ## In work
 
+A project can be hidden from the In work zone and from the List view's All sessions. Its General tab has a Sidebar section with one checkbox per view; the choice is `hiddenFromWork` and `hiddenFromAllSessions` on the project entry, stored only when true, so a project without them is shown in both. A hidden project's sessions leave that one zone or list, and the project itself stays in the Tree view and the rest of the sidebar. The Tree view does not read `hiddenFromAllSessions`, and VS Code shows no Sidebar section because its projects are workspace folders.
+
 Sessions in work (`metadata.openchamber.work.state === 'open'`, see
 `packages/web/server/lib/session-work/DOCUMENTATION.md`) render in their own
 `work` activity zone under Chats and above the projects, in both
