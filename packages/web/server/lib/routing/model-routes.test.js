@@ -271,6 +271,24 @@ describe('registerModelRouteRoutes', () => {
     expect(targetConfig.experimental.model_route_tuning).toEqual({ enabled: true, notes });
     expect(saved.out.body.tuning).toEqual({ enabled: true, notes });
   });
+
+  it('PUT saves every pool when one of them carries a schedule', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const pools = {
+      plain: { targets: ['a/b'] },
+      peak: {
+        targets: ['a/b', 'c/d'],
+        schedules: [{ targets: ['c/*'], when: { daysOfWeek: ['mon'], start: '09:00', end: '17:00' }, factor: 0.5 }],
+      },
+    };
+    const response = res();
+    await handler({ body: { routes: pools } }, response);
+    expect(response.out.status).toBeUndefined();
+    expect(targetConfig.experimental.model_routes).toEqual(pools);
+    expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json');
+  });
 });
 
 describe('validateModelRoute strictness', () => {
@@ -314,6 +332,89 @@ describe('validateModelRoute strictness', () => {
     expect(validateModelRoute('x', { ...base, health: { slowThreshold: 6 } })).toMatch(/cannot exceed health\.sampleWindow \(5\)/);
     expect(validateModelRoute('x', { ...base, health: { slowThreshold: 5 } })).toBeNull();
     expect(validateModelRoute('x', { ...base, health: { slowThreshold: 4 } })).toBeNull();
+  });
+});
+
+describe('validateModelRoute schedules', () => {
+  const base = { targets: ['deepseek/v4', 'openai/gpt-6-luna'] };
+  const peak = {
+    id: 'peak',
+    targets: ['deepseek/*'],
+    when: {
+      daysOfWeek: ['mon', 'friday', 3],
+      daysOfMonth: [1, -1],
+      start: '09:00',
+      end: '17:00',
+      timezone: 'America/Chicago',
+      from: 1767225600000,
+      until: 1893456000000,
+    },
+    factor: 0.5,
+    note: 'DeepSeek is slow at peak hours',
+  };
+  const scheduled = (...schedules) => ({ ...base, schedules });
+  const withWhen = (when) => scheduled({ when, factor: 0.5 });
+
+  it('accepts a pool with a schedule, and the map that holds it', () => {
+    expect(validateModelRoute('peak', scheduled(peak))).toBeNull();
+    expect(validateModelRoute('peak', scheduled())).toBeNull();
+    expect(validateModelRoutes({ plain: { targets: ['a/b'] }, peak: scheduled(peak, { when: {}, weight: 2 }) })).toBeNull();
+  });
+
+  it('accepts a weight, both factor and weight, or neither, as OpenCode\'s schema does', () => {
+    expect(validateModelRoute('peak', scheduled({ when: {}, weight: 2 }))).toBeNull();
+    expect(validateModelRoute('peak', scheduled({ when: {}, factor: 0.5, weight: 2 }))).toBeNull();
+    expect(validateModelRoute('peak', scheduled({ when: {} }))).toBeNull();
+  });
+
+  it('accepts day numbers, short and long day names, and a start time without a leading zero', () => {
+    expect(validateModelRoute('peak', withWhen({ daysOfWeek: [0, 6, 'sunday', 'tues', 'thur', 'thurs'] }))).toBeNull();
+    expect(validateModelRoute('peak', withWhen({ daysOfMonth: [31], start: '9:30', end: '17:00' }))).toBeNull();
+  });
+
+  it('refuses schedules that are not a list, and an entry that is not an object', () => {
+    expect(validateModelRoute('peak', { ...base, schedules: {} })).toMatch(/route "peak" schedules must be a list/);
+    expect(validateModelRoute('peak', scheduled(null))).toMatch(/route "peak" schedule 1 must be an object/);
+  });
+
+  it('names an unknown key on a schedule or its window, and which schedule has it', () => {
+    expect(validateModelRoute('peak', scheduled(peak, { ...peak, enabled: true }))).toMatch(
+      /route "peak" schedule 2 has unknown key "enabled" \(expected id, targets, when, factor, weight, note\)/,
+    );
+    // OpenCode would drop the misspelled key and apply the schedule on every day.
+    expect(validateModelRoute('peak', withWhen({ dayOfWeek: ['mon'] }))).toMatch(/route "peak" schedule 1 when has unknown key "dayOfWeek"/);
+  });
+
+  it('refuses a missing or malformed when window', () => {
+    expect(validateModelRoute('peak', scheduled({ factor: 0.5 }))).toMatch(/route "peak" schedule 1 needs a when window/);
+    expect(validateModelRoute('peak', withWhen([]))).toMatch(/route "peak" schedule 1 when must be an object/);
+    expect(validateModelRoute('peak', withWhen({ daysOfWeek: ['Mon'] }))).toMatch(/route "peak" schedule 1 when\.daysOfWeek must list lowercase day names/);
+    expect(validateModelRoute('peak', withWhen({ daysOfWeek: [7] }))).toMatch(/when\.daysOfWeek/);
+    expect(validateModelRoute('peak', withWhen({ daysOfWeek: 'mon' }))).toMatch(/when\.daysOfWeek/);
+    expect(validateModelRoute('peak', withWhen({ daysOfMonth: [0] }))).toMatch(/route "peak" schedule 1 when\.daysOfMonth must list whole numbers from 1 to 31/);
+    expect(validateModelRoute('peak', withWhen({ daysOfMonth: [-2] }))).toMatch(/when\.daysOfMonth/);
+    expect(validateModelRoute('peak', withWhen({ start: 900 }))).toMatch(/route "peak" schedule 1 when\.start must be a string/);
+    expect(validateModelRoute('peak', withWhen({ timezone: null }))).toMatch(/when\.timezone must be a string/);
+    expect(validateModelRoute('peak', withWhen({ from: 0 }))).toMatch(/route "peak" schedule 1 when\.from must be a positive epoch-millisecond time/);
+    expect(validateModelRoute('peak', withWhen({ until: 1.5 }))).toMatch(/when\.until/);
+  });
+
+  it('refuses a factor or weight that is not a positive number', () => {
+    expect(validateModelRoute('peak', scheduled({ ...peak, factor: 0 }))).toMatch(/route "peak" schedule 1 factor must be a positive number/);
+    expect(validateModelRoute('peak', scheduled({ ...peak, factor: '0.5' }))).toMatch(/factor must be a positive number/);
+    expect(validateModelRoute('peak', scheduled({ ...peak, factor: Infinity }))).toMatch(/factor must be a positive number/);
+    expect(validateModelRoute('peak', scheduled({ when: {}, weight: -1 }))).toMatch(/route "peak" schedule 1 weight must be a positive number/);
+  });
+
+  it('refuses targets that are not a list of strings, and an id or note that is not a string', () => {
+    expect(validateModelRoute('peak', scheduled({ ...peak, targets: 'deepseek/*' }))).toMatch(/route "peak" schedule 1 targets must be a list of strings/);
+    expect(validateModelRoute('peak', scheduled({ ...peak, targets: ['deepseek/*', 4] }))).toMatch(/targets must be a list of strings/);
+    expect(validateModelRoute('peak', scheduled({ ...peak, id: 4 }))).toMatch(/route "peak" schedule 1 id must be a string/);
+    expect(validateModelRoute('peak', scheduled({ ...peak, note: null }))).toMatch(/note must be a string/);
+  });
+
+  it('fails the whole map on one bad schedule and names its pool', () => {
+    expect(validateModelRoutes({ plain: { targets: ['a/b'] }, peak: scheduled({ ...peak, factor: 0 }) })).toMatch(/^route "peak" schedule 1 factor/);
   });
 });
 

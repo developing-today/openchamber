@@ -20,15 +20,23 @@ const TARGET_PATTERN = /^[^/#]+\/[^#]+(?:#[^#]+)?$/;
 
 const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const isWhole = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
+// Only a string is equal to its own String(), so this is a plain value check.
+const isString = (value) => String(value) === value;
 const MAX_MS = 3_600_000;
 const MAX_COUNT = 50;
 
-// The keys each object may carry, as OpenCode's schema defines them. OpenCode
-// reads only these, so any other key would be saved and silently ignored.
-const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights"];
+// The keys each object may carry, as OpenCode's schema defines them in
+// packages/schema/src/config/model-routes.ts (Route, the object form of Target,
+// Health, Budget, Schedule, Window and Tuning). OpenCode drops any other key,
+// so a save that carries one is refused. Keep these in step with that file.
+// Settings saves every pool at once, so a key missing here fails every save
+// while any pool carries it.
+const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules"];
 const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
+const SCHEDULE_KEYS = ["id", "targets", "when", "factor", "weight", "note"];
+const WINDOW_KEYS = ["daysOfWeek", "daysOfMonth", "start", "end", "timezone", "from", "until"];
 const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
 
 // OpenCode's defaults for the health window (model-route.ts).
@@ -99,6 +107,54 @@ const validateBudgets = (id, budgets) => {
     if (budget.softLimit !== undefined && !(typeof budget.softLimit === "number" && budget.softLimit >= 0.125 && budget.softLimit <= 1))
       return `route "${id}" budget for "${target}" softLimit must be between 0.125 and 1`;
   }
+  return null;
+};
+
+// The day names OpenCode's schema accepts (`DayOfWeek`), lowercase only.
+const DAY_NAMES = ["sun", "sunday", "mon", "monday", "tue", "tuesday", "tues", "wed", "wednesday", "thu", "thursday", "thur", "thurs", "fri", "friday", "sat", "saturday"];
+const isDayOfWeek = (day) => DAY_NAMES.includes(day) || isWhole(day, 0, 6);
+const isDayOfMonth = (day) => day === -1 || isWhole(day, 1, 31);
+
+/**
+ * A schedule's `when` window, checked only as far as OpenCode's schema checks
+ * it. Start, end and timezone may be any string there. OpenCode skips a
+ * schedule whose window it cannot read, and still loads the config.
+ */
+const validateWindow = (when) => {
+  if (!isRecord(when)) return "when must be an object";
+  const unknown = unknownKeysProblem(when, WINDOW_KEYS);
+  if (unknown) return `when has ${unknown}`;
+  if (when.daysOfWeek !== undefined && !(Array.isArray(when.daysOfWeek) && when.daysOfWeek.every(isDayOfWeek)))
+    return "when.daysOfWeek must list lowercase day names such as mon or monday, or numbers from 0 (Sunday) to 6 (Saturday)";
+  if (when.daysOfMonth !== undefined && !(Array.isArray(when.daysOfMonth) && when.daysOfMonth.every(isDayOfMonth)))
+    return "when.daysOfMonth must list whole numbers from 1 to 31, or -1 for the last day";
+  for (const key of ["start", "end", "timezone"])
+    if (when[key] !== undefined && !isString(when[key])) return `when.${key} must be a string`;
+  for (const key of ["from", "until"])
+    if (when[key] !== undefined && !isWhole(when[key], 1, Number.MAX_SAFE_INTEGER))
+      return `when.${key} must be a positive epoch-millisecond time`;
+  return null;
+};
+
+/**
+ * One entry of a route's `schedules`. OpenCode's description asks for exactly
+ * one of factor and weight, but its schema also takes both (weight wins) or
+ * neither (the entry changes nothing), and so does this check.
+ */
+const validateSchedule = (schedule) => {
+  if (!isRecord(schedule)) return "must be an object";
+  const unknown = unknownKeysProblem(schedule, SCHEDULE_KEYS);
+  if (unknown) return `has ${unknown}`;
+  if (schedule.id !== undefined && !isString(schedule.id)) return "id must be a string";
+  if (schedule.targets !== undefined && !(Array.isArray(schedule.targets) && schedule.targets.every(isString)))
+    return "targets must be a list of strings";
+  if (schedule.when === undefined) return "needs a when window";
+  const problem = validateWindow(schedule.when);
+  if (problem) return problem;
+  for (const key of ["factor", "weight"])
+    if (schedule[key] !== undefined && !(Number.isFinite(schedule[key]) && schedule[key] > 0))
+      return `${key} must be a positive number`;
+  if (schedule.note !== undefined && !isString(schedule.note)) return "note must be a string";
   return null;
 };
 
@@ -179,6 +235,13 @@ export const validateModelRoute = (id, route) => {
     const problem = validateBudgets(id, route.budgets);
     if (problem) return problem;
   }
+  if (route.schedules !== undefined) {
+    if (!Array.isArray(route.schedules)) return `route "${id}" schedules must be a list`;
+    for (const [index, schedule] of route.schedules.entries()) {
+      const problem = validateSchedule(schedule);
+      if (problem) return `route "${id}" schedule ${index + 1} ${problem}`;
+    }
+  }
   return null;
 };
 
@@ -205,8 +268,7 @@ export const validateModelRouteTuning = (tuning) => {
   if (tuning.windowHours !== undefined && !isWhole(tuning.windowHours, 1, 336))
     return "tuning.windowHours must be a whole number from 1 to 336";
   if (tuning.notes !== undefined) {
-    // Only a string is equal to its own String(), so this is a plain value check.
-    if (!Array.isArray(tuning.notes) || !tuning.notes.every((line) => String(line) === line))
+    if (!Array.isArray(tuning.notes) || !tuning.notes.every(isString))
       return "tuning.notes must be a list of strings";
     const bad = tuning.notes.findIndex((line) => !NOTE_LINE.test(line));
     if (bad !== -1) return `tuning.notes line ${bad + 1} must read "match: text" on one line`;

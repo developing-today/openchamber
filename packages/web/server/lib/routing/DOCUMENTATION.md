@@ -253,6 +253,9 @@ Separate from Jev/Auto above: read-only views over OpenCode's own
 `{ available: false, reason }` instead of an empty result when the database,
 its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
 
+`model-routes.js` validates a pool before saving it and accepts `schedules` as
+OpenCode's schema defines them.
+
 - `model-route-stats.js` — `GET /api/model-routes/stats`: aggregate counts,
   latencies, grouped errors and hedge win rates per target over a trailing
   window (`hours`, default 24).

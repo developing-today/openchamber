@@ -46,6 +46,21 @@ describe('saveModelRoutes', () => {
     expect(state).toMatchObject({ routes, available: true });
   });
 
+  test('sends back a pool schedule the client does not model, as it was read', async () => {
+    const routes = {
+      peak: {
+        targets: ['p/a', 'p/b'],
+        schedules: [{ targets: ['p/b'], when: { daysOfWeek: ['mon'], start: '09:00', end: '17:00' }, factor: 0.5 }],
+      },
+    } satisfies Record<string, ModelRoute>;
+    respond = () => reply(JSON.stringify({ routes }));
+    const read = await fetchModelRoutes();
+    expect(read.routes).toEqual(routes);
+    respond = (request) => reply(request.body);
+    await saveModelRoutes(read.routes);
+    expect(JSON.parse(sent[1]?.body ?? '')).toEqual({ routes });
+  });
+
   test('throws the server message when the save is refused', async () => {
     respond = () => reply(JSON.stringify({ error: 'route "kept" has unknown key "attmepts" (expected name, targets)' }), 400);
     await expect(saveModelRoutes({ kept: { targets: ['p/a'] } })).rejects.toThrow('has unknown key "attmepts"');
