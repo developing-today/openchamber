@@ -220,6 +220,8 @@ export interface SourceControlAuthAccount {
   current: boolean;
   source: 'oauth' | 'pat' | 'cli';
   status: 'valid' | 'invalid';
+  /** A token account added from 1Password: where the token is kept (op://…), never the token. */
+  tokenReference?: string;
 }
 
 type SourceControlDisconnectedAuth = SourceControlIdentity & {

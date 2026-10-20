@@ -110,5 +110,21 @@ export const createVaultResolver = ({
   /** Per variable: the last read's outcome, or absent before any read. */
   const status = () => Object.fromEntries(statuses);
 
-  return { resolve, status };
+  /**
+   * One reference's secret, for a caller that holds a reference itself (an
+   * integration account): `{ ok: true, value }` or `{ ok: false, reason }`.
+   * Shares the cache and the five-minute refresh with `resolve`; a failed
+   * re-read keeps the last good value.
+   */
+  const readSecret = async (reference) => {
+    const trimmed = String(reference ?? '').trim();
+    if (!isVaultReference(trimmed)) return { ok: false, reason: 'not-a-reference' };
+    const cached = values.get(trimmed);
+    if (cached && now() - cached.at < ttlMs) return { ok: true, value: cached.value };
+    const outcome = await readReference(trimmed);
+    if (outcome.ok) return outcome;
+    return cached ? { ok: true, value: cached.value } : outcome;
+  };
+
+  return { resolve, status, readSecret };
 };

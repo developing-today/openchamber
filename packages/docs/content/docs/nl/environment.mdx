@@ -26,6 +26,7 @@ Een waarde kan naar 1Password verwijzen in plaats van het geheim zelf te bevatte
 - Git, de terminal en projectacties lezen het bij de volgende actie die u start, en gebruiken het daarna vijf minuten opnieuw.
 - Een verwijzing die niet te lezen is, wordt weggelaten en niet als tekst doorgegeven. Instellingen vermeldt waarom: `op` is niet geïnstalleerd, 1Password reageerde niet of weigerde de verwijzing.
 - Om een geheim door te geven aan een MCP-server of een provider in uw OpenCode-configuratie, stelt u de variabele hier in en verwijst u ernaar in de configuratie met `{env:GITHUB_TOKEN}` van OpenCode.
+- Ook GitHub- en GitLab-accounts kunnen hun token in 1Password bewaren: vul bij **Instellingen → Integraties** de verwijzing in onder **Token uit 1Password** op de GitHub-kaart, of in het tokenveld op de GitLab-kaart. Alleen de verwijzing wordt opgeslagen, en een token dat u in 1Password vervangt, wordt binnen vijf minuten opgepikt.
 
 De variabelen bereiken geen OpenCode-server die u zelf hebt gestart, en de VS Code-extensie heeft deze instelling niet. Alles hieronder leest OpenChamber zelf bij het starten.
 

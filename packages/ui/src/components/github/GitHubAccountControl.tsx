@@ -11,6 +11,7 @@ import {
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SourceControlAuthAccount, SourceControlAuthStatus, SourceControlIdentity } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { VAULT_ACCOUNT_SOURCE_LABEL } from '@/lib/source-control/identity';
 import { cn } from '@/lib/utils';
 import { getManagedCredentialSourceLabelKey, GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -102,7 +103,7 @@ export const GitHubAccountControl: React.FC<{ className?: string; identity?: Sou
         {accounts.map((account) => {
           const accountUser = account.user;
           const isCurrent = Boolean(account.current);
-          const sourceLabel = t(getManagedCredentialSourceLabelKey(account.source ?? 'oauth'));
+          const sourceLabel = account.tokenReference ? VAULT_ACCOUNT_SOURCE_LABEL : t(getManagedCredentialSourceLabelKey(account.source ?? 'oauth'));
           return (
             <DropdownMenuItem
               key={account.id}

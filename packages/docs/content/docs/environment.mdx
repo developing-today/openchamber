@@ -26,6 +26,7 @@ A value can point into 1Password instead of holding the secret: enter `op://Vaul
 - Git, the terminal and project actions read it on the next action you start, and reuse it for five minutes.
 - A reference that can't be read is left out rather than passed on as text, and Settings says why: `op` isn't installed, 1Password didn't answer, or it refused the reference.
 - To hand a secret to an MCP server or a provider in your OpenCode config, set the variable here and refer to it in the config with OpenCode's `{env:GITHUB_TOKEN}`.
+- GitHub and GitLab accounts can keep their token in 1Password too: in **Settings → Integrations**, enter the reference under **Token from 1Password** on the GitHub card, or in the token field on the GitLab card. Only the reference is stored, and a token you rotate in 1Password is picked up within five minutes.
 
 The variables don't reach an OpenCode server you started yourself, and the VS Code extension has no such setting. Everything below is read by OpenChamber itself at startup.
 

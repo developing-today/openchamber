@@ -32,6 +32,7 @@ const makeOperations = () => {
     github: {
       status: vi.fn(async () => ({ connected: true, accounts: [{ id: 'occred:v1:github:a', current: true, ...leak }], ghCli: { available: true, token: SEED } })),
       activate: vi.fn(async (accountId) => (accountId === 'missing' ? { status: 404, body: { error: 'GitHub account not found' } } : ok({ connected: true }))),
+      addFromVault: vi.fn(async (reference) => ok({ connected: true, accounts: [{ id: 'occred:v1:github:b', tokenReference: reference }] })),
       remove: vi.fn(async () => ok({ success: true, removed: true })),
       setCliDisabled: vi.fn(async (disabled) => ({ disabled, ...leak })),
     },
@@ -39,6 +40,7 @@ const makeOperations = () => {
       listInstances: vi.fn(async () => [GITLAB]),
       status: vi.fn(async (instance) => ({ provider: 'gitlab', instance, connected: true, accounts: [{ id: `${instance}#1`, ...leak }] })),
       activate: vi.fn(async () => ok({ connected: true })),
+      addFromVault: vi.fn(async () => ok({ connected: true })),
       remove: vi.fn(async () => ok({ removed: true })),
       setCliDisabled: vi.fn(async (_instance, disabled) => ({ available: false, disabled, ...leak })),
     },
@@ -81,10 +83,12 @@ const VALID_CALLS = {
   'integrations.list': {},
   'github.status': {},
   'github.activate': { accountId: 'occred:v1:github:a' },
+  'github.addFromVault': { tokenReference: 'op://Vertex SRE/github_token/credential' },
   'github.remove': { accountId: 'occred:v1:github:a', confirm: true },
   'github.cli': { disabled: true },
   'gitlab.status': {},
   'gitlab.activate': { instance: GITLAB, accountId: `${GITLAB}#1` },
+  'gitlab.addFromVault': { instance: GITLAB, tokenReference: 'op://Vertex SRE/gitlab_token/credential' },
   'gitlab.remove': { instance: GITLAB, accountId: `${GITLAB}#1`, confirm: true },
   'gitlab.cli': { instance: GITLAB, disabled: false },
   'linear.status': {},
@@ -181,6 +185,14 @@ describe('github actions', () => {
     expect(ops.github.remove).not.toHaveBeenCalled();
     await expect(run('github.remove', { accountId: 'occred:v1:github:a', confirm: true })).resolves.toMatchObject({ removed: true });
     expect(ops.github.remove).toHaveBeenCalledWith('occred:v1:github:a');
+  });
+
+  it('add an account from a vault reference, which the answer may show', async () => {
+    const { ops, run } = setup();
+    const answer = await run('github.addFromVault', { tokenReference: 'op://Vertex SRE/github_token/credential' });
+    expect(ops.github.addFromVault).toHaveBeenCalledWith('op://Vertex SRE/github_token/credential');
+    expect(answer.accounts[0].tokenReference).toBe('op://Vertex SRE/github_token/credential');
+    await expectError(run('github.addFromVault', {}), 400, /tokenReference/);
   });
 
   it('turn the gh login off with a boolean only', async () => {

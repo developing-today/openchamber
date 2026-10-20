@@ -26,6 +26,7 @@ Bir değer, gizli bilginin kendisini tutmak yerine 1Password'e işaret edebilir:
 - Git, terminal ve proje eylemleri onu başlattığınız bir sonraki eylemde okur ve beş dakika boyunca yeniden kullanır.
 - Okunamayan bir referans dışarıda bırakılır ve metin olarak aktarılmaz. Ayarlar nedenini söyler: `op` kurulu değildir, 1Password yanıt vermemiştir ya da referansı reddetmiştir.
 - Bir gizli değeri OpenCode yapılandırmanızdaki bir MCP sunucusuna ya da sağlayıcıya vermek için değişkeni burada ayarlayın ve yapılandırmada OpenCode'un `{env:GITHUB_TOKEN}` sözdizimiyle ona başvurun.
+- GitHub ve GitLab hesapları da token'larını 1Password'de tutabilir: **Ayarlar → Entegrasyonlar** bölümünde referansı GitHub kartındaki **1Password’den token** alanına ya da GitLab kartındaki token alanına girin. Yalnızca referans saklanır ve 1Password'de yenilediğiniz bir token beş dakika içinde kullanılmaya başlar.
 
 Bu değişkenler kendi başlattığınız bir OpenCode sunucusuna ulaşmaz ve VS Code eklentisinde böyle bir ayar yoktur. Aşağıdaki her şeyi OpenChamber başlangıçta kendisi okur.
 

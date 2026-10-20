@@ -135,6 +135,9 @@ import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes
 import { configureGitEnvironment, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
+import { createVaultResolver } from './lib/environment/vault.js';
+import { configureGitHubVaultReader } from './lib/github/auth.js';
+import { configureGitLabVaultReader } from './lib/gitlab/auth-storage.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
@@ -1319,7 +1322,14 @@ const listConfiguredProjects = async () => {
   const settings = await readSettingsFromDiskMigrated();
   return sanitizeProjects(settings?.projects || []);
 };
+// One vault reader for every secret kept as an op:// reference: environment
+// variables and integration accounts share its cache. The terminal's PATH, so
+// a packaged server finds `op` where the user installed it.
+const vaultResolver = createVaultResolver({ env: () => ({ ...process.env, PATH: buildAugmentedPath() }) });
+configureGitHubVaultReader(vaultResolver.readSecret);
+configureGitLabVaultReader(vaultResolver.readSecret);
 const environmentRuntime = createEnvironmentRuntime({
+  vault: vaultResolver,
   store: environmentStore,
   listProjects: listConfiguredProjects,
   spawn,

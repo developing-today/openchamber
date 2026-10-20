@@ -6,6 +6,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { renameWithRetry, renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { isVaultReference } from '../environment/vault.js';
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -54,14 +55,20 @@ function parseUser(value) {
   return user;
 }
 
+// A token account keeps its token, or, added from a vault, only the reference
+// to it (`tokenReference`, op://…), read when the token is used.
+const hasTokenOrReference = (value) => (Object.hasOwn(value, 'tokenReference')
+  ? !Object.hasOwn(value, 'accessToken') && value.source === 'pat' && validText(value.tokenReference) && isVaultReference(value.tokenReference)
+  : validText(value.accessToken));
+
 function parseCredential(value) {
   if (!isPlainObject(value)
     || !exactKeys(value, [
-      'credentialId', 'revision', 'providerUserId', 'accessToken', 'scope', 'tokenType',
+      'credentialId', 'revision', 'providerUserId', 'scope', 'tokenType',
       'createdAt', 'user', 'source', 'status',
-    ], ['invalidReason'])
+    ], ['invalidReason', 'accessToken', 'tokenReference'])
     || !validText(value.credentialId) || !Number.isSafeInteger(value.revision) || value.revision < 1
-    || !validText(value.providerUserId) || !validText(value.accessToken)
+    || !validText(value.providerUserId) || !hasTokenOrReference(value)
     || !isString(value.scope) || !validText(value.tokenType)
     || !Number.isFinite(value.createdAt) || value.createdAt < 0
     || !['oauth', 'pat'].includes(value.source) || !['valid', 'invalid'].includes(value.status)) throw invalidState();
@@ -143,7 +150,6 @@ function serializeState(state) {
         credentialId: credential.credentialId,
         revision: credential.revision,
         providerUserId: credential.providerUserId,
-        accessToken: credential.accessToken,
         scope: credential.scope,
         tokenType: credential.tokenType,
         createdAt: credential.createdAt,
@@ -151,6 +157,8 @@ function serializeState(state) {
         source: credential.source,
         status: credential.status,
       };
+      if (credential.tokenReference) stored.tokenReference = credential.tokenReference;
+      else stored.accessToken = credential.accessToken;
       if (credential.status === 'invalid') stored.invalidReason = credential.invalidReason;
       return stored;
     }),
@@ -161,7 +169,7 @@ function publicCredential(credential, state) {
   const userHasValidCredential = state.credentials.some((candidate) => (
     candidate.providerUserId === credential.providerUserId && candidate.status === 'valid'
   ));
-  return {
+  const view = {
     id: credential.credentialId,
     credentialId: credential.credentialId,
     credentialRevision: credential.revision,
@@ -173,6 +181,9 @@ function publicCredential(credential, state) {
     source: credential.source,
     status: credential.status,
   };
+  // Where the token is kept, not the token.
+  if (credential.tokenReference) view.tokenReference = credential.tokenReference;
+  return view;
 }
 
 /** @public Exposed to integration tests that dynamically import the auth module. */
@@ -238,8 +249,11 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
         || (revision !== undefined && credential.revision !== revision)) return null;
       return credential;
     }),
-    setAccount: ({ accessToken, scope, tokenType, user, source = 'oauth' }) => mutate((state) => {
-      if (!validText(accessToken) || !['oauth', 'pat'].includes(source)) throw new Error('Valid GitHub credential is required');
+    setAccount: ({ accessToken, tokenReference, scope, tokenType, user, source = 'oauth' }) => mutate((state) => {
+      const fromVault = tokenReference !== undefined;
+      if (fromVault
+        ? (source !== 'pat' || !isVaultReference(tokenReference) || accessToken !== undefined)
+        : (!validText(accessToken) || !['oauth', 'pat'].includes(source))) throw new Error('Valid GitHub credential is required');
       const parsedUser = parseLegacyUser(user);
       const providerUserId = githubAccountId(parsedUser.id);
       const credentialId = newCredentialId();
@@ -249,7 +263,7 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
         revision: 1,
         credentialRevision: 1,
         providerUserId,
-        accessToken,
+        ...(fromVault ? { tokenReference: tokenReference.trim() } : { accessToken }),
         scope: isString(scope) ? scope : '',
         tokenType: validText(tokenType) ? tokenType : 'bearer',
         createdAt: Date.now(),
@@ -271,6 +285,9 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
     markInvalid: (credentialId, reason = 'unauthorized') => mutate((state) => {
       const credential = state.credentials.find((candidate) => candidate.credentialId === credentialId);
       if (!credential) return { changed: false, value: false };
+      // A refused token from a vault is likely rotated there; the next read
+      // picks up the new one, so the account stays usable.
+      if (credential.tokenReference) return { changed: false, value: false };
       if (credential.status === 'invalid' && credential.invalidReason === reason) return { changed: false, value: false };
       credential.status = 'invalid';
       credential.invalidReason = validText(reason) ? reason : 'unauthorized';
@@ -303,13 +320,41 @@ function writeSettingsFile(settings) {
   renameSyncWithRetry((from, to) => fsSync.renameSync(from, to), tmpFile, SETTINGS_FILE);
 }
 
-export const getGitHubAuth = () => authStore.getActive();
-export const getGitHubAuthAccounts = () => authStore.listAccounts();
-export const getGitHubAuthByAccountId = (credentialId, revision) => authStore.readAccount(credentialId, revision);
+// Reads a vault reference's secret (`readSecret` of ../environment/vault.js),
+// set once by the server. Without it an account added from a vault has no
+// token, and reads as disconnected.
+let readVaultSecret = null;
 
-export async function setGitHubAuth({ accessToken, scope, tokenType, user, accountId, source = 'oauth' }) {
+/** The server's vault reader, for accounts that keep a token reference. */
+export const configureGitHubVaultReader = (reader) => {
+  readVaultSecret = reader;
+};
+
+/**
+ * The credential with the token filled in from its vault reference. A token
+ * that cannot be read leaves `accessToken` out, as for an account with no
+ * token, and names why in `tokenReadError`; the stored credential is unchanged.
+ */
+const withVaultToken = async (credential) => {
+  if (!credential?.tokenReference) return credential;
+  const outcome = readVaultSecret ? await readVaultSecret(credential.tokenReference) : { ok: false, reason: 'vault-unavailable' };
+  return outcome.ok
+    ? { ...credential, accessToken: outcome.value }
+    : { ...credential, tokenReadError: outcome.reason };
+};
+
+/** A vault reference's token, for checking it before an account keeps the reference. */
+export const readGitHubVaultToken = (reference) => (readVaultSecret
+  ? readVaultSecret(reference)
+  : Promise.resolve({ ok: false, reason: 'vault-unavailable' }));
+
+export const getGitHubAuth = async () => withVaultToken(await authStore.getActive());
+export const getGitHubAuthAccounts = () => authStore.listAccounts();
+export const getGitHubAuthByAccountId = async (credentialId, revision) => withVaultToken(await authStore.readAccount(credentialId, revision));
+
+export async function setGitHubAuth({ accessToken, tokenReference, scope, tokenType, user, accountId, source = 'oauth' }) {
   if (accountId !== undefined) throw new Error('GitHub credential IDs are server assigned');
-  const credential = await authStore.setAccount({ accessToken, scope, tokenType, user, source });
+  const credential = await authStore.setAccount({ accessToken, tokenReference, scope, tokenType, user, source });
   // A newly connected account becomes current, so the gh CLI stops being it.
   if (readSettingsFile().ghCliActive) setGhCliActive(false);
   return credential;

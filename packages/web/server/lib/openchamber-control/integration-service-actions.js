@@ -18,7 +18,9 @@
  *
  * Secrets stay with the user:
  * - Nothing here signs in or takes a token, password or client secret. Inputs
- *   holding a key named like one are refused before any operation runs.
+ *   holding a key named like one are refused before any operation runs. An
+ *   account can be added from a vault reference (op://…), which names where a
+ *   token is kept; OpenChamber reads it, the agent never sees it.
  * - Every answer passes through `withoutSecrets`, which drops such keys at any
  *   depth. The operations already answer without them; this keeps it so if
  *   one of them changes.
@@ -37,10 +39,12 @@ export const INTEGRATION_SERVICE_ACTION_DEFINITIONS = Object.freeze([
   { action: 'integrations.list', title: 'List connected services', description: 'Overview of every connected service in one answer: GitHub and GitLab accounts, Linear workspaces, installed extensions with their sign-in state, and the source-control binding of directory. A section that cannot be read carries error; the others are still complete. Tokens are never returned' },
   { action: 'github.status', title: 'Show GitHub accounts', description: 'GitHub accounts OpenChamber holds, which one is current, and the gh CLI login (whether it is available, turned off, or the current account)' },
   { action: 'github.activate', title: 'Switch the GitHub account', description: 'Make accountId (from github.status) the current GitHub account; a github.com#cli: id switches to the gh CLI login' },
+  { action: 'github.addFromVault', title: 'Add a GitHub account from 1Password', description: 'Add a GitHub account whose token stays in 1Password: tokenReference is an op://vault/item/field reference. OpenChamber reads it, checks the token with GitHub, and stores only the reference; the token is read again whenever the account is used. The new account becomes current' },
   { action: 'github.remove', title: 'Sign out of a GitHub account', description: 'Remove accountId (from github.status); repositories bound to it are marked as needing an account. For the gh CLI login it only stops using it. Needs confirm' },
   { action: 'github.cli', title: 'Turn the gh CLI login on or off', description: 'disabled true stops OpenChamber from offering the gh CLI login; false offers it again' },
   { action: 'gitlab.status', title: 'Show GitLab accounts', description: 'GitLab accounts per instance, which one is current, and the glab CLI login. instance picks one; without it every instance with stored accounts is listed' },
   { action: 'gitlab.activate', title: 'Switch the GitLab account', description: 'Make accountId (from gitlab.status) current on instance; an <instance>#cli: id switches to the glab login' },
+  { action: 'gitlab.addFromVault', title: 'Add a GitLab account from 1Password', description: 'Add a GitLab account on instance whose token stays in 1Password: tokenReference is an op://vault/item/field reference. OpenChamber reads it, checks the token with the instance, and stores only the reference. The new account becomes current on that instance' },
   { action: 'gitlab.remove', title: 'Sign out of a GitLab account', description: 'Remove accountId on instance; repositories bound to it are marked as needing an account. Needs confirm' },
   { action: 'gitlab.cli', title: 'Turn the glab login on or off', description: 'disabled true stops OpenChamber from offering the glab login on instance; false offers it again' },
   { action: 'linear.status', title: 'Show Linear', description: 'Linear workspaces, the current one, which OpenChamber project each Linear team opens sessions in, and whether sessions post status comments on Linear issues' },
@@ -59,6 +63,7 @@ export const INTEGRATION_SERVICE_ACTION_DEFINITIONS = Object.freeze([
 
 export const INTEGRATION_SERVICE_PARAMETERS = {
   accountId: { type: 'string', description: 'Account id from github.status or gitlab.status (accounts[].id)' },
+  tokenReference: { type: 'string', description: 'github.addFromVault and gitlab.addFromVault: where the token is kept, op://vault/item/field; never the token itself' },
   instance: { type: 'string', description: 'GitLab instance origin, such as https://gitlab.com; must be gitlab.com or one gitlab.status lists' },
   workspaceId: { type: 'string', description: 'Linear workspace id from linear.status (workspaces[].id)' },
   linearMapping: {
@@ -188,6 +193,14 @@ export const createIntegrationServiceActions = (deps) => {
     return unwrap(await operations().github.remove(accountId));
   };
 
+  const requireTokenReference = (input, action) => {
+    const reference = asNonEmptyString(input.tokenReference);
+    if (!reference) throw badRequest(`tokenReference (op://vault/item/field) is required for ${action}`);
+    return reference;
+  };
+
+  const githubAddFromVault = async (input) => unwrap(await operations().github.addFromVault(requireTokenReference(input, 'github.addFromVault')));
+
   const githubCli = (input) => operations().github.setCliDisabled(requireBoolean(input, 'disabled', 'github.cli'));
 
   // ---- GitLab
@@ -228,6 +241,11 @@ export const createIntegrationServiceActions = (deps) => {
   const gitlabActivate = async (input) => {
     const origin = await requireInstance(input, 'gitlab.activate');
     return unwrap(await operations().gitlab.activate(origin, requireAccountId(input, 'gitlab.activate')));
+  };
+
+  const gitlabAddFromVault = async (input) => {
+    const origin = await requireInstance(input, 'gitlab.addFromVault');
+    return unwrap(await operations().gitlab.addFromVault(origin, requireTokenReference(input, 'gitlab.addFromVault')));
   };
 
   const gitlabRemove = async (input) => {
@@ -386,10 +404,12 @@ export const createIntegrationServiceActions = (deps) => {
     'integrations.list': integrationsList,
     'github.status': githubStatus,
     'github.activate': githubActivate,
+    'github.addFromVault': githubAddFromVault,
     'github.remove': githubRemove,
     'github.cli': githubCli,
     'gitlab.status': gitlabStatus,
     'gitlab.activate': gitlabActivate,
+    'gitlab.addFromVault': gitlabAddFromVault,
     'gitlab.remove': gitlabRemove,
     'gitlab.cli': gitlabCli,
     'linear.status': linearStatus,

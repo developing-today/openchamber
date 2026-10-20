@@ -1,11 +1,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import type { SourceControlDeviceFlowStart } from '@/lib/api/types';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
+import { VAULT_ACCOUNT_SOURCE_LABEL } from '@/lib/source-control/identity';
 import { SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
@@ -212,6 +214,32 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
     }
   }, [captureRuntime, setStatus, sourceControl, t]);
 
+  // An account whose token stays in 1Password: the server reads the
+  // reference, checks the token with GitHub and stores only the reference.
+  const [vaultReference, setVaultReference] = React.useState('');
+  const addFromVault = React.useCallback(async () => {
+    const reference = vaultReference.trim();
+    if (!reference || !sourceControl) return;
+    const isCurrentRuntime = captureRuntime();
+    setIsBusy(true);
+    try {
+      const nextStatus = await sourceControl.authSetToken(GITHUB_SOURCE_CONTROL_IDENTITY, reference);
+      if (!isCurrentRuntime()) return;
+      setStatus(GITHUB_SOURCE_CONTROL_IDENTITY, nextStatus);
+      setVaultReference('');
+      toast.success(t('settings.vault.added'));
+    } catch (error) {
+      if (!isCurrentRuntime()) return;
+      const code = error instanceof Error && 'code' in error ? error.code : null;
+      toast.error(code === 'VAULT_READ_FAILED' ? t('settings.vault.error.readFailed')
+        : code === 'INVALID_TOKEN' ? t('settings.vault.error.invalidToken')
+          : code === 'INVALID_REFERENCE' ? t('settings.vault.error.invalidReference')
+            : t('settings.vault.error.failed'));
+    } finally {
+      if (isCurrentRuntime()) setIsBusy(false);
+    }
+  }, [captureRuntime, setStatus, sourceControl, t, vaultReference]);
+
   const removeAccount = React.useCallback(async (accountId: string) => {
     const isCurrentRuntime = captureRuntime();
     setIsBusy(true);
@@ -269,9 +297,11 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
           accounts={accounts}
           avatarAlt={(username) => t('settings.github.page.avatarAlt.withLogin', { login: username })}
           currentLabel={t('settings.sourceControl.accounts.inUse')}
-          sourceLabel={(account) => account.source === 'cli'
-            ? t('settings.github.page.accountSource.cli')
-            : t('settings.github.page.accountSource.oauth')}
+          sourceLabel={(account) => {
+            if (account.source === 'cli') return t('settings.github.page.accountSource.cli');
+            if (account.tokenReference) return VAULT_ACCOUNT_SOURCE_LABEL;
+            return t('settings.github.page.accountSource.oauth');
+          }}
           statusLabel={(account) => account.status === 'valid'
             ? null
             : t('settings.sourceControl.accounts.needsAuthentication')}
@@ -322,6 +352,30 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
             {accounts.length > 0 ? t('settings.github.page.actions.addAccount') : t('settings.github.page.actions.connect')}
           </Button>
         </div>
+      )}
+
+      {flow ? null : (
+        <SettingsFieldRow label={t('settings.vault.github.label')} info={t('settings.vault.github.info')} settingsItem="git.github-vault">
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addFromVault();
+            }}
+          >
+            <Input
+              className="h-8 w-[18rem] max-w-full font-mono text-xs"
+              value={vaultReference}
+              onChange={(event) => setVaultReference(event.target.value)}
+              placeholder="op://Vault/item/field"
+              aria-label={t('settings.vault.github.label')}
+              disabled={isBusy}
+            />
+            <Button type="submit" size="sm" variant="outline" disabled={isBusy || !vaultReference.trim()}>
+              {t('settings.vault.add')}
+            </Button>
+          </form>
+        </SettingsFieldRow>
       )}
 
       {showCliFallback && ghCli ? (

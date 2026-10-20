@@ -26,6 +26,7 @@ Une valeur peut pointer vers 1Password au lieu de contenir le secret : saisissez
 - Git, le terminal et les actions de projet le lisent à la prochaine action que vous lancez, et le réutilisent pendant cinq minutes.
 - Une référence illisible est ignorée et n’est pas transmise comme texte. Les Paramètres indiquent pourquoi : `op` n’est pas installé, 1Password n’a pas répondu, ou il a refusé la référence.
 - Pour transmettre un secret à un serveur MCP ou à un fournisseur dans votre configuration OpenCode, définissez la variable ici et faites-y référence dans la configuration avec `{env:GITHUB_TOKEN}` d’OpenCode.
+- Les comptes GitHub et GitLab peuvent aussi garder leur jeton dans 1Password : dans **Paramètres → Intégrations**, saisissez la référence sous **Jeton depuis 1Password** sur la carte GitHub, ou dans le champ du jeton sur la carte GitLab. Seule la référence est enregistrée, et un jeton que vous renouvelez dans 1Password est pris en compte dans les cinq minutes.
 
 Ces variables n’atteignent pas un serveur OpenCode que vous avez lancé vous-même, et l’extension VS Code n’a pas ce réglage. Tout ce qui suit est lu par OpenChamber lui-même au démarrage.
 

@@ -8,7 +8,7 @@
 ## Entrypoints and structure
 
 - `packages/web/server/lib/github/index.js`: public server entrypoint. `routes.js` loads it lazily with `await import('./index.js')` and destructures the handler it needs, so a re-export removed from here breaks a route at request time rather than at build time. Static "unused export" reports do not see these consumers.
-- `packages/web/server/lib/github/routes.js`: Express route registration for canonical `/api/source-control/github/*` resources, shared auth compatibility paths, and fail-closed retired `/api/github/*` resources. It returns `accounts` (`status`, `activate`, `remove`, `setCliDisabled`), the operations its account routes run, so the `openchamber` agent tool's `github.*` actions (`../openchamber-control/integration-service-actions.js`) behave exactly like Settings.
+- `packages/web/server/lib/github/routes.js`: Express route registration for canonical `/api/source-control/github/*` resources, shared auth compatibility paths, and fail-closed retired `/api/github/*` resources. It returns `accounts` (`status`, `activate`, `addFromVault`, `remove`, `setCliDisabled`), the operations its account routes run, so the `openchamber` agent tool's `github.*` actions (`../openchamber-control/integration-service-actions.js`) behave exactly like Settings.
 - `packages/web/server/lib/github/auth.js`: auth storage, multi-account support, client id, scope config.
 - `packages/web/server/lib/github/device-flow.js`: OAuth device flow.
 - `packages/web/server/lib/github/octokit.js`: Octokit factories for legacy current auth and immutable account IDs.
@@ -26,7 +26,8 @@
 - `getGitHubAuth()`: current auth entry.
 - `getGitHubAuthAccounts()`: all configured accounts.
 - `getGitHubAuthByAccountId(credentialId, revision?)`: exact valid persisted credential lookup with optional revision pinning and no current-account or CLI fallback. The returned record keeps `credentialId` separate from `providerUserId`.
-- `setGitHubAuth({ accessToken, scope, tokenType, user, accountId })`: save or update account; the new account becomes current and gh CLI activation is cleared.
+- `setGitHubAuth({ accessToken, scope, tokenType, user, accountId })`: save or update account; the new account becomes current and gh CLI activation is cleared. With `tokenReference` (an `op://` reference) instead of `accessToken` and `source: 'pat'`, the account keeps only the reference.
+- Accounts from a vault: a credential stores either `accessToken` or, added through `POST /auth/vault` (`addFromVault`), `tokenReference`. `getGitHubAuth` and `getGitHubAuthByAccountId` fill `accessToken` in from the reference with the server's vault reader (`configureGitHubVaultReader`, the shared reader of `../environment/vault.js`), cached five minutes; every consumer, Git transport included, reads the token from there unchanged. A reference that cannot be read leaves `accessToken` out and sets `tokenReadError`, so the account reads as disconnected with the reason. Such an account is never marked invalid: a refused token is most likely rotated in the vault, and the next read picks the new one up. The public account view carries `tokenReference`, never the token.
 - `activateGitHubAuth(accountId)`: switch active account; switching to a saved account clears gh CLI activation.
 - `clearGitHubAuth()`: clear current account.
 - `markGitHubAuthAccountInvalid(accountId)`: retain exact account metadata but make its credential unavailable.

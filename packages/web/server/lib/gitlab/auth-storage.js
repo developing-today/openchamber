@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { normalizeGitLabInstance } from './instance.js';
 import { isPlainObject, isString } from './validation.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { isVaultReference } from '../environment/vault.js';
 import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const AUTH_VERSION = 2;
@@ -42,13 +43,19 @@ function runtimeCredential(value) {
   return { ...value, id: value.credentialId, credentialRevision: value.revision };
 }
 
+// A token account keeps its token, or, added from a vault, only the reference
+// to it (`tokenReference`, op://…), read when the token is used.
+const hasTokenOrReference = (value) => (Object.hasOwn(value, 'tokenReference')
+  ? !Object.hasOwn(value, 'token') && value.source === 'pat' && validText(value.tokenReference) && isVaultReference(value.tokenReference)
+  : validText(value.token));
+
 function parseCredential(value, origin) {
   if (!isPlainObject(value)
     || !exactKeys(value, [
-      'credentialId', 'revision', 'providerUserId', 'token', 'user', 'source', 'scope', 'status',
-    ], ['invalidReason', 'refreshToken', 'expiresAt'])
+      'credentialId', 'revision', 'providerUserId', 'user', 'source', 'scope', 'status',
+    ], ['invalidReason', 'refreshToken', 'expiresAt', 'token', 'tokenReference'])
     || !validText(value.credentialId) || !Number.isSafeInteger(value.revision) || value.revision < 1
-    || !validText(value.providerUserId) || !validText(value.token)
+    || !validText(value.providerUserId) || !hasTokenOrReference(value)
     || !['oauth', 'pat'].includes(value.source) || !isString(value.scope)
     || !['valid', 'invalid'].includes(value.status)) throw invalidState();
   const user = parseUser(value.user);
@@ -101,12 +108,13 @@ function serializeState(state) {
           credentialId: credential.credentialId,
           revision: credential.revision,
           providerUserId: credential.providerUserId,
-          token: credential.token,
           user: credential.user,
           source: credential.source,
           scope: credential.scope,
           status: credential.status,
         };
+        if (credential.tokenReference) stored.tokenReference = credential.tokenReference;
+        else stored.token = credential.token;
         if (credential.status === 'invalid') stored.invalidReason = credential.invalidReason;
         if (credential.refreshToken) stored.refreshToken = credential.refreshToken;
         if (credential.expiresAt !== undefined) stored.expiresAt = credential.expiresAt;
@@ -134,6 +142,32 @@ const REFRESH_MARGIN_MS = 5 * 60_000;
 // Longer than one refresh request may take, so a process waiting on another's
 // renewal sees its result.
 const RENEW_LOCK_WAIT_MS = 15_000;
+
+// Reads a vault reference's secret (`readSecret` of ../environment/vault.js),
+// set once by the server. Without it an account added from a vault has no
+// token, and reads as disconnected.
+let readVaultSecret = null;
+
+/** The server's vault reader, for accounts that keep a token reference. */
+export const configureGitLabVaultReader = (reader) => {
+  readVaultSecret = reader;
+};
+
+/** A vault reference's token, for checking it before an account keeps the reference. */
+export const readGitLabVaultToken = (reference) => (readVaultSecret
+  ? readVaultSecret(reference)
+  : Promise.resolve({ ok: false, reason: 'vault-unavailable' }));
+
+/**
+ * The credential with the token filled in from its vault reference. A token
+ * that cannot be read leaves `token` out, as for an account with no token,
+ * and names why in `tokenReadError`; the stored credential is unchanged.
+ */
+const withVaultToken = async (credential) => {
+  if (!credential?.tokenReference) return credential;
+  const outcome = readVaultSecret ? await readVaultSecret(credential.tokenReference) : { ok: false, reason: 'vault-unavailable' };
+  return outcome.ok ? { ...credential, token: outcome.value } : { ...credential, tokenReadError: outcome.reason };
+};
 
 /**
  * `refreshOAuthToken({ origin, refreshToken })` trades an OAuth refresh token
@@ -266,27 +300,31 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     },
     readInstance: async (origin) => {
       await renewExpiring(origin);
-      return read((state) => publicInstance(state.providers.gitlab.instances[origin] ?? emptyInstance()));
+      const instance = await read((state) => publicInstance(state.providers.gitlab.instances[origin] ?? emptyInstance()));
+      return { ...instance, accounts: await Promise.all(instance.accounts.map(withVaultToken)) };
     },
     readAccount: async (origin, credentialId, revision) => {
       await renewExpiring(origin, credentialId);
-      return read((state) => {
-      const credential = state.providers.gitlab.instances[origin]?.credentials
-        .find((candidate) => candidate.credentialId === credentialId);
-      if (!credential || credential.status !== 'valid'
-        || (revision !== undefined && credential.revision !== revision)) return null;
-      return credential;
-      });
+      return withVaultToken(await read((state) => {
+        const credential = state.providers.gitlab.instances[origin]?.credentials
+          .find((candidate) => candidate.credentialId === credentialId);
+        if (!credential || credential.status !== 'valid'
+          || (revision !== undefined && credential.revision !== revision)) return null;
+        return credential;
+      }));
     },
-    setAccount: (origin, { token, user, source, scope = '', refreshToken, expiresIn }) => mutate((state) => {
-      if (!validText(token) || !['oauth', 'pat'].includes(source) || !isString(scope)) throw invalidState();
+    setAccount: (origin, { token, tokenReference, user, source, scope = '', refreshToken, expiresIn }) => mutate((state) => {
+      const fromVault = tokenReference !== undefined;
+      if ((fromVault
+        ? (source !== 'pat' || !isVaultReference(tokenReference) || token !== undefined)
+        : (!validText(token) || !['oauth', 'pat'].includes(source))) || !isString(scope)) throw invalidState();
       const parsedUser = parseUser(user);
       const credentialId = newCredentialId();
       const credential = runtimeCredential({
         credentialId,
         revision: 1,
         providerUserId: providerUserId(origin, parsedUser.id),
-        token,
+        ...(fromVault ? { tokenReference: tokenReference.trim() } : { token }),
         user: parsedUser,
         source,
         scope,
@@ -326,6 +364,9 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       const instance = state.providers.gitlab.instances[origin];
       const credential = instance?.credentials.find((candidate) => candidate.credentialId === credentialId);
       if (!credential) return { changed: false, value: false };
+      // A refused token from a vault is likely rotated there; the next read
+      // picks up the new one, so the account stays usable.
+      if (credential.tokenReference) return { changed: false, value: false };
       if (credential.status === 'invalid' && credential.invalidReason === reason) return { changed: false, value: false };
       credential.status = 'invalid';
       credential.invalidReason = validText(reason) ? reason : 'unauthorized';

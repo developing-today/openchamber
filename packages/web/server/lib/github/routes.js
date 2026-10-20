@@ -1,3 +1,4 @@
+import { asNonEmptyString } from '../shared/guards.js';
 import { digestMutationInput, mutationReceipt } from '../source-control/mutation-executor.js';
 import { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } from './checks-summary.js';
 
@@ -1280,7 +1281,10 @@ export function registerGitHubRoutes(app, options = {}) {
     // A current-but-invalid saved account means disconnected only while it,
     // not the gh CLI login, is the selected source.
     if (selectedPersisted && !usingOwnToken && !ghCliCurrent) {
-      return { connected: false, accounts, ghCli: buildGhCli() };
+      // An account added from a vault whose token could not be read says why.
+      const disconnected = { connected: false, accounts, ghCli: buildGhCli() };
+      if (auth?.tokenReadError) disconnected.tokenReadError = auth.tokenReadError;
+      return disconnected;
     }
     const octokit = await getOctokitOrNull();
     if (!octokit) {
@@ -1463,6 +1467,53 @@ export function registerGitHubRoutes(app, options = {}) {
       if (lockResponse) return lockResponse;
       console.error('Failed to complete GitHub device flow:', error);
       return res.status(500).json({ error: error.message || 'Failed to complete GitHub device flow' });
+    }
+  });
+
+  /**
+   * Adds an account whose token stays in a vault: `reference` (op://…) is read,
+   * the token is checked against GitHub, and only the reference is stored. The
+   * token is read again whenever the account is used.
+   */
+  const addAccountFromVault = async (reference) => {
+    const { readGitHubVaultToken, setGitHubAuth, getGitHubAuthAccounts, createOctokit } = await getGitHubLibraries();
+    const { isVaultReference } = await import('../environment/vault.js');
+    const trimmed = asNonEmptyString(reference) ?? '';
+    if (!isVaultReference(trimmed)) {
+      return { status: 400, body: { error: 'reference must be a 1Password reference such as op://Vault/item/field', code: 'INVALID_REFERENCE' } };
+    }
+    const read = await readGitHubVaultToken(trimmed);
+    if (!read.ok) {
+      return { status: 400, body: { error: `The token could not be read from 1Password (${read.reason})`, code: 'VAULT_READ_FAILED', reason: read.reason } };
+    }
+    let user;
+    try {
+      user = await getGitHubUserSummary(createOctokit(read.value));
+    } catch (error) {
+      if (isGitHubAuthInvalid(error)) return { status: 400, body: { error: 'GitHub refused the token from 1Password', code: 'INVALID_TOKEN' } };
+      throw error;
+    }
+    const credential = await setGitHubAuth({ tokenReference: trimmed, tokenType: 'bearer', user, source: 'pat' });
+    if (credential?.credentialId) {
+      options.onAccountConnected?.({
+        account: { provider: 'github', instance: 'github.com', accountId: credential.credentialId },
+        user,
+        credential: { credentialRevision: credential.credentialRevision, providerUserId: credential.providerUserId },
+        renews: [],
+      });
+    }
+    return { status: 200, body: { connected: true, user, accounts: await getGitHubAuthAccounts() } };
+  };
+
+  app.post(githubAuthRoutePaths('/auth/vault'), async (req, res) => {
+    try {
+      const { status, body } = await addAccountFromVault(req.body?.reference);
+      return res.status(status).json(body);
+    } catch (error) {
+      const lockResponse = sendAuthStorageError(res, error);
+      if (lockResponse) return lockResponse;
+      console.error('Failed to add a GitHub account from 1Password:', error?.message ?? error);
+      return res.status(500).json({ error: 'Failed to add the GitHub account' });
     }
   });
 
@@ -3320,6 +3371,7 @@ export function registerGitHubRoutes(app, options = {}) {
     accounts: Object.freeze({
       status: readAuthStatus,
       activate: activateAccount,
+      addFromVault: addAccountFromVault,
       remove: removeAccount,
       setCliDisabled: setGhCliDisabledState,
     }),

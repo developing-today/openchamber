@@ -1847,6 +1847,7 @@ type GitHubAuthAccount = {
   current?: boolean;
   source?: 'oauth' | 'pat' | 'cli' | 'gh-cli';
   status?: 'valid' | 'invalid';
+  tokenReference?: string;
 };
 
 export type GitHubDeviceFlowStart = {
@@ -1873,6 +1874,7 @@ export interface SourceControlAPI {
   authStatus(identity: SourceControlIdentity): Promise<SourceControlAuthStatus>;
   authStart(identity: SourceControlIdentity): Promise<SourceControlDeviceFlowStart>;
   authComplete(identity: SourceControlIdentity, flowId: string): Promise<SourceControlDeviceFlowComplete>;
+  /** GitLab: a token or a 1Password reference (op://…). GitHub: a 1Password reference only. */
   authSetToken(identity: SourceControlIdentity, token: string): Promise<SourceControlAuthStatus>;
   authDisconnect(identity: SourceControlIdentity, accountId: string): Promise<{ removed: boolean }>;
   authActivate(identity: SourceControlIdentity, accountId: string): Promise<SourceControlAuthStatus>;

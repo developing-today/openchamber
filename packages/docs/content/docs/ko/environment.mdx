@@ -26,6 +26,7 @@ OpenCode, Git, 터미널, [프로젝트 작업](/ko/project-actions/)에 API 토
 - Git, 터미널, 프로젝트 작업은 다음에 시작하는 작업에서 값을 읽고, 5분 동안 재사용합니다.
 - 읽을 수 없는 참조는 텍스트로 전달되지 않고 아예 빠집니다. 설정에 그 이유가 표시됩니다. `op`가 설치되지 않았거나, 1Password가 응답하지 않았거나, 참조를 거부한 경우입니다.
 - OpenCode 설정의 MCP 서버나 프로바이더에 비밀 값을 넘기려면 여기에서 변수를 설정하고, 설정에서 OpenCode의 `{env:GITHUB_TOKEN}`으로 참조하세요.
+- GitHub와 GitLab 계정도 토큰을 1Password에 보관할 수 있습니다. **설정 → 통합 기능**에서 GitHub 카드의 **1Password의 토큰** 칸이나 GitLab 카드의 토큰 칸에 참조를 입력하세요. 참조만 저장되며, 1Password에서 토큰을 교체하면 5분 안에 반영됩니다.
 
 이 변수는 직접 시작한 OpenCode 서버에는 전달되지 않으며, VS Code 확장에는 이 설정이 없습니다. 아래 변수는 모두 OpenChamber가 시작할 때 직접 읽습니다.
 

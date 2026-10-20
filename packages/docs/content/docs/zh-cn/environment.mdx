@@ -26,6 +26,7 @@ OpenChamber 会在启动时读取这些变量。对于开机启动服务，`open
 - Git、终端和项目操作会在你下一次启动操作时读取它，并在五分钟内重复使用。
 - 无法读取的引用会被直接略过，不会作为文本传下去。设置中会说明原因：没有安装 `op`、1Password 没有响应，或者它拒绝了该引用。
 - 要把密钥交给 OpenCode 配置中的 MCP 服务器或提供商，请在这里设置变量，然后在配置中用 OpenCode 的 `{env:GITHUB_TOKEN}` 引用它。
+- GitHub 和 GitLab 账号也可以把令牌放在 1Password 中：在 **设置 → 集成** 中，把引用填入 GitHub 卡片上的 **来自 1Password 的令牌**，或 GitLab 卡片上的令牌字段。只保存引用；你在 1Password 中轮换令牌后，五分钟内就会生效。
 
 这些变量不会传给你自己启动的 OpenCode 服务器，VS Code 扩展也没有这项设置。下面的所有变量都由 OpenChamber 本身在启动时读取。
 

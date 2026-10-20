@@ -26,6 +26,7 @@ Wartość może wskazywać na wpis w 1Password zamiast przechowywać sam sekret:
 - Git, terminal i akcje projektu odczytują go przy następnej akcji, którą uruchomisz, i używają go ponownie przez pięć minut.
 - Odwołanie, którego nie da się odczytać, zostaje pominięte i nie trafia dalej jako tekst. Ustawienia podają przyczynę: `op` nie jest zainstalowany, 1Password nie odpowiedział albo odrzucił odwołanie.
 - Aby przekazać sekret serwerowi MCP lub dostawcy w konfiguracji OpenCode, ustaw tu zmienną i odwołaj się do niej w konfiguracji przez `{env:GITHUB_TOKEN}` z OpenCode.
+- Konta GitHub i GitLab też mogą trzymać token w 1Password: w **Ustawienia → Integracje** wpisz odwołanie w polu **Token z 1Password** na karcie GitHub albo w polu tokenu na karcie GitLab. Zapisywane jest tylko odwołanie, a token zmieniony w 1Password zostaje pobrany w ciągu pięciu minut.
 
 Te zmienne nie trafiają do serwera OpenCode, który uruchamiasz samodzielnie, a rozszerzenie VS Code nie ma takiego ustawienia. Wszystko poniżej OpenChamber odczytuje sam przy starcie.
 

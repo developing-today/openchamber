@@ -26,6 +26,7 @@ Un valor puede apuntar a 1Password en lugar de contener el secreto: escribe `op:
 - Git, la terminal y las acciones de proyecto lo leen en la siguiente acción que inicies y lo reutilizan durante cinco minutos.
 - Una referencia que no se puede leer se omite y no se pasa como texto. Configuración explica el motivo: `op` no está instalado, 1Password no respondió o rechazó la referencia.
 - Para pasar un secreto a un servidor MCP o a un proveedor en tu configuración de OpenCode, define la variable aquí y haz referencia a ella en la configuración con `{env:GITHUB_TOKEN}` de OpenCode.
+- Las cuentas de GitHub y GitLab también pueden guardar su token en 1Password: en **Configuración → Integraciones**, escribe la referencia en **Token de 1Password** en la tarjeta de GitHub, o en el campo del token de la tarjeta de GitLab. Solo se guarda la referencia, y si rotas el token en 1Password, OpenChamber usa el nuevo en menos de cinco minutos.
 
 Las variables no llegan a un servidor de OpenCode que hayas arrancado tú, y la extensión de VS Code no tiene este ajuste. Todo lo que sigue lo lee el propio OpenChamber al arrancar.
 
