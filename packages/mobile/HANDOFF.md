@@ -11,9 +11,10 @@ renderer), not the desktop shell. The native app is a WKWebView (iOS) / Android 
 bundled copy of the web build; native capabilities are added via Capacitor plugins and two iOS app
 extensions.
 
-- App id / package: `com.openchamber.app`; app name `OpenChamber`.
-  The release build is a separate app, `today.developing.openchamber` labelled `OC`, so it installs
-  beside the default app (the id is set for the release variant only, in `build.gradle`).
+- App id / package: `today.developing.openchamber` on every platform and build type; app name
+  `OpenChamber` (the release build type labels itself `OC`). Debug and release builds share the
+  id, so one replaces the other on a device. The Android Java package / namespace stays
+  `com.openchamber.app`; it is source layout, not the application id.
 - Capacitor config: `capacitor.config.json`. It is JSON because the Capacitor CLI reads a
   `capacitor.config.ts` through the TypeScript JS API (`transpileModule`), which TypeScript 7 no
   longer ships. Why its values are what they are:
@@ -107,7 +108,7 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   device's push when an interactive (desktop/web) client is visible.
 - **iOS widgets + Control Center + Notification Service Extension** — WidgetKit extension
   (`OpenChamberWidget`), a Control Center control, and an NSE (`OpenChamberNotificationService`)
-  that refreshes widgets from push. All share the App Group `group.com.openchamber.app`.
+  that refreshes widgets from push. All share the App Group `group.today.developing.openchamber`.
 - **Native chrome** — status bar (iOS overlay + safe-area; Android inset + themed background),
   keyboard handling (iOS CSS inset; Android native `adjustResize`), edge-swipe session switch,
   back-button handling, app-icon badge.
@@ -132,7 +133,7 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 
 - Extensions: `OpenChamberWidget` (WidgetKit, deployment 17.0) and `OpenChamberNotificationService`
   (NSE, 15.5), both hand-wired into `App.xcodeproj/project.pbxproj` and embedded via a copy phase.
-- App Group `group.com.openchamber.app` in all three targets' entitlements (app + widget + NSE).
+- App Group `group.today.developing.openchamber` in all three targets' entitlements (app + widget + NSE).
 - `Info.plist`: `CFBundleURLTypes` scheme `openchamber`, `NSCameraUsageDescription`.
 - Push entitlement (aps-environment) required.
 - APNs `mutable-content: 1` (set server/relay side) wakes the NSE to refresh widgets.
@@ -205,7 +206,7 @@ TestFlight / Play internal testing:
 ### iOS
 
 - Apple Developer account; App IDs for the app **and** both extensions
-  (`com.openchamber.app`, `.OpenChamberWidget`, `.OpenChamberNotificationService`), each enabled for
+  (`today.developing.openchamber`, `.OpenChamberWidget`, `.OpenChamberNotificationService`), each enabled for
   the **App Group** and (app) **Push**.
 - Signing certificate + provisioning profiles for all three targets (extensions need their own).
 - App Store Connect API key for non-interactive TestFlight upload (`xcodebuild archive` +

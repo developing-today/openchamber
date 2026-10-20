@@ -7,16 +7,16 @@ def ciKeystorePassword = System.getenv('OPENCHAMBER_ANDROID_KEYSTORE_PASSWORD')
 def ciKeyAlias = System.getenv('OPENCHAMBER_ANDROID_KEY_ALIAS')
 def ciKeyPassword = System.getenv('OPENCHAMBER_ANDROID_KEY_PASSWORD')
 def hasCiSigning = ciKeystorePath && ciKeystorePassword && ciKeyAlias && ciKeyPassword
-// The release build is its own app, so it installs beside the default com.openchamber.app
-// (debug and CI installs) instead of replacing it. Its data, label and push identity are its own.
-// The id is the reverse of the maintainer's domain (developing.today), so it stays unique.
-def releasePackageName = 'today.developing.openchamber'
+// Every build type is the same app: debug, CI and release builds share one application id
+// and replace each other on a device. The id is the reverse of the maintainer's domain
+// (developing.today), so it stays unique.
+def appPackageName = 'today.developing.openchamber'
 
 android {
     namespace "com.openchamber.app"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.openchamber.app"
+        applicationId appPackageName
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode ciVersionCode ? ciVersionCode.toInteger() : 1
@@ -89,23 +89,16 @@ try {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
 
-// The application id of the release variant. A build type cannot change the id, so the
-// variant API sets it for release only; debug keeps com.openchamber.app.
-androidComponents {
-    onVariants(selector().withBuildType('release')) { variant ->
-        variant.applicationId.set(releasePackageName)
-    }
-}
-
-// Google Services needs a client for each package in google-services.json. The release package
-// has none until Firebase is set up for it (add the package there and download the file again).
-// Until then the release build skips that step: it builds and installs, and push is off in it.
+// Google Services needs a client for the application id in google-services.json. The file
+// still describes the previous package (com.openchamber.app) until the maintainer registers
+// today.developing.openchamber in Firebase and downloads the file again. Until then every
+// build skips that step: the app builds and installs, and push is off.
 def servicesFile = file('google-services.json')
 def servicesPackages = servicesFile.exists()
     ? new groovy.json.JsonSlurper().parse(servicesFile).client.collect { it.client_info.android_client_info.package_name }
     : []
 afterEvaluate {
-    if (!servicesPackages.contains(releasePackageName)) {
-        tasks.matching { it.name == 'processReleaseGoogleServices' }.configureEach { enabled = false }
+    if (!servicesPackages.contains(appPackageName)) {
+        tasks.matching { it.name.startsWith('process') && it.name.endsWith('GoogleServices') }.configureEach { enabled = false }
     }
 }

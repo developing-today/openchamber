@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const APK_PATH = join(mobileRoot, 'android', 'app', 'build', 'outputs', 'apk', 'standard', 'debug', 'app-standard-debug.apk');
-const APP_ID = 'com.openchamber.app';
+const APP_ID = 'today.developing.openchamber';
 const LAUNCH_ACTIVITY = `${APP_ID}/.MainActivity`;
 
 const adb = (args, { capture = false, allowFail = false } = {}) => {
@@ -55,9 +55,9 @@ const requireApk = () => {
 // Installer shows them only as "App not installed as package appears to be invalid".
 const INSTALL_FAILURE_HINTS = {
   INSTALL_FAILED_UPDATE_INCOMPATIBLE:
-    'The installed app is signed with a different key. Its data goes with it on uninstall. Remove it, then install again: adb uninstall com.openchamber.app',
+    'The installed app is signed with a different key. Its data goes with it on uninstall. Remove it, then install again: adb uninstall today.developing.openchamber',
   INSTALL_FAILED_VERSION_DOWNGRADE:
-    'The installed app has a higher versionCode than this build. Remove it, then install again: adb uninstall com.openchamber.app',
+    'The installed app has a higher versionCode than this build. Remove it, then install again: adb uninstall today.developing.openchamber',
   INSTALL_PARSE_FAILED_NO_CERTIFICATES:
     'The APK is unsigned. Rebuild it; signing is set by the OPENCHAMBER_ANDROID_* environment.',
 };

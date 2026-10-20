@@ -86,7 +86,7 @@ let apnsEnvironment: String = {
 /// Apple and Google then carry only sealed text. See the server's push-seal.js.
 let pushSealKey: String = {
     let storageKey = "pushSealKey"
-    let defaults = UserDefaults(suiteName: "group.com.openchamber.app")
+    let defaults = UserDefaults(suiteName: "group.today.developing.openchamber")
     if let stored = defaults?.string(forKey: storageKey),
        Data(base64Encoded: stored)?.count == 32 {
         return stored
@@ -245,7 +245,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         writeWidgetSnapshot()
     }
 
-    private static let widgetAppGroup = "group.com.openchamber.app"
+    private static let widgetAppGroup = "group.today.developing.openchamber"
     private static let widgetSnapshotKey = "widgetSnapshot"
 
     /// Pulls the session overview JSON from the web layer (window.__OPENCHAMBER_WIDGET_SNAPSHOT__),

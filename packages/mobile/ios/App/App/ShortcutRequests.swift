@@ -77,7 +77,7 @@ private struct SnapshotProjects: Decodable {
 
 private enum ShortcutProjectStore {
     static func load() -> [SnapshotProject] {
-        guard let defaults = UserDefaults(suiteName: "group.com.openchamber.app"),
+        guard let defaults = UserDefaults(suiteName: "group.today.developing.openchamber"),
               let json = defaults.string(forKey: "widgetSnapshot"),
               let data = json.data(using: .utf8),
               let snapshot = try? JSONDecoder().decode(SnapshotProjects.self, from: data) else {
