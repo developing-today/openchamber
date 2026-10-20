@@ -1,4 +1,4 @@
-import { asNonEmptyString, isBoolean } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean, isPlainObject, isString } from '../shared/guards.js';
 import path from 'node:path';
 import { OpenCode } from '@opencode/client';
 import { OpenChamberControlError, asControlError } from './error.js';
@@ -11,6 +11,10 @@ import { branchesOffPullRequestsByDefault } from '../git/worktree-start-ref.js';
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
 const WAIT_POLL_INTERVAL_MS = 500;
+// Matches the fields `sanitizeProjects` keeps that Project settings edits.
+const EDITABLE_PROJECT_SETTINGS = Object.freeze([
+  'label', 'icon', 'color', 'iconBackground', 'sidebarCollapsed', 'defaultModel', 'defaultAgent', 'defaultVariant',
+]);
 // One service, both capabilities: which tool asked is the caller's concern.
 const CONTROL_ACTIONS = new Set(OPENCHAMBER_ALL_ACTIONS);
 const SCHEDULE_TASK_ID_ACTIONS = new Set([
@@ -306,7 +310,55 @@ export const createOpenChamberControlService = (dependencies) => {
       id: project.id,
       path: path.resolve(project.path),
       label: asNonEmptyString(project.label) || path.basename(project.path) || project.path,
+      settings: projectSettingsOf(project),
     }));
+  };
+
+  // The per-project settings Project settings shows; the id, path and
+  // timestamps are the project's identity and history, not settings.
+  const projectSettingsOf = (project) => Object.fromEntries(
+    EDITABLE_PROJECT_SETTINGS.filter((key) => project[key] !== undefined).map((key) => [key, project[key]]),
+  );
+
+  // Same writer and sanitizer as Project settings: a value the sanitizer
+  // drops or rewrites is refused rather than reported as saved.
+  const updateProject = async (input) => {
+    if (projectActionsUnavailable) {
+      throw new OpenChamberControlError('Changing projects is not available on this server', 503);
+    }
+    const projectID = asNonEmptyString(input.projectId);
+    if (!projectID) throw new OpenChamberControlError('projectId is required', 400);
+    const changes = input.projectSettings;
+    if (!isPlainObject(changes) || Object.keys(changes).length === 0) {
+      throw new OpenChamberControlError(`projectSettings must be an object of one or more of ${EDITABLE_PROJECT_SETTINGS.join(', ')}`, 400);
+    }
+    const unknown = Object.keys(changes).filter((key) => !EDITABLE_PROJECT_SETTINGS.includes(key));
+    if (unknown.length > 0) {
+      throw new OpenChamberControlError(`Nothing was saved. Not a project setting: ${unknown.join(', ')}. Editable: ${EDITABLE_PROJECT_SETTINGS.join(', ')}`, 400);
+    }
+    const settings = await readSettingsFromDiskMigrated();
+    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+    const target = existingProjects.find((project) => project.id === projectID) || null;
+    if (!target) throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
+
+    const next = { ...target };
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === null) delete next[key];
+      else next[key] = value;
+    }
+    const nextProjects = existingProjects.map((project) => (project.id === projectID ? next : project));
+    const accepted = sanitizeProjects(nextProjects).find((project) => project.id === projectID);
+    const rejected = Object.entries(changes)
+      .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(isString(value) ? value.trim() : value))
+      .map(([key]) => key);
+    if (rejected.length > 0) {
+      throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${rejected.join(', ')} (defaultModel is provider/model, defaultVariant needs a defaultModel, iconBackground is a #hex color, sidebarCollapsed is a boolean)`, 400);
+    }
+    await persistSettings({ projects: nextProjects });
+    return {
+      project: { id: target.id, path: path.resolve(target.path), settings: projectSettingsOf(accepted) },
+      note: 'Saved. Open OpenChamber windows may need a reload to show the change',
+    };
   };
 
   const projectActionsUnavailable = !fsPromises || !validateDirectoryPath || !persistSettings || !createProjectIdFromPath;
@@ -989,6 +1041,7 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action === 'projects.list') return { projects: await projects() };
       if (action === 'projects.add') return addProject(input);
       if (action === 'projects.remove') return removeProject(input);
+      if (action === 'projects.update') return updateProject(input);
       if (action === 'models.list') return models();
       if (action === 'schedule.status') return scheduledTaskService.status();
       if (action.startsWith('schedule.')) {
