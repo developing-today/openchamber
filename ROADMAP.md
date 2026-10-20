@@ -110,3 +110,8 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Subagent chains count at any depth (8-level cap removed)          | 2026-10-19 | #123, #126                 |
 | Root `.env` untracked (already covered by `.gitignore`)           | 2026-10-19 | #120, #121                 |
 | Jules upstream-sync dispatches queue with `queue: max`            | 2026-10-19 | #124                       |
+| Remaining floating `@v4` action references SHA-pinned             | 2026-10-19 | #127, #128                 |
+| Self-handoff readiness timeout reports log, exit and pid state    | 2026-10-20 | #131, #132                 |
+| `queue: max` on stale, the last non-cancelling workflow           | 2026-10-20 | #133, #134                 |
+| Electron lint stub replaced with the shared oxlint command        | 2026-10-20 | #135, #136                 |
+| Electron `test:linux-desktop` smoke runs in pr checks             | 2026-10-20 | #137, #138                 |
