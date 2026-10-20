@@ -619,6 +619,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': 'このアプリ: {version}',
   'settings.openchamber.about.toast.serverLatestVersion': 'サーバーは最新の OpenChamber です',
   'settings.openchamber.about.actions.checkForUpdates': 'アップデートを確認',
+  'settings.openchamber.about.actions.releaseAvailable': 'Release {version} available',
   'settings.openchamber.about.toast.latestVersion': '最新バージョンです',
   'settings.agents.sidebar.title': 'エージェント',
   'settings.agents.sidebar.total': '合計 {count}',

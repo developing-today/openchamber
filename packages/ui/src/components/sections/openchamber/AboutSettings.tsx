@@ -11,6 +11,7 @@ import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeStatus } from '@/components/update/openCodeUpgrade';
@@ -173,8 +174,12 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     restartToUpdate: s.restartToUpdate,
   })));
   const { isMobile } = useDeviceInfo();
-  // Native app: updates target the connected server; the app itself updates
-  // through its store, which is not actionable from here.
+  // Native app: the update store's own result is about the app build (a
+  // newer GitHub release of the app), while `update` below is reassigned to
+  // the connected server's update for native apps.
+  const appUpdateInfo = useUpdateStore((s) => s.info);
+  const appUpdateAvailable = useUpdateStore((s) => s.available);
+  const appRuntimeType = useUpdateStore((s) => s.runtimeType);
   const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
   const isDesktopRemote = useDesktopRemoteHostActive();
   const serverUpdate = useConnectedServerUpdate(isNativeApp || isDesktopRemote);
@@ -243,8 +248,29 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const installBlocked = update.available && isInstallBlocked(update.info);
   const remoteHostInstallBlocked = Boolean(remoteHostUpdate?.available && isInstallBlocked(remoteHostUpdate.info));
 
+  // A newer release of the phone app itself, when the shared store's check
+  // found one. The button opens the release page; the signed APK there
+  // installs over the current app.
+  const appReleaseUpdate = isNativeApp && appRuntimeType === 'mobile' && appUpdateAvailable
+    ? appUpdateInfo
+    : null;
+  const appReleaseControls = appReleaseUpdate ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="default"
+      onClick={() => void openExternalUrl(appReleaseUpdate.releaseUrl || appReleaseUpdate.downloadUrl || '')}
+    >
+      <Icon name="download" className="size-4" />
+      {t('settings.openchamber.about.actions.releaseAvailable', { version: appReleaseUpdate.version || '' })}
+    </Button>
+  ) : null;
+
   const checkAll = () => {
     void update.checkForUpdates();
+    // On the native app `update` is the server check; the app-build check
+    // lives in the shared store and needs its own trigger here.
+    if (isNativeApp) void updateStore.checkForUpdates();
     if (remoteHostUpdate) void remoteHostUpdate.check();
     void openCode.refresh();
   };
@@ -495,6 +521,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <div className="flex justify-center text-center">{remoteHostUpdateControls}</div>
         )}
 
+        {appReleaseControls && (
+          <div className="flex justify-center text-center">{appReleaseControls}</div>
+        )}
+
         {openCodeUpdateControls && (
           <div className="flex justify-center text-center">{openCodeUpdateControls}</div>
         )}
@@ -626,6 +656,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
         {remoteHostUpdateControls && (
           <div className="px-4 py-3 border-b border-border/40">{remoteHostUpdateControls}</div>
+        )}
+
+        {appReleaseControls && (
+          <div className="px-4 py-3 border-b border-border/40">{appReleaseControls}</div>
         )}
 
         {openCodeUpdateControls && (

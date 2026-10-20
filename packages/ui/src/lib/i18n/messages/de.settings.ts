@@ -594,6 +594,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': 'Diese App: {version}',
   'settings.openchamber.about.toast.serverLatestVersion': 'Der Server verwendet die neueste OpenChamber-Version',
   'settings.openchamber.about.actions.checkForUpdates': 'Nach Updates suchen',
+  'settings.openchamber.about.actions.releaseAvailable': 'Release {version} available',
   'settings.openchamber.about.toast.latestVersion': 'Sie verwenden die neueste Version',
   'settings.agents.sidebar.title': 'Agents',
   'settings.agents.sidebar.total': 'Gesamt {count}',

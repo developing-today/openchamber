@@ -3374,7 +3374,6 @@ export const dict = {
   'updateDialog.error.restartUnavailable': 'Installing the update requires the OpenChamber desktop app.',
   'mobileUpdate.toast.available.title': 'OpenChamber update available',
   'mobileUpdate.toast.available.description': 'Version {version} is ready for Android.',
-  'mobileUpdate.toast.actions.download': 'Download',
   'mobileUpdate.toast.actions.dismiss': 'Dismiss',
   'opencodeUpdate.toast.available.title': 'OpenCode update',
   'opencodeUpdate.toast.available.description': 'Version {version} available.',

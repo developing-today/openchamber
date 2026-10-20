@@ -3286,7 +3286,6 @@ export const dict = {
   'updateDialog.error.restartUnavailable': 'يتطلب تثبيت التحديث تطبيق OpenChamber لسطح المكتب.',
   'mobileUpdate.toast.available.title': 'يتوفر تحديث لـ OpenChamber',
   'mobileUpdate.toast.available.description': 'الإصدار {version} جاهز لـ Android.',
-  'mobileUpdate.toast.actions.download': 'تنزيل',
   'mobileUpdate.toast.actions.dismiss': 'تجاهل',
   'opencodeUpdate.toast.available.title': 'تحديث OpenCode',
   'opencodeUpdate.toast.available.description': 'الإصدار {version} متاح.',

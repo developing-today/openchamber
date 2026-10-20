@@ -3189,7 +3189,6 @@ export const dict = {
   'updateDialog.error.restartUnavailable': 'Güncellemeyi kurmak için OpenChamber masaüstü uygulaması gerekir.',
   'mobileUpdate.toast.available.title': 'OpenChamber güncellemesi var',
   'mobileUpdate.toast.available.description': '{version} sürümü Android için hazır.',
-  'mobileUpdate.toast.actions.download': 'İndir',
   'mobileUpdate.toast.actions.dismiss': 'Kapat',
   'opencodeUpdate.toast.available.title': 'OpenCode güncellemesi',
   'opencodeUpdate.toast.available.description': '{version} sürümü mevcut.',

@@ -13,6 +13,7 @@ import {
   isWebRuntime,
 } from '@/lib/desktop';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+import { checkMobileReleaseUpdate } from '@/lib/mobileReleaseUpdate';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
@@ -293,8 +294,16 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
         const vscodeInfo = await checkForWebUpdates('vscode');
         suggestedSec = vscodeInfo?.nextSuggestedCheckInSec ?? null;
       } else if (runtime === 'mobile') {
-        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
-        info = await checkForWebUpdates('mobile', appVersion);
+        // The app checks GitHub directly first: it needs no connected server
+        // and compares the installed APK's own version. A null result means
+        // "no update found or the check could not run", so the server check
+        // below still gets its say — a server that can reach GitHub when the
+        // phone cannot answers the same question.
+        info = await checkMobileReleaseUpdate();
+        if (!info) {
+          const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
+          info = await checkForWebUpdates('mobile', appVersion);
+        }
         suggestedSec = info?.nextSuggestedCheckInSec ?? null;
       }
 
