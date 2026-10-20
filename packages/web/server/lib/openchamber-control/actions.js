@@ -11,6 +11,7 @@ import { SESSION_EXTRA_ACTION_DEFINITIONS } from './session-actions.js';
 import { PROVIDER_ACTION_DEFINITIONS } from './provider-actions.js';
 import { CONFIG_ACTION_DEFINITIONS } from './config-actions.js';
 import { INTEGRATION_ACTION_DEFINITIONS } from './integration-actions.js';
+import { ENVIRONMENT_ACTION_DEFINITIONS } from './environment-actions.js';
 
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'List configured projects; no parameters' },
@@ -32,6 +33,7 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   ...PROVIDER_ACTION_DEFINITIONS,
   ...CONFIG_ACTION_DEFINITIONS,
   ...INTEGRATION_ACTION_DEFINITIONS,
+  ...ENVIRONMENT_ACTION_DEFINITIONS,
   { action: 'schedule.status', title: 'Check scheduler status', description: 'Check scheduler status; no parameters', agentExposed: false },
   { action: 'schedule.list', title: 'List scheduled tasks', description: 'List tasks and scheduler status; scope with projectId or directory' },
   { action: 'schedule.get', title: 'View a scheduled task', description: 'Read one task by taskId, with its schedule, prompt, model and run state; scope with projectId or directory' },

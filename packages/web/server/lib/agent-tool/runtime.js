@@ -18,6 +18,7 @@ import { SESSION_EXTRA_PARAMETERS } from '../openchamber-control/session-actions
 import { PROVIDER_PARAMETERS } from '../openchamber-control/provider-actions.js';
 import { CONFIG_PARAMETERS } from '../openchamber-control/config-actions.js';
 import { INTEGRATION_PARAMETERS } from '../openchamber-control/integration-actions.js';
+import { ENVIRONMENT_PARAMETERS } from '../openchamber-control/environment-actions.js';
 import {
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
   RENDER_PAGE_MAX_HTML_LENGTH,
@@ -84,6 +85,7 @@ const ALL_PARAMETER_PROPERTIES = {
   ...PROVIDER_PARAMETERS,
   ...CONFIG_PARAMETERS,
   ...INTEGRATION_PARAMETERS,
+  ...ENVIRONMENT_PARAMETERS,
   link: {
     type: 'object',
     description: 'What session.link records, on any service',

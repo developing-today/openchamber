@@ -146,6 +146,8 @@ export const ProjectEnvironmentSection: React.FC<{ projectRef: ProjectRef }> = (
         <div className="space-y-6">
           <EnvironmentVariablesEditor
             names={load.state === 'ready' ? load.environment.names : []}
+            references={load.state === 'ready' ? load.environment.references : undefined}
+            vault={load.state === 'ready' ? load.environment.vault : undefined}
             disabled={load.state !== 'ready'}
             onSet={(name, value) => save({ variables: { [name]: value } })}
             onRemove={(name) => save({ variables: { [name]: null } })}

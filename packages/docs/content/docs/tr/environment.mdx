@@ -18,6 +18,15 @@ OpenCode'a, Git'e, terminale ve [proje eylemlerine](/tr/project-actions/) API to
 
 Bir proje kendi değişkenlerini ya da bunları yazdıran `direnv export json` gibi bir komutu **Ayarlar → Projeler** bölümünde ekleyebilir. [Projeler](/tr/projects/#proje-ortamı) sayfasına bakın.
 
+### 1Password'den gizli değerler
+
+Bir değer, gizli bilginin kendisini tutmak yerine 1Password'e işaret edebilir: `op://Vault/item/field` girin, örneğin `GITHUB_TOKEN` = `op://Vertex SRE/github_token/credential`. Bir işlem buna ihtiyaç duyduğunda OpenChamber onu [1Password CLI](https://developer.1password.com/docs/cli/) (`op read`) ile okur. Gizli değer yalnızca bellekte tutulur, hiçbir zaman `environment.json` dosyasına yazılmaz ve gösterilmez; Ayarlar referansı gösterir.
+
+- OpenCode onu her başlangıçta okur. Gizli değeri değiştirdikten sonra OpenCode'u yeniden başlatın.
+- Git, terminal ve proje eylemleri onu başlattığınız bir sonraki eylemde okur ve beş dakika boyunca yeniden kullanır.
+- Okunamayan bir referans dışarıda bırakılır ve metin olarak aktarılmaz. Ayarlar nedenini söyler: `op` kurulu değildir, 1Password yanıt vermemiştir ya da referansı reddetmiştir.
+- Bir gizli değeri OpenCode yapılandırmanızdaki bir MCP sunucusuna ya da sağlayıcıya vermek için değişkeni burada ayarlayın ve yapılandırmada OpenCode'un `{env:GITHUB_TOKEN}` sözdizimiyle ona başvurun.
+
 Bu değişkenler kendi başlattığınız bir OpenCode sunucusuna ulaşmaz ve VS Code eklentisinde böyle bir ayar yoktur. Aşağıdaki her şeyi OpenChamber başlangıçta kendisi okur.
 
 ## OpenChamber sunucusu

@@ -18,6 +18,15 @@ Para darles a OpenCode, a Git, a la terminal y a las [acciones de proyecto](/es/
 
 Un proyecto puede añadir sus propias variables, o un comando que las imprima como `direnv export json`, en **Configuración → Proyectos**. Consulta [Proyectos](/es/projects/#entorno-del-proyecto).
 
+### Secretos de 1Password
+
+Un valor puede apuntar a 1Password en lugar de contener el secreto: escribe `op://Vault/item/field`, por ejemplo `GITHUB_TOKEN` = `op://Vertex SRE/github_token/credential`. OpenChamber lo lee con la [CLI de 1Password](https://developer.1password.com/docs/cli/) (`op read`) cuando un proceso lo necesita. El secreto solo se guarda en memoria, nunca se escribe en `environment.json` y nunca se muestra; Configuración muestra la referencia.
+
+- OpenCode lo lee cada vez que arranca. Reinicia OpenCode después de cambiar el secreto.
+- Git, la terminal y las acciones de proyecto lo leen en la siguiente acción que inicies y lo reutilizan durante cinco minutos.
+- Una referencia que no se puede leer se omite y no se pasa como texto. Configuración explica el motivo: `op` no está instalado, 1Password no respondió o rechazó la referencia.
+- Para pasar un secreto a un servidor MCP o a un proveedor en tu configuración de OpenCode, define la variable aquí y haz referencia a ella en la configuración con `{env:GITHUB_TOKEN}` de OpenCode.
+
 Las variables no llegan a un servidor de OpenCode que hayas arrancado tú, y la extensión de VS Code no tiene este ajuste. Todo lo que sigue lo lee el propio OpenChamber al arrancar.
 
 ## Servidor OpenChamber

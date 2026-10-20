@@ -172,6 +172,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getManagedOpenCodeEnv = async () => ({}),
     // Variables from Settings and `opencode service set env` (lib/environment).
     getUserEnvironment = () => ({}),
+    // The same variables with vault references read; only the launch sees them.
+    resolveUserEnvironment = async () => getUserEnvironment(),
     getActiveSessionCount = () => 0,
     listBusySessionIds = () => [],
     spawnProcess = spawn,
@@ -901,7 +903,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // The user's variables go over the inherited environment (a PATH entry
     // in front of the managed PATH) and under everything OpenChamber itself
     // sets for OpenCode.
-    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
+    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, await resolveUserEnvironment());
     // The host process (Desktop's Electron main, or `serve --foreground`)
     // records its own private variables as injected; OpenCode does not need
     // Desktop's identity, dist dir or bind host, and nothing it spawns should
