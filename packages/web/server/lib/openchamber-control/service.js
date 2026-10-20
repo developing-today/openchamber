@@ -464,7 +464,10 @@ export const createOpenChamberControlService = (dependencies) => {
   // oldest-first for the caller.
   const MESSAGE_PAGE_LIMIT = 200;
   const sessionMessages = async (client, sessionID, role, limit) => {
-    const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
+    // Room for the non-text records between text messages, within the page
+    // size OpenCode accepts (a larger one is refused, which reads as an error
+    // about the caller's own limit).
+    const fetchLimit = limit === undefined ? undefined : Math.min(MESSAGE_PAGE_LIMIT, Math.max(100, limit * 4));
     const collected = [];
     const seenCursors = new Set();
     let cursor;
