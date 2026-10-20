@@ -268,8 +268,12 @@ const requestOptions = ({ timeoutMs, signal }) => {
 /**
  * Generates text with the user's small model through the running OpenCode.
  * Credentials stay inside OpenCode; this server only sends a prompt.
+ *
+ * `variant` is a thinking level of the explicit request `model`. It is sent
+ * only when that model is the one resolved: a level picked for one model
+ * means nothing to another, and OpenCode refuses one the model lacks.
  */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, variant, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
@@ -317,9 +321,11 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 
   const generationOptions = requestOptions({ timeoutMs, signal });
   const unavailableMessage = `Model unavailable: ${resolved.providerID}/${resolved.modelID}`;
+  const modelRef = { id: resolved.modelID, providerID: resolved.providerID };
+  if (variant && resolved.source === 'request') modelRef.variant = variant;
   const send = async () => {
     const result = await client.generate.text(
-      { prompt: fullPrompt, model: { id: resolved.modelID, providerID: resolved.providerID } },
+      { prompt: fullPrompt, model: modelRef },
       generationOptions,
     );
     return typeof result?.text === 'string' ? result.text : '';

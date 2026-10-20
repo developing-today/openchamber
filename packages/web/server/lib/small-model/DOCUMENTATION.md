@@ -147,6 +147,15 @@ model they got. The resolved value comes back as `outputTokens`.
 longer wanted. The timeout covers generation, retry waits and structured-output
 retries together.
 
+`variant` is a thinking level (OpenCode's model variant) of the explicit
+request `model`, sent as `model.variant` on `/api/experimental/generate`.
+OpenCode resolves it the way it does for a chat turn (`ModelResolver.resolve`
+applies the variant's settings, headers and body) and refuses a level the
+model does not list with `Variant unavailable for provider/model: level`. It is
+dropped whenever the model came from anywhere but the request, since a level
+picked for one model means nothing to another. The goal writer is the only
+caller today.
+
 OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
 plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode
 starts because plugins for the global location load lazily. An

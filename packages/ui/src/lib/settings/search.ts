@@ -334,6 +334,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'chat.session-goal-writer-effort',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.writer.effortLabel',
+    keywords: ['goal', 'spec', 'writer', 'effort', 'thinking', 'reasoning', 'variant'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.session-goal-writer-prompt',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.writer.promptLabel',
+    descriptionKey: 'settings.openchamber.visual.goal.writer.promptInfo',
+    keywords: ['goal', 'spec', 'writer', 'prompt', 'system prompt', 'instructions', 'rewrite', 'reset'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.session-goal-writer-review',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.goal.writer.reviewLabel',

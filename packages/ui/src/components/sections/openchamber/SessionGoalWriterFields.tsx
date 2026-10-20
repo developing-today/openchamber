@@ -1,22 +1,38 @@
 import React from 'react';
+import { formatEffortLabel } from '@/components/chat/mobileControlsUtils';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import {
   SettingsCheckboxRow,
   SettingsChipGroup,
   SettingsFieldRow,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCallableModelProviders } from '@/hooks/useCallableModelProviders';
+import {
+  fetchGoalWriterBuiltinPrompt,
+  requestGoalWriterPromptRewrite,
+  type GoalWriterBuiltinPromptResult,
+} from '@/lib/goalWriter';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { modelVariantNames } from '@/lib/modelVariants';
+import { findCatalogModel } from '@/lib/opencode/model';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore, type SessionGoalAutoCreate, type SessionGoalWriterSendMode } from '@/stores/useUIStore';
+import { GoalWriterPromptEditor } from './GoalWriterPromptEditor';
+
+/** The effort picker's value for "no level": the model's own default. */
+const MODEL_DEFAULT_EFFORT = '__default__';
 
 /**
  * The goal writer's settings in Settings → Chat → Goal: the composer switch,
- * the model, review before sending, what the spec does on send, rewriting
- * every goal, and starting a goal from the next message.
+ * the model and its effort, the prompt, review before sending, what the spec
+ * does on send, rewriting every goal, and starting a goal from the next
+ * message.
  */
 export const SessionGoalWriterFields: React.FC<{ disabled?: boolean }> = ({ disabled = false }) => {
   const { t } = useI18n();
@@ -43,6 +59,7 @@ export const SessionGoalWriterFields: React.FC<{ disabled?: boolean }> = ({ disa
         settingsItem="chat.session-goal-writer"
       />
       <SessionGoalWriterModelField disabled={disabled} />
+      <SessionGoalWriterPromptField disabled={disabled} />
       <SettingsCheckboxRow
         checked={review}
         onChange={setReview}
@@ -97,22 +114,34 @@ export const SessionGoalWriterFields: React.FC<{ disabled?: boolean }> = ({ disa
 };
 
 /**
- * Which model writes goal specs. Empty means the model the session uses. The
- * server reads the setting for every spec it writes, so the value lives in the
- * settings file only, as the walkthrough model does.
+ * Which model writes goal specs, and at which effort. Empty means the model
+ * the session uses, named under the label when the composer has one. The
+ * server reads the model for every spec it writes, so it lives in the settings
+ * file only, as the walkthrough model does; the effort applies only to a
+ * model picked here and is cleared when the pick changes.
  */
 const SessionGoalWriterModelField: React.FC<{ disabled: boolean }> = ({ disabled }) => {
   const { t } = useI18n();
   // Fail closed: never offer providers whose credentials were not verified.
   const providers = useCallableModelProviders() ?? [];
+  const catalog = useConfigStore((state) => state.providers);
+  const sessionProviderId = useConfigStore((state) => state.currentProviderId);
+  const sessionModelId = useConfigStore((state) => state.currentModelId);
+  const variant = useUIStore((state) => state.sessionGoalWriterVariant);
+  const setVariant = useUIStore((state) => state.setSessionGoalWriterVariant);
   const [model, setModel] = React.useState<string | undefined>();
+  // Until the saved pick is read, an empty pick does not yet mean the session's model.
+  const [modelKnown, setModelKnown] = React.useState(false);
 
   React.useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const stored = (await loadDesktopSettings())?.sessionGoalWriterModel?.trim();
-        if (alive && stored) setModel(stored);
+        const settings = await loadDesktopSettings();
+        if (!alive || !settings) return;
+        const stored = settings.sessionGoalWriterModel?.trim();
+        if (stored) setModel(stored);
+        setModelKnown(true);
       } catch (error) {
         console.warn('Failed to load the goal writer model:', error);
       }
@@ -128,6 +157,9 @@ const SessionGoalWriterModelField: React.FC<{ disabled: boolean }> = ({ disabled
   const handleChange = React.useCallback(async (providerId: string, modelId: string) => {
     const next = providerId && modelId ? `${providerId}/${modelId}` : undefined;
     setModel(next);
+    setModelKnown(true);
+    // An effort level belongs to the model it was picked for.
+    setVariant('');
     try {
       // Clearing the picker goes back to the session's model, so an empty
       // value is a real choice.
@@ -135,26 +167,95 @@ const SessionGoalWriterModelField: React.FC<{ disabled: boolean }> = ({ disabled
     } catch (error) {
       console.warn('Failed to save the goal writer model:', error);
     }
-  }, []);
+  }, [setVariant]);
+
+  const levels = React.useMemo(() => {
+    if (!parsed.providerId || !parsed.modelId) return [];
+    const provider = catalog.find((entry) => entry.id === parsed.providerId);
+    return modelVariantNames(findCatalogModel(provider?.models, parsed.modelId));
+  }, [catalog, parsed.modelId, parsed.providerId]);
+
+  const sessionModel = sessionProviderId && sessionModelId ? `${sessionProviderId}/${sessionModelId}` : '';
 
   return (
-    <SettingsFieldRow
-      settingsItem="chat.session-goal-writer-model"
-      label={t('settings.openchamber.visual.goal.writer.modelLabel')}
-      info={t('settings.openchamber.visual.goal.writer.modelInfo')}
-    >
-      <div className={cn(disabled && 'pointer-events-none opacity-50')} aria-disabled={disabled || undefined}>
-        <ModelSelector
-          providerId={parsed.providerId}
-          modelId={parsed.modelId}
-          onChange={(providerId, modelId) => {
-            void handleChange(providerId, modelId);
-          }}
-          allowedProviderIds={providers}
-          placeholder={t('settings.openchamber.visual.goal.writer.modelSessionDefault')}
-          className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-        />
-      </div>
-    </SettingsFieldRow>
+    <>
+      <SettingsFieldRow
+        settingsItem="chat.session-goal-writer-model"
+        label={t('settings.openchamber.visual.goal.writer.modelLabel')}
+        info={t('settings.openchamber.visual.goal.writer.modelInfo')}
+        description={modelKnown && !model && sessionModel
+          ? t('settings.openchamber.visual.goal.writer.modelSessionInUse', { model: sessionModel })
+          : undefined}
+      >
+        <div className={cn(disabled && 'pointer-events-none opacity-50')} aria-disabled={disabled || undefined}>
+          <ModelSelector
+            providerId={parsed.providerId}
+            modelId={parsed.modelId}
+            onChange={(providerId, modelId) => {
+              void handleChange(providerId, modelId);
+            }}
+            allowedProviderIds={providers}
+            placeholder={t('settings.openchamber.visual.goal.writer.modelSessionDefault')}
+            className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+          />
+        </div>
+      </SettingsFieldRow>
+      <SettingsFieldRow
+        settingsItem="chat.session-goal-writer-effort"
+        label={t('settings.openchamber.visual.goal.writer.effortLabel')}
+        info={t('settings.openchamber.visual.goal.writer.effortInfo')}
+      >
+        <Select
+          value={variant || MODEL_DEFAULT_EFFORT}
+          onValueChange={(value) => setVariant(value === MODEL_DEFAULT_EFFORT ? '' : value)}
+          // A saved level stays clearable even when the model no longer lists it.
+          disabled={disabled || (levels.length === 0 && !variant)}
+        >
+          <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('settings.openchamber.visual.goal.writer.effortLabel')}>
+            <SelectValue>
+              {variant ? formatEffortLabel(variant) : t('settings.openchamber.visual.goal.writer.effortDefault')}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={MODEL_DEFAULT_EFFORT}>{t('settings.openchamber.visual.goal.writer.effortDefault')}</SelectItem>
+            {levels.map((level) => (
+              <SelectItem key={level} value={level}>{formatEffortLabel(level)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingsFieldRow>
+    </>
   );
+};
+
+/**
+ * The goal writer's prompt, saved through the settings store. The server owns
+ * the built-in text and the rules after it, so both are read from it.
+ */
+const SessionGoalWriterPromptField: React.FC<{ disabled: boolean }> = ({ disabled }) => {
+  const stored = useUIStore((state) => state.sessionGoalWriterPrompt);
+  const setStored = useUIStore((state) => state.setSessionGoalWriterPrompt);
+  // The session's model writes specs when Settings names none, so it rewrites the prompt too.
+  const providerID = useConfigStore((state) => state.currentProviderId);
+  const modelID = useConfigStore((state) => state.currentModelId);
+  const [builtin, setBuiltin] = React.useState<GoalWriterBuiltinPromptResult | null>(null);
+
+  React.useEffect(() => {
+    let alive = true;
+    void fetchGoalWriterBuiltinPrompt().then((result) => {
+      if (alive) setBuiltin(result);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const rewrite = React.useCallback(
+    (prompt: string, instruction: string, signal: AbortSignal) => (
+      requestGoalWriterPromptRewrite({ prompt, instruction, providerID, modelID, signal })
+    ),
+    [modelID, providerID],
+  );
+
+  return <GoalWriterPromptEditor stored={stored} onStore={setStored} builtin={builtin} rewrite={rewrite} disabled={disabled} />;
 };

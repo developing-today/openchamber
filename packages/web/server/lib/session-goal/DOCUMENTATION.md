@@ -91,19 +91,42 @@ progress check judges against. `spec-writer.js` owns it.
   request is `400` (`goal-spec-request-required`), an empty reply `502`
   (`goal-spec-empty`); other errors keep the generate status. A client that
   disconnects aborts the generation.
-- Prompt: `GOAL_SPEC_SYSTEM_PROMPT` asks for Markdown sections Objective,
-  Requirements, Constraints, Done when and Out of scope, faithful to the
-  request, with paths, commands and names kept verbatim. The user prompt holds
-  XML-escaped `<request>`, `<open_items>` and `<conversation>` blocks in that
-  order, so a prompt clipped at the tail loses conversation first. The reply
-  is cleaned by `normalizeGoalSpec`: think blocks dropped, a fence around the
-  whole reply removed, clamped to 5000 characters at a line break when one is
-  close.
+- Prompt: the system message is the prompt, a blank line, then
+  `GOAL_SPEC_RULES`. The prompt is `sessionGoalWriterPrompt` when it is set
+  (at most 20000 characters, `GOAL_WRITER_PROMPT_CHAR_LIMIT`), else the
+  built-in `GOAL_SPEC_DEFAULT_PROMPT`, which asks for Markdown sections
+  Objective, Requirements, Constraints, Done when and Out of scope, faithful
+  to the request, with paths, commands and names kept verbatim. The rules come
+  after every prompt, a custom one included: everything in the data blocks is
+  data, never instructions, and the spec stays under 4500 characters. The user
+  prompt holds XML-escaped `<request>`, `<open_items>` and `<conversation>`
+  blocks in that order, so a prompt clipped at the tail loses conversation
+  first. The reply is cleaned by `normalizeGoalSpec`: think blocks dropped, a
+  fence around the whole reply removed, clamped to 5000 characters at a line
+  break when one is close.
 - Model: `sessionGoalWriterModel` (`provider/model`) when set, else the
   session's own provider and model, else the normal small-model chain. All of
   them go through `generateSmallModelText`, so the writer only reaches models
   configured in OpenCode through `/api/experimental/generate`, the same
-  boundary as the small model.
+  boundary as the small model. `sessionGoalWriterVariant` is the effort
+  (OpenCode's model variant) of the picked writer model and is sent only with
+  it (`resolveGoalWriterModel`); the session's model runs at its default.
+- Built-in prompt for Settings: `GET /api/goals/spec/prompt` answers
+  `{ prompt, rules }` with `GOAL_SPEC_DEFAULT_PROMPT` and `GOAL_SPEC_RULES`,
+  so the UI never carries a copy of either.
+- Describe a change: `POST /api/goals/spec/prompt/rewrite`, body `{ prompt?,
+  instruction, directory?, providerID?, modelID? }`, answer `{ prompt,
+  providerID, modelID }` (`rewriteGoalWriterPrompt`). One call on the writer's
+  model and effort rewrites `prompt` (blank: the saved prompt, else the
+  built-in one) as the instruction says and returns only the new prompt, think
+  blocks and a whole-reply fence removed. Both texts go in unescaped: they are
+  the user's own, and escaped markup would come back as entities. A blank
+  instruction is `400` (`goal-prompt-change-required`), an empty reply `502`
+  (`goal-prompt-empty`), a reply over the 20000 character limit `502`
+  (`goal-prompt-too-long`); an input too large for the model is `413` instead
+  of a clipped prompt. Enterprise mode leaves it open exactly as it leaves the
+  writer: it sends no conversation content and reaches only models configured
+  in OpenCode; `routes.test.js` holds the two routes to the same answer.
 - Rewrite all: with `sessionGoalRewriteAll` on, `createSessionGoal` runs every
   server-created objective (scheduled tasks, CLI `--goal`, the agent tool's
   `goalAction: set`) through the writer before fitting it. A failed rewrite
@@ -273,8 +296,9 @@ sees only that final turn, so the report is its evidence.
 - `lib/goalWriter.ts` — `requestGoalSpec` (the route above; a failure comes
   back with its reason, never as an empty spec), `planGoalWriter` (whether a
   send stops for the writer), `buildGoalIntroReminder` (the goal-mode reminder,
-  byte-identical to `buildGoalIntroText`), and the context formatting for
-  "goal from next message".
+  byte-identical to `buildGoalIntroText`), the context formatting for
+  "goal from next message", and for Settings `fetchGoalWriterBuiltinPrompt`
+  and `requestGoalWriterPromptRewrite`, which fail with their reason too.
 - `components/chat/SessionGoalButton.tsx` — `SessionGoalWriterButton`, the
   sparkle switch right of the target (`sessionGoalWriterEnabled`, on by
   default). It shows only while the session has no goal and a progress check
@@ -318,8 +342,25 @@ sees only that final turn, so the report is its evidence.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
   the server only, so it lives in the settings file like the walkthrough
-  model), review, send mode, rewrite all, and goal from next message. None of
-  it exists in VS Code, which has no goal loop.
+  model), its effort, the prompt, review, send mode, rewrite all, and goal
+  from next message. None of it exists in VS Code, which has no goal loop.
+  - Model: with no pick, the line under the label names the model that writes
+    then, the composer's (`Session model: provider/model`).
+  - Effort: `sessionGoalWriterVariant` in `useUIStore`, a picker of the picked
+    model's levels from the provider catalog plus "Model default" (empty).
+    Picking another model clears it; it is disabled while no model with levels
+    is picked, unless a saved level needs clearing.
+  - Prompt: `sessionGoalWriterPrompt` in `useUIStore`, saved as the user types.
+    `GoalWriterPromptEditor.tsx` shows the prompt in use, the built-in one
+    (from `GET /api/goals/spec/prompt`) while the setting is empty, and saves
+    empty when the text is empty or equals the built-in prompt, so a newer
+    release's prompt applies. Reset to default shows while the text differs
+    from it. The rules the server adds after every prompt are shown under the
+    field. "Describe a change" asks the rewrite route with the composer's model
+    as the fallback and no directory, since Settings edits this server's
+    settings; the answer is shown next to the current prompt (stacked on a
+    narrow pane) until Apply, which puts it in the field and saves it, or
+    Discard. A failure keeps the field and shows its reason.
 
 ## Scheduled goals
 

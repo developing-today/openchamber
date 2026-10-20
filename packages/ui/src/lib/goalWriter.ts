@@ -6,10 +6,11 @@ import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import type { SessionGoalAutoCreate, SessionGoalWriterSendMode } from '@/stores/useUIStore';
 
 // The goal writer: a model turns a message into a goal spec of at most
-// SESSION_GOAL_OBJECTIVE_CHAR_LIMIT characters. The server owns the prompt and
-// the model choice (`POST /api/goals/spec`, see
+// SESSION_GOAL_OBJECTIVE_CHAR_LIMIT characters. The server owns the built-in
+// prompt and the model choice (`POST /api/goals/spec`, see
 // packages/web/server/lib/session-goal/DOCUMENTATION.md); this module asks for
-// a spec, decides when the composer asks, and shapes the context it sends.
+// a spec, decides when the composer asks, shapes the context it sends, and
+// reads and rewrites the prompt for Settings.
 
 export type GoalSpecResult =
   | { ok: true; spec: string; providerID: string; modelID: string }
@@ -42,6 +43,19 @@ const GoalSpecResponseSchema = z.object({
 });
 
 const GoalSpecErrorSchema = z.object({ error: z.string().min(1) });
+
+type GoalWriterAnswer<T> = { ok: true; data: T } | { ok: false; message: string };
+
+/** A goal writer route's answer: its parsed body, or the reason it failed. */
+async function readGoalWriterAnswer<T>(response: Response, schema: z.ZodType<T>, emptyMessage: string): Promise<GoalWriterAnswer<T>> {
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const parsedError = GoalSpecErrorSchema.safeParse(payload);
+    return { ok: false, message: parsedError.success ? parsedError.data.error : `HTTP ${response.status}` };
+  }
+  const parsed = schema.safeParse(payload);
+  return parsed.success ? { ok: true, data: parsed.data } : { ok: false, message: emptyMessage };
+}
 
 export interface GoalSpecRequest {
   /** What the spec is written from: the typed message or the goal text. */
@@ -84,19 +98,87 @@ export async function requestGoalSpec(input: GoalSpecRequest): Promise<GoalSpecR
       signal: input.signal,
       body: JSON.stringify(body),
     });
-    const payload: unknown = await response.json().catch(() => null);
-    if (!response.ok) {
-      const parsedError = GoalSpecErrorSchema.safeParse(payload);
-      return { ok: false, message: parsedError.success ? parsedError.data.error : `HTTP ${response.status}` };
-    }
-    const parsed = GoalSpecResponseSchema.safeParse(payload);
-    if (!parsed.success) return { ok: false, message: 'The goal writer returned no spec' };
+    const answer = await readGoalWriterAnswer(response, GoalSpecResponseSchema, 'The goal writer returned no spec');
+    if (!answer.ok) return answer;
     return {
       ok: true,
-      spec: parsed.data.spec.slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT),
-      providerID: parsed.data.providerID,
-      modelID: parsed.data.modelID,
+      spec: answer.data.spec.slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT),
+      providerID: answer.data.providerID,
+      modelID: answer.data.modelID,
     };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The goal writer's built-in prompt and the rules the server adds after every prompt. */
+export type GoalWriterBuiltinPromptResult =
+  | { ok: true; prompt: string; rules: string }
+  | { ok: false; message: string };
+
+const GoalWriterBuiltinPromptSchema = z.object({ prompt: z.string().min(1), rules: z.string() });
+
+/**
+ * Read the built-in prompt from the server, which owns its text. Never throws:
+ * a failure comes back with its reason.
+ */
+export async function fetchGoalWriterBuiltinPrompt(): Promise<GoalWriterBuiltinPromptResult> {
+  try {
+    const response = await runtimeFetch('/api/goals/spec/prompt', { headers: { Accept: 'application/json' } });
+    const answer = await readGoalWriterAnswer(response, GoalWriterBuiltinPromptSchema, 'The server sent no built-in prompt');
+    return answer.ok ? { ok: true, prompt: answer.data.prompt, rules: answer.data.rules } : answer;
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export type GoalWriterPromptRewriteResult =
+  | { ok: true; prompt: string; providerID: string; modelID: string }
+  | { ok: false; message: string };
+
+interface GoalWriterPromptRewriteRequest {
+  /** The prompt on screen; empty lets the server take the prompt in use. */
+  prompt: string;
+  /** The change to make, in the user's words. */
+  instruction: string;
+  /** The session's model; the server uses it unless Settings names a writer model. */
+  providerID?: string | null;
+  modelID?: string | null;
+  signal?: AbortSignal;
+}
+
+/** The `POST /api/goals/spec/prompt/rewrite` body; a missing field means "none". */
+interface GoalWriterPromptRewriteBody {
+  prompt: string;
+  instruction: string;
+  providerID?: string;
+  modelID?: string;
+}
+
+const GoalWriterPromptRewriteResponseSchema = z.object({
+  prompt: z.string().trim().min(1),
+  providerID: z.string(),
+  modelID: z.string(),
+});
+
+/**
+ * Ask the goal writer's model to rewrite the prompt as the instruction says.
+ * Never throws: a failure comes back with its reason. No directory goes along:
+ * Settings edits this server's settings, so the server that reads them answers.
+ */
+export async function requestGoalWriterPromptRewrite(input: GoalWriterPromptRewriteRequest): Promise<GoalWriterPromptRewriteResult> {
+  const body: GoalWriterPromptRewriteBody = { prompt: input.prompt, instruction: input.instruction };
+  if (input.providerID) body.providerID = input.providerID;
+  if (input.modelID) body.modelID = input.modelID;
+  try {
+    const response = await runtimeFetch('/api/goals/spec/prompt/rewrite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: input.signal,
+      body: JSON.stringify(body),
+    });
+    const answer = await readGoalWriterAnswer(response, GoalWriterPromptRewriteResponseSchema, 'The model returned no prompt');
+    return answer.ok ? { ok: true, ...answer.data } : answer;
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }

@@ -122,6 +122,10 @@ export const createSettingsHelpers = (dependencies) => {
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
+  // The same limit as `GOAL_WRITER_PROMPT_CHAR_LIMIT` in session-goal/spec-writer.js
+  // and the UI registry; importing that module here would load the small-model
+  // client with the settings, so settings-helpers.test.js pins the three instead.
+  const GOAL_WRITER_PROMPT_CHAR_LIMIT = 20_000;
 
   const sanitizeShortcutOverrides = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -579,6 +583,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (goalWriterModel.success) {
       // Empty clears the pick: the session's own model writes specs again.
       result.sessionGoalWriterModel = goalWriterModel.data || undefined;
+    }
+    // Kept verbatim, empty included: empty means the built-in prompt. It is
+    // saved as the user types, so trailing whitespace is part of the text;
+    // the writer trims it when it reads the setting.
+    const goalWriterPrompt = z.string().max(GOAL_WRITER_PROMPT_CHAR_LIMIT).safeParse(candidate.sessionGoalWriterPrompt);
+    if (goalWriterPrompt.success) {
+      result.sessionGoalWriterPrompt = goalWriterPrompt.data;
+    }
+    // Empty is the writer model's default thinking level.
+    const goalWriterVariant = z.string().trim().max(128).safeParse(candidate.sessionGoalWriterVariant);
+    if (goalWriterVariant.success) {
+      result.sessionGoalWriterVariant = goalWriterVariant.data;
     }
     if (candidate.sessionGoalWriterSendMode === 'with-message' || candidate.sessionGoalWriterSendMode === 'goal-as-message') {
       result.sessionGoalWriterSendMode = candidate.sessionGoalWriterSendMode;

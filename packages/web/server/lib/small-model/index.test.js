@@ -230,6 +230,19 @@ describe('generateSmallModelText', () => {
     expect(lastGenerate().body.model).toEqual({ id: 'gpt-5.6-luna', providerID: 'openai' });
   });
 
+  it('sends the thinking level of an explicit request model to OpenCode', async () => {
+    await generateSmallModelText({ prompt: 'hi', model: 'openai/gpt-5.6-luna', variant: 'high', directory: '/proj' });
+
+    expect(lastGenerate().body.model).toEqual({ id: 'gpt-5.6-luna', providerID: 'openai', variant: 'high' });
+  });
+
+  it('drops a thinking level when no request model names the model it belongs to', async () => {
+    const result = await generateSmallModelText({ prompt: 'hi', variant: 'high', directory: '/proj' });
+
+    expect(result.source).toBe('default');
+    expect(lastGenerate().body.model).toEqual({ id: 'claude-haiku-4-5', providerID: 'anthropic' });
+  });
+
   it('sends an explicit Claude Code model like any other', async () => {
     const result = await generateSmallModelText({ prompt: 'hi', model: 'claude-code/haiku', directory: '/proj' });
 

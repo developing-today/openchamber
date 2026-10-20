@@ -11,6 +11,13 @@ const SESSION_GOAL_STATUSES: SessionGoalStatus[] = ['active', 'paused', 'blocked
 
 export const SESSION_GOAL_OBJECTIVE_CHAR_LIMIT = 5000;
 
+/**
+ * The longest goal writer prompt Settings saves (`sessionGoalWriterPrompt`).
+ * The server holds the same limit (`session-goal/spec-writer.js` and the
+ * settings sanitizer); its settings-helpers test fails when they drift apart.
+ */
+export const SESSION_GOAL_WRITER_PROMPT_CHAR_LIMIT = 20_000;
+
 export interface SessionGoalPayload {
   id: string;
   objective: string;

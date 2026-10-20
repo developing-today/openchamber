@@ -668,6 +668,22 @@
         "mobile"
       ]
     },
+    "sessionGoalWriterVariant": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalWriterPrompt": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "sessionGoalWriterReview": {
       "scope": "profile",
       "surfaces": [

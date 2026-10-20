@@ -5,6 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { SESSION_GOAL_WRITER_PROMPT_CHAR_LIMIT } from '@openchamber/ui/lib/sessionGoalMetadata';
+
+import { GOAL_WRITER_PROMPT_CHAR_LIMIT } from '../session-goal/spec-writer.js';
 import {
   DEFAULT_INPUT_HISTORY_LIMIT,
 } from './input-history-scope.js';
@@ -872,7 +875,7 @@ describe('settings registry gate', () => {
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
     sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
-    sessionGoalWriterEnabled: true, sessionGoalWriterModel: 'anthropic/claude', sessionGoalWriterReview: true, sessionGoalWriterSendMode: 'goal-as-message', sessionGoalRewriteAll: true, sessionGoalAutoCreate: 'review',
+    sessionGoalWriterEnabled: true, sessionGoalWriterModel: 'anthropic/claude', sessionGoalWriterVariant: 'high', sessionGoalWriterPrompt: 'Write short specs.', sessionGoalWriterReview: true, sessionGoalWriterSendMode: 'goal-as-message', sessionGoalRewriteAll: true, sessionGoalAutoCreate: 'review',
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,
@@ -981,5 +984,33 @@ describe('settings registry gate', () => {
       autoSaveEnabled: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+
+  it('keeps the goal writer prompt verbatim and its effort through a save, empty included', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    // Saved while the user types, so whitespace is part of the value.
+    const prompt = '  Write short specs.\n';
+    const accepted = helpers.sanitizeSettingsUpdate({ sessionGoalWriterPrompt: prompt, sessionGoalWriterVariant: ' high ' });
+    expect(accepted).toEqual({ sessionGoalWriterPrompt: prompt, sessionGoalWriterVariant: 'high' });
+    expect(helpers.formatSettingsResponse(helpers.mergePersistedSettings({}, accepted)))
+      .toMatchObject({ sessionGoalWriterPrompt: prompt, sessionGoalWriterVariant: 'high' });
+
+    // Empty is a real value: the built-in prompt, the model's default effort.
+    const cleared = helpers.sanitizeSettingsUpdate({ sessionGoalWriterPrompt: '', sessionGoalWriterVariant: '' });
+    expect(cleared).toEqual({ sessionGoalWriterPrompt: '', sessionGoalWriterVariant: '' });
+    expect(helpers.formatSettingsResponse(helpers.mergePersistedSettings(accepted, cleared)))
+      .toMatchObject({ sessionGoalWriterPrompt: '', sessionGoalWriterVariant: '' });
+
+    expect(helpers.sanitizeSettingsUpdate({ sessionGoalWriterPrompt: 7, sessionGoalWriterVariant: ['high'] })).toEqual({});
+  });
+
+  it('bounds the goal writer prompt like the writer and the interface do', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    // Three copies of one number: this sanitizer, the writer's rewrite check,
+    // and the UI registry and text area. A drift loses saves silently.
+    expect(GOAL_WRITER_PROMPT_CHAR_LIMIT).toBe(SESSION_GOAL_WRITER_PROMPT_CHAR_LIMIT);
+    const longest = 'x'.repeat(GOAL_WRITER_PROMPT_CHAR_LIMIT);
+    expect(helpers.sanitizeSettingsUpdate({ sessionGoalWriterPrompt: longest })).toEqual({ sessionGoalWriterPrompt: longest });
+    expect(helpers.sanitizeSettingsUpdate({ sessionGoalWriterPrompt: `${longest}x` })).toEqual({});
   });
 });
