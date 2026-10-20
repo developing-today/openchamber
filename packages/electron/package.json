@@ -57,7 +57,7 @@
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives ."
   },
   "build": {
-    "appId": "dev.openchamber.desktop",
+    "appId": "today.developing.openchamber",
     "productName": "OpenChamber",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",
