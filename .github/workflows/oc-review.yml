@@ -74,6 +74,7 @@ jobs:
         run: |
           bun run test:architecture
           bun run test:updater
+          bun run test:linux-desktop
 
   # Catches what type-check cannot: bundling, Vite-only syntax, the web
   # build's memory ceiling. The packages whose `build` is only a type-check (`tsc -b`)
