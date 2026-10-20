@@ -268,6 +268,37 @@ describe('OpenChamber control service', () => {
     expect(persistSettings).not.toHaveBeenCalled();
   });
 
+  it('keeps a hex colour the sanitizer lowercases, and says when clearing a model clears its variant', async () => {
+    let storedProjects = [{ id: 'project-1', path: '/repo', defaultModel: 'openai/gpt', defaultVariant: 'high' }];
+    const persistSettings = vi.fn(async (changes) => {
+      storedProjects = changes.projects;
+      return { projects: storedProjects };
+    });
+    // Stands in for the server sanitizer: lowercases a hex colour, and keeps a
+    // variant only with a model (settings-normalization-runtime.js).
+    const sanitizeProjects = (entries) => entries.map((entry) => {
+      const next = { ...entry };
+      if (next.iconBackground) next.iconBackground = next.iconBackground.toLowerCase();
+      if (!next.defaultModel) delete next.defaultVariant;
+      return next;
+    });
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ projects: storedProjects })),
+      sanitizeProjects,
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(),
+      persistSettings,
+      createProjectIdFromPath: (p) => p,
+    });
+
+    await expect(service.execute('projects.update', { projectId: 'project-1', projectSettings: { iconBackground: '#AABBCC' } }))
+      .resolves.toMatchObject({ project: { settings: { iconBackground: '#aabbcc' } } });
+
+    const cleared = await service.execute('projects.update', { projectId: 'project-1', projectSettings: { defaultModel: null } });
+    expect(cleared.alsoCleared).toEqual(['defaultVariant']);
+    expect(cleared.note).toMatch(/defaultVariant was cleared too/);
+  });
+
   it('removes a configured project by id, leaving its checkout untouched, and rejects an unknown id', async () => {
     const persistSettings = vi.fn(async () => ({}));
     const { service } = createService({

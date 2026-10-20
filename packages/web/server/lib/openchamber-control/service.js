@@ -348,17 +348,31 @@ export const createOpenChamberControlService = (dependencies) => {
     }
     const nextProjects = existingProjects.map((project) => (project.id === projectID ? next : project));
     const accepted = sanitizeProjects(nextProjects).find((project) => project.id === projectID);
+    // The sanitizer trims text and lowercases a hex colour; either is the value kept, not a refusal.
+    const kept = (key, value) => {
+      if (!isString(value)) return value;
+      return key === 'iconBackground' ? value.trim().toLowerCase() : value.trim();
+    };
     const rejected = Object.entries(changes)
-      .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(isString(value) ? value.trim() : value))
+      .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(kept(key, value)))
       .map(([key]) => key);
     if (rejected.length > 0) {
       throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${rejected.join(', ')} (defaultModel is provider/model, defaultVariant needs a defaultModel, iconBackground is a #hex color, sidebarCollapsed is a boolean)`, 400);
     }
     await persistSettings({ projects: nextProjects });
-    return {
+    // A setting can depend on another: clearing defaultModel drops defaultVariant with it.
+    const alsoCleared = EDITABLE_PROJECT_SETTINGS.filter((key) => (
+      target[key] !== undefined && accepted?.[key] === undefined && !Object.hasOwn(changes, key)
+    ));
+    const result = {
       project: { id: target.id, path: path.resolve(target.path), settings: projectSettingsOf(accepted) },
       note: 'Saved. Open OpenChamber windows may need a reload to show the change',
     };
+    if (alsoCleared.length > 0) {
+      result.alsoCleared = alsoCleared;
+      result.note += `. ${alsoCleared.join(', ')} was cleared too, since it only applies with what was removed`;
+    }
+    return result;
   };
 
   const projectActionsUnavailable = !fsPromises || !validateDirectoryPath || !persistSettings || !createProjectIdFromPath;

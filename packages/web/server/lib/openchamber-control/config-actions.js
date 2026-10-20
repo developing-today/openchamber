@@ -89,7 +89,7 @@ const AGENT_BLOCKED_SETTINGS = Object.freeze({
   githubScopes: 'it configures sign-in credentials',
   gitlabClientId: 'it configures sign-in credentials',
   securityScopedBookmarks: 'it holds macOS file-access grants',
-  projects: 'use projects.add or projects.remove',
+  projects: 'use projects.add, projects.update or projects.remove',
   activeProjectId: 'the user picks the active project',
 });
 
@@ -345,7 +345,13 @@ export const createConfigActions = (deps) => {
       updated,
       note: 'Saved. Open OpenChamber windows may need a reload to show the change; OpenChamber tool switches reach OpenCode within a few seconds',
     };
-    if (surface) result.surface = surface;
+    if (surface) {
+      result.surface = surface;
+      const shared = keys.filter((key) => settingsRegistry.fields[key]?.perSurface !== true);
+      if (shared.length > 0) {
+        result.note += `. ${shared.join(', ')} ${shared.length === 1 ? 'is' : 'are'} not kept per surface kind, so every surface uses the new value`;
+      }
+    }
     const baseOnly = surface ? [] : keys.filter((key) => settingsRegistry.fields[key]?.perSurface === true);
     if (baseOnly.length > 0) {
       result.note += `. ${baseOnly.join(', ')} ${baseOnly.length === 1 ? 'is' : 'are'} kept per surface kind and this changed the base value; a surface with its own value keeps it (settings.get shows them; pass surface to change one)`;

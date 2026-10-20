@@ -170,6 +170,13 @@ describe('per-surface settings', () => {
     expect(all.surfaces).toEqual({ desktop: { sidebarLayout: layout } });
   });
 
+  it('says a key not kept per surface reaches every surface, even when a surface is named', async () => {
+    const { actions, persistSettings } = await createSurfaceActions();
+    const result = await actions.execute('settings.set', { settingKey: 'agentWebToolEnabled', settingValue: false, surface: 'desktop' });
+    expect(persistSettings).toHaveBeenCalledWith({ agentWebToolEnabled: false }, { surface: 'desktop' });
+    expect(result.note).toMatch(/agentWebToolEnabled is not kept per surface kind/);
+  });
+
   it('says a base write does not reach a surface that has its own value', async () => {
     const { actions } = await createSurfaceActions();
     const result = await actions.execute('settings.set', { settingKey: 'sidebarLayout', settingValue: { attention: 'off' } });
