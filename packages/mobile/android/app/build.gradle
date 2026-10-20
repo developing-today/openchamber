@@ -9,8 +9,8 @@ def ciKeyPassword = System.getenv('OPENCHAMBER_ANDROID_KEY_PASSWORD')
 def hasCiSigning = ciKeystorePath && ciKeystorePassword && ciKeyAlias && ciKeyPassword
 // The release build is its own app, so it installs beside the default com.openchamber.app
 // (debug and CI installs) instead of replacing it. Its data, label and push identity are its own.
-def releaseSuffix = '.fork'
-def releasePackageName = 'com.openchamber.app' + releaseSuffix
+// The id is the reverse of the maintainer's domain (developing.today), so it stays unique.
+def releasePackageName = 'today.developing.openchamber'
 
 android {
     namespace "com.openchamber.app"
@@ -48,8 +48,7 @@ android {
             }
         }
         release {
-            applicationIdSuffix releaseSuffix
-            resValue "string", "app_name", "OpenChamber Fork"
+            resValue "string", "app_name", "OC"
             if (hasCiSigning) {
                 signingConfig signingConfigs.release
             }
@@ -88,6 +87,14 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// The application id of the release variant. A build type cannot change the id, so the
+// variant API sets it for release only; debug keeps com.openchamber.app.
+androidComponents {
+    onVariants(selector().withBuildType('release')) { variant ->
+        variant.applicationId.set(releasePackageName)
+    }
 }
 
 // Google Services needs a client for each package in google-services.json. The release package
