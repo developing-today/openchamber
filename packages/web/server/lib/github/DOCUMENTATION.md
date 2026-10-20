@@ -8,7 +8,7 @@
 ## Entrypoints and structure
 
 - `packages/web/server/lib/github/index.js`: public server entrypoint. `routes.js` loads it lazily with `await import('./index.js')` and destructures the handler it needs, so a re-export removed from here breaks a route at request time rather than at build time. Static "unused export" reports do not see these consumers.
-- `packages/web/server/lib/github/routes.js`: Express route registration for canonical `/api/source-control/github/*` resources, shared auth compatibility paths, and fail-closed retired `/api/github/*` resources.
+- `packages/web/server/lib/github/routes.js`: Express route registration for canonical `/api/source-control/github/*` resources, shared auth compatibility paths, and fail-closed retired `/api/github/*` resources. It returns `accounts` (`status`, `activate`, `remove`, `setCliDisabled`), the operations its account routes run, so the `openchamber` agent tool's `github.*` actions (`../openchamber-control/integration-service-actions.js`) behave exactly like Settings.
 - `packages/web/server/lib/github/auth.js`: auth storage, multi-account support, client id, scope config.
 - `packages/web/server/lib/github/device-flow.js`: OAuth device flow.
 - `packages/web/server/lib/github/octokit.js`: Octokit factories for legacy current auth and immutable account IDs.

@@ -227,12 +227,17 @@ export const registerGuestRoutes = (app, {
     return findInstalledGuest(id, persistPath);
   };
 
+  // The operations below are shared by the routes and the `openchamber` agent
+  // tool (../openchamber-control/integration-service-actions.js). Those whose
+  // route can refuse answer `{ status, body }`.
+  const listGuests = async () => {
+    const guests = await listInstalledGuests({ persistPath });
+    return { guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath))) };
+  };
+
   app.get('/api/guests', async (_req, res) => {
     try {
-      const guests = await listInstalledGuests({ persistPath });
-      res.json({
-        guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath))),
-      });
+      res.json(await listGuests());
     } catch (error) {
       console.error('Failed to list guests:', error);
       res.status(500).json({ error: 'Failed to list guests' });
@@ -346,21 +351,29 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  app.get('/api/guests/:id/oauth/status', async (req, res) => {
-    try {
-      const guest = await loadGuest(req.params.id);
-      if (!guest) {
-        return res.status(404).json({ error: 'not-found' });
-      }
-      const origin = requestOrigin(req);
-      // Tokens minted for addresses the package no longer names are dropped
-      // here, so the card shows disconnected instead of a stale account.
-      const stored = await takeUsableGuestAuth(guest, authPath);
-      const auth = resolveIntegrationAuth(guest.integration ?? {});
-      res.json({
+  /** The integration card's status; `origin` is the address the redirect URI is built on, when there is one. */
+  const readAuthStatus = async (id, origin = null) => {
+    const guest = await loadGuest(id);
+    if (!guest) {
+      return { status: 404, body: { error: 'not-found' } };
+    }
+    // Tokens minted for addresses the package no longer names are dropped
+    // here, so the card shows disconnected instead of a stale account.
+    const stored = await takeUsableGuestAuth(guest, authPath);
+    const auth = resolveIntegrationAuth(guest.integration ?? {});
+    return {
+      status: 200,
+      body: {
         ...await toGuestAuthResponse(guest.integration, stored),
         redirectUri: auth === 'oauth' && origin ? guestRedirectUri(origin, guest.id) : '',
-      });
+      },
+    };
+  };
+
+  app.get('/api/guests/:id/oauth/status', async (req, res) => {
+    try {
+      const { status, body } = await readAuthStatus(req.params.id, requestOrigin(req));
+      res.status(status).json(body);
     } catch (error) {
       console.error('Failed to read guest oauth status:', error);
       res.status(500).json({ error: 'Failed to read guest oauth status' });
@@ -419,25 +432,31 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  /** Saves the declared keys of `values`; anything else in it is ignored, as on the card. */
+  const saveSettings = async (id, values) => {
+    const guest = await loadGuest(id);
+    if (!guest?.integration) {
+      return { status: 404, body: { error: 'not-found' } };
+    }
+    if (!values || typeof values !== 'object' || Array.isArray(values)) {
+      return { status: 400, body: { error: 'invalid-settings' } };
+    }
+    const allowed = declaredSettings(guest);
+    const settings = {};
+    for (const [key, value] of Object.entries(values)) {
+      if (!allowed.has(key) || typeof value !== 'string') {
+        continue;
+      }
+      settings[key] = value.trim().slice(0, 2000);
+    }
+    const stored = await patchGuestAuth(guest.id, { settings }, authPath);
+    return { status: 200, body: await toGuestAuthResponse(guest.integration, stored) };
+  };
+
   app.put('/api/guests/:id/settings', json16, async (req, res) => {
     try {
-      const guest = await loadGuest(req.params.id);
-      if (!guest?.integration) {
-        return res.status(404).json({ error: 'not-found' });
-      }
-      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
-        return res.status(400).json({ error: 'invalid-settings' });
-      }
-      const allowed = declaredSettings(guest);
-      const settings = {};
-      for (const [key, value] of Object.entries(req.body)) {
-        if (!allowed.has(key) || typeof value !== 'string') {
-          continue;
-        }
-        settings[key] = value.trim().slice(0, 2000);
-      }
-      const stored = await patchGuestAuth(guest.id, { settings }, authPath);
-      res.json(await toGuestAuthResponse(guest.integration, stored));
+      const { status, body } = await saveSettings(req.params.id, req.body);
+      res.status(status).json(body);
     } catch (error) {
       console.error('Failed to save guest settings:', error);
       res.status(500).json({ error: 'Failed to save guest settings' });
@@ -501,16 +520,22 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  /** Drops the guest's tokens; its client and settings stay. */
+  const disconnectAuth = async (id) => {
+    const guest = await loadGuest(id);
+    if (!guest) {
+      return { status: 404, body: { error: 'not-found' } };
+    }
+    await disconnectHostGuest(guest.integration);
+    await disconnectGuestAuth(guest.id, authPath);
+    const stored = await getGuestAuth(guest.id, authPath);
+    return { status: 200, body: await toGuestAuthResponse(guest.integration, stored) };
+  };
+
   app.delete('/api/guests/:id/oauth', async (req, res) => {
     try {
-      const guest = await loadGuest(req.params.id);
-      if (!guest) {
-        return res.status(404).json({ error: 'not-found' });
-      }
-      await disconnectHostGuest(guest.integration);
-      await disconnectGuestAuth(guest.id, authPath);
-      const stored = await getGuestAuth(guest.id, authPath);
-      res.json(await toGuestAuthResponse(guest.integration, stored));
+      const { status, body } = await disconnectAuth(req.params.id);
+      res.status(status).json(body);
     } catch (error) {
       console.error('Failed to disconnect guest oauth:', error);
       res.status(500).json({ error: 'Failed to disconnect guest oauth' });
@@ -770,25 +795,31 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  /** Pause (false) or resume; a pause stops the service and hands back any role the guest held. */
+  const setEnabled = async (id, request) => {
+    const guest = await loadGuest(id);
+    if (!guest) {
+      return { status: 404, body: { error: 'not-found' } };
+    }
+    const parsed = enabledBodySchema.safeParse(request);
+    if (!parsed.success) {
+      return { status: 400, body: { error: 'invalid-request' } };
+    }
+    await setGuestEnabled(guest.id, persistPath, parsed.data.enabled);
+    if (!parsed.data.enabled) {
+      await onGuestDeactivated({ guestId: guest.id, guestName: guest.name });
+    }
+    const next = await loadGuest(guest.id);
+    if (!next) {
+      return { status: 404, body: { error: 'not-found' } };
+    }
+    return { status: 200, body: { guest: toPublicGuest(next) } };
+  };
+
   app.put('/api/guests/:id/enabled', json16, async (req, res) => {
     try {
-      const guest = await loadGuest(req.params.id);
-      if (!guest) {
-        return res.status(404).json({ error: 'not-found' });
-      }
-      const parsed = enabledBodySchema.safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({ error: 'invalid-request' });
-      }
-      await setGuestEnabled(guest.id, persistPath, parsed.data.enabled);
-      if (!parsed.data.enabled) {
-        await onGuestDeactivated({ guestId: guest.id, guestName: guest.name });
-      }
-      const next = await loadGuest(guest.id);
-      if (!next) {
-        return res.status(404).json({ error: 'not-found' });
-      }
-      res.json({ guest: toPublicGuest(next) });
+      const { status, body } = await setEnabled(req.params.id, req.body);
+      res.status(status).json(body);
     } catch (error) {
       console.error('Failed to update guest enabled state:', error);
       res.status(500).json({ error: 'Failed to update guest enabled state' });
@@ -890,5 +921,13 @@ export const registerGuestRoutes = (app, {
       console.error('Failed to serve guest asset:', error);
       res.status(500).json({ error: 'Failed to serve guest asset' });
     }
+  });
+
+  return Object.freeze({
+    list: listGuests,
+    authStatus: readAuthStatus,
+    setEnabled,
+    saveSettings,
+    disconnect: disconnectAuth,
   });
 };

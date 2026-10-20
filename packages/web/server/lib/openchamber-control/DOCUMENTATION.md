@@ -189,9 +189,35 @@ other.
   was `openchamber/<name>`. A pull request branch-off without `branch` gets the
   same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
-  `integration-actions.js`, `provider-actions.js`) are passed in as
+  `integration-actions.js`, `integration-service-actions.js`,
+  `provider-actions.js`) are passed in as
   `actionModules` and dispatched by action name before the built-in actions;
   their definitions are part of `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
+- `integration-service-actions.js` runs the connected-service actions:
+  `integrations.list` (every section below at once; a section that fails
+  carries `error` and the others stay), `github.status|activate|remove|cli`,
+  `gitlab.status|activate|remove|cli`,
+  `linear.status|activate|disconnect|mapping|preferences`,
+  `binding.get|set` (a repository's source-control binding) and
+  `extensions.list|get|toggle|settings|disconnect`. Each one calls the
+  operation its Settings route calls: the GitHub, GitLab, Linear, guest and
+  source-control route modules return those operations, and
+  `../opencode/feature-routes-runtime.js` hands them out through
+  `getIntegrationOperations` once the routes are registered (before that the
+  actions answer 503). A refusal keeps the route's status and message.
+  Secrets: no action signs in or takes a token, password or client secret;
+  an input object with a key ending in token, secret, password or passphrase
+  is refused with 400 before any operation runs; every answer has such keys
+  removed at any depth (`withoutSecrets`). `github.remove`, `gitlab.remove`,
+  `linear.disconnect`, `extensions.disconnect` and every `binding.set` except
+  `bindingOperation: provider` need `confirm: true`. GitLab actions accept
+  gitlab.com and instances already in the credential store only, so an agent
+  cannot make the server probe an address the user never connected. Left to
+  the user: signing in (device flow, OAuth, pasted tokens, OAuth clients),
+  approving an extension's capabilities, installing, updating or removing an
+  extension, and an extension service's socket path. None of the actions
+  sends conversation content anywhere, so enterprise mode gates none of them;
+  extension grants stay narrowed by enterprise mode in the catalog itself.
 - `projects.add`/`projects.remove` are the only destructive-adjacent actions
   wired: `projects.add` mirrors `POST /api/openchamber/directory` exactly
   (`validateDirectoryPath`, `createProjectIdFromPath`, `persistSettings`), so
