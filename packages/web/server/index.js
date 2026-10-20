@@ -162,6 +162,7 @@ import { createSessionExtraActions } from './lib/openchamber-control/session-act
 import { createProviderActions } from './lib/openchamber-control/provider-actions.js';
 import { createConfigActions } from './lib/openchamber-control/config-actions.js';
 import { createIntegrationActions } from './lib/openchamber-control/integration-actions.js';
+import { createProjectSetupActions } from './lib/openchamber-control/project-setup-actions.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1906,6 +1907,7 @@ const openChamberControlService = createOpenChamberControlService({
       getRequestHandoff: () => requestSelfHandoff,
     }),
     createIntegrationActions({ readSettingsFromDiskMigrated, persistSettings }),
+    createProjectSetupActions({ readProjectSetup: projectConfigRuntime.readProjectSetup, listProjects: listConfiguredProjects }),
   ],
 });
 

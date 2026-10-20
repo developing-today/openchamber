@@ -189,9 +189,16 @@ other.
   was `openchamber/<name>`. A pull request branch-off without `branch` gets the
   same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
-  `integration-actions.js`, `provider-actions.js`) are passed in as
-  `actionModules` and dispatched by action name before the built-in actions;
-  their definitions are part of `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
+  `integration-actions.js`, `provider-actions.js`, `project-setup-actions.js`)
+  are passed in as `actionModules` and dispatched by action name before the
+  built-in actions; their definitions are part of
+  `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
+- `projects.setup` returns a configured project's setup through
+  `projectConfigRuntime.readProjectSetup`, the same read as
+  `GET /api/projects/:projectId/config`; an unknown id is a 404. It is read
+  only: worktree setup commands and project actions run outside OpenCode's
+  permission rules, so an agent able to write them could run commands it was
+  never allowed to. Writing them stays with the user in Settings.
 - `projects.add`/`projects.remove` are the only destructive-adjacent actions
   wired: `projects.add` mirrors `POST /api/openchamber/directory` exactly
   (`validateDirectoryPath`, `createProjectIdFromPath`, `persistSettings`), so
