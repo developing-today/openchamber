@@ -35,8 +35,10 @@ type ReleaseFetch = (url: string, init: { headers: { Accept: string } }) => Prom
 function versionParts(version: string): number[] | null {
   const core = version.trim().replace(/^v/, '').split('-')[0];
   if (!core) return null;
-  const parts = core.split('.').map((part) => Number(part));
-  return parts.every((part) => Number.isInteger(part) && part >= 0) ? parts : null;
+  const rawParts = core.split('.');
+  // Number() alone is too lenient: '' parses as 0, '0x10' as 16, '1e3' as 1000.
+  if (rawParts.some((part) => !/^\d+$/.test(part))) return null;
+  return rawParts.map((part) => Number(part));
 }
 
 /**

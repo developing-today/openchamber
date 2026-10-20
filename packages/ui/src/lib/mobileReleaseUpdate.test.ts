@@ -16,6 +16,17 @@ describe('compareReleaseVersions', () => {
     expect(compareReleaseVersions('2.4.0', 'dev')).toBe(0);
     expect(compareReleaseVersions('', '2.3.3')).toBe(0);
   });
+
+  test('rejects malformed numeric parts Number() would otherwise accept', () => {
+    // Number('') === 0, Number('0x10') === 16, Number('1e3') === 1000:
+    // none of these are plain numeric version components.
+    expect(compareReleaseVersions('2..4', '2.0.3')).toBe(0);
+    expect(compareReleaseVersions('v3.', '2.3.3')).toBe(0);
+    expect(compareReleaseVersions('..', '0.0.0')).toBe(0);
+    expect(compareReleaseVersions('0x10.0', '2.3.3')).toBe(0);
+    expect(compareReleaseVersions('1e3.0', '2.3.3')).toBe(0);
+    expect(compareReleaseVersions('2.4.0', '2..3')).toBe(0);
+  });
 });
 
 const releaseJson = () => ({
@@ -56,6 +67,11 @@ describe('fetchLatestMobileRelease', () => {
     };
     const info = await fetchLatestMobileRelease('2.3.3', fetchReturning(JSON.stringify(body)));
     expect(info?.downloadUrl).toBe('https://example.com/plain.apk');
+  });
+
+  test('returns null for a malformed tag that would parse as newer', async () => {
+    const body = { ...releaseJson(), tag_name: 'v3.' };
+    expect(await fetchLatestMobileRelease('2.3.3', fetchReturning(JSON.stringify(body)))).toBeNull();
   });
 
   test('returns null when the installed version is current or newer', async () => {
