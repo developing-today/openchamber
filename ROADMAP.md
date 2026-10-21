@@ -126,3 +126,6 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Malformed versions rejected in web upgrade check                    | 2026-10-21 | #184, #187                 |
 | Malformed versions rejected in web package-manager check            | 2026-10-21 | #188, #189                 |
 | Malformed versions rejected in electron compareSemver               | 2026-10-21 | #185, #190                 |
+| ROADMAP Done records the five version-parse completions             | 2026-10-21 | #191, #192                 |
+| Non-mac releases can finalize without macOS manifests               | 2026-10-21 | #186, #193                 |
+| Android launch targets the real MainActivity class                  | 2026-10-21 | #173, #200                 |
