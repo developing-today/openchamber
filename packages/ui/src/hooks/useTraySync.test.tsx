@@ -9,8 +9,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useNotificationStore } from '@/sync/notification-store';
 import {
   applyGlobalBlockingRequestEvents,
+  applyWaitingPageEvent,
+  readHostBlockingRequestsSnapshot,
   resetGlobalBlockingRequests,
-  seedGlobalBlockingRequests,
 } from '@/sync/global-blocking-requests';
 
 const session = (id: string, parentID?: string): Session => ({
@@ -204,15 +205,18 @@ describe('tray approvals', () => {
 
   test('a seeded ask does too, so an unopened directory does not lose the option', async () => {
     await act(async () => root.render(<Harness />));
-    seedGlobalBlockingRequests([{
-      sessionId: 'root',
-      directory: '/unopened',
-      permissions: [
-        { id: 'seed-save', sessionID: 'root', action: 'bash', resources: ['git status'], save: ['git *'] },
-        { id: 'seed-once', sessionID: 'root', action: 'bash', resources: ['rm -rf tmp'] },
-      ],
-      forms: [],
-    }]);
+    await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: {},
+      pending: { root: {
+        permissions: [
+          { id: 'seed-save', sessionID: 'root', action: 'bash', resources: ['git status'], save: ['git *'] },
+          { id: 'seed-once', sessionID: 'root', action: 'bash', resources: ['rm -rf tmp'] },
+        ],
+        forms: [],
+        pages: [],
+      } },
+      serverTime: 0,
+    }), () => '/unopened');
     await flush();
 
     expect(canSaveById()).toEqual({ 'seed-save': true, 'seed-once': false });
@@ -224,13 +228,15 @@ describe('tray approvals', () => {
   test('a nested subagent\'s requests open the root, and its waiting page opens its own session', async () => {
     useGlobalSessionsStore.getState().applySnapshot([session('root'), session('child', 'root'), session('grandchild', 'child')], [], 'ready');
     await act(async () => root.render(<Harness />));
-    seedGlobalBlockingRequests([{
-      sessionId: 'grandchild',
-      directory: '/project',
-      permissions: [{ id: 'perm', sessionID: 'grandchild', action: 'bash', resources: ['echo ok'] }],
-      forms: [{ id: 'form', sessionID: 'grandchild', title: 'Pick a layout' }],
-      pages: [{ id: 'page', sessionID: 'grandchild', title: 'Review the page' }],
-    }]);
+    await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: {},
+      pending: { grandchild: {
+        permissions: [{ id: 'perm', sessionID: 'grandchild', action: 'bash', resources: ['echo ok'] }],
+        forms: [{ id: 'form', sessionID: 'grandchild', title: 'Pick a layout' }],
+        pages: [{ id: 'page', sessionID: 'grandchild', title: 'Review the page' }],
+      } },
+      serverTime: 0,
+    }), () => '/project');
     await flush();
 
     const approvals = (snapshots.at(-1)?.approvals ?? []).map(({ id, sessionId, sessionTitle, openSessionId, openDirectory }) => ({
@@ -241,5 +247,19 @@ describe('tray approvals', () => {
       { id: 'form', sessionId: 'grandchild', sessionTitle: 'grandchild', openSessionId: 'root', openDirectory: '/project' },
       { id: 'page', sessionId: 'grandchild', sessionTitle: 'grandchild', openSessionId: 'grandchild', openDirectory: '/project' },
     ]);
+  });
+
+  test('a complete host snapshot removes an answered page from tray approvals', async () => {
+    await act(async () => root.render(<Harness />));
+    applyWaitingPageEvent({
+      type: 'openchamber.page-waiting',
+      properties: { sessionID: 'root', directory: '/repo', page: { id: 'answered-page', title: 'Services page binding' } },
+    }, () => null);
+    await flush();
+    expect(canSaveById()).toEqual({ 'answered-page': false });
+
+    await readHostBlockingRequestsSnapshot(async () => ({ sessions: {}, pending: {}, serverTime: Date.now() }), () => '/repo');
+    await flush();
+    expect(canSaveById()).toEqual({});
   });
 });

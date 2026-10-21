@@ -4,15 +4,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
@@ -245,7 +248,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
 }) {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const projects = useProjectsStore((state) => state.projects);
+  const storedProjects = useProjectsStore((state) => state.projects);
+  const projects = useProjectsInSidebarOrder(storedProjects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const { currentTheme } = useThemeSystem();
@@ -333,8 +337,9 @@ export function ScheduledTasksView({ layout, onLeave }: {
     }
   }, [t]);
 
+  // Keyed on the stored list: a "Recent" reorder must not reset the chosen scope.
   React.useEffect(() => {
-    const preferredProjectID = activeProject?.id || projects[0]?.id || (chatsAvailable ? CHAT_DRAFT_PROJECT_ID : '');
+    const preferredProjectID = activeProject?.id || storedProjects[0]?.id || (chatsAvailable ? CHAT_DRAFT_PROJECT_ID : '');
     setSelectedProjectID(preferredProjectID);
     if (preferredProjectID) {
       void reloadTasks(preferredProjectID);
@@ -342,7 +347,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
       setTasks([]);
       setLoading(false);
     }
-  }, [activeProject, projects, chatsAvailable, reloadTasks]);
+  }, [activeProject, storedProjects, chatsAvailable, reloadTasks]);
 
   React.useEffect(() => {
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
@@ -441,14 +446,20 @@ export function ScheduledTasksView({ layout, onLeave }: {
   }, [selectedProject?.path, onLeave]);
 
   // The session of the task's latest run; a run records it as soon as it
-  // creates the session, so a running or failed run has one too.
+  // creates the session, so a running or failed run has one too. The session
+  // owns its directory: one in a linked worktree must not open on the
+  // project root, so the session's own record decides, not the selection.
   const openLastRunSession = React.useCallback((task: ScheduledTask) => {
     const sessionId = task.state?.lastSessionId;
     if (!sessionId) return;
-    const project = projects.find((entry) => entry.id === selectedProjectID);
-    useSessionUIStore.getState().setCurrentSession(sessionId, project?.path ?? null);
+    void openSessionFromRoute(sessionId);
+    // A run can create its session after the global list last loaded; that
+    // list cannot name the folder until it is fetched again.
+    if (!useGlobalSessionsStore.getState().entityById.has(sessionId)) {
+      void refreshGlobalSessions().then(() => openSessionFromRoute(sessionId));
+    }
     onLeave('session');
-  }, [projects, selectedProjectID, onLeave]);
+  }, [onLeave]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -657,7 +668,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                             className="inline-flex items-center gap-1"
                             style={{ color: `var(--status-${meta.tone})` }}
                           >
-                            <Icon name={meta.Icon} className="h-3.5 w-3.5" />
+                            {meta.spin ? <Spinner className="h-3.5 w-3.5" /> : <Icon name={meta.Icon} className="h-3.5 w-3.5" />}
                             {statusLabel}
                           </span>
                         ) : null}

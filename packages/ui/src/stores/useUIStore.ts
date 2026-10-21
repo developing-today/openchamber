@@ -18,7 +18,10 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
+import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
+import { CONTEXT_SURFACE_WIDTHS } from '@/lib/surfaces/registry';
+import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import {
   carrySurfaceToZone,
   getZoneView,
@@ -191,7 +194,7 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
   );
 };
 
-const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
+const CONTEXT_PANEL_DEFAULT_WIDTH = CONTEXT_SURFACE_WIDTHS.regular;
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
 const CONTEXT_PANEL_MIN_HEIGHT = 160;
@@ -268,10 +271,22 @@ const normalizeContextTargetDirectory = (value: string | null | undefined): stri
 
 // A terminal may run in another directory than the panel it lives in, and a
 // chat tab may show a session from another project (or Chat) next to the
-// main chat; every other mode works in the panel's own directory.
+// main chat. A Tracker item reads through the project it belongs to, and so
+// do the Changes and walkthrough of a pull request opened from one, without
+// the app moving to that project. Every other mode works in the panel's own
+// directory.
 const contextPanelModeKeepsTargetDirectory = (mode: ContextPanelMode): boolean => {
-  return mode === 'terminal' || mode === 'chat';
+  return mode === 'terminal' || mode === 'chat' || mode === 'pr' || mode === 'diff' || mode === 'walkthrough';
 };
+
+/**
+ * The Tracker surface's first tab: the checked-out branch's pull request, or
+ * the form that creates it. It is always there and never closes; the items
+ * opened beside it carry their link as `targetPath`.
+ */
+export const isTrackerBranchTab = (tab: { mode: ContextPanelMode; targetPath: string | null }): boolean => (
+  tab.mode === 'pr' && !tab.targetPath
+);
 
 const normalizeContextTabLabel = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') {
@@ -297,7 +312,7 @@ const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath
     return targetPath || mode;
   }
 
-  if (mode === 'browser') {
+  if (mode === 'browser' || mode === 'pr') {
     return targetPath || mode;
   }
 
@@ -382,7 +397,7 @@ const clampContextPanelTabs = (
     const modeTabs = tabs.filter((tab) => tab.mode === mode);
     const removable = [...modeTabs]
       .sort((a, b) => a.touchedAt - b.touchedAt)
-      .filter((tab) => tab.id !== activeTabId);
+      .filter((tab) => tab.id !== activeTabId && !isTrackerBranchTab(tab));
     // Never drop the tab being opened or looked at; if that leaves the mode one
     // over its budget, one extra tab beats losing the one in use.
     for (const tab of removable.slice(0, count - maxTabsPerMode)) removeSet.add(tab.id);
@@ -723,6 +738,21 @@ const moveContextPanelFileTabs = (
   return next;
 };
 
+/**
+ * Another project's Changes or walkthrough is saved as the panel's own: the
+ * PR it was asked to show is held in memory only, so restored as it was it
+ * would show whatever that project has checked out, with no way to switch.
+ */
+const withoutForeignComparisons = (
+  byDirectory: Record<string, ContextPanelDirectoryState>,
+): Record<string, ContextPanelDirectoryState> => {
+  const isForeign = (tab: ContextPanelTab) => (tab.mode === 'diff' || tab.mode === 'walkthrough') && tab.targetDirectory !== null;
+  if (!Object.values(byDirectory).some((panel) => panel.tabs.some(isForeign))) return byDirectory;
+  return Object.fromEntries(Object.entries(byDirectory).map(([directory, panel]) => [directory, panel.tabs.some(isForeign)
+    ? { ...panel, tabs: panel.tabs.map((tab) => (isForeign(tab) ? { ...tab, targetDirectory: null } : tab)) }
+    : panel]));
+};
+
 const sanitizeContextPanelByDirectory = (
   value: unknown,
 ): Record<string, ContextPanelDirectoryState> => {
@@ -841,6 +871,10 @@ interface UIStore {
   /** Surface ids the user hid from the context rail; stored as the hidden set
       so surfaces added later appear for everyone. */
   contextRailHiddenSurfaces: string[];
+  /** Order of the phone's workspace drawer tabs (lib/mobileWorkspaceTabs.ts). */
+  mobileWorkspaceTabOrder: string[];
+  /** Workspace drawer tabs the user hid; stored as the hidden set so tabs added later appear for everyone. */
+  mobileWorkspaceHiddenTabs: string[];
   /** Surfaces the user moved off the right zone, per device (lib/workspace/zones.ts). */
   contextSurfaceZones: ContextZonePlacement;
   contextEditorTreeVisible: boolean;
@@ -996,6 +1030,8 @@ interface UIStore {
   layoutAnimations: boolean;
   /** Plain clicks on links in chat open in the built-in browser panel (desktop only). */
   openLinksInBrowserPanel: boolean;
+  /** How many of the user's browser tabs keep their page loaded, across projects (desktop only). */
+  liveBrowserTabLimit: number;
   /** Plain clicks on issue, PR and Linear links in chat open them on the issues and PRs board. */
   openTrackerLinksOnBoard: boolean;
   autoDeleteAfterDays: number;
@@ -1082,6 +1118,7 @@ interface UIStore {
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
+  agentScheduleToolEnabled: boolean;
   agentWebToolEnabled: boolean;
   /** Full-text message search (server index). Opt-in: off keeps every part of it idle. */
   messageSearchEnabled: boolean;
@@ -1095,8 +1132,6 @@ interface UIStore {
   agentRenderToolEnabled: boolean;
   /** Whether OpenChamber's agent tools sit behind OpenCode's Code Mode instead of being direct tools. */
   agentToolsCodeMode: boolean;
-  /** Whether an agent moves its session into a new worktree on a busy branch without asking first. */
-  agentWorktreeMoveWithoutAsking: boolean;
   /** The isolated-spaces switch as saved; the server applies it at its next start. */
   isolatedSpacesEnabled: boolean;
   /** The permission mode the server writes onto each new top-level session. */
@@ -1142,9 +1177,11 @@ interface UIStore {
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
+  stickyUserHeader: boolean;
   promptNavigatorEnabled: boolean;
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
+  savePastedImagesAsFiles: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
@@ -1162,12 +1199,19 @@ interface UIStore {
   setContextEditorTreeWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
+  /**
+   * Opens an issue, pull or merge request or Linear issue in the panel's
+   * Tracker surface, one tab per item (`key` names the item, whatever page of
+   * it the link opens). `targetDirectory` is the project it is read through.
+   * Answers the tab's id.
+   */
+  openTrackerItem: (directory: string, item: { url: string; key: string; label: string; targetDirectory: string | null }) => string | null;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
   /** `preview` opens it as the replaceable preview tab (a files-tree click). */
   openContextFile: (directory: string, filePath: string, options?: { preview?: boolean }) => void;
   /** Turns a preview file tab into a regular one. */
   pinContextPanelTab: (directory: string, tabID: string) => void;
-  openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
+  openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number, options?: { preview?: boolean }) => void;
   openContextOverview: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
   openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
@@ -1175,8 +1219,12 @@ interface UIStore {
   /** A new background browser tab for an agent at `url`; returns its tab id, or null where there is no browser. */
   openAgentBrowserTab: (directory: string, url: string, ownerSessionId: string | null) => string | null;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
-  /** Points file tabs and the editor's open files at or under `fromPath` at `toPath` after a move or rename. */
-  moveContextFilePaths: (directory: string, fromPath: string, toPath: string) => void;
+  /**
+   * Points file tabs and the editor's open files at or under `fromPath` at `toPath` after a move or
+   * rename. `filesRoot` is the root the editor keeps them under when it is not `directory`: a draft
+   * waiting for a space shows the space's files in its own panel.
+   */
+  moveContextFilePaths: (directory: string, fromPath: string, toPath: string, filesRoot?: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
@@ -1207,6 +1255,8 @@ interface UIStore {
   setWorkStatusSectionOrder: (sectionIds: readonly string[]) => void;
   setContextRailSurfaceVisible: (surfaceId: string, visible: boolean) => void;
   setContextRailHiddenSurfaces: (surfaceIds: string[]) => void;
+  setMobileWorkspaceTabOrder: (order: readonly string[]) => void;
+  setMobileWorkspaceTabVisible: (tab: MobileWorkspaceTab, visible: boolean) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
@@ -1279,6 +1329,7 @@ interface UIStore {
   setConfirmFileTreeMove: (value: boolean) => void;
   setLayoutAnimations: (value: boolean) => void;
   setOpenLinksInBrowserPanel: (value: boolean) => void;
+  setLiveBrowserTabLimit: (value: number) => void;
   setOpenTrackerLinksOnBoard: (value: boolean) => void;
   setFileTreeSide: (side: 'left' | 'right') => void;
   setAutoDeleteAfterDays: (days: number) => void;
@@ -1360,6 +1411,7 @@ interface UIStore {
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
+  setAgentScheduleToolEnabled: (value: boolean) => void;
   setAgentWebToolEnabled: (value: boolean) => void;
   setMessageSearchEnabled: (value: boolean) => void;
   setMessageSearchReasoningEnabled: (value: boolean) => void;
@@ -1369,7 +1421,6 @@ interface UIStore {
   setAgentNotifyToolEnabled: (value: boolean) => void;
   setAgentRenderToolEnabled: (value: boolean) => void;
   setAgentToolsCodeMode: (value: boolean) => void;
-  setAgentWorktreeMoveWithoutAsking: (value: boolean) => void;
   setIsolatedSpacesEnabled: (value: boolean) => void;
   setPermissionDefaultMode: (value: PermissionMode) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
@@ -1397,9 +1448,11 @@ interface UIStore {
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
+  setStickyUserHeader: (value: boolean) => void;
   setPromptNavigatorEnabled: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
+  setSavePastedImagesAsFiles: (value: boolean) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
@@ -1415,6 +1468,20 @@ interface UIStore {
 }
 
 
+// Opens a file tab, or reuses it. The preview this open replaces leaves the
+// editor's open files too, like any closed tab.
+const openFileTab = (state: UIStore, directory: string, filePath: string, preview: boolean) => {
+  const tabs = state.contextPanelByDirectory[directory]?.tabs ?? [];
+  const replacedPreviewPath = preview
+    ? tabs.find((tab) => tab.preview && tab.targetPath !== filePath)?.targetPath ?? null
+    : null;
+  const alreadyOpen = tabs.some((tab) => tab.mode === 'file' && tab.targetPath === filePath);
+  state.openContextPanelTab(directory, { mode: 'file', targetPath: filePath, preview });
+  if (replacedPreviewPath && !alreadyOpen) {
+    useFilesViewTabsStore.getState().removeOpenPath(directory, replacedPreviewPath);
+  }
+};
+
 export const useUIStore = create<UIStore>()(
   devtools(
     persist(
@@ -1428,6 +1495,8 @@ export const useUIStore = create<UIStore>()(
         contextPanelByDirectory: {},
         contextRailOrder: [],
         contextRailHiddenSurfaces: [],
+        mobileWorkspaceTabOrder: [],
+        mobileWorkspaceHiddenTabs: [],
         contextSurfaceZones: {},
         contextEditorTreeVisible: true,
         fileTreeSide: 'right',
@@ -1511,6 +1580,7 @@ export const useUIStore = create<UIStore>()(
         confirmFileTreeMove: true,
         layoutAnimations: true,
         openLinksInBrowserPanel: false,
+        liveBrowserTabLimit: LIVE_BROWSER_TABS_DEFAULT,
         openTrackerLinksOnBoard: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
@@ -1582,6 +1652,7 @@ export const useUIStore = create<UIStore>()(
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
+        agentScheduleToolEnabled: true,
         agentWebToolEnabled: true,
         messageSearchEnabled: false,
         messageSearchReasoningEnabled: false,
@@ -1591,7 +1662,6 @@ export const useUIStore = create<UIStore>()(
         agentNotifyToolEnabled: false,
         agentRenderToolEnabled: true,
         agentToolsCodeMode: false,
-        agentWorktreeMoveWithoutAsking: false,
         isolatedSpacesEnabled: false,
         permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,
@@ -1618,9 +1688,11 @@ export const useUIStore = create<UIStore>()(
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
+        stickyUserHeader: false,
         promptNavigatorEnabled: true,
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
+        savePastedImagesAsFiles: false,
         draftStartersVisible: true,
         isExpandedInput: false,
         reportUsage: true,
@@ -1722,6 +1794,18 @@ export const useUIStore = create<UIStore>()(
             // `>=` so equal timestamps (same-millisecond opens) resolve to the
             // later tab in insertion order.
             const mostRecent = tabsOfMode.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
+            // The rail's Changes and walkthrough are this project's: a pull
+            // request of another project opened from the Tracker gives way.
+            if ((mode === 'diff' || mode === 'walkthrough') && mostRecent.targetDirectory) {
+              state.openContextPanelTab(normalizedDirectory, {
+                mode,
+                targetPath: mostRecent.targetPath,
+                stagedDiff: mostRecent.stagedDiff,
+                diffScope: mostRecent.diffScope,
+                targetDirectory: null,
+              });
+              return;
+            }
             state.setActiveContextPanelTab(normalizedDirectory, mostRecent.id);
             return;
           }
@@ -1742,7 +1826,8 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          const nextTab = tab.mode === 'terminal'
+          // Working in the panel's own directory is the default, stored as no target.
+          const nextTab = tab.mode !== 'chat' && contextPanelModeKeepsTargetDirectory(tab.mode)
             ? {
                 ...tab,
                 targetDirectory: normalizeContextTargetDirectory(tab.targetDirectory) === normalizedDirectory
@@ -1769,6 +1854,37 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        openTrackerItem: (directory, item) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const url = item.url.trim();
+          if (!normalizedDirectory || !url) {
+            return null;
+          }
+
+          const dedupeKey = `tracker:${item.key}`;
+          const targetDirectory = normalizeContextTargetDirectory(item.targetDirectory);
+          set((state) => {
+            const placement = state.contextSurfaceZones;
+            const current = touchContextPanelState(state.contextPanelByDirectory[normalizedDirectory], placement);
+            // An item never shows without the branch's own tab beside it.
+            const withBranch = current.tabs.some(isTrackerBranchTab)
+              ? current
+              : upsertContextPanelTab(current, { mode: 'pr' }, placement, { reveal: false });
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: upsertContextPanelTab(withBranch, {
+                mode: 'pr',
+                targetPath: url,
+                dedupeKey,
+                label: item.label,
+                targetDirectory: targetDirectory === normalizedDirectory ? null : targetDirectory,
+              }, placement),
+            };
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+          return buildContextPanelTabID('pr', dedupeKey);
+        },
+
         openContextDiff: (directory, filePath, staged = false, scope = null) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = (filePath || '').trim();
@@ -1793,24 +1909,12 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          const preview = options?.preview === true;
-          // The preview this open replaces leaves the editor's open files too,
-          // like any closed tab.
-          const replacedPreviewPath = preview
-            ? get().contextPanelByDirectory[normalizedDirectory]?.tabs
-              .find((tab) => tab.preview && tab.targetPath !== normalizedFilePath)?.targetPath ?? null
-            : null;
-          const alreadyOpen = get().contextPanelByDirectory[normalizedDirectory]?.tabs
-            .some((tab) => tab.mode === 'file' && tab.targetPath === normalizedFilePath) ?? false;
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath, preview });
-          if (replacedPreviewPath && !alreadyOpen) {
-            useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, replacedPreviewPath);
-          }
+          openFileTab(get(), normalizedDirectory, normalizedFilePath, options?.preview === true);
           get().setPendingFileFocusPath(normalizedFilePath);
           get().setPendingFileNavigation(null);
         },
 
-        openContextFileAtLine: (directory, filePath, line, column) => {
+        openContextFileAtLine: (directory, filePath, line, column, options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = normalizeContextTargetPath(filePath);
           const normalizedLine = Number.isFinite(line) ? Math.max(1, Math.trunc(line)) : 1;
@@ -1819,7 +1923,7 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          openFileTab(get(), normalizedDirectory, normalizedFilePath, options?.preview === true);
           get().setPendingFileFocusPath(null);
           get().setPendingFileNavigation({
             path: normalizedFilePath,
@@ -1914,7 +2018,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        moveContextFilePaths: (directory, fromPath, toPath) => {
+        moveContextFilePaths: (directory, fromPath, toPath, filesRoot = directory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFrom = normalizeContextTargetPath(fromPath);
           const normalizedTo = normalizeContextTargetPath(toPath);
@@ -1931,7 +2035,7 @@ export const useUIStore = create<UIStore>()(
               },
             };
           });
-          useFilesViewTabsStore.getState().movePaths(normalizedDirectory, normalizedFrom, normalizedTo);
+          useFilesViewTabsStore.getState().movePaths(normalizeDirectoryPath(filesRoot.trim()), normalizedFrom, normalizedTo);
         },
 
         setActiveContextPanelTab: (directory, tabID) => {
@@ -2046,9 +2150,13 @@ export const useUIStore = create<UIStore>()(
 
         closeContextPanelTabs: (directory, tabIds) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          // The Tracker's branch tab stays: closing every item leaves it.
+          const branchTabIds = new Set((get().contextPanelByDirectory[normalizedDirectory]?.tabs ?? [])
+            .filter(isTrackerBranchTab)
+            .map((tab) => tab.id));
           const normalizedTabIds = (tabIds ?? [])
             .map((id) => (id || '').trim())
-            .filter((id) => id.length > 0);
+            .filter((id) => id.length > 0 && !branchTabIds.has(id));
           if (!normalizedDirectory || normalizedTabIds.length === 0) {
             return;
           }
@@ -2291,6 +2399,24 @@ export const useUIStore = create<UIStore>()(
 
         setContextRailHiddenSurfaces: (surfaceIds) => {
           set({ contextRailHiddenSurfaces: [...new Set(surfaceIds)] });
+        },
+
+        setMobileWorkspaceTabOrder: (order) => {
+          set({ mobileWorkspaceTabOrder: orderMobileWorkspaceTabs(order) });
+        },
+
+        setMobileWorkspaceTabVisible: (tab, visible) => {
+          set((state) => {
+            const hidden = state.mobileWorkspaceHiddenTabs;
+            if (visible) {
+              return hidden.includes(tab) ? { mobileWorkspaceHiddenTabs: hidden.filter((entry) => entry !== tab) } : state;
+            }
+            if (hidden.includes(tab)) return state;
+            // The last tab the user keeps stays: the drawer would have nothing to show.
+            const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden);
+            if (shown.length <= 1) return state;
+            return { mobileWorkspaceHiddenTabs: [...hidden, tab] };
+          });
         },
 
 
@@ -2622,6 +2748,10 @@ export const useUIStore = create<UIStore>()(
 
         setOpenLinksInBrowserPanel: (value) => {
           set({ openLinksInBrowserPanel: value });
+        },
+
+        setLiveBrowserTabLimit: (value) => {
+          set({ liveBrowserTabLimit: clampLiveBrowserTabs(value) });
         },
 
         setOpenTrackerLinksOnBoard: (value) => {
@@ -3157,6 +3287,9 @@ export const useUIStore = create<UIStore>()(
         setAgentControlToolEnabled: (value) => {
           set({ agentControlToolEnabled: value });
         },
+        setAgentScheduleToolEnabled: (value) => {
+          set({ agentScheduleToolEnabled: value });
+        },
         setAgentWebToolEnabled: (value) => {
           set({ agentWebToolEnabled: value });
         },
@@ -3189,9 +3322,6 @@ export const useUIStore = create<UIStore>()(
         },
         setAgentToolsCodeMode: (value) => {
           set({ agentToolsCodeMode: value });
-        },
-        setAgentWorktreeMoveWithoutAsking: (value) => {
-          set({ agentWorktreeMoveWithoutAsking: value });
         },
         setAgentMemoryFeatureAvailable: (value) => {
           set({ agentMemoryFeatureAvailable: value });
@@ -3283,6 +3413,9 @@ export const useUIStore = create<UIStore>()(
         setCollapsibleUserMessages: (value) => {
           set({ collapsibleUserMessages: value });
         },
+        setStickyUserHeader: (value) => {
+          set({ stickyUserHeader: value });
+        },
         setPromptNavigatorEnabled: (value) => {
           set({ promptNavigatorEnabled: value });
         },
@@ -3291,6 +3424,9 @@ export const useUIStore = create<UIStore>()(
         },
         setAllowPromptingSubagentSessions: (value) => {
           set({ allowPromptingSubagentSessions: value });
+        },
+        setSavePastedImagesAsFiles: (value) => {
+          set({ savePastedImagesAsFiles: value });
         },
         setReportUsage: (value) => {
           set({ reportUsage: value });
@@ -3591,6 +3727,10 @@ export const useUIStore = create<UIStore>()(
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
+          for (const key of ['mobileWorkspaceTabOrder', 'mobileWorkspaceHiddenTabs']) {
+            const value = state[key];
+            state[key] = Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+          }
 
           // v23 -> v24: workspace zones. Panels gain closed left/bottom zones
           // (the sanitize above), and nothing is placed off the right.
@@ -3602,9 +3742,11 @@ export const useUIStore = create<UIStore>()(
           theme: state.theme,
           isSidebarOpen: state.isSidebarOpen,
           sidebarWidth: state.sidebarWidth,
-          contextPanelByDirectory: state.contextPanelByDirectory,
+          contextPanelByDirectory: withoutForeignComparisons(state.contextPanelByDirectory),
           contextRailOrder: state.contextRailOrder,
           contextRailHiddenSurfaces: state.contextRailHiddenSurfaces,
+          mobileWorkspaceTabOrder: state.mobileWorkspaceTabOrder,
+          mobileWorkspaceHiddenTabs: state.mobileWorkspaceHiddenTabs,
           contextSurfaceZones: state.contextSurfaceZones,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
           fileTreeSide: state.fileTreeSide,
@@ -3653,6 +3795,7 @@ export const useUIStore = create<UIStore>()(
           confirmFileTreeMove: state.confirmFileTreeMove,
           layoutAnimations: state.layoutAnimations,
           openLinksInBrowserPanel: state.openLinksInBrowserPanel,
+          liveBrowserTabLimit: state.liveBrowserTabLimit,
           openTrackerLinksOnBoard: state.openTrackerLinksOnBoard,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
@@ -3708,6 +3851,7 @@ export const useUIStore = create<UIStore>()(
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
+          agentScheduleToolEnabled: state.agentScheduleToolEnabled,
           agentWebToolEnabled: state.agentWebToolEnabled,
           messageSearchEnabled: state.messageSearchEnabled,
           messageSearchReasoningEnabled: state.messageSearchReasoningEnabled,
@@ -3717,7 +3861,6 @@ export const useUIStore = create<UIStore>()(
           agentNotifyToolEnabled: state.agentNotifyToolEnabled,
           agentRenderToolEnabled: state.agentRenderToolEnabled,
           agentToolsCodeMode: state.agentToolsCodeMode,
-          agentWorktreeMoveWithoutAsking: state.agentWorktreeMoveWithoutAsking,
           isolatedSpacesEnabled: state.isolatedSpacesEnabled,
           permissionDefaultMode: state.permissionDefaultMode,
           agentMemoryViewedAt: state.agentMemoryViewedAt,
@@ -3741,9 +3884,11 @@ export const useUIStore = create<UIStore>()(
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
+          stickyUserHeader: state.stickyUserHeader,
           promptNavigatorEnabled: state.promptNavigatorEnabled,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
+          savePastedImagesAsFiles: state.savePastedImagesAsFiles,
           draftStartersVisible: state.draftStartersVisible,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,

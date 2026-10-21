@@ -5,6 +5,7 @@ import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 import { ContextMenu } from '@base-ui/react/context-menu';
+import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,13 +47,13 @@ import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContain
 import { useSessionRowMenuState } from './useSessionRowMenuState';
 import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from './sessionSubtreeActions';
 import type { SessionNode } from '../types';
-import { hasTreeSlotContext, isMixedZoneContext, isTwoLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
+import { hasTreeSlotContext, isMixedZoneContext, isMultiLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
+import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
@@ -74,6 +75,8 @@ import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { getCurrentSessionAssist } from '@/lib/sessionAssistMetadata';
 import { isDoneSuggested, isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { useSessionWarmingStore, useSessionWarmUntil } from '@/stores/useSessionWarmingStore';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { getMultiRunIdentity, sameMultiRunIdentity } from '@/lib/multirun/identity';
@@ -407,20 +410,24 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // Flat rows: no tree gutter, live state on the right. Chats and the Tree
   // view's Pinned and In work rows keep it on one line.
   const isOneLineTimelineRow = renderContext === 'timeline-chat' || renderContext === 'tree-chat' || renderContext === 'mixed-compact' || renderContext === 'mixed-flat';
-  const isTimelineRow = isTwoLineTimelineContext(renderContext) || isOneLineTimelineRow;
+  const isTimelineRow = isMultiLineTimelineContext(renderContext) || isOneLineTimelineRow;
+  // List sorted by time: no project headers, so the row names its project
+  // on a line of its own.
+  const hasProjectLine = renderContext === 'timeline-by-time';
   // The Tree view's one-line Chats, Pinned and In work rows never expand, but
   // they keep the tree's slot and geometry, so their state reads down the
   // same left edge as the tree under them. List rows stay flat.
   const hasTreeSlot = hasTreeSlotContext(renderContext);
   // While the Pinned section is shown it holds every pinned zone session, and
-  // its header already says they are pinned; In work then has none of them.
+  // its header already says they are pinned; In work then has none of them,
+  // and neither has the list by time, whose rows share the zones' context.
   const isZoneRow = isMixedZoneContext(renderContext);
   const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
   const hidePinnedMarker = isZoneRow && pinnedSectionShown;
-  // List rows in the zones and the combined list show the project's own icon
-  // (a chat its chat mark); the row reads exactly that one project record,
-  // and `find` keeps the reference stable between renders.
-  const showsProjectMark = renderContext === 'timeline-mixed' || renderContext === 'mixed-flat';
+  // List rows in the zones, the combined list and the list by time show the
+  // project's own icon (a chat its chat mark); the row reads exactly that one
+  // project record, and `find` keeps the reference stable between renders.
+  const showsProjectMark = renderContext === 'timeline-mixed' || renderContext === 'mixed-flat' || hasProjectLine;
   const timelineProject = useProjectsStore(
     React.useCallback((state) => {
       if (!showsProjectMark || !projectId) return null;
@@ -559,11 +566,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   }, [linkedGitLabIssueStates, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t, uncolouredChanges]);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
-  const openOnBoard = useOpenOnBoard();
+  const openTrackerItem = useOpenTrackerItem();
   const refBadgeLabel = refLines.map((line) => line.text).join(', ');
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
+  // Ref chips open their item in the Tracker through the row's project. The
+  // project's root path resolves without the live worktree map, which a
+  // session in a worktree outside the root does not until that map arrives.
+  const projectRootDirectory = useProjectsStore((state) =>
+    projectId ? state.projects.find((entry) => entry.id === projectId)?.path ?? null : null,
+  );
+  const trackerDirectory = projectRootDirectory ?? sessionDirectory;
   // Multi-select scope: sessions are flat per project, so selection groups by
   // project (falling back to the directory when no project is known) — a
   // selection must survive mixing sessions from different worktrees.
@@ -647,6 +661,20 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       toast.error(t('sessions.sidebar.session.work.updateFailed'));
     }
   };
+  // Per-session warming is offered only while Settings chose it, for a root
+  // session the host's OpenCode runs (a space's sessions run on its own).
+  const perSessionWarming = useSessionWarmingStore((state) => state.enabled);
+  const isWarmed = useSessionWarmUntil(session.id) !== undefined;
+  const canKeepWarm = perSessionWarming && !archivedBucket && !node.session.parentID
+    && Boolean(sessionDirectory) && !isSpaceDirectory(sessionDirectory);
+  const toggleSessionWarm = async () => {
+    if (!sessionDirectory) return;
+    try {
+      await useSessionWarmingStore.getState().setSessionWarm(session.id, sessionDirectory, !isWarmed);
+    } catch {
+      toast.error(t('sessions.warming.toggleFailed'));
+    }
+  };
   // SAFETY: sessionGoalStatusLabelKey contains an i18n key for every SessionGoalStatus.
   const sessionGoalLabel = sessionGoal ? t(sessionGoalStatusLabelKey[sessionGoal.status] as never) : '';
   const sessionGoalGlyph = sessionGoal ? (
@@ -690,7 +718,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     handleMenuOpenChange,
     handleContextMenuOpenChange,
     handleMenuOpenChangeComplete,
-    toggleMenu,
   } = useSessionRowMenuState({
     menuInstanceKey,
     contextMenuInstanceKey,
@@ -945,6 +972,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             project={timelineProject}
             chat={showsChatMark}
             projectLabel={tooltipProjectLabel}
+            projectLine={hasProjectLine}
             title={renameForm}
             titleClassName="text-foreground"
             branchLabel={tooltipBranchLabel}
@@ -1085,19 +1113,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     ? <Icon name="error-warning" className="h-4 w-4 text-status-warning" />
     : null;
 
+  // Base UI's trigger handlers open the menu, so it records the click and
+  // stays open when the pointer leaves it. A menu opened only through `open`
+  // has no open event, and Base UI closes it on pointer leave like a hover menu.
   const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
     event.stopPropagation();
-    toggleMenu();
   };
 
   const handleMenuTriggerPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
     event.stopPropagation();
   };
 
   const handleMenuTriggerMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
     event.stopPropagation();
   };
 
@@ -1325,6 +1352,14 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         <Item onClick={() => { void toggleSessionWork(); }} className="[&>svg]:me-1">
           <Icon name={isInWork ? 'check' : 'eye'} className="me-1 h-4 w-4" />
           {isInWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+        </Item>
+        </SessionMenuItemHint>
+      ) : null}
+      {canKeepWarm ? (
+        <SessionMenuItemHint hint={isWarmed ? t('sessions.sidebar.session.menuHint.stopWarm') : t('sessions.sidebar.session.menuHint.keepWarm')}>
+        <Item onClick={() => { void toggleSessionWarm(); }} className="[&>svg]:me-1">
+          <Icon name={isWarmed ? 'fire-fill' : 'fire'} className="me-1 h-4 w-4" />
+          {isWarmed ? t('sessions.sidebar.session.menu.stopWarm') : t('sessions.sidebar.session.menu.keepWarm')}
         </Item>
         </SessionMenuItemHint>
       ) : null}
@@ -1654,7 +1689,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             event.stopPropagation();
             // The `+N` only counts the others; the tooltip lists them.
             if (event.target instanceof Element && event.target.closest('[data-ref-more]')) return;
-            if (primaryRef.url) openOnBoard(primaryRef.url, sessionDirectory, event);
+            if (primaryRef.url) openTrackerItem(primaryRef.url, trackerDirectory, event);
           }}
           onKeyDown={(event) => event.stopPropagation()}
         >
@@ -1667,7 +1702,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={6} className="max-w-xs">
-        <SidebarRefLinks items={refLines} directory={sessionDirectory} />
+        <SidebarRefLinks items={refLines} directory={trackerDirectory} />
       </TooltipContent>
     </Tooltip>
   ) : null;
@@ -1676,10 +1711,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // one-line form, with the session's live state and time on the right.
   const rowBody = (
     <SessionTimelineRowBody
-      compact={!isTwoLineTimelineContext(renderContext)}
+      compact={!isMultiLineTimelineContext(renderContext)}
       project={timelineProject}
       chat={showsChatMark}
       projectLabel={tooltipProjectLabel}
+      projectLine={hasProjectLine}
       title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
@@ -1789,7 +1825,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   return (
     <React.Fragment key={session.id}>
       <DraggableSessionRow sessionId={session.id} dragKey={dragKey ?? sessionRowKey} ownerKey={folderOwnerKey ?? selectionScopeKey} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} archivedBucket={archivedBucket}>
-        <ContextMenu.Root open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
+        <ContextMenuRoot open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
           <ContextMenu.Trigger
             render={
               <div
@@ -1885,7 +1921,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                         <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
                       </div>
                     ) : null}
-                    {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={sessionDirectory} /> : null}
+                    {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={trackerDirectory} /> : null}
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}
@@ -2007,7 +2043,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           </div>
           </ContextMenu.Trigger>
           {contextMenuContent}
-        </ContextMenu.Root>
+        </ContextMenuRoot>
       </DraggableSessionRow>
       {hasChildren && isExpanded ? children : null}
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>

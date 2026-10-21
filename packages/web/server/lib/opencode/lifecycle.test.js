@@ -25,6 +25,7 @@ vi.mock('./startup-performance.js', () => ({
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
@@ -189,6 +190,38 @@ describe('OpenCode lifecycle', () => {
       // Credential reads take variable keys from the environment the current process got.
       expect(runtime.getManagedOpenCodeProcessEnv()).toBe(spawnMock.mock.calls[1][2].env);
       expect(runtime.getManagedOpenCodeProcessEnv()).toMatchObject({ SHELL_ONLY: 'yes' });
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
+  it('journals managed launch, readiness, exit and restart as fixed actions only', async () => {
+    const journal = createServerDiagnosticJournal();
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => {
+        child.stderr.emit('data', 'plugin failed: token=secret-123 /private/file\n');
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime({ diagnosticJournal: journal });
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+    try {
+      await runtime.restartOpenCode();
+      expect(journal.snapshot().events.map(({ action, detail }) => [action, detail])).toEqual([
+        ['managed launch', 'attempt=1'],
+        ['managed ready', 'attempt=1'],
+        ['managed restart started', undefined],
+        ['managed process exited', undefined],
+        ['managed launch', 'attempt=1'],
+        ['managed ready', 'attempt=1'],
+        ['managed restart ready', undefined],
+      ]);
+      expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('OPENCODE_PRINT_LOGS');
+      expect(JSON.stringify(journal.snapshot())).not.toMatch(/secret|private/);
     } finally {
       await runtime.testState.openCodeProcess.close();
     }
@@ -418,6 +451,43 @@ describe('OpenCode lifecycle', () => {
     await runtime.bootstrapOpenCodeAtStartup();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(runtime.getDefaultOpenCodeDirectory()).toBe(project);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  // The UI stops a chat's location once the user leaves it. A read that went
+  // to the chat used last at startup would start it again, every quota poll.
+  it('scopes reads without a directory to the directory the user works in now', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-current-'));
+    const leftChat = path.join(root, 'left-chat');
+    const current = path.join(root, 'current');
+    await fs.mkdir(leftChat);
+    await fs.mkdir(current);
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => [leftChat]),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(leftChat);
+
+    runtime.noteCurrentDirectory(current);
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(current);
+
+    // A directory that is not there is never sent.
+    runtime.noteCurrentDirectory(path.join(root, 'missing'));
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(current);
     await fs.rm(root, { recursive: true, force: true });
   });
 

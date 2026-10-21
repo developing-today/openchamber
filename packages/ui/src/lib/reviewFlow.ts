@@ -22,7 +22,7 @@ import { getSyncMessages, getSyncParts, getSyncSessionStatus, getSyncSessions, r
 import { computeSubtreeIds } from '@/sync/scoped-blocking-requests';
 import { markPendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from '@/lib/sessionKnowledgeApi';
+import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 
 const HANDOFF_TIMEOUT_MS = 180_000;
 const HANDOFF_POLL_MS = 400;
@@ -385,16 +385,15 @@ const sendPlainMessage = async (
   }
   // Review sessions are real work sessions, so they carry the project's
   // standing context (pinned notes, memory) exactly as a composer send would.
-  const knowledge = await fetchSessionKnowledge(directory, sessionID);
+  await syncSessionKnowledge(directory, sessionID);
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const sendContext = knowledge.text ? [{ text: knowledge.text }, ...(context ?? [])] : context;
   markPendingUserSendAnimation(sessionID);
   let sentMessageID: string | null = null;
   await optimisticSend({
     sessionId: sessionID,
     content: text,
     directory,
-    context: sendContext,
+    context,
     onMessageID: (messageID) => {
       sentMessageID = messageID;
     },
@@ -418,9 +417,6 @@ const sendPlainMessage = async (
     },
   });
   if (!sentMessageID) throw new Error('Failed to prepare review flow message');
-  if (knowledge.text) {
-    void reportSessionKnowledgeDelivered(directory, sessionID, knowledge.signature);
-  }
   return sentMessageID;
 };
 

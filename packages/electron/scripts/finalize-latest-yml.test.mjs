@@ -128,6 +128,18 @@ test('fails in MAC_ONLY mode when both Mac manifests are missing', (context) => 
   assert.match(result.stderr, /Both x64 and arm64 macOS update manifests are required/);
 });
 
+test('keeps Macs older than macOS 13 off the update', (context) => {
+  const fixture = createFixture();
+  context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+
+  execFileSync(process.execPath, [script], { env: environment(fixture) });
+
+  const mac = fs.readFileSync(path.join(fixture.output, 'latest-mac.yml'), 'utf8');
+  const windows = fs.readFileSync(path.join(fixture.output, 'latest.yml'), 'utf8');
+  assert.match(mac, /^minimumSystemVersion: 22\.0\.0$/m);
+  assert.doesNotMatch(windows, /minimumSystemVersion/);
+});
+
 test('fails instead of publishing a Mac manifest without the arm64 build', (context) => {
   const fixture = createFixture({ includeMacArm64: false });
   context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
