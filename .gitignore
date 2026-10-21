@@ -19,7 +19,13 @@ release
 # changelog-card tool: cached webfonts + generated cards
 scripts/changelog-card/.fonts/
 changelog-*.png
-*.local
+# Files like config.local and .env.local, at any depth. Written `?*.local`,
+# not `*.local`: Knip (bun run dead-code) matches root .gitignore patterns
+# against absolute paths, so `*.local` also matched a `.local` folder above the
+# checkout (~/.local/share/opencode/worktree/...) and every file looked
+# ignored. `?*` needs one character before `.local`, which a bare `.local`
+# never has; Git ignores the same files as before.
+?*.local
 *.tgz
 *.vsix
 /npm
