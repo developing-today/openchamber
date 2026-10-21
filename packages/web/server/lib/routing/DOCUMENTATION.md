@@ -277,6 +277,22 @@ against OpenCode's schema and its own stricter rules before saving it.
 `experimental.model_routes` and `experimental.model_route_tuning`. No pool in
 the OpenCode config can fail a read or block a save of another pool.
 
+Both routes read the merged global config: `opencode.json` and
+`opencode.jsonc` in OpenCode's config directory, plus the file
+`OPENCODE_CONFIG` names (`readConfigLayers(null)`, so project config files are
+neither read nor written). A save writes both keys into the primary global
+file, `opencode.json` when it exists, else `opencode.jsonc`, else a new
+`opencode.json` (`paths.userPath`), then asks OpenCode to reload
+(`refreshOpenCodeAfterConfigChange`). When that request fails, the file stays
+written and OpenCode reads it at its next reload. In enterprise mode every PUT
+answers 403; GET still answers.
+
+- **Schema lists.** `ROUTE_KEYS`, `TARGET_KEYS`, `HEALTH_KEYS`, `BUDGET_KEYS`,
+  `SCHEDULE_KEYS`, `WINDOW_KEYS` and `TUNING_KEYS` copy the keys OpenCode's
+  schema defines (`packages/schema/src/config/model-routes.ts` in the OpenCode
+  fork). A key OpenCode adds and these lists lack is reported on every pool
+  that uses it, and a save that changes such a pool is refused until forced,
+  so the lists move with that file.
 - **Problems.** `modelRouteProblems` reports every problem in one pool, each
   with `skipsPool`. It is true where OpenCode's own schema refuses the value:
   OpenCode decodes each pool on its own and leaves out one that fails
@@ -306,6 +322,142 @@ anywhere in the pool, a value of another type, a `{ providerID, model }`
 target) becomes a `json` entry: the JSON as received, plus the path the editor
 stopped at, sent back unchanged unless the user edits that JSON. Review
 settings it cannot read come back as `unreadable`, and the pools still load.
+Settings (`packages/ui/src/components/sections/routing/ModelPoolsSection.tsx`)
+rolls a refused or failed save back to the last saved pools, for an edit in
+the structured editor and in Raw JSON alike. A refused save lists its problems
+with Save anyway; a failed one shows the error.
+
+## Sentence rules
+
+Settings → Routing → Route by sentence
+(`packages/ui/src/components/sections/routing/RouteRulesSection.tsx`,
+`RouteRulesAdvanced.tsx`, `packages/ui/src/lib/routing/routeRulesApi.ts`)
+turns one plain sentence, such as "skip anthropic today", into overrides that
+OpenCode applies while it picks a pool's target. `route-overrides-store.js`
+keeps them (see Route overrides).
+
+- `route-interpreter.js` reads a sentence in stages and returns a decision, a
+  question, or nothing. It touches no files, so the stages and the learning are
+  tested directly.
+- `route-rules-routes.js` serves `/api/model-routes/rules` (GET),
+  `/api/model-routes/interpret` and `/api/model-routes/interpret/answer`
+  (POST), `/api/model-routes/rules/:id` (DELETE, the undo),
+  `/api/model-routes/settings` (GET, PUT), `/api/model-routes/wait` (GET),
+  `/api/model-routes/local` (GET) and `/api/model-routes/local/download`
+  (POST). It runs the stages on sentences of 1 to 500 characters and writes
+  each decision through the overrides store.
+- `route-learning.js` (`learnedChoices`) works out which answer to a
+  clarifying question the user has settled on.
+- `route-local-model.js` pins, downloads and runs the local stage's model.
+- `route-settings.js` keeps `route-settings.json` in OpenChamber's data
+  directory: which stages run, `learnAfter`, `waitPercentile` and
+  `waitMinSamples`.
+- `route-wait.js` (`estimateWait`) estimates how long a target stays out of
+  rotation, from OpenCode's `route_health` table.
+
+Invariants:
+
+- The stages run in order: keywords, then the local model, then the
+  classification provider. The first stage that decides wins. Only the keyword
+  stage asks a question, and the later stages see only sentences it could not
+  read, so the user is asked at most one thing and no model answers a question
+  meant for the user.
+- A model stage only picks from fixed answers (`choiceQuestions`). For the
+  local model the provider and the model family come from the sentence itself
+  (`groundChoices`), because a small model invents names. A
+  classification-provider answer below 0.6 confidence counts as none. A model
+  stage never avoids a model family without a provider to scope it.
+- The classification-provider stage sends the sentence and the provider ids to
+  the endpoint `routingRuntime.classifierEndpoint()` returns, so it follows the
+  user's pick and enterprise mode, and it is skipped when there is none.
+- Every override ends. A sentence without a duration lasts a day, and its
+  summary says the day was assumed. An override reaches `fixed` pools unless
+  the sentence excludes them, and none is limited to one pool.
+- Answering a clarifying question records the choice in
+  `route-feedback.jsonl`; undoing a rule that came from a question records a
+  vote against that answer. An answer is learned once it has at least
+  `learnAfter` net votes (3 by default) and leads every other answer. A learned
+  answer is applied as tentative, and its summary says it was the user's
+  earlier choice.
+- Undo removes every rule written for the same sentence.
+- The settings never go into the OpenCode config. Values are clamped
+  (`learnAfter` 1 to 20, `waitPercentile` 5 to 75, `waitMinSamples` 1 to 100),
+  and an unreadable file reads as the defaults.
+- The local model is downloaded only when the user asks, from a Hugging Face
+  URL pinned to one commit, into `$XDG_CACHE_HOME/openchamber/models`
+  (`~/.cache` by default). It is kept only when its size and SHA-256 match the
+  pinned values; a model without a pinned digest is refused with 409 before
+  anything is fetched. `node-llama-cpp` is loaded only when the stage first
+  runs.
+- A wait estimate reads the target's `cooldown-start` rows from the last 30
+  days, at most 2,000. It takes the chosen percentile of the closest group with
+  enough samples (same weekday and hour give or take one, then same hour, then
+  all) and never goes below the ordinary 60-second cooldown. Too few samples
+  give no estimate, and a missing database or routing table comes back as
+  `reason`.
+
+## Route overrides
+
+`route-overrides-store.js` owns `route-overrides.json`, the overrides OpenCode
+reads while it picks a pool's target, and `route-feedback.jsonl`, the answers
+the interpreter learns from. Both live in OpenCode's data directory
+(`resolveOpenCodeDataDir`: `$XDG_DATA_HOME/opencode`, default
+`~/.local/share/opencode`), where OpenCode's `ModelRouteOverrides.filePath`
+looks.
+
+- The file is `{ version: 1, overrides: [...] }` and stays in step with
+  `ModelRouteOverrides.parse` in OpenCode
+  (`packages/core/src/model-route-overrides.ts`). OpenCode reads it again
+  whenever its modification time changes, so a new override applies to the
+  next routed request without a config reload.
+- An entry is kept only with an id, an action (`avoid`, `prefer` or
+  `allow-over-budget`), a finite `until` and at least one provider or model
+  pattern. Anything else is dropped on read, and a missing or unreadable file
+  reads as no overrides.
+- Every write drops the entries whose `until` has passed. `fixed` is true
+  unless an entry says `false`, so an override reaches fixed pools by default.
+- OpenCode's parser also accepts `weight` and a recurring `schedule`, which
+  needs no `until`. This store keeps neither field: OpenChamber's next write
+  drops an entry without `until`, and an entry with both loses its window and
+  then applies at all hours until it ends. OpenCode itself never writes the
+  file (fork main at 1668a0350b), so only a hand edit adds such entries.
+- Feedback is appended as one JSON line per answer or undo, and a line that
+  does not parse is skipped.
+
+## Plan store
+
+`plans.js` and `plan-routes.js` own the plan store: the user's plans, each
+model's cost tier, what each pool is for, and the notes about how usage has
+felt. It is `plans.json` and the append-only `plan-notes.jsonl` in OpenCode's
+data directory, the records OpenCode's `plan_info` and `route_usage` tools
+read. Settings → Routing → Plans and usage
+(`packages/ui/src/components/sections/routing/PlansSection.tsx`,
+`packages/ui/src/lib/routing/plansApi.ts`) edits it.
+
+`plan-routes.js` serves `/api/routing/plans` (GET), `/api/routing/plans/record`,
+`/api/routing/plans/model` and `/api/routing/plans/pool` (PUT), and
+`/api/routing/plans/notes` (GET, POST).
+
+- The shapes match `packages/core/src/model-plan.ts` in OpenCode. Coverage is
+  `subscription`, `credits`, `metered`, `free` or `trial`; a model's tier is
+  `cheap`, `standard` or `frontier`; a note's kind is `experience`,
+  `expectation`, `plan-change`, `correction` or `other`. A change on one side
+  needs the same change on the other and in `plansApi.ts`.
+- A missing `plans.json` is an empty store. A malformed one answers 409
+  `PLAN_STORE_MALFORMED` and is left as it is, so a bad write never erases the
+  user's plans.
+- Every write is checked against the schema, written to a temporary file and
+  renamed into place.
+- An update sets the fields it names, keeps the ones it leaves out, and removes
+  a field sent as `null`. A plan sent without an id gets a slug of its provider
+  and its plan name or label. A model needs a tier the first time it is set
+  (400 `INVALID_TIER`).
+- Nothing is deleted: there is no delete route, and a plan that ends is marked
+  `expired` or `cancelled`. Notes are only appended, and a damaged line is
+  skipped and counted (`skippedNotes`). Notes written from Settings carry
+  `source: "ui"`.
+- GET returns the newest 20 notes. The notes route takes a `limit` from 1 to
+  500, 50 by default.
 
 ## Tests
 
@@ -318,5 +470,13 @@ paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send
 ahead of a stand-in proxy, the routes), `model-routes.test.js` (every
 validator rule, which problems skip a pool, problems on a read, unchanged pools
-written as stored, a refused save and its forced retry). The queue and
-auto-accept tests cover their hooks.
+written as stored, a refused save and its forced retry),
+`route-interpreter.test.js` (the keyword stage, its question and learned
+answers, stage order and toggles, grounding, override records),
+`route-rules-routes.test.js` (interpret, answer, undo, settings, wait and the
+local model over HTTP), `route-learning-wait-settings.test.js` (the learning
+threshold, wait estimates, settings ranges), `route-local-model.test.js` (the
+pin and the download checks), `route-overrides-store.test.js` (the file
+OpenCode reads, expiry, feedback lines, `XDG_DATA_HOME`), `plans.test.js` and
+`plan-routes.test.js` (merges, refusals, atomic writes, the malformed file,
+notes). The queue and auto-accept tests cover their hooks.
