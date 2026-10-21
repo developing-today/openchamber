@@ -44,7 +44,7 @@ export const CONFIG_ACTION_DEFINITIONS = Object.freeze([
   { action: 'settings.get', title: 'Read OpenChamber settings', description: 'Read OpenChamber settings: all of them, or one settingKey. Some keys (perSurface in settings.keys, such as sidebarLayout, themeId or fontSize) hold a separate value for each surface kind: with surface, the values that surface uses are returned; without it, the base values plus a surfaces breakdown of each kind\'s own values. Secrets (passwords, tokens) are never returned, only whether they are set' },
   { action: 'settings.set', title: 'Change OpenChamber settings', description: 'Change OpenChamber settings: settingKey with settingValue (any JSON), or a settings object of several. A perSurface key changed with surface (web, desktop, vscode or mobile) changes only that surface kind; without surface it changes the base value, which a surface with its own value ignores. Every key is checked before anything is saved: unknown, device-only, computed, desktop-owned, secret and security-sensitive keys (permissions, tunnels, LAN access, the OpenCode binary, projects) are refused, as is a value OpenChamber would not accept. Turning off agentControlToolEnabled removes this tool and needs confirm. Open OpenChamber windows may need a reload to show the change' },
   { action: 'opencode.config.get', title: 'Read OpenCode config', description: 'Read OpenCode configuration and the files it comes from. configScope merged (default), user, project or custom; configPath is a dot path into it, such as mcp.servers.github or providers.openai.models["gpt-4.1"]. Values that look like keys, tokens or passwords are masked' },
-  { action: 'opencode.config.set', title: 'Change OpenCode config', description: 'Set configValue (any JSON) at configPath in the user (default) or project OpenCode config file; configValue null or configDelete removes it. Comments and formatting in the file are kept. OpenCode applies the change on its own within seconds; the result says if another config file overrides it. Use only when the user asks for the change' },
+  { action: 'opencode.config.set', title: 'Change OpenCode config', description: 'Set configValue (any JSON) at configPath in the user (default), project, or custom (the file OPENCODE_CONFIG names) OpenCode config file; configValue null or configDelete removes it. Comments and formatting in the file are kept. OpenCode applies the change on its own within seconds; the result says if another config file overrides it. Use only when the user asks for the change' },
   { action: 'opencode.reload', title: 'Restart OpenCode', description: 'Restart the OpenCode server OpenChamber manages so it re-reads its configuration; running sessions are handed over and keep going. Rarely needed, since OpenCode applies config file changes by itself: use it when the user asks or a change did not take. A connected external OpenCode cannot be restarted from here; the result says so' },
   { action: 'openchamber.restart', title: 'Restart OpenChamber', description: 'Restart the OpenChamber server itself, only when the user asks. It answers first, then starts a fresh server process on the same port and stops the old one once the new one serves; OpenCode and sessions keep running and open windows reconnect. If the new process fails to start, the old one keeps serving. Not available in the desktop app, on Windows, or when OpenChamber runs embedded or under Bun' },
 ]);
@@ -54,7 +54,7 @@ export const CONFIG_PARAMETERS = {
   settingValue: { description: 'New value for settingKey in settings.set; any JSON value' },
   settings: { type: 'object', description: 'settings.set: several settings at once, key to value' },
   surface: { type: 'string', enum: SETTINGS_SURFACES, description: 'settings.get and settings.set: the surface kind whose own values to read or change for perSurface keys; omit for the base values' },
-  configScope: { type: 'string', enum: ['merged', 'user', 'project', 'custom'], description: 'Which OpenCode config file. opencode.config.get reads merged (default), user, project or custom. opencode.config.set, mcp.toggle, skills.toggle, tools.toggle, models.toggle, models.default, provider.models.add/remove and models.cost write user (default) or project (the project config of directory or projectId)' },
+  configScope: { type: 'string', enum: ['merged', 'user', 'project', 'custom'], description: 'Which OpenCode config file. opencode.config.get reads merged (default), user, project or custom. opencode.config.set writes user (default), project or custom. mcp.toggle, skills.toggle, tools.toggle, models.toggle, models.default, provider.models.add/remove and models.cost write user (default) or project (the project config of directory or projectId)' },
   configPath: { type: 'string', description: 'Dot path into the OpenCode config, such as model or mcp.servers.github.disabled; quote a key containing dots as ["gpt-4.1"]' },
   configValue: { description: 'Value for opencode.config.set; any JSON value, null removes the key' },
   configDelete: { type: 'boolean', description: 'opencode.config.set: remove configPath instead of setting it' },
@@ -361,9 +361,9 @@ export const createConfigActions = (deps) => {
 
   const resolveScope = (input, { allowRead }) => {
     const scope = asNonEmptyString(input.configScope) || (allowRead ? 'merged' : 'user');
-    const allowed = allowRead ? ['merged', 'user', 'project', 'custom'] : ['user', 'project'];
+    const allowed = allowRead ? ['merged', 'user', 'project', 'custom'] : ['user', 'project', 'custom'];
     if (!allowed.includes(scope)) {
-      throw new OpenChamberControlError(`configScope must be ${allowed.join(', ')}${allowRead ? '' : '; only the user and project files are written'}`, 400);
+      throw new OpenChamberControlError(`configScope must be ${allowed.join(', ')}${allowRead ? '' : '; merged is a view of several files, not one to write'}`, 400);
     }
     return scope;
   };
@@ -418,7 +418,13 @@ export const createConfigActions = (deps) => {
     }
 
     const layers = readConfigLayers(directory);
-    const targetPath = scope === 'project' ? layers.paths.projectPath : layers.paths.userPath;
+    // custom is the file the user's own OPENCODE_CONFIG names, the same file
+    // Settings writes when it is set; OpenChamber's managed config file is set
+    // only in OpenCode's environment and never reaches this one.
+    if (scope === 'custom' && !layers.paths.customPath) {
+      throw new OpenChamberControlError('There is no custom config file: OPENCODE_CONFIG is not set for OpenChamber. Use user or project', 400);
+    }
+    const targetPath = { project: layers.paths.projectPath, custom: layers.paths.customPath }[scope] ?? layers.paths.userPath;
     const layerError = layers.layerErrors.find((entry) => entry.path === targetPath);
     if (layerError) throw new OpenChamberControlError(`${layerError.message}. Fix the file by hand before changing it here`, 409);
 

@@ -339,6 +339,24 @@ describe('opencode.config.set', () => {
     expect(fs.readFileSync(userConfigPath, 'utf8')).toBe(before);
   });
 
+  it('writes the custom file OPENCODE_CONFIG names, and nothing else', async () => {
+    const customPath = path.join(root, 'custom', 'opencode.jsonc');
+    writeFile(customPath, '{\n  // mine\n  "share": "manual"\n}\n');
+    writeFile(userConfigPath, JSON.stringify({ model: 'a/b' }));
+    process.env.OPENCODE_CONFIG = customPath;
+    try {
+      const { actions } = createActions();
+      const result = await actions.execute('opencode.config.set', { configScope: 'custom', configPath: 'model', configValue: 'openai/gpt' }, { contextDirectory: projectDir });
+      expect(result).toMatchObject({ scope: 'custom', file: customPath, value: 'openai/gpt', effectiveValue: 'openai/gpt', shadowed: false });
+      const text = fs.readFileSync(customPath, 'utf8');
+      expect(text).toContain('// mine');
+      expect(JSON.parse(text.replace(/\/\/.*$/m, ''))).toEqual({ share: 'manual', model: 'openai/gpt' });
+      expect(readJson(userConfigPath)).toEqual({ model: 'a/b' });
+    } finally {
+      delete process.env.OPENCODE_CONFIG;
+    }
+  });
+
   it('says when another file overrides the value it wrote', async () => {
     writeFile(path.join(projectDir, 'opencode.json'), JSON.stringify({ model: 'openai/gpt' }));
     const { actions } = createActions();
@@ -355,8 +373,9 @@ describe('opencode.config.set', () => {
     await expectError(actions.execute('opencode.config.set', { configPath: 'model', configDelete: true, configValue: 'x' }), 400, /configDelete/);
     await expectError(actions.execute('opencode.config.set', { configPath: 'plugins[0]', configValue: 'x' }), 400, /array/);
     await expectError(actions.execute('opencode.config.set', { configPath: 'model.inner', configValue: 'x' }), 400, /non-object/);
-    await expectError(actions.execute('opencode.config.set', { configScope: 'merged', configPath: 'model', configValue: 'x' }), 400, /user or project|user, project/);
-    await expectError(actions.execute('opencode.config.set', { configScope: 'custom', configPath: 'model', configValue: 'x' }), 400);
+    await expectError(actions.execute('opencode.config.set', { configScope: 'merged', configPath: 'model', configValue: 'x' }), 400, /user, project, custom/);
+    // OPENCODE_CONFIG is unset in this file, so there is no custom file to write.
+    await expectError(actions.execute('opencode.config.set', { configScope: 'custom', configPath: 'model', configValue: 'x' }), 400, /OPENCODE_CONFIG is not set/);
     await expectError(actions.execute('opencode.config.set', { configScope: 'project', configPath: 'model', configValue: 'x' }), 400, /directory/);
     expect(readJson(userConfigPath)).toEqual({ model: 'a/b' });
   });

@@ -265,6 +265,12 @@ other.
   for the registry's `perSurface` keys, because the sidebar layout, themes and
   font sizes the user changes in the app are stored per surface and the base
   read alone shows them as absent.
+- `opencode.config.set` (`config-actions.js`) writes the user file (default),
+  the project file, or with `configScope: custom` the file the user's own
+  `OPENCODE_CONFIG` names, the file Settings writes when it is set. Without
+  `OPENCODE_CONFIG` a custom write is refused rather than redirected.
+  OpenChamber's managed config file is set only in OpenCode's environment, so
+  this layer never points at it. `merged` is read only.
 - `session.archive` / `session.unarchive` move a session out of (and back
   into) the active list through the session service's `archive` /
   `unarchive`, so open windows hear the same broadcast as a UI archive; a
