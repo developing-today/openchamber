@@ -154,6 +154,41 @@ describe('settings runtime', () => {
     }
   });
 
+  it('feeds updateSettings the migrated settings, so a project resolves by its canonical id before any migrated read', async () => {
+    // A settings file no migrated read has persisted yet still carries the
+    // pre-migration project id, while projects.list already shows the
+    // canonical path-derived id. An update by that id must find the project
+    // instead of failing with "Unknown project" (issue #199).
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    try {
+      const projectPath = path.join(tempRoot, 'alpha');
+      await fsPromises.mkdir(projectPath, { recursive: true });
+      const canonicalId = createProjectIdFromPath(projectPath);
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({
+        projects: [{ id: 'legacy-random-id', path: projectPath }],
+        activeProjectId: 'legacy-random-id',
+      }), 'utf8');
+
+      const seenIds = [];
+      const result = await runtime.updateSettings((current) => {
+        seenIds.push(...(current.projects ?? []).map((project) => project.id));
+        const project = (current.projects ?? []).find((entry) => entry.id === canonicalId);
+        if (!project) throw new Error(`Unknown project: ${canonicalId}`);
+        return { projects: [{ ...project, label: 'renamed' }] };
+      });
+
+      expect(seenIds).toEqual([canonicalId]);
+      expect(result.projects).toEqual([{ id: canonicalId, path: projectPath, label: 'renamed' }]);
+      const stored = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(stored.projects).toEqual([{ id: canonicalId, path: projectPath, label: 'renamed' }]);
+      expect(stored.activeProjectId).toBe(canonicalId);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('round-trips both archived-only retention states through instance settings', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
     try {
