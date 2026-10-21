@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '@/lib/i18n';
 import { questionPrompts, type QuestionAnswer } from '@/lib/opencode/question';
@@ -6,10 +9,11 @@ import { QuestionAnswerForm, QuestionToolDetailsView, type QuestionToolDetailsVi
 
 // Static renders, as in FormMarkdown.test.tsx: question text is Markdown,
 // whose renderer loads lazily through a Vite worker import that `bun test`
-// cannot resolve, so a mounted tree fails once that import settles. The steps
-// between these states (open, pick, send) are covered by the answer
+// cannot resolve, so a mounted tree fails once that import settles. The one
+// mounted test, which opens and closes the form, uses a call with no
+// questions for that reason. Picking and sending are covered by the answer
 // conversions in questionAnswers.test.ts and the send request in
-// input-store.test.ts; no test here clicks through them.
+// input-store.test.ts.
 
 const prompts = questionPrompts({
   questions: [
@@ -115,5 +119,81 @@ describe('QuestionToolDetailsView', () => {
 
   test('the form with nothing answered cannot send yet', () => {
     expect(/<button[^>]*disabled=""[^>]*>[\s\S]{0,200}Send answers/.test(renderForm(null))).toBe(true);
+  });
+});
+
+describe('QuestionToolDetailsView, opened and closed', () => {
+  let windowInstance: Window;
+  let host: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    windowInstance = new Window();
+    Object.assign(globalThis, {
+      window: windowInstance,
+      document: windowInstance.document,
+      HTMLElement: windowInstance.HTMLElement,
+      Element: windowInstance.Element,
+      Node: windowInstance.Node,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    });
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    await windowInstance.happyDOM.close();
+  });
+
+  const click = async (label: string) => {
+    const button = [...host.querySelectorAll('button')].find((candidate) => candidate.textContent === label);
+    if (!button) throw new Error(`No "${label}" button in: ${host.textContent}`);
+    await act(async () => button.click());
+  };
+
+  test('the answers to start from are read once each time the form opens, by the click that opens it', async () => {
+    let reads = 0;
+    const startingAnswers = () => {
+      reads += 1;
+      return null;
+    };
+    const kept: QuestionAnswer[][] = [];
+    const onKeep = (answers: QuestionAnswer[]) => {
+      kept.push(answers);
+    };
+    const render = () => act(async () => root.render(
+      <I18nProvider>
+        <QuestionToolDetailsView
+          prompts={[]}
+          answers={null}
+          errorText={null}
+          canAnswer
+          startingAnswers={startingAnswers}
+          onKeep={onKeep}
+          onSend={noop}
+          isMobile={false}
+        />
+      </I18nProvider>,
+    ));
+
+    await render();
+    expect(reads).toBe(0);
+
+    await click('Answer');
+    expect(reads).toBe(1);
+
+    // The row renders again while the form stays open, as it does whenever
+    // the stores QuestionToolDetails reads change.
+    await render();
+    expect(reads).toBe(1);
+
+    await click('Cancel');
+    expect(kept).toEqual([[]]);
+    expect(reads).toBe(1);
+
+    await click('Answer');
+    expect(reads).toBe(2);
   });
 });

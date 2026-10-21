@@ -21,7 +21,7 @@ export interface QuestionToolDetailsViewProps {
     /** Why the call ended without answers, as OpenCode reported it. */
     errorText: string | null;
     canAnswer: boolean;
-    /** The answers the form opens with: the last ones given here, else the call's. */
+    /** The answers the form opens with, read each time it opens: the last ones given here, else the call's. */
     startingAnswers: () => readonly QuestionAnswer[] | null;
     /** Called with the form's answers when it closes without sending. */
     onKeep: (answers: QuestionAnswer[]) => void;
@@ -32,21 +32,25 @@ export interface QuestionToolDetailsViewProps {
 
 export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer, startingAnswers, onKeep, onSend, isMobile }: QuestionToolDetailsViewProps) {
     const { t } = useI18n();
-    const [answering, setAnswering] = React.useState(false);
+    // The answers the open form started from, null while it is closed. The
+    // click that opens it reads them, since the React Compiler caches a call
+    // made during render on the identity of `startingAnswers`, which stays the
+    // same, and a second opening would get the first one's answers.
+    const [opened, setOpened] = React.useState<{ starting: readonly QuestionAnswer[] | null } | null>(null);
 
-    if (answering && canAnswer) {
+    if (opened && canAnswer) {
         return (
             <QuestionAnswerForm
                 prompts={prompts}
-                starting={startingAnswers()}
+                starting={opened.starting}
                 isMobile={isMobile}
                 onCancel={(kept) => {
                     onKeep(kept);
-                    setAnswering(false);
+                    setOpened(null);
                 }}
                 onSend={(sent) => {
                     onSend(sent);
-                    setAnswering(false);
+                    setOpened(null);
                 }}
             />
         );
@@ -65,7 +69,7 @@ export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer
                 </p>
             ) : null}
             {canAnswer ? (
-                <Button variant="outline" size="xs" onClick={() => setAnswering(true)}>
+                <Button variant="outline" size="xs" onClick={() => setOpened({ starting: startingAnswers() })}>
                     <Icon name="question" className="size-3.5" />
                     {answers ? t('chat.questionAnswers.answerAgain') : t('chat.questionAnswers.answer')}
                 </Button>
