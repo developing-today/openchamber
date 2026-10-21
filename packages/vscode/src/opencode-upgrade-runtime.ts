@@ -19,15 +19,17 @@ type UpgradeResult =
   | { status: 409; body: { success: false; code: 'OPENCODE_UPGRADE_UNSUPPORTED'; error: string; upgrade: UpgradeCapability } }
   | { status: 500; body: { success: false; error: string } };
 
-const parseVersion = (value: unknown): { parts: number[]; prerelease: boolean } => {
+const parseVersion = (value: unknown): { parts: number[]; prerelease: boolean } | null => {
   const normalized = String(value || '').replace(/^v/, '').split('+')[0];
   const prereleaseIndex = normalized.indexOf('-');
   const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
+  const rawParts = core.split('.');
+  // Strict like versionParts in packages/ui mobileReleaseUpdate: parseInt
+  // alone accepts '1junk' as 1 and '' as 0, so a malformed version would
+  // compare as a real one and could claim an upgrade that is not there.
+  if (!core || rawParts.some((part) => !/^\d+$/.test(part))) return null;
   return {
-    parts: core.split('.').map((part) => {
-      const parsed = Number.parseInt(part || '0', 10);
-      return Number.isFinite(parsed) ? parsed : 0;
-    }),
+    parts: rawParts.map((part) => Number(part)),
     prerelease: prereleaseIndex >= 0,
   };
 };
@@ -35,6 +37,8 @@ const parseVersion = (value: unknown): { parts: number[]; prerelease: boolean } 
 const compareVersions = (left: unknown, right: unknown): number => {
   const a = parseVersion(left);
   const b = parseVersion(right);
+  // An unparseable version never claims an update.
+  if (!a || !b) return 0;
   for (let index = 0; index < Math.max(a.parts.length, b.parts.length); index += 1) {
     const difference = (a.parts[index] || 0) - (b.parts[index] || 0);
     if (difference !== 0) return difference;
