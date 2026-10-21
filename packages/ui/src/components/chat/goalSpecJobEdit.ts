@@ -25,7 +25,9 @@ export async function takeGoalSpecJobBack(job: GoalSpecJob): Promise<void> {
         attachments: message.attachments,
         context: message.context,
     });
-    if (job.trigger === 'armed') useSessionGoalArmStore.getState().setArmed(true);
+    // The arm belongs to no runtime, so after a switch away from the job's it
+    // would make the next send on the runtime now active a goal.
+    if (job.trigger === 'armed' && getRuntimeKey() === runtimeKey) useSessionGoalArmStore.getState().setArmed(true);
 }
 
 /**

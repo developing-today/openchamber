@@ -205,6 +205,7 @@ describe('goal writer jobs in the client', () => {
   test('starting a job posts the captured message with its send settings and keeps the prompt in history', async () => {
     respond = () => Response.json({ revision: 1, job: job() });
     await useGoalSpecJobStore.getState().startJob({
+      expectedRuntimeKey: getRuntimeKey(),
       sessionId: 'ses_one',
       directory: '/repo',
       trigger: 'auto-create',
@@ -243,6 +244,28 @@ describe('goal writer jobs in the client', () => {
     expect(jobs().ses_one?.id).toBe('job-1');
     const history = selectInputHistoryEntries(useInputHistoryStore.getState(), { runtimeKey: getRuntimeKey(), directory: '/repo', sessionId: 'ses_one' });
     expect(history.map((entry) => entry.text)).toEqual(['@build Add dark mode']);
+  });
+
+  // The composer takes the message, then reads the response style and the
+  // writer's context before the start: a switch in between would post the
+  // message under its session id to the server now active.
+  test('a start after a switch away from the runtime the message was taken on is refused and posts nothing', async () => {
+    await expect(useGoalSpecJobStore.getState().startJob({
+      expectedRuntimeKey: `${getRuntimeKey()}-before-the-switch`,
+      sessionId: 'ses_one',
+      directory: '/repo',
+      trigger: 'armed',
+      review: true,
+      sendMode: 'with-message',
+      tokenBudget: null,
+      writerInput: null,
+      newSession: false,
+      message: { content: 'Add dark mode', text: 'Add dark mode' },
+      sendConfig: { providerID: 'p', modelID: 'm' },
+    })).rejects.toThrow('the runtime changed');
+
+    expect(calls).toEqual([]);
+    expect(jobs()).toEqual({});
   });
 
   test('back to edit hands back the whole message, files included', async () => {

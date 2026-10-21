@@ -459,9 +459,13 @@ before a newer update arrived does not replace the job that update set. A
 failed read keeps the jobs shown; a failed action reads the server again and
 reports the server's reason. A cancelled job and a dismissed one (`job: null`)
 leave the store. A started job records its prompt in the session's input
-history, as an accepted queued message does. `claimJob` and `editJob` return
+history, as an accepted queued message does. A start names the runtime the
+composer took its message on (`expectedRuntimeKey`) and is refused, with
+nothing posted, after a switch away from it, since its session id names a
+session on that runtime. `claimJob` and `editJob` return
 the full captured message with its files decoded (`toAttachedFile`);
-`claimJob` also names the claim and says whether the server holds it until
+`claimJob` also answers the job as the server holds it after the claim,
+names the claim and says whether the server holds it until
 the agent's turn is over. Spec text edited on a card stays in `specEdits`
 per job and write attempt, so a thread switch keeps it. The writer and length
 limit chosen on a card stay in `choiceEdits` per job until `redoJob` sends

@@ -82,6 +82,8 @@ const answerQueue = (call: Call): Response => {
   return Response.json({ revision: queueRevision, session: session(), item });
 };
 let respondToQueue: (call: Call) => Response | Promise<Response> = answerQueue;
+/** Runs as the settings are read, which the composer does for a session's first message before it starts a job. */
+let onSettingsRead: (() => void) | null = null;
 
 // Nothing reaches a server: goal writer job and message queue requests are
 // recorded and answered here, everything else answers empty. An answer takes
@@ -107,7 +109,10 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     return Response.json({ directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } });
   }
   // A response style is on, so a session's first message carries it.
-  if (path === '/api/config/settings') return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+  if (path === '/api/config/settings') {
+    onSettingsRead?.();
+    return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+  }
   if (path.endsWith('/session')) return Response.json({ data: [] });
   return Response.json({});
 });
@@ -138,7 +143,8 @@ const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useInputStore } = await import('@/sync/input-store');
-const { getRuntimeKey } = await import('@/lib/runtime-switch');
+const { getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
+const { invalidateSettingsCache } = await import('@/lib/persistence');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useSessionGoalArmStore } = await import('@/stores/useSessionGoalArmStore');
@@ -765,6 +771,67 @@ describe('a message queued while the agent works, with a goal armed', () => {
       expect(sends).toEqual([{ text: 'Add dark mode\n\nAnd a toggle', goalArm: undefined, queuedGoal: { tokenBudget: 50_000 } }]);
       expect(useSessionGoalArmStore.getState().armed).toBe(false);
     } finally {
+      await composer.unmount();
+    }
+  });
+});
+
+// Last in the file: a runtime switch resets runtime-scoped state the tests
+// above set up, so nothing runs after it.
+describe('a runtime switch while a goal writer job starts', () => {
+  const originalSendMessage = useSessionUIStore.getState().sendMessage;
+  let directSends = 0;
+  const actions = () => requests.filter((call) => call.method !== 'GET');
+
+  beforeEach(() => {
+    requests.length = 0;
+    directSends = 0;
+    respondToGoalJobs = (call) => (call.method === 'GET'
+      ? Response.json({ revision: 0, jobs: [] })
+      : Response.json({ revision: 1, job: writingJob('armed') }));
+    useInputStore.setState({ pendingComposerEdits: [], pendingSyntheticParts: null });
+    useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm' });
+    useUIStore.setState({
+      sessionGoalEnabled: true,
+      sessionGoalWriterEnabled: true,
+      sessionGoalWriterReview: true,
+      sessionGoalWriterSendMode: 'with-message',
+      sessionGoalRewriteAll: false,
+      sessionGoalAutoCreate: 'off',
+      sessionGoalDefaultBudgetEnabled: false,
+    });
+    useSessionGoalArmStore.getState().setArmed(true);
+    useGoalSpecJobStore.getState().resetForRuntimeSwitch();
+    useSessionUIStore.setState({
+      sendMessage: async () => {
+        directSends += 1;
+      },
+    });
+  });
+
+  afterAll(() => {
+    useSessionUIStore.setState({ sendMessage: originalSendMessage });
+  });
+
+  // The composer takes the message, then reads the response style for a
+  // session's first message. The message's session id names a session on
+  // the runtime it was taken on, so no job may start on the one now active.
+  test('a switch while the response style is read starts no job on the runtime now active', async () => {
+    const composer = await mountComposer();
+    onSettingsRead = () => {
+      onSettingsRead = null;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://other-host.test', runtimeKey: 'goal-writer-other-host' });
+    };
+    // The response style is read from the server, not from the settings read at mount.
+    invalidateSettingsCache();
+    try {
+      await composer.send('Add dark mode', () => onSettingsRead === null);
+
+      expect(getRuntimeKey()).toBe('goal-writer-other-host');
+      expect(actions()).toEqual([]);
+      expect(directSends).toBe(0);
+    } finally {
+      onSettingsRead = null;
       await composer.unmount();
     }
   });

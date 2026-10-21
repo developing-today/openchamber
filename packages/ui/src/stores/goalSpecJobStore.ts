@@ -143,17 +143,25 @@ export interface GoalSpecJobMessage {
 }
 
 /**
- * A window's claim on a job: the full message, and the claim's id. While the
- * agent works and the follow-up setting is queue, the server holds the claim
- * (`waiting`) and hands it over once the turn is over.
+ * A window's claim on a job: the full message, the job as the server answered
+ * the claim, and the claim's id. While the agent works and the follow-up
+ * setting is queue, the server holds the claim (`waiting`) and hands it over
+ * once the turn is over.
  */
 interface GoalSpecJobClaim {
     message: GoalSpecJobMessage;
+    /** Null only from a server that answered without the job. */
+    job: GoalSpecJob | null;
     claimId: string | null;
     waiting: boolean;
 }
 
 interface GoalSpecJobStart {
+    /**
+     * The runtime whose composer the message was taken from. Its session id
+     * names a session there, so a start after a switch away from it is refused.
+     */
+    expectedRuntimeKey: string;
     sessionId: string;
     directory: string;
     trigger: GoalSpecJob['trigger'];
@@ -415,7 +423,8 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
         },
 
         startJob: async (input) => {
-            const runtimeKey = getRuntimeKey();
+            const runtimeKey = input.expectedRuntimeKey;
+            if (getRuntimeKey() !== runtimeKey) throw new Error('The message was not sent because the runtime changed.');
             const message = toServerItemInput(input.message, input.sendConfig);
             const body: StartJobBody = {
                 sessionId: input.sessionId,
@@ -461,6 +470,7 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
             const result = await mutate(job, handBackResponseSchema, jobPath(job.id, 'claim'), jsonInit('POST', { kind }));
             return {
                 message: toJobMessage(result.message),
+                job: result.job,
                 claimId: result.job?.claimId ?? null,
                 waiting: result.job?.waiting === true,
             };

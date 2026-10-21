@@ -15,6 +15,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { setSyncRefs } from '@/sync/sync-refs';
 import { ChatColumnTakesPromptsContext } from './chatColumnSession';
 import { GoalSpecJobCard } from './GoalSpecJobCard';
+import { takeGoalSpecJobBack } from './goalSpecJobEdit';
 import { sendGoalSpecJob } from './goalSpecJobSend';
 
 // The stores above load without a DOM, as their own tests load them. React
@@ -474,6 +475,27 @@ describe('GoalSpecJobCard', () => {
     expect(text()).toContain('Sent your message as typed. The spec is its goal.');
   });
 
+  test('a send from this window goes to the directory the claim found the job in, where its session moved', async () => {
+    const ready = job({ status: 'ready', spec: 'Spec', composerOnly: true });
+    show(ready);
+    respond = (call) => (call.path.endsWith('/claim')
+      ? Response.json({
+        revision: 2,
+        job: { ...ready, directory: '/repo-moved', sending: true, claimId: 'claim-now' },
+        message: { content: 'x', text: 'x', attachments: [], context: [{ kind: 'synthetic', text: 'Resolve the conflict' }] },
+      })
+      : Response.json({ revision: 3, job: { ...ready, directory: '/repo-moved', status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } } }));
+    const targets: Array<string | undefined> = [];
+    const sendMessage: SendMessage = async (_content, _providerID, _modelID, _agent, _attachments, _mention, _parts, _variant, _mode, options) => {
+      targets.push(options?.target?.directory);
+    };
+    useSessionUIStore.setState({ sendMessage });
+
+    await sendGoalSpecJob(ready, { kind: 'spec', sendMode: 'with-message', spec: 'Spec' });
+
+    expect(targets).toEqual(['/repo-moved']);
+  });
+
   test('a send from this window that fails is settled with the reason', async () => {
     const waiting = job({ status: 'ready', spec: 'Spec', composerOnly: true });
     show(waiting);
@@ -650,6 +672,25 @@ describe('GoalSpecJobCard', () => {
         expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim']);
       });
     }
+
+    test('Back to edit answered after the switch gives the message to the old runtime\'s composer and arms nothing on the new one', async () => {
+      const armed = job({ status: 'ready', spec: 'Spec', trigger: 'armed' });
+      show(armed);
+      const editRuntime = getRuntimeKey();
+      respond = () => {
+        switchAway();
+        return Response.json({
+          revision: 2,
+          job: { ...armed, status: 'cancelled' },
+          message: { content: 'Add dark mode', text: 'Add dark mode', attachments: [], context: [] },
+        });
+      };
+
+      await takeGoalSpecJobBack(armed);
+
+      expect(useInputStore.getState().pendingComposerEdits.map((edit) => edit.runtimeKey)).toEqual([editRuntime]);
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    });
   });
 
   test('a sent job says how it went and can be dismissed', async () => {

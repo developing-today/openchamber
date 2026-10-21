@@ -2000,6 +2000,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     })
                     : null;
                 await useGoalSpecJobStore.getState().startJob({
+                    expectedRuntimeKey: submitRuntimeKey,
                     sessionId: session.sessionId,
                     directory: session.directory,
                     trigger: plan.trigger,

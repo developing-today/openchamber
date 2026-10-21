@@ -661,7 +661,9 @@ sees only that final turn, so the report is its evidence.
   the card's length limit switch as `ignoreLimit`),
   then `settle` under the claim's id with the outcome and the id of the user
   message the send created (`onMessageID` on the send), or with the reason
-  when the send failed.
+  when the send failed. A send at once uses the job as the claim answered
+  it, so a session that moved to another directory meanwhile gets the
+  message in its new one.
   A claim the server holds for the agent's turn (queue, the agent working)
   returns at once with the message, so the card shows it queued with Back to
   edit open; the window keeps the message by claim id and sends it once the
@@ -680,8 +682,11 @@ sees only that final turn, so the report is its evidence.
   consumes the store first. Back to edit (`components/chat/goalSpecJobEdit.ts`)
   ends the job (`edit`), hands the full message to that session's composer
   through `input-store.pendingComposerEdits`, and arms the goal again for an
-  armed job. A new chat's job (`newSession`) shown in the main chat goes back
-  to a new chat instead, while nothing was sent in its session: no message in
+  armed job while the runtime it was taken back on is still active. The arm
+  store belongs to no runtime, so after a switch it would make the next send
+  on the other runtime a goal. A new chat's job (`newSession`) shown in the
+  main chat goes back to a new chat instead, while nothing was sent in its
+  session: no message in
   this window's store and none in OpenCode's list (`limit: 1`), so the
   session is removed (`deleteSession`) and a new-session draft opens for the
   session's directory (another chat for a chat), and the message goes to that

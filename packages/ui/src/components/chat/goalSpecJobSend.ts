@@ -35,7 +35,9 @@ export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoic
     const claimed = await jobs.claimJob(job, choice.kind);
     if (getRuntimeKey() !== runtimeKey) throw new Error('The message was not sent because the runtime changed.');
     if (!claimed.waiting) {
-        await sendClaimed(job, choice, claimed.message, claimed.claimId, runtimeKey);
+        // The job as the claim found it, since its session may have moved to
+        // another directory after the card showed it.
+        await sendClaimed(claimed.job ?? job, choice, claimed.message, claimed.claimId, runtimeKey);
         return;
     }
     if (!claimed.claimId) throw new Error('The server queued the message without naming its claim');
