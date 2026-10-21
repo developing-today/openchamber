@@ -287,6 +287,7 @@ const TEXT_INDEPENDENT_CHILDREN = [
   'QueuedMessagesStrip',
   'ComposerDictation',
   'SessionGoalObjectiveCounter',
+  'CurrentModelIndicator',
 ];
 
 const expectOnlyTheEditorFollowsTheText = (cost: TypingCost) => {

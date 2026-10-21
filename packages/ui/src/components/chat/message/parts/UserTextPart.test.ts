@@ -16,16 +16,9 @@ describe('prepareUserMarkdownContent', () => {
         expect(content).not.toContain('-&gt;');
     });
 
-    test('escapes raw HTML outside fences so tags display as text', () => {
-        const content = prepareUserMarkdownContent({
-            textContent: 'Use <b>bold</b> and <script>alert("x")</script>',
-            skillNames: new Set(),
-        });
-
-        expect(content).toContain('&lt;b&gt;bold&lt;/b&gt;');
-        expect(content).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
-        expect(content).not.toContain('<b>bold</b>');
-        expect(content).not.toContain('<script>');
+    test('leaves HTML escaping to the renderer, so code keeps the characters typed', () => {
+        const textContent = 'Use <b>bold</b> & `{ "ok": true }` with <tag a=\'1\'>';
+        expect(prepareUserMarkdownContent({ textContent, skillNames: new Set() })).toBe(textContent);
     });
 
     test('links $skill and the older /skill form, leaving unknown names as text', () => {

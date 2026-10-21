@@ -341,6 +341,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                         )}
                         disableLinkSafety
                         enableFileReferences={false}
+                        literalHtml
                     />
                 ) : (
                     plainTextContent
