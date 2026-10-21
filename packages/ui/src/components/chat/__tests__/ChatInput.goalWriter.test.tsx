@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { GoalSpecJob } from '@/stores/goalSpecJobStore';
+import type { SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 
 // Mounts the real composer, as ChatInput.keystroke.test.tsx does, to check
 // what it does with the goal writer: where a message sent through the writer
@@ -53,11 +54,37 @@ Object.assign(globalThis, {
 
 type Call = { method: string; path: string; body: ReturnType<typeof JSON.parse> };
 const requests: Call[] = [];
-let respondToGoalJobs: (call: Call) => Response = () => Response.json({ revision: 0, jobs: [] });
+let respondToGoalJobs: (call: Call) => Response | Promise<Response> = () => Response.json({ revision: 0, jobs: [] });
+const queueRequests: Call[] = [];
+let queueRevision = 0;
+/** The session's queue on the server, as the composer's requests left it. */
+let serverItems: Array<ReturnType<typeof JSON.parse>> = [];
+/**
+ * The message queue as the server answers: a new item joins the session's
+ * queue under an id the server gives it, and a take hands items back.
+ */
+const answerQueue = (call: Call): Response => {
+  queueRevision += 1;
+  const session = () => ({ sessionId: SESSION_ID, directory: '/workspace', items: serverItems, sendingId: null });
+  if (call.method === 'GET') return Response.json({ revision: queueRevision, sessions: serverItems.length > 0 ? [session()] : [] });
+  if (call.path.endsWith('/items')) {
+    serverItems = [...serverItems, { id: `queued-${queueRevision}`, createdAt: 1, ...call.body.item }];
+    return Response.json({ revision: queueRevision, session: session() });
+  }
+  if (!call.path.includes('/items/')) {
+    const items = serverItems;
+    serverItems = [];
+    return Response.json({ revision: queueRevision, session: session(), items });
+  }
+  const item = serverItems.find((entry) => call.path.endsWith(`/items/${entry.id}/take`));
+  serverItems = serverItems.filter((entry) => entry !== item);
+  return Response.json({ revision: queueRevision, session: session(), item });
+};
+let respondToQueue: (call: Call) => Response | Promise<Response> = answerQueue;
 
-// Nothing reaches a server: goal writer job requests are recorded and
-// answered here, everything else answers empty. An answer takes a moment, as
-// over a network: the composer renders before it arrives.
+// Nothing reaches a server: goal writer job and message queue requests are
+// recorded and answered here, everything else answers empty. An answer takes
+// a moment, as over a network: the composer renders before it arrives.
 spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const request = new Request(input instanceof Request ? input : new URL(input.toString(), 'http://localhost/'), init);
   const path = new URL(request.url).pathname;
@@ -67,6 +94,13 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     requests.push(call);
     await new Promise((done) => setTimeout(done, 20));
     return respondToGoalJobs(call);
+  }
+  if (path.startsWith('/api/message-queue')) {
+    const body = await request.text();
+    const call: Call = { method: request.method, path, body: body ? JSON.parse(body) : undefined };
+    queueRequests.push(call);
+    await new Promise((done) => setTimeout(done, 20));
+    return respondToQueue(call);
   }
   if (path.endsWith('/location')) {
     return Response.json({ directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } });
@@ -108,6 +142,9 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useSessionGoalArmStore } = await import('@/stores/useSessionGoalArmStore');
 const { useGoalSpecJobStore } = await import('@/stores/goalSpecJobStore');
+const { useMessageQueueStore } = await import('@/stores/messageQueueStore');
+const { getSyncChildStores } = await import('@/sync/sync-refs');
+const { clearChatDraft, createChatDraftIdentity } = await import('@/lib/chatDraftPersistence');
 const { opencodeClient } = await import('@/lib/opencode/client');
 const { getResponseStylePresetInstructions } = await import('@/lib/responseStyle');
 const { wrapSystemReminder } = await import('@/lib/systemReminder');
@@ -164,6 +201,13 @@ const mountComposer = async (on: 'session' | 'draft' = 'session') => {
   const content = container.querySelector<HTMLElement>('.cm-content');
   const view = content ? EditorView.findFromDOM(content) : null;
   if (!view) throw new Error('The composer editor did not mount');
+  /** Waits until `settled`, then for the answer and what the composer does with it. */
+  const waitFor = async (settled: () => boolean) => {
+    for (let turn = 0; turn < 50 && !settled(); turn += 1) {
+      await act(async () => { await new Promise((done) => setTimeout(done, 10)); });
+    }
+    await act(async () => { await new Promise((done) => setTimeout(done, 60)); });
+  };
   return {
     view,
     /** Types into the editor and submits the composer's form, as Enter does, then waits until `settled`. */
@@ -176,11 +220,23 @@ const mountComposer = async (on: 'session' | 'draft' = 'session') => {
       await act(async () => {
         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       });
-      for (let turn = 0; turn < 50 && !settled(); turn += 1) {
-        await act(async () => { await new Promise((done) => setTimeout(done, 10)); });
-      }
-      // The answer, and what the composer does with it.
-      await act(async () => { await new Promise((done) => setTimeout(done, 60)); });
+      await waitFor(settled);
+    },
+    /** Whether the agent is working in the session: while it is, a send follows the follow-up setting. */
+    setStatus: async (type: 'busy' | 'idle') => {
+      await act(async () => {
+        const store = getSyncChildStores().getChild('/workspace');
+        if (!store) throw new Error('The session\'s directory store did not mount');
+        store.setState({ session_status: { [SESSION_ID]: { type } } });
+      });
+    },
+    /** Clicks a queued message's button (`edit` or `send`), then waits until `settled`. */
+    clickQueued: async (label: 'edit' | 'send', settled: () => boolean) => {
+      const queue = container.querySelector('[role="group"][aria-label="Queued messages"]');
+      const button = Array.from(queue?.querySelectorAll('button') ?? []).find((candidate) => candidate.textContent?.trim() === label);
+      if (!button) throw new Error(`The queued message has no ${label} button`);
+      await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await waitFor(settled);
     },
     unmount: async () => {
       await act(async () => root.unmount());
@@ -463,6 +519,251 @@ describe('the composer and the goal writer', () => {
       expect(useInputStore.getState().getPendingSyntheticParts(null)).toEqual([{ text: 'Resolve the conflict', synthetic: true }]);
       // The message for another draft waits for that draft.
       expect(useInputStore.getState().pendingComposerEdits.map((edit) => edit.content)).toEqual(['For another draft']);
+    } finally {
+      await composer.unmount();
+    }
+  });
+});
+
+// A message sent while the agent works joins the queue (the default follow-up
+// setting). A goal armed for it must go with it, never stay on the composer.
+describe('a message queued while the agent works, with a goal armed', () => {
+  const originalSendMessage = useSessionUIStore.getState().sendMessage;
+  const sends: Array<{ text: string; goalArm: SessionGoalArm | undefined }> = [];
+  const jobStarts = () => requests.filter((call) => call.method === 'POST' && call.path === '/api/goals/spec-jobs');
+  const queued = () => queueRequests.filter((call) => call.method === 'POST' && call.path === `/api/message-queue/sessions/${SESSION_ID}/items`);
+  const takes = () => queueRequests.filter((call) => call.path.endsWith('/take'));
+  const anything = () => jobStarts().length > 0 || queued().length > 0 || sends.length > 0;
+  const plainArm: SessionGoalArm = { armed: true, objectiveOverride: null, settled: false, briefAgent: false };
+  const settleAnswers = async () => {
+    await act(async () => { await new Promise((done) => setTimeout(done, 80)); });
+  };
+
+  beforeEach(() => {
+    requests.length = 0;
+    queueRequests.length = 0;
+    serverItems = [];
+    sends.length = 0;
+    respondToGoalJobs = () => Response.json({ revision: 0, jobs: [] });
+    respondToQueue = answerQueue;
+    // A test before this one can leave text and a file in the session's composer.
+    const draft = createChatDraftIdentity(getRuntimeKey(), '/workspace', SESSION_ID);
+    if (draft) clearChatDraft(draft);
+    useInputStore.setState({ pendingComposerEdits: [], pendingSyntheticParts: null, attachedFiles: [], attachmentDraftKey: null, attachmentDrafts: new Map() });
+    useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm' });
+    useUIStore.setState({
+      sessionGoalEnabled: true,
+      sessionGoalWriterEnabled: false,
+      sessionGoalWriterReview: true,
+      sessionGoalWriterSendMode: 'with-message',
+      sessionGoalRewriteAll: false,
+      sessionGoalAutoCreate: 'off',
+      sessionGoalDefaultBudgetEnabled: true,
+      sessionGoalDefaultBudget: 50_000,
+    });
+    useSessionGoalArmStore.getState().setArmed(false);
+    useGoalSpecJobStore.getState().resetForRuntimeSwitch();
+    useMessageQueueStore.setState({ followUpBehavior: 'queue', queuedMessages: {}, sendingIds: {} });
+    // A test before this one can leave a new-session draft open, which hides the queue.
+    useSessionUIStore.setState({ newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: false } });
+    useSessionUIStore.setState({
+      sendMessage: async (content, _providerID, _modelID, _agent, _attachments, _mention, _parts, _variant, _mode, options) => {
+        sends.push({ text: content, goalArm: options?.goalArm });
+      },
+    });
+  });
+
+  afterAll(() => {
+    useSessionUIStore.setState({ sendMessage: originalSendMessage });
+  });
+
+  test('without the writer the queued message carries the goal and its budget, and the composer is no longer armed', async () => {
+    useSessionGoalArmStore.getState().setArmed(true);
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', anything);
+
+      expect(queued().map((call) => call.body)).toEqual([{
+        directory: '/workspace',
+        item: {
+          content: 'Add dark mode',
+          text: 'Add dark mode',
+          attachments: [],
+          context: [],
+          sendConfig: { providerID: 'p', modelID: 'm' },
+          goal: { tokenBudget: 50_000 },
+        },
+      }]);
+      expect(jobStarts()).toEqual([]);
+      expect(sends).toEqual([]);
+      expect(composer.view.state.doc.toString()).toBe('');
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+      // The queue the composer shows knows which message starts a goal.
+      expect(Object.values(useMessageQueueStore.getState().queuedMessages).flat().map((message) => message.goal)).toEqual([{ tokenBudget: 50_000 }]);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('with the writer the message starts a goal writer job and does not join the queue', async () => {
+    useUIStore.setState({ sessionGoalWriterEnabled: true });
+    useSessionGoalArmStore.getState().setArmed(true);
+    respondToGoalJobs = (call) => (call.method === 'GET'
+      ? Response.json({ revision: 0, jobs: [] })
+      : Response.json({ revision: 1, job: writingJob('armed') }));
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', anything);
+
+      expect(jobStarts().map((call) => [call.body.trigger, call.body.message.text, call.body.tokenBudget])).toEqual([
+        ['armed', 'Add dark mode', 50_000],
+      ]);
+      expect(queued()).toEqual([]);
+      expect(sends).toEqual([]);
+      expect(composer.view.state.doc.toString()).toBe('');
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('the goal goes with one message: one sent while the first is being queued is queued plain', async () => {
+    useSessionGoalArmStore.getState().setArmed(true);
+    // The first message's answer waits until the second one is queued.
+    let releaseFirst = () => {};
+    respondToQueue = (call) => (call.path.endsWith('/items') && queued().length === 1
+      ? new Promise<Response>((resolve) => { releaseFirst = () => resolve(answerQueue(call)); })
+      : answerQueue(call));
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', () => queued().length === 1);
+      await composer.send('And a toggle', () => queued().length === 2);
+      releaseFirst();
+      await settleAnswers();
+
+      expect(queued().map((call) => [call.body.item.text, call.body.item.goal])).toEqual([
+        ['Add dark mode', { tokenBudget: 50_000 }],
+        ['And a toggle', undefined],
+      ]);
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('with the writer, a message sent while the job starts is queued plain, not a second goal', async () => {
+    useUIStore.setState({ sessionGoalWriterEnabled: true });
+    useSessionGoalArmStore.getState().setArmed(true);
+    let releaseJob = () => {};
+    respondToGoalJobs = (call) => (call.method === 'GET'
+      ? Response.json({ revision: 0, jobs: [] })
+      : new Promise<Response>((resolve) => { releaseJob = () => resolve(Response.json({ revision: 1, job: writingJob('armed') })); }));
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', () => jobStarts().length === 1);
+      await composer.send('And a toggle', () => queued().length === 1);
+      releaseJob();
+      await settleAnswers();
+
+      expect(jobStarts().map((call) => call.body.message.text)).toEqual(['Add dark mode']);
+      expect(queued().map((call) => [call.body.item.text, call.body.item.goal])).toEqual([['And a toggle', undefined]]);
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('a message queued without a goal armed is queued as before, with the writer on too', async () => {
+    useUIStore.setState({ sessionGoalWriterEnabled: true });
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', anything);
+
+      expect(queued().map((call) => call.body)).toEqual([{
+        directory: '/workspace',
+        item: { content: 'Add dark mode', text: 'Add dark mode', attachments: [], context: [], sendConfig: { providerID: 'p', modelID: 'm' } },
+      }]);
+      expect(jobStarts()).toEqual([]);
+      expect(sends).toEqual([]);
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('a message the queue refuses comes back to the composer with its goal armed again', async () => {
+    useSessionGoalArmStore.getState().setArmed(true);
+    respondToQueue = (call) => (call.path.endsWith('/items')
+      ? Response.json({ error: 'message queue is full' }, { status: 409 })
+      : answerQueue(call));
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', anything);
+
+      expect(queued()).toHaveLength(1);
+      expect(composer.view.state.doc.toString()).toBe('Add dark mode');
+      expect(useSessionGoalArmStore.getState().armed).toBe(true);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('a queued goal message taken back for editing arms the composer again', async () => {
+    useSessionGoalArmStore.getState().setArmed(true);
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', () => queued().length === 1);
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+
+      await composer.clickQueued('edit', () => takes().length === 1);
+
+      expect(composer.view.state.doc.toString()).toBe('Add dark mode');
+      expect(useSessionGoalArmStore.getState().armed).toBe(true);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('sending a queued goal message now passes its goal with that send and leaves the composer\'s arm alone', async () => {
+    useSessionGoalArmStore.getState().setArmed(true);
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', () => queued().length === 1);
+      // The user arms a goal for the next message they type.
+      useSessionGoalArmStore.getState().setArmed(true);
+
+      await composer.clickQueued('send', () => sends.length > 0);
+
+      expect(takes().map((call) => call.method)).toEqual(['POST']);
+      expect(sends).toEqual([{ text: 'Add dark mode', goalArm: plainArm }]);
+      expect(useSessionGoalArmStore.getState().armed).toBe(true);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('a send that takes a queued goal message along carries the goal, and the composer\'s arm with its own text', async () => {
+    useSessionGoalArmStore.getState().setArmed(true);
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', () => queued().length === 1);
+      // The turn ends before the server delivers it, and the user sends another message, armed.
+      await composer.setStatus('idle');
+      useSessionGoalArmStore.getState().setArmed(true);
+
+      await composer.send('And a toggle', () => sends.length > 0);
+
+      expect(sends).toEqual([{ text: 'Add dark mode\n\nAnd a toggle', goalArm: plainArm }]);
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
     } finally {
       await composer.unmount();
     }

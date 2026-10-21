@@ -426,4 +426,20 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ]);
   });
+
+  test('a message queued with a goal is sent with that goal, never the composer\'s arm', async () => {
+    const payload = buildQueuedAutoSendPayload([
+      { id: 'queued-goal', content: 'Add dark mode', text: 'Add dark mode', createdAt: 1, goal: { tokenBudget: null } },
+    ]);
+
+    expect(payload).not.toBeNull();
+    await sendQueuedAutoSendPayload({ runtimeKey: 'runtime-original', sessionId: 'session-original', directory: '/repo' }, payload!, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+    });
+
+    expect(sendMessageCalls[0]?.[9]).toMatchObject({
+      goalArm: { armed: true, objectiveOverride: null, settled: false, briefAgent: false },
+    });
+  });
 });

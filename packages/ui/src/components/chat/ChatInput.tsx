@@ -8,7 +8,7 @@ import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageInput, type QueuedMessageSendConfig } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { createGoalArm, useSessionGoalArmStore, type SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 import { isOpenGoalSpecJob, useGoalSpecJobStore } from '@/stores/goalSpecJobStore';
 import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
 import { planGoalWriter, type GoalWriterPlan } from '@/lib/goalWriter';
@@ -312,6 +312,12 @@ type TakenComposerMessage = {
      * composer of a session created for the message meanwhile (a new chat).
      */
     restore: (to?: { identity: ChatDraftIdentity; inlineDrafts: InlineCommentDraftTarget }) => void;
+};
+
+/** Arms the composer again with a goal taken for a message that did not go out. */
+const giveGoalArmBack = (arm: SessionGoalArm | null) => {
+    if (!arm?.armed) return;
+    useSessionGoalArmStore.getState().setArmed(true, arm.objectiveOverride, { settled: arm.settled, briefAgent: arm.briefAgent });
 };
 
 /**
@@ -1374,6 +1380,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             starter chips: on mobile the collapsed pill has no mounted textarea,
             so the DOM-first input snapshot would read empty content. */
         presetText?: string;
+        /** Queue the message, with its armed goal, unless the goal writer takes it as it would take a send. */
+        queue?: true;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1482,29 +1490,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         };
     }, [agents, attachedFiles, chatDraftIdentity, clearAttachedFiles, consumeDrafts, consumePendingSyntheticParts, currentDirectory, extractInlineFileMentions, inlineDraftTarget, linkedReferences, mailboxTarget, persistDraftImmediately, prepareReadOnSendMentions, restoreDraft, sanitizeAttachmentsForSend, t]);
 
-    // Add message to queue instead of sending
-    const handleQueueMessage = React.useCallback(async () => {
-        // The comment's exit paths are attach/cancel; queueing a real prompt
-        // underneath comment mode must never fire.
-        if (isMobileCommentOpen()) return;
+    /**
+     * Queues what the composer holds. The goal armed for it goes into the
+     * queue with it: the arm is taken before anything else, so a message sent
+     * meanwhile cannot take the same goal, and whoever delivers the message
+     * creates the goal and its reminder right before it. A message the queue
+     * refuses gets everything back, the arm included.
+     */
+    const queueComposerMessage = React.useCallback(async () => {
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
-
-        // A local or extension command is run, not queued: the queue delivers
-        // text to the model, and `/compact`, `/btw`, or `/task` mean nothing there.
-        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)
-            || routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)) {
-            void handleSubmitRef.current();
-            return;
-        }
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
         // Queueing is the same user intent as sending, so an archived session
         // comes back once the queue accepts the message, not at delivery.
         const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
+        // As for a send, only a typed message takes the arm. The composer's arm
+        // names no objective of its own (sends that bring one pass their own
+        // `goalArm`), so the message is the objective.
+        const goalArm = inputMode === 'normal' && inputSnapshot.message.trim()
+            ? useSessionGoalArmStore.getState().consume()
+            : null;
         const taken = await takeComposerMessage(inputSnapshot.message, queueRuntimeKey);
+        // An agent mention alone leaves no text to be the objective.
+        const carriesGoal = Boolean(goalArm?.armed && taken?.message.text?.trim());
+        if (!carriesGoal) giveGoalArmBack(goalArm);
         if (!taken) return;
+        if (carriesGoal) {
+            const uiState = useUIStore.getState();
+            taken.message.goal = { tokenBudget: uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null };
+        }
 
         // Sending while the agent works must still take the reader to the
         // live edge — a queued message produces no user row yet, so the
@@ -1531,11 +1547,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             toast.error(t('chat.queuedMessage.toast.queueFailed'));
             // The composer was cleared on queueing; give everything back.
             taken.restore();
+            if (carriesGoal) giveGoalArmBack(goalArm);
             return;
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, taken.linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, takeComposerMessage, scrollToLatest, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, takeComposerMessage, scrollToLatest, isMobile, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+
+    // Add message to queue instead of sending
+    const handleQueueMessage = React.useCallback(async () => {
+        // The comment's exit paths are attach/cancel; queueing a real prompt
+        // underneath comment mode must never fire.
+        if (isMobileCommentOpen()) return;
+        const inputSnapshot = getCurrentInputSnapshot();
+        if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
+
+        // A local or extension command is run, not queued: the queue delivers
+        // text to the model, and `/compact`, `/btw`, or `/task` mean nothing there.
+        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)
+            || routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)) {
+            void handleSubmitRef.current();
+            return;
+        }
+        // An armed goal goes with this message. The send decides, as for any
+        // send, whether the goal writer takes it: the writer's job holds the
+        // message until the agent's turn is over. Otherwise it is queued here.
+        if (useSessionGoalArmStore.getState().armed) {
+            void handleSubmitRef.current({ queue: true });
+            return;
+        }
+        await queueComposerMessage();
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, isMobileCommentOpen, queueComposerMessage]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1606,6 +1648,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleQueuedMessageEdit = React.useCallback((queued: QueuedMessage) => {
         setMessage(queued.content);
         restoreQueuedContext(queued.context ?? []);
+        // Its goal comes back with it, armed for the message as before it was queued.
+        if (queued.goal) useSessionGoalArmStore.getState().setArmed(true);
         setTimeout(() => {
             composerRef.current?.focus();
         }, 0);
@@ -1896,7 +1940,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const goalTargetDirectory = currentSessionId
             ? currentSessionDirectoryForSync ?? currentDirectory ?? null
             : newSessionDraft?.directoryOverride ?? currentDirectory ?? null;
-        const startGoalWriterJob = async (plan: GoalWriterPlan, providerID: string, modelID: string) => {
+        const startGoalWriterJob = async (plan: GoalWriterPlan, providerID: string, modelID: string, goalArm: SessionGoalArm | null) => {
             const queuedTexts = composerQueuedMessages.map((queued) => queued.content);
             const projectForContext = currentSessionId
                 ? resolveProjectForSessionDirectory(
@@ -1906,7 +1950,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 )
                 : selectedDraftProject && selectedDraftProject.kind !== 'chat' ? selectedDraftProject : null;
             const taken = await takeComposerMessage(inputSnapshot.message, submitRuntimeKey);
-            if (!taken) return;
+            if (!taken) {
+                giveGoalArmBack(goalArm);
+                return;
+            }
             // As for a queued message: no user row comes yet, so the reader
             // goes to the live edge, where the card is the last row.
             scrollToLatest?.();
@@ -1976,13 +2023,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 });
             } catch (error) {
                 taken.restore(restoreTo);
+                giveGoalArmBack(goalArm);
                 toast.error(t('chat.goal.writer.toast.startFailed', {
                     reason: getSubmitErrorMessage(error, t('chat.chatInput.toast.messageSendFailed')),
                 }));
                 return;
             }
-            // The server writes the goal now; this arm was for this message.
-            if (plan.trigger === 'armed') useSessionGoalArmStore.getState().setArmed(false);
             void resumeAfterStart?.().catch(console.warn);
             recordLinkedReferences(session.sessionId, session.directory, taken.linked);
         };
@@ -2011,13 +2057,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             autoCreate: sessionPhase === 'idle' ? uiState.sessionGoalAutoCreate : 'off',
         });
         if (goalWriterPlan) {
-            await startGoalWriterJob(goalWriterPlan, providerIdToSend, modelIdToSend);
+            // The server writes the goal from here on, so the arm is this
+            // message's now: a message sent while the job starts is not this
+            // goal. A start that fails gives it back.
+            const goalArm = goalWriterPlan.trigger === 'armed' ? useSessionGoalArmStore.getState().consume() : null;
+            await startGoalWriterJob(goalWriterPlan, providerIdToSend, modelIdToSend, goalArm);
+            return;
+        }
+
+        // Queued at the user's request, with its armed goal: the writer did not take it.
+        if (options?.queue) {
+            await queueComposerMessage();
             return;
         }
 
         // Auto-review owns the active workflow; follow-ups wait in its queue.
         if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
-            void handleQueueMessage();
+            void queueComposerMessage();
             return;
         }
 
@@ -2038,7 +2094,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // race with that run, so it is queued; the queued-message auto-send
             // hook delivers it once the session returns to idle (#1740, #3369).
             if ((deniedPermissions || dismissedForms) && delivery !== 'steer') {
-                void handleQueueMessage();
+                void queueComposerMessage();
                 return;
             }
         }
@@ -2149,6 +2205,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             historySubmissions?: InputHistorySubmission[];
             delivery?: 'steer';
             skills?: SkillMentions;
+            goalArm?: SessionGoalArm;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -2195,6 +2252,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 return;
             }
             if (queuedOnly && queuedMessagesToSend.length === 0) return;
+        }
+
+        // A queued message's goal goes with the send that takes it, passed
+        // with the send (`goalArm`). When the composer's own text goes too, its
+        // arm is part of that goal and is taken as well; a failed send gives it back.
+        let composerGoalArm: SessionGoalArm | null = null;
+        if (queuedMessagesToSend.some((queued) => queued.goal)) {
+            if (!queuedOnly && inputSnapshot.hasContent) composerGoalArm = useSessionGoalArmStore.getState().consume();
+            sendMessageOptions = { ...sendMessageOptions, goalArm: composerGoalArm?.armed ? composerGoalArm : createGoalArm(true) };
         }
 
         const historySubmissions = buildChatInputHistorySubmissions({
@@ -2512,6 +2578,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
             restoreComposerText();
+            giveGoalArmBack(composerGoalArm);
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||

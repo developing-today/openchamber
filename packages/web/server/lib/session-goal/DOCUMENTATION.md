@@ -33,7 +33,9 @@ metadata; the runtime never creates a goal on its own. Goal creation happens
 at send time through an arm (`useSessionGoalArmStore`): the composer target
 button arms "the next prompt is the objective" in the store, and the
 run-as-goal flows (fork-from-answer dialog, plan implement dialog) pass
-their own arm with the send (`goalArm`) and leave the composer's alone.
+their own arm with the send (`goalArm`) and leave the composer's alone. A
+message queued while the agent works takes the composer's arm with it and
+starts the goal when it is delivered (*Queued goals*).
 The plan flow additionally supplies an objective OVERRIDE carrying the plan
 content, since "Implement this plan: X" alone gives the audit nothing to
 judge against. The armed send also attaches a synthetic system-reminder
@@ -445,7 +447,8 @@ sees only that final turn, so the report is its evidence.
   A send that brings its own goal (`SendMessageOptions.goalArm`, built with
   `createGoalArm`: the goal writer card, Plan "Run as goal", fork as goal)
   neither reads nor clears the flag, and a goal it fails to save is not put
-  back on it.
+  back on it. A queued message takes the flag when it is queued (*Queued
+  goals*).
   Armed slash commands resolve their authoritative command template and apply
   OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
   implicit argument suffix) for the audit objective before goal metadata is
@@ -482,7 +485,8 @@ sees only that final turn, so the report is its evidence.
   taken from the composer. Eligible sends are plain text in normal mode on a
   session with a known directory or a new-session draft: no slash command,
   shell input, side question, queue flush, or a send that auto-review would
-  queue. Two triggers:
+  queue. A message queued while the agent works with the target armed is
+  asked the same way (*Queued goals*). Two triggers:
   - `armed`: the target is armed and the switch or rewrite-all is on. The
     writer reads the message only.
   - `auto-create`: the session has no goal at all, no goal writer job still
@@ -505,11 +509,12 @@ sees only that final turn, so the report is its evidence.
   message), since a job belongs to a session; the start then says so
   (`newSession: true`). A session's first message also
   carries the response style as a derived instruction, as a direct send does.
-  Once the job starts, an armed
-  target is disarmed (the server writes the goal) and the prompt joins the
-  session's input history; a start the server refuses gives everything back
-  to the composer, to the new session's composer when one was created, and
-  keeps the arm. The composer never sends the message itself.
+  An armed target is disarmed when the job is planned (the server writes the
+  goal), so a message sent while the job starts is not this goal, and the
+  prompt joins the session's input history once the job starts; a start the
+  server refuses gives everything back to the composer, to the new session's
+  composer when one was created, and arms the target again. The composer never
+  sends the message itself.
 - Rewrite all in the UI: `setSessionGoal` takes `rewrite` with the session's
   model and returns `rewrittenSpec`. `sendMessage` passes it for unsettled
   armed goals (Plan "Run as goal", fork as goal), and `SessionGoalDialog` when
@@ -602,6 +607,46 @@ sees only that final turn, so the report is its evidence.
     answer is shown next to the current prompt (stacked on a
     narrow pane) until Apply, which puts it in the field and saves it, or
     Discard. A failure keeps the field and shows its reason.
+
+### Queued goals
+
+A message sent while the agent works joins the message queue: Enter with the
+follow-up setting on `queue` (the default) or the queue button
+(`handleQueueMessage`), and, from `handleSubmit`, a send while auto-review runs
+or one that dismissed a permission or form. An armed goal goes the way it goes
+for any send. `handleQueueMessage` hands an armed message to `handleSubmit`
+(`queue`), which asks `planGoalWriter` before it queues anything.
+
+- When `planGoalWriter` gives an armed plan, the message becomes a goal writer
+  job, which holds it until the agent's turn is over (*Goal writer jobs*). The
+  job follows the follow-up setting. With the setting on `steer`, a message
+  from the queue button goes into the running turn when the job sends it.
+- Otherwise the queue item carries the goal (`goal: { tokenBudget }`, the
+  default budget captured when it was queued). The server's queue saves the
+  goal and sends its reminder right before the message when it delivers it
+  (`../message-queue/DOCUMENTATION.md`, *Delivery loop*). A message queued
+  while auto-review runs goes this way even with the writer on, because the
+  review holds the session's queue and a goal writer job does not wait for
+  that hold.
+
+The composer takes the arm with the message, before any request, so a message
+sent before the queue or the job answers is plain. A refusal gives the message
+back to the composer and arms the target again. As for a send, only text typed
+in normal mode takes the arm; a message whose text is empty after its agent
+mention leaves the target armed. The composer's arm names no objective of its
+own, so the message text is the objective.
+
+A queued goal message the composer takes back keeps its goal. A composer send
+that takes it ("send" on its row, or a send that takes the queue along) passes
+it with that send (`goalArm`, `createGoalArm(true)`), and when the composer's
+own text goes along the composer's arm is taken into the same goal and given
+back if the send fails. "Edit" arms the target again. Removing the message
+removes its goal. VS Code's local queue passes the goal from its auto-send the
+same way, though VS Code never arms one (it runs no goal loop). Those
+client-side sends read the token budget from Settings when they send, as the
+goal writer card's composer send does; only the server's delivery uses the
+captured one. A server older than the `goal` field drops it and queues the
+message plain.
 
 ## Scheduled goals
 

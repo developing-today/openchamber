@@ -383,6 +383,29 @@ describe("server-owned message queue", () => {
     await expect(useMessageQueueStore.getState().takeForSend(target, "srv-1")).rejects.toThrow()
   })
 
+  test("addToQueue hands a goal to the server, the projection shows it, and a take brings it back", async () => {
+    const goal = { tokenBudget: 50_000 }
+    respond = () => json({ revision: 6, session: session([serverItem("srv-1", "Add dark mode", { goal })]) })
+    await useMessageQueueStore.getState().addToQueue(target, {
+      content: "Add dark mode",
+      sendConfig: { providerID: "p", modelID: "m" },
+      goal,
+    })
+    expect(calls[0]?.body.item.goal).toEqual(goal)
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.[0]?.goal).toEqual(goal)
+
+    respond = () => json({ revision: 7, session: session([]), item: serverItem("srv-1", "Add dark mode", { goal: { tokenBudget: null } }) })
+    const [taken] = await useMessageQueueStore.getState().takeForSend(target, "srv-1")
+    expect(taken?.goal).toEqual({ tokenBudget: null })
+  })
+
+  test("a message queued without a goal sends none and the projection shows none", async () => {
+    respond = () => json({ revision: 6, session: session([serverItem("srv-1", "plain")]) })
+    await useMessageQueueStore.getState().addToQueue(target, { content: "plain", sendConfig: { providerID: "p", modelID: "m" } })
+    expect(calls[0]?.body.item).not.toHaveProperty("goal")
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.[0]).not.toHaveProperty("goal")
+  })
+
   test("addToQueue rolls the optimistic entry back when the server refuses", async () => {
     respond = () => new Response("nope", { status: 500 })
     await expect(useMessageQueueStore.getState().addToQueue(target, {

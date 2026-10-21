@@ -4,7 +4,9 @@ import { create } from 'zustand';
 // composer target button (works for existing sessions AND session drafts);
 // consumed by sendMessage in session-ui-store, which turns the sent prompt
 // into the goal objective — unless the arm carries a richer objective
-// override (e.g. the plan content instead of "Implement this plan: X").
+// override (e.g. the plan content instead of "Implement this plan: X"). The
+// composer consumes it itself for a message that goes to the goal writer or
+// into the message queue, which then carries the goal to its delivery.
 // Sends that bring their own goal (the goal writer card, the run-as-goal
 // flows of the fork dialog and the plan send) pass an arm to sendMessage
 // instead and leave this store alone.

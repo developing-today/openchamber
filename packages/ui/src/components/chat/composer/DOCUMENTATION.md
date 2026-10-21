@@ -130,7 +130,10 @@ state is one persisted preference in `useUIStore` (`messageQueueExpanded`,
 collapsed by default), shared by every session and surviving session switches
 and reloads. It receives the composer's main-session queue target instead of
 resolving the global selection, so a chat pinned in the side panel addresses
-its own queue. It stays visible under the form and permission docks.
+its own queue. It stays visible under the form and permission docks. A message
+queued with the goal target armed takes the goal with it, or goes to the goal
+writer as a send would; editing it arms the target again (*Queued goals* in
+`packages/web/server/lib/session-goal/DOCUMENTATION.md`).
 
 `selectComposerQueue` in the submission builder excludes server-scheduled items
 before the composer counts manual content or reads captured send configuration.
