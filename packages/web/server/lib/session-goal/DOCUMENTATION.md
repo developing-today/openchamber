@@ -596,7 +596,10 @@ sees only that final turn, so the report is its evidence.
   becomes a session first (`materializeOpenDraftSession`, with the automatic
   worktree when it is on, and the draft's synthetic context added to the
   message), since a job belongs to a session; the start then says so
-  (`newSession: true`). A session's first message also
+  (`newSession: true`). The draft is made on the runtime the composer took the
+  message on: after a switch away from it, nothing is made, neither the
+  worktree nor the session, and the message goes back to the composer. A
+  session's first message also
   carries the response style as a derived instruction, as a direct send does.
   An armed target is disarmed when the job is planned (the server writes the
   goal), so a message sent while the job starts is not this goal, and the

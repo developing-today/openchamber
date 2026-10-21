@@ -1970,6 +1970,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             let restoreTo: Parameters<TakenComposerMessage['restore']>[0];
             try {
                 if (!session) {
+                    // The draft is a new chat on the runtime the message was taken on: after
+                    // a switch, no worktree and no session is made on the one now active.
+                    if (getRuntimeKey() !== submitRuntimeKey) throw new Error('The message was not sent because the runtime changed.');
                     startDraftWorktreeIfConfigured(taken.message.text ?? taken.message.content);
                     const created = await materializeOpenDraftSession({
                         providerID,

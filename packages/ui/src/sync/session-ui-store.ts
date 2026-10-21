@@ -1070,6 +1070,7 @@ export async function materializeOpenDraftSession(selection: {
   const store = useSessionUIStore.getState()
   const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
+  const runtimeKey = getRuntimeKey()
   const draftPermissionMode = draft.permissionMode
 
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
@@ -1103,6 +1104,9 @@ export async function materializeOpenDraftSession(selection: {
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
   draftDirectoryOverride = await resolveDraftStartDirectory(draftDirectoryOverride, draftProjectId)
+  // The draft's worktree and folder are on the runtime it started on; after a
+  // switch while it waited for them, its session is not made on the one now active.
+  if (getRuntimeKey() !== runtimeKey) throw new Error("Message was not sent because the runtime changed.")
 
   const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
   // The draft already knows what the first turn runs on, so the session is

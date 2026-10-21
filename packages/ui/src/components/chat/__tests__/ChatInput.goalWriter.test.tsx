@@ -835,4 +835,45 @@ describe('a runtime switch while a goal writer job starts', () => {
       await composer.unmount();
     }
   });
+
+  // A new chat becomes a session before its job starts. The draft is a chat on
+  // the runtime the message was taken on, so after a switch nothing of it may
+  // be made on the one now active: no session, and no job.
+  test('a switch while a new chat\'s response style is read makes no session on the runtime now active', async () => {
+    const originalCreateSession = opencodeClient.createSession;
+    const createdIn: Array<string | null | undefined> = [];
+    opencodeClient.createSession = async (_params, directory) => {
+      createdIn.push(directory);
+      return {
+        id: 'ses_from_draft',
+        projectID: 'project',
+        directory: '/workspace',
+        title: 'New chat',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 1 },
+      };
+    };
+    const composer = await mountComposer('draft');
+    // The switch the test above made reset the selection a new chat starts on.
+    await act(async () => { useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm' }); });
+    const takenOn = getRuntimeKey();
+    onSettingsRead = () => {
+      onSettingsRead = null;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://third-host.test', runtimeKey: 'goal-writer-third-host' });
+    };
+    invalidateSettingsCache();
+    try {
+      await composer.send('Add dark mode', () => onSettingsRead === null);
+
+      expect(getRuntimeKey()).not.toBe(takenOn);
+      expect(createdIn).toEqual([]);
+      expect(actions()).toEqual([]);
+      expect(directSends).toBe(0);
+    } finally {
+      onSettingsRead = null;
+      opencodeClient.createSession = originalCreateSession;
+      await composer.unmount();
+    }
+  });
 });

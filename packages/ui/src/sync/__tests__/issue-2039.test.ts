@@ -247,12 +247,14 @@ mock.module("../selection-store", () => ({
 }))
 
 // Spread the real module so the stub stays a patch: anything else importing
-// runtime-switch in this process still gets its remaining exports.
+// runtime-switch in this process still gets its remaining exports. A test sets
+// `runtimeKey` to stand for a switch to another runtime.
+let runtimeKey = "test-runtime"
 const runtimeSwitchModule = await import("@/lib/runtime-switch")
 mock.module("@/lib/runtime-switch", () => ({
   ...runtimeSwitchModule,
   getRuntimeApiBaseUrl: () => "",
-  getRuntimeKey: () => "test-runtime",
+  getRuntimeKey: () => runtimeKey,
   initializeRuntimeEndpoint: () => undefined,
   subscribeRuntimeEndpointChanged: () => () => undefined,
   switchRuntimeEndpoint: () => undefined,
@@ -401,6 +403,7 @@ mock.module("@/lib/worktrees/worktreeCreate", () => ({
 }))
 
 const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store")
+const { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } = await import("@/lib/worktrees/pendingDraftWorktree")
 const { useSessionDisplayStore } = await import("@/stores/useSessionDisplayStore")
 const { useUIStore } = await import("@/stores/useUIStore")
 
@@ -454,6 +457,7 @@ describe("issue 2039 draft auto-accept", () => {
 
   beforeEach(() => {
     storage.clear()
+    runtimeKey = "test-runtime"
     createSessionCalls.length = 0
     applyDefaultModelAgentSelectionCalls.length = 0
     activateDirectoryCalls.length = 0
@@ -839,6 +843,26 @@ describe("issue 2039 draft auto-accept", () => {
     })
 
     expect(useSessionUIStore.getState().getDirectoryForSession(sessionId)).toBe("/canonical/worktree")
+  })
+
+  // A draft's first send can wait for the worktree it started. That worktree is
+  // on the runtime the send began on, so a switch meanwhile leaves the runtime
+  // now active without a session for it.
+  test("a runtime switch while the draft waits for its worktree makes no session", async () => {
+    const requestId = createPendingDraftWorktreeRequest()
+    useSessionUIStore.getState().openNewSessionDraft({ target: "project", directoryOverride: "/repo" })
+    const draft = { ...useSessionUIStore.getState().newSessionDraft, pendingWorktreeRequestId: requestId }
+
+    const created = materializeOpenDraftSession({ providerID: "provider", modelID: "model" }, draft)
+    runtimeKey = "other-runtime"
+    resolvePendingDraftWorktreeRequest(requestId, "/worktrees/feature")
+
+    try {
+      await expect(created).rejects.toThrow("runtime changed")
+      expect(createSessionCalls).toEqual([])
+    } finally {
+      runtimeKey = "test-runtime"
+    }
   })
 })
 
