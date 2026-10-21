@@ -126,3 +126,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Malformed versions rejected in web upgrade check                    | 2026-10-21 | #184, #187                 |
 | Malformed versions rejected in web package-manager check            | 2026-10-21 | #188, #189                 |
 | Malformed versions rejected in electron compareSemver               | 2026-10-21 | #185, #190                 |
+| Bare-key secret names masked and refused                            | 2026-10-21 | #208, #175, #211           |
