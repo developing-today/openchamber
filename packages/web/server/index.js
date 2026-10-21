@@ -1958,6 +1958,7 @@ const openChamberControlService = createOpenChamberControlService({
   validateDirectoryPath,
   persistSettings,
   createProjectIdFromPath,
+  updateSettings: (compute, options) => settingsRuntime.updateSettings(compute, options),
   actionModules: [
     createSessionExtraActions({ sessionService: openChamberSessionService, sessionKnowledgeRuntime }),
     createProviderActions({ readSettingsFromDiskMigrated, persistSettings }),

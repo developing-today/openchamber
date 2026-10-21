@@ -112,6 +112,48 @@ describe('settings runtime', () => {
     }
   });
 
+  it('keeps saving after a failed save', async () => {
+    // Before, each save chained on the previous promise, so one rejection made
+    // every later save reject with the same error until a restart.
+    const { runtime, cleanup } = await createRuntime({
+      mergePersistedSettings: (_current, changes) => {
+        if (changes.failThisSave) throw new Error('disk full');
+        return changes;
+      },
+    });
+    try {
+      await expect(runtime.persistSettings({ failThisSave: true })).rejects.toThrow('disk full');
+      await expect(runtime.persistSettings({ lightThemeId: 'flexoki-light' }))
+        .resolves.toMatchObject({ lightThemeId: 'flexoki-light' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('runs updateSettings read-compute-write calls one at a time', async () => {
+    const { runtime, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    try {
+      await runtime.persistSettings({ favoriteModels: [] });
+      const append = (value) => runtime.updateSettings(async (current) => {
+        // Yield between the read and the write; without the lock the other
+        // calls would read the same list and the last write would win.
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        return { favoriteModels: [...(current.favoriteModels ?? []), value] };
+      });
+      await Promise.all(['a', 'b', 'c'].map(append));
+      expect((await runtime.readSettingsFromDisk()).favoriteModels).toEqual(['a', 'b', 'c']);
+
+      await expect(runtime.updateSettings(() => null)).resolves.toBeNull();
+      await expect(runtime.updateSettings(() => { throw new Error('refused'); })).rejects.toThrow('refused');
+      await expect(runtime.persistSettings({ lightThemeId: 'x' })).resolves.toMatchObject({ lightThemeId: 'x' });
+      expect((await runtime.readSettingsFromDisk()).favoriteModels).toEqual(['a', 'b', 'c']);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('round-trips both archived-only retention states through instance settings', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
     try {

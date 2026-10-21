@@ -565,6 +565,31 @@ describe('applyHunk', () => {
     await expect(applyHunk(tmpDir, 'file.txt', { patch: historical[0], action: 'discard' })).rejects.toThrow('refresh and try again');
   });
 
+  // The only test with a diff prefix setting on: every other test runs with
+  // whatever the machine's git config says. With diff.mnemonicPrefix git
+  // writes i/ and w/ for a working-tree diff, and before the service passed
+  // its own prefixes a hunk never matched its file.
+  it.each([
+    ['diff.mnemonicPrefix', 'true'],
+    ['diff.noprefix', 'true'],
+    ['diff.srcPrefix', 'left/'],
+  ])('stages a hunk with %s=%s set', async (key, value) => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    const original = Array.from({ length: 30 }, (_, index) => `line${index}`);
+    await writeFile(tmpDir, 'file.txt', original.join('\n') + '\n');
+    await git.add('file.txt'); await git.commit('Initial');
+    runGit(tmpDir, ['config', key, value]);
+    const changed = [...original];
+    changed[1] = 'FIRST';
+    await writeFile(tmpDir, 'file.txt', changed.join('\n') + '\n');
+    const diff = await getDiff(tmpDir, { path: 'file.txt' });
+    expect(diff.startsWith('diff --git a/file.txt b/file.txt\n')).toBe(true);
+    const [hunk] = splitHunks(diff);
+    await applyHunk(tmpDir, 'file.txt', { patch: hunk, action: 'stage' });
+    expect(await readStaged(git)).toBe(changed.join('\n') + '\n');
+  });
+
   it.each(['crlf', 'mixed'])('preserves %s file bytes through stage, unstage and discard', async (endings) => {
     if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
@@ -712,7 +737,7 @@ describe.runIf(canRunGit())('untracked diffs', () => {
     // Confirm this fixture produces a real diff exit, including stderr in the warning case.
     let expectedPatch;
     try {
-      runGit(tmpDir, ['diff', '--no-color', '--full-index', '--no-index', '--', '/dev/null', 'new file.txt']);
+      runGit(tmpDir, ['diff', '--no-color', '--full-index', '--no-index', '--src-prefix=a/', '--dst-prefix=b/', '--', '/dev/null', 'new file.txt']);
       throw new Error('Expected git diff to exit with differences');
     } catch (error) {
       expect(error.status).toBe(1);
@@ -756,6 +781,10 @@ describe.runIf(canRunGit())('untracked diffs', () => {
 
   it('rejects truncated patches when the process output exceeds the buffer limit', async () => {
     const { tmpDir } = await createTempRepo();
+    // A machine-wide core.bigFileThreshold below 21 MiB (some set 16m) makes
+    // git print "Binary files differ" for this file, and the buffer is never
+    // reached. Pin it so the test checks the buffer limit everywhere.
+    runGit(tmpDir, ['config', 'core.bigFileThreshold', '1g']);
     fs.writeFileSync(path.join(tmpDir, 'large.txt'), 'x'.repeat(21 * 1024 * 1024) + '\n');
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {

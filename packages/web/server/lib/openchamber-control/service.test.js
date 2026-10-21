@@ -299,6 +299,77 @@ describe('OpenChamber control service', () => {
     expect(cleared.note).toMatch(/defaultVariant was cleared too/);
   });
 
+  it('runs concurrent project changes through updateSettings so none writes over another', async () => {
+    // A store whose reads and writes yield, so two read-then-write sequences
+    // interleave unless something serializes them. updateSettings serializes
+    // the way the settings runtime does: one read-compute-write at a time.
+    let stored = { projects: [{ id: 'a', path: '/a' }, { id: 'b', path: '/b' }, { id: 'c', path: '/c' }] };
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+    const persistSettings = vi.fn(async (changes) => { await tick(); stored = { ...stored, ...changes }; return stored; });
+    let lock = Promise.resolve();
+    const updateSettings = vi.fn((compute) => {
+      const run = lock.then(async () => {
+        await tick();
+        const changes = await compute(structuredClone(stored));
+        if (changes) await persistSettings(changes);
+      });
+      lock = run.catch(() => {});
+      return run;
+    });
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => { await tick(); return structuredClone(stored); }),
+      sanitizeProjects: (entries) => entries,
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(async (directory) => ({ ok: true, directory })),
+      persistSettings,
+      createProjectIdFromPath: (p) => `id${p}`,
+      updateSettings,
+    });
+
+    await Promise.all([
+      service.execute('projects.update', { projectId: 'a', projectSettings: { label: 'A' } }),
+      service.execute('projects.update', { projectId: 'b', projectSettings: { label: 'B' } }),
+      service.execute('projects.remove', { projectId: 'c' }),
+      service.execute('projects.add', { directory: '/d' }),
+    ]);
+
+    expect(stored.projects).toEqual([
+      { id: 'a', path: '/a', label: 'A' },
+      { id: 'b', path: '/b', label: 'B' },
+      expect.objectContaining({ id: 'id/d', path: '/d' }),
+    ]);
+    expect(updateSettings).toHaveBeenCalledTimes(4);
+  });
+
+  it('a refused project change inside updateSettings writes nothing and does not block the next one', async () => {
+    let stored = { projects: [{ id: 'a', path: '/a' }] };
+    const persistSettings = vi.fn(async (changes) => { stored = { ...stored, ...changes }; return stored; });
+    let lock = Promise.resolve();
+    const updateSettings = (compute) => {
+      const run = lock.then(async () => {
+        const changes = await compute(structuredClone(stored));
+        if (changes) await persistSettings(changes);
+      });
+      lock = run.catch(() => {});
+      return run;
+    };
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => structuredClone(stored)),
+      sanitizeProjects: (entries) => entries,
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(),
+      persistSettings,
+      createProjectIdFromPath: (p) => p,
+      updateSettings,
+    });
+
+    await expect(service.execute('projects.update', { projectId: 'nope', projectSettings: { label: 'x' } }))
+      .rejects.toMatchObject({ statusCode: 404 });
+    expect(persistSettings).not.toHaveBeenCalled();
+    await expect(service.execute('projects.update', { projectId: 'a', projectSettings: { label: 'A' } }))
+      .resolves.toMatchObject({ project: { id: 'a', settings: { label: 'A' } } });
+  });
+
   it('removes a configured project by id, leaving its checkout untouched, and rejects an unknown id', async () => {
     const persistSettings = vi.fn(async () => ({}));
     const { service } = createService({
