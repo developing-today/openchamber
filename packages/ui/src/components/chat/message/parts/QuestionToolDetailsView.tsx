@@ -28,9 +28,16 @@ export interface QuestionToolDetailsViewProps {
     onSend: (answers: QuestionAnswer[]) => void;
     /** Enter sends from a text box only off mobile, where it starts a new line instead. */
     isMobile: boolean;
+    /** Wraps the questions in the row's scroll box, which stops growing at a share of the window's height. */
+    renderScrollBox: (questions: React.ReactNode) => React.ReactNode;
 }
 
-export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer, startingAnswers, onKeep, onSend, isMobile }: QuestionToolDetailsViewProps) {
+// The buttons sit under the scroll box, so they stay in reach however long the
+// questions are. The box pads its content with `p-2`, and the same padding
+// here lines the buttons up with the questions above them.
+const BUTTON_ROW_CLASS = 'px-2 pb-2';
+
+export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer, startingAnswers, onKeep, onSend, isMobile, renderScrollBox }: QuestionToolDetailsViewProps) {
     const { t } = useI18n();
     // The answers the open form started from, null while it is closed. The
     // click that opens it reads them, since the React Compiler caches a call
@@ -44,6 +51,7 @@ export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer
                 prompts={prompts}
                 starting={opened.starting}
                 isMobile={isMobile}
+                renderScrollBox={renderScrollBox}
                 onCancel={(kept) => {
                     onKeep(kept);
                     setOpened(null);
@@ -57,22 +65,28 @@ export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer
     }
 
     return (
-        <div className="space-y-2">
-            <ol className="space-y-3">
-                {prompts.map((prompt, index) => (
-                    <QuestionSummary key={index} prompt={prompt} answer={answers ? answers[index] ?? [] : null} />
-                ))}
-            </ol>
-            {errorText ? (
-                <p className="typography-micro text-muted-foreground">
-                    {t('chat.questionAnswers.notAnswered')} · {errorText}
-                </p>
-            ) : null}
+        <div>
+            {renderScrollBox(
+                <div className="space-y-2">
+                    <ol className="space-y-3">
+                        {prompts.map((prompt, index) => (
+                            <QuestionSummary key={index} prompt={prompt} answer={answers ? answers[index] ?? [] : null} />
+                        ))}
+                    </ol>
+                    {errorText ? (
+                        <p className="typography-micro text-muted-foreground">
+                            {t('chat.questionAnswers.notAnswered')} · {errorText}
+                        </p>
+                    ) : null}
+                </div>,
+            )}
             {canAnswer ? (
-                <Button variant="outline" size="xs" onClick={() => setOpened({ starting: startingAnswers() })}>
-                    <Icon name="question" className="size-3.5" />
-                    {answers ? t('chat.questionAnswers.answerAgain') : t('chat.questionAnswers.answer')}
-                </Button>
+                <div className={BUTTON_ROW_CLASS}>
+                    <Button variant="outline" size="xs" onClick={() => setOpened({ starting: startingAnswers() })}>
+                        <Icon name="question" className="size-3.5" />
+                        {answers ? t('chat.questionAnswers.answerAgain') : t('chat.questionAnswers.answer')}
+                    </Button>
+                </div>
             ) : null}
         </div>
     );
@@ -132,12 +146,14 @@ export function QuestionAnswerForm({
     prompts,
     starting,
     isMobile,
+    renderScrollBox,
     onCancel,
     onSend,
 }: {
     prompts: readonly QuestionPrompt[];
     starting: readonly QuestionAnswer[] | null;
     isMobile: boolean;
+    renderScrollBox: QuestionToolDetailsViewProps['renderScrollBox'];
     onCancel: (kept: QuestionAnswer[]) => void;
     onSend: (sent: QuestionAnswer[]) => void;
 }) {
@@ -169,23 +185,27 @@ export function QuestionAnswerForm({
     };
 
     return (
-        <div className="space-y-2">
-            <div className="space-y-1">
-                {shown.map((field) => (
-                    <FormFieldControl
-                        key={field.key}
-                        field={field}
-                        values={values}
-                        missing={[]}
-                        showErrors={false}
-                        isResponding={false}
-                        updateValue={updateValue}
-                        onTextKeyDown={handleTextKeyDown}
-                    />
-                ))}
-            </div>
-            <p className="typography-micro text-muted-foreground">{t('chat.questionAnswers.sendHint')}</p>
-            <div className="flex items-center justify-end gap-1.5">
+        <div>
+            {renderScrollBox(
+                <div className="space-y-2">
+                    <div className="space-y-1">
+                        {shown.map((field) => (
+                            <FormFieldControl
+                                key={field.key}
+                                field={field}
+                                values={values}
+                                missing={[]}
+                                showErrors={false}
+                                isResponding={false}
+                                updateValue={updateValue}
+                                onTextKeyDown={handleTextKeyDown}
+                            />
+                        ))}
+                    </div>
+                    <p className="typography-micro text-muted-foreground">{t('chat.questionAnswers.sendHint')}</p>
+                </div>,
+            )}
+            <div className={cn('flex items-center justify-end gap-1.5', BUTTON_ROW_CLASS)}>
                 <Button variant="ghost" size="xs" onClick={() => onCancel(answers)}>
                     {t('chat.questionAnswers.cancel')}
                 </Button>

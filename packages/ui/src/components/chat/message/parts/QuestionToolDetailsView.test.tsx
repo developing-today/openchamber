@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '@/lib/i18n';
@@ -40,6 +40,9 @@ const prompts = questionPrompts({
 
 const noop = () => undefined;
 
+// Stands in for the row's scroll box, so a test can tell what is in it.
+const renderScrollBox = (questions: ReactNode) => <div data-scroll-box="">{questions}</div>;
+
 const renderView = (props: Partial<QuestionToolDetailsViewProps>) => renderToStaticMarkup(
   <I18nProvider>
     <QuestionToolDetailsView
@@ -51,6 +54,7 @@ const renderView = (props: Partial<QuestionToolDetailsViewProps>) => renderToSta
       onKeep={noop}
       onSend={noop}
       isMobile={false}
+      renderScrollBox={renderScrollBox}
       {...props}
     />
   </I18nProvider>,
@@ -58,7 +62,7 @@ const renderView = (props: Partial<QuestionToolDetailsViewProps>) => renderToSta
 
 const renderForm = (starting: QuestionAnswer[] | null) => renderToStaticMarkup(
   <I18nProvider>
-    <QuestionAnswerForm prompts={prompts} starting={starting} isMobile={false} onCancel={noop} onSend={noop} />
+    <QuestionAnswerForm prompts={prompts} starting={starting} isMobile={false} renderScrollBox={renderScrollBox} onCancel={noop} onSend={noop} />
   </I18nProvider>,
 );
 
@@ -122,6 +126,47 @@ describe('QuestionToolDetailsView', () => {
   });
 });
 
+describe('QuestionToolDetailsView, buttons under the scroll box', () => {
+  let page: Window;
+
+  beforeEach(() => {
+    page = new Window();
+  });
+
+  afterEach(async () => {
+    await page.happyDOM.close();
+  });
+
+  // The row's scroll box stops growing at 60% of the window's height, which a
+  // few questions fill on a phone. A button inside the box sits below that
+  // fold until the reader scrolls inside the row, so every button goes under it.
+  const layout = (html: string) => {
+    page.document.body.innerHTML = html;
+    const box = page.document.querySelector('[data-scroll-box]');
+    if (!box) throw new Error(`No scroll box in: ${textOf(html)}`);
+    const buttonsUnderBox = [...page.document.querySelectorAll('button')]
+      .filter((button) => !box.contains(button))
+      .map((button) => button.textContent?.trim());
+    return { inBox: box.textContent ?? '', buttonsUnderBox };
+  };
+
+  test('the questions scroll in the box, and Answer sits under it', () => {
+    const { inBox, buttonsUnderBox } = layout(renderView({ errorText: 'The user dismissed this question' }));
+
+    expect(inBox).toContain('Which checks run?');
+    expect(inBox).toContain('Not answered · The user dismissed this question');
+    expect(buttonsUnderBox).toEqual(['Answer']);
+  });
+
+  test('the open form scrolls its questions in the box, and Cancel and Send answers sit under it', () => {
+    const { inBox, buttonsUnderBox } = layout(renderForm(null));
+
+    expect(inBox).toContain('Which checks run?');
+    expect(inBox).toContain('The agent gets your answers as a new message.');
+    expect(buttonsUnderBox).toEqual(['Cancel', 'Send answers']);
+  });
+});
+
 describe('QuestionToolDetailsView, opened and closed', () => {
   let windowInstance: Window;
   let host: HTMLDivElement;
@@ -174,6 +219,7 @@ describe('QuestionToolDetailsView, opened and closed', () => {
           onKeep={onKeep}
           onSend={noop}
           isMobile={false}
+          renderScrollBox={renderScrollBox}
         />
       </I18nProvider>,
     ));

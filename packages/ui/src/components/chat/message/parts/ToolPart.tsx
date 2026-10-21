@@ -1259,7 +1259,15 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             }
 
             if (content.kind === 'questions') {
-                return renderScrollableBlock(<QuestionToolDetails part={part} state={state} />, { maxHeightClass: 'max-h-[60vh]' });
+                // Only the questions go in the box. The view puts its buttons
+                // under it, so they stay in reach however long the questions are.
+                return (
+                    <QuestionToolDetails
+                        part={part}
+                        state={state}
+                        renderScrollBox={(questions) => renderScrollableBlock(questions, { maxHeightClass: 'max-h-[60vh]' })}
+                    />
+                );
             }
 
             if (content.kind === 'error') {

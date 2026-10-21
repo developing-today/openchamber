@@ -8,7 +8,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useChatColumnActions, useChatSessionSelection } from '../../chatColumnSession';
 import { resolveChatPromptReadOnly } from '../../chatPromptReadOnly';
 import { formatQuestionAnswers, recallQuestionAnswers, rememberQuestionAnswers } from '../../questionAnswers';
-import { QuestionToolDetailsView } from './QuestionToolDetailsView';
+import { QuestionToolDetailsView, type QuestionToolDetailsViewProps } from './QuestionToolDetailsView';
 
 /**
  * The expanded row of an agent's `question` call: every question with all of
@@ -17,7 +17,11 @@ import { QuestionToolDetailsView } from './QuestionToolDetailsView';
  * can be answered again from here; the answers go to the agent as a new
  * message, since the call itself is over.
  */
-export function QuestionToolDetails({ part, state }: { part: ToolPart; state: ToolState }) {
+export function QuestionToolDetails({ part, state, renderScrollBox }: {
+    part: ToolPart;
+    state: ToolState;
+    renderScrollBox: QuestionToolDetailsViewProps['renderScrollBox'];
+}) {
     const { t } = useI18n();
     const prompts = React.useMemo(() => questionPrompts(state.input), [state.input]);
     const answers = React.useMemo(() => questionAnswers(state), [state]);
@@ -57,6 +61,7 @@ export function QuestionToolDetails({ part, state }: { part: ToolPart; state: To
             onKeep={handleKeep}
             onSend={handleSend}
             isMobile={isMobile}
+            renderScrollBox={renderScrollBox}
         />
     );
 }
