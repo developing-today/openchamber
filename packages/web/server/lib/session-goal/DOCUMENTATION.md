@@ -30,10 +30,11 @@ the web server and survives UI disconnects.
 
 The UI writes goals (create/edit/pause/resume/clear) by patching this
 metadata; the runtime never creates a goal on its own. Goal creation happens
-at send time via the arm store (`useSessionGoalArmStore`): the composer
-target button arms "the next prompt is the objective", and the run-as-goal
-flows (fork-from-answer dialog, plan implement dialog) arm the same way —
-the plan flow additionally supplies an objective OVERRIDE carrying the plan
+at send time through an arm (`useSessionGoalArmStore`): the composer target
+button arms "the next prompt is the objective" in the store, and the
+run-as-goal flows (fork-from-answer dialog, plan implement dialog) pass
+their own arm with the send (`goalArm`) and leave the composer's alone.
+The plan flow additionally supplies an objective OVERRIDE carrying the plan
 content, since "Implement this plan: X" alone gives the audit nothing to
 judge against. The armed send also attaches a synthetic system-reminder
 part telling the agent goal mode is active and that each turn should end
@@ -431,8 +432,9 @@ sees only that final turn, so the report is its evidence.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
   A send that brings its own goal (`SendMessageOptions.goalArm`, built with
-  `createGoalArm`) neither reads nor clears the flag, and a goal it fails to
-  save is not put back on it.
+  `createGoalArm`: the goal writer card, Plan "Run as goal", fork as goal)
+  neither reads nor clears the flag, and a goal it fails to save is not put
+  back on it.
   Armed slash commands resolve their authoritative command template and apply
   OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
   implicit argument suffix) for the audit objective before goal metadata is

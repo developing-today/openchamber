@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 
 // Narrow store for the "next message starts a goal" flag. Armed by the
-// composer target button (works for existing sessions AND session drafts)
-// and by the run-as-goal flows (fork dialog, plan send); consumed by
-// sendMessage in session-ui-store, which turns the sent prompt into the
-// goal objective — unless the arming flow supplied a richer objective
+// composer target button (works for existing sessions AND session drafts);
+// consumed by sendMessage in session-ui-store, which turns the sent prompt
+// into the goal objective — unless the arm carries a richer objective
 // override (e.g. the plan content instead of "Implement this plan: X").
+// Sends that bring their own goal (the goal writer card, the run-as-goal
+// flows of the fork dialog and the plan send) pass an arm to sendMessage
+// instead and leave this store alone.
 export interface SessionGoalArm {
   armed: boolean;
   objectiveOverride: string | null;

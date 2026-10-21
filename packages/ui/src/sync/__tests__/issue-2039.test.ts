@@ -172,6 +172,8 @@ mock.module("@/stores/useSessionGoalArmStore", () => ({
   useSessionGoalArmStore: {
     getState: () => ({ setArmed: () => undefined }),
   },
+  // A fork builds its own goal with it; no send here starts a goal.
+  createGoalArm: () => ({ armed: false, objectiveOverride: null, settled: false, briefAgent: false }),
 }))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({

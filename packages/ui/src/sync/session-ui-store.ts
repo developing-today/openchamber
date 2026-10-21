@@ -83,7 +83,7 @@ import {
   type UnarchiveSessionsOptions,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
-import { useSessionGoalArmStore, type SessionGoalArm } from "@/stores/useSessionGoalArmStore"
+import { createGoalArm, useSessionGoalArmStore, type SessionGoalArm } from "@/stores/useSessionGoalArmStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { buildGoalIntroReminder } from "@/lib/goalWriter"
 import { useUIStore } from "@/stores/useUIStore"
@@ -2300,13 +2300,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
     }
 
-    // "Run as goal" rides the same arm mechanism as the composer target
-    // button: sendMessage consumes the flag, stamps the goal (objective =
-    // the composed fork message) and attaches the goal-mode intro part.
-    // Set explicitly either way so a stray armed flag cannot leak into a
-    // non-goal fork.
-    useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
-
+    // "Run as goal" goes with this send (`goalArm`): sendMessage stamps the
+    // goal (objective = the composed fork message) and attaches the
+    // goal-mode intro part. The composer's own arm is neither read nor
+    // cleared, so a composer send made while this one waits cannot take the
+    // fork's goal, and a goal the user armed in the composer stays theirs.
     await get().sendMessage(
       composeForkSessionMessage(execution.instructions, assistantPlanText),
       providerID,
@@ -2317,7 +2315,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       undefined,
       execution.variant || undefined,
       undefined,
-      { sessionId: session.id },
+      { sessionId: session.id, goalArm: createGoalArm(execution.runAsGoal === true) },
     )
   },
 
