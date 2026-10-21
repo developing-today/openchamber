@@ -437,6 +437,22 @@ describe('ModelPoolsSection', () => {
     }
   });
 
+  test('the autonomy select shows the label of the level a pool holds, and the default\'s label when it holds none', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'] }, ruled: { targets: ['p/dear'], autonomy: 'rules' } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      const shown = () => findByAriaLabel(dom.container, '[role="combobox"]', 'Autonomy').textContent;
+      await expandPool(dom.container, 'kept');
+      expect(shown()).toBe('Unset (full behavior)');
+      await pickOption(dom.container, 'Autonomy', 'Predictive');
+      expect(shown()).toBe('Predictive');
+      await expandPool(dom.container, 'ruled');
+      expect(shown()).toBe('Rules');
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('automatic review switch saves enabled and then explicitly disabled', async () => {
     const { dom, cleanup } = await renderSection();
     try {

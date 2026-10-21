@@ -7,7 +7,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SettingsFieldRow,
 } from '@/components/sections/shared/SettingsSection';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { ModelRoute } from '@/lib/routing/modelRoutesApi';
 import {
   isConcreteTarget,
@@ -24,6 +24,12 @@ import { cn } from '@/lib/utils';
 
 type Health = NonNullable<ModelRoute['health']>;
 type Budget = NonNullable<NonNullable<ModelRoute['budgets']>[string]>;
+
+const SELECTION_LABEL_KEYS = {
+  ordered: 'settings.pools.advanced.selection.ordered',
+  'round-robin': 'settings.pools.advanced.selection.roundRobin',
+  weighted: 'settings.pools.advanced.selection.weighted',
+} as const satisfies Record<NonNullable<ModelRoute['selection']>, I18nKey>;
 
 const SECONDS = 1000;
 
@@ -125,13 +131,13 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
           onValueChange={(next) => onChange(setRouteField(route, 'selection', pickedValue(next)))}
         >
           <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-56')} aria-label={t('settings.pools.advanced.selection')}>
-            <SelectValue />
+            <SelectValue>{route.selection ? t(SELECTION_LABEL_KEYS[route.selection]) : t('settings.pools.advanced.selectionDefault')}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__unset__">{t('settings.pools.advanced.selectionDefault')}</SelectItem>
-            <SelectItem value="ordered">{t('settings.pools.advanced.selection.ordered')}</SelectItem>
-            <SelectItem value="round-robin">{t('settings.pools.advanced.selection.roundRobin')}</SelectItem>
-            <SelectItem value="weighted">{t('settings.pools.advanced.selection.weighted')}</SelectItem>
+            <SelectItem value="ordered">{t(SELECTION_LABEL_KEYS.ordered)}</SelectItem>
+            <SelectItem value="round-robin">{t(SELECTION_LABEL_KEYS['round-robin'])}</SelectItem>
+            <SelectItem value="weighted">{t(SELECTION_LABEL_KEYS.weighted)}</SelectItem>
           </SelectContent>
         </Select>
       </SettingsFieldRow>

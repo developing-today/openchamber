@@ -145,7 +145,7 @@ const PoolFields: React.FC<{
           onValueChange={(next) => onChange({ ...route, autonomy: pickedAutonomy(next) })}
         >
           <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.autonomy')}>
-            <SelectValue placeholder={t('settings.pools.autonomyDefault')} />
+            <SelectValue>{route.autonomy ? t(`settings.pools.autonomy.${route.autonomy}`) : t('settings.pools.autonomyDefault')}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__unset__">{t('settings.pools.autonomyDefault')}</SelectItem>

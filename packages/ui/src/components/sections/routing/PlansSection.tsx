@@ -131,7 +131,7 @@ const SelectField = <T extends string>({
 }) => (
   <Select value={value} onValueChange={(next) => onChange(next as T)}>
     <SelectTrigger className="w-full">
-      <SelectValue />
+      <SelectValue>{label(value)}</SelectValue>
     </SelectTrigger>
     <SelectContent>
       {options.map((option) => (
