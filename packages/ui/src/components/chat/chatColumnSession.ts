@@ -64,9 +64,9 @@ export const useChatColumnActions = (): ChatColumnActions => React.useContext(Ch
 /**
  * Whether the column's chat takes prompts, as its ChatContainer decides: a
  * read-only surface, a deleted space's archived chat and a subagent's session
- * (unless prompting those is allowed) get no composer. A transcript row that
- * sends through the composer reads it. False outside a column, where no
- * composer is known to take the text.
+ * (unless prompting those is allowed) get no composer. What acts through the
+ * composer reads it: a question row's Answer and the goal writer card. False
+ * outside a column, where no composer is known to take the text.
  */
 export const ChatColumnTakesPromptsContext = React.createContext(false);
 

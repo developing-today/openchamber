@@ -63,6 +63,7 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { ensureHomeDirectoryResolved } = await import('@/stores/useDirectoryStore');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { ChatColumnTakesPromptsContext } = await import('./chatColumnSession');
 const { GoalSpecJobCard } = await import('./GoalSpecJobCard');
 
 afterAll(() => {
@@ -127,7 +128,9 @@ describe('GoalSpecJobCard choices for this spec', () => {
   const show = (value: GoalSpecJob) => useGoalSpecJobStore.getState().applyServerJob(value.sessionId, value, 1, getRuntimeKey());
   const render = () => act(async () => root.render(
     <I18nProvider>
-      <GoalSpecJobCard sessionId="ses_card" />
+      <ChatColumnTakesPromptsContext.Provider value>
+        <GoalSpecJobCard sessionId="ses_card" />
+      </ChatColumnTakesPromptsContext.Provider>
     </I18nProvider>,
   ));
   const text = () => document.body.textContent ?? '';

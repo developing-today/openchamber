@@ -615,7 +615,10 @@ sees only that final turn, so the report is its evidence.
 - `components/chat/GoalSpecJobCard.tsx` shows a session's job: the last row of
   its transcript (the list footer in `ChatContainer`, after
   `SessionErrorNotice`), or above the composer while the session has no
-  transcript yet. It names the writer (the picked model with its effort, the
+  transcript yet. A chat that takes no prompts (`ChatColumnTakesPromptsContext`:
+  a read-only surface, a deleted space's archived chat, a subagent's session
+  unless prompting those is allowed) shows no card, since it has no composer to
+  send the message from or take it back to. It names the writer (the picked model with its effort, the
   session's model at its default effort, or the small model until the model
   that answered is known) and the state: writing (with "sent as soon as it is
   written" when review is off), ready with the spec in an editable field (edits

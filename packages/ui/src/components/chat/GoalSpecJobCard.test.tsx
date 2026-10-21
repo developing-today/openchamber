@@ -13,6 +13,7 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { setSyncRefs } from '@/sync/sync-refs';
+import { ChatColumnTakesPromptsContext } from './chatColumnSession';
 import { GoalSpecJobCard } from './GoalSpecJobCard';
 
 // The stores above load without a DOM, as their own tests load them. React
@@ -87,9 +88,11 @@ describe('GoalSpecJobCard', () => {
   let calls: Call[];
   let respond: (call: Call) => Response;
 
-  const render = (sessionId = 'ses_card') => act(async () => root.render(
+  const render = (sessionId = 'ses_card', takesPrompts = true) => act(async () => root.render(
     <I18nProvider>
-      <GoalSpecJobCard sessionId={sessionId} />
+      <ChatColumnTakesPromptsContext.Provider value={takesPrompts}>
+        <GoalSpecJobCard sessionId={sessionId} />
+      </ChatColumnTakesPromptsContext.Provider>
     </I18nProvider>,
   ));
   const findButton = (label: string): HTMLButtonElement | null => (
@@ -147,6 +150,14 @@ describe('GoalSpecJobCard', () => {
 
     await click('Use my message as the goal');
     expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'original', ignoreLimit: false } }]);
+  });
+
+  test('a chat that takes no prompts shows no card, so nothing can send the message or take it back', async () => {
+    show(job({ status: 'ready', spec: 'Spec' }));
+    await render('ses_card', false);
+
+    expect(text()).toBe('');
+    expect(document.querySelectorAll('button')).toHaveLength(0);
   });
 
   test('a written spec can be edited, sent either way, or written again', async () => {

@@ -19,6 +19,7 @@ import {
   type GoalSpecJobChoices,
 } from '@/stores/goalSpecJobStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatColumnTakesPrompts } from './chatColumnSession';
 import { GoalWriterPicker } from './GoalWriterPicker';
 import { takeGoalSpecJobBack } from './goalSpecJobEdit';
 import { sendGoalSpecJob } from './goalSpecJobSend';
@@ -42,12 +43,15 @@ const otherSendMode = (mode: SendMode): SendMode => (mode === 'with-message' ? '
  * The goal writer's card for one session: what the server does with a message
  * sent through the goal writer, and the choices that send it. ChatContainer
  * shows it as the last row of the transcript, or above the composer while the
- * session has no transcript yet. The job is the server's, so leaving the
- * session changes nothing and the card is there on return.
+ * session has no transcript yet. A chat that takes no prompts shows no card:
+ * it has no composer to send the message from or take it back to. The job is
+ * the server's, so leaving the session changes nothing and the card is there
+ * on return.
  */
 export const GoalSpecJobCard = React.memo(function GoalSpecJobCard({ sessionId, className }: GoalSpecJobCardProps) {
   const job = useGoalSpecJobStore((state) => state.jobs[sessionId] ?? null);
-  if (!job) return null;
+  const takesPrompts = useChatColumnTakesPrompts();
+  if (!job || !takesPrompts) return null;
   return (
     <div className={className}>
       <GoalSpecJobCardBody key={job.id} job={job} />
