@@ -112,6 +112,8 @@ async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message:
     const goalArm = choice.kind === 'spec'
         ? createGoalArm(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message' })
         : createGoalArm(job.trigger === 'armed', null, { settled: true });
+    // The user message this send creates: a sent card hides once a user message follows it.
+    let messageId: string | undefined;
     try {
         if (!target) throw new Error('The session of this goal spec has no directory');
         await useSessionUIStore.getState().sendMessage(
@@ -124,7 +126,7 @@ async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message:
             outgoing.additionalParts.length > 0 ? outgoing.additionalParts : undefined,
             job.sendConfig.variant,
             'normal',
-            { target, userInitiated: true, goalArm },
+            { target, userInitiated: true, goalArm, onMessageID: (id) => { messageId = id; } },
         );
     } catch (error) {
         const reason = error instanceof Error && error.message ? error.message : 'The message could not be sent';
@@ -132,6 +134,6 @@ async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message:
         throw error;
     }
     await jobs.settleJob(job, choice.kind === 'spec'
-        ? { outcome: { kind: 'spec', sendMode: choice.sendMode }, spec: choice.spec }
-        : { outcome: { kind: 'original', withGoal: job.trigger === 'armed' } });
+        ? { outcome: { kind: 'spec', sendMode: choice.sendMode }, spec: choice.spec, messageId }
+        : { outcome: { kind: 'original', withGoal: job.trigger === 'armed' }, messageId });
 }

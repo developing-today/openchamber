@@ -191,6 +191,8 @@ export async function routeMessage(params: {
    * without waiting for it. Resolves to '' when nothing is owed.
    */
   sessionKnowledge?: Promise<string>
+  /** Told the id a prompt's user message gets; a command or shell send has none. */
+  onMessageID?: (messageID: string) => void
 }): Promise<'command' | 'prompt' | 'shell'> {
   const requestDirectory = params.directory ?? undefined
   // The session carries its own model and agent server-side. Sending them on
@@ -318,6 +320,7 @@ export async function routeMessage(params: {
     context: contextItems,
     leadingContext: params.sessionKnowledge?.then((text) => (text ? { text } : null)),
     appendSubmissions: params.appendSubmissions,
+    onMessageID: params.onMessageID,
     send: (messageID, context) => opencodeClient.sendMessage({
       runtimeKey: params.runtimeKey,
       id: params.sessionId,
@@ -362,6 +365,8 @@ type SendMessageOptions = {
    * composer's.
    */
   goalArm?: SessionGoalArm
+  /** Told the id of the user message a prompt creates, before it is sent; a command or shell send has none. */
+  onMessageID?: (messageID: string) => void
 }
 
 type AssistantMessageSessionExecution = {
@@ -1925,6 +1930,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           delivery: options?.delivery,
           skills: options?.skills,
           sessionKnowledge: draftKnowledgeRequest?.then((knowledge) => knowledge.text),
+          onMessageID: options?.onMessageID,
           additionalParts: draftParts.map((p) => ({
             text: p.text,
             synthetic: p.synthetic,
@@ -2052,6 +2058,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         delivery: options?.delivery,
         skills: options?.skills,
         sessionKnowledge: knowledgeRequest?.then((knowledge) => knowledge.text),
+        onMessageID: options?.onMessageID,
         additionalParts: additionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,

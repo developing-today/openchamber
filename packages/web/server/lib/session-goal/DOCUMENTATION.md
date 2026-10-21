@@ -149,8 +149,8 @@ persisted, revisioned, broadcast).
 
 - Job: `{ id, sessionId, directory, status, trigger, review, sendMode,
   tokenBudget, message, composerOnly, spec, writer, sendConfig, error,
-  failedStep, warning, sending, waiting, claimId, outcome, attempt,
-  createdAt, updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
+  failedStep, warning, sending, waiting, claimId, messageId, outcome,
+  attempt, createdAt, updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
   `cancelled`; `trigger` is `armed` or `auto-create`. `message` is the
   captured composer message in the queue item's form (`content` as typed,
   `text` to deliver, `agentMention`, `attachments`, `context`); `sendConfig`
@@ -165,7 +165,11 @@ persisted, revisioned, broadcast).
   message as typed that fails while the spec is being written leaves a job
   without a spec, so its status is `failed` although the write never failed.
   `warning` is set on a sent job whose goal reminder could not be sent; the
-  message went out without it.
+  message went out without it. `messageId` is the id of the user message a
+  sent job sent: the id OpenCode answered the prompt with (it names the inbox
+  item, and the message keeps it), or the one the composer reports in
+  `settle`; null for a job sent before the field existed or a composer that
+  named none.
   `sending` is a send under way, `waiting` a send held until the agent's
   turn ends (below), and `claimId` the claim of the composer sending it,
   while that claim waits or is under way. `writerInput` (conversation and
@@ -289,7 +293,7 @@ persisted, revisioned, broadcast).
   writerInput?, message, sendConfig }`; `POST /:jobId/send` with `{ kind:
   'spec', sendMode, spec }` (the spec as edited) or `{ kind: 'original' }`;
   `POST /:jobId/redo`; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
-  }`; `POST /:jobId/settle` with `{ outcome, spec?, error? }`; `DELETE
+  }`; `POST /:jobId/settle` with `{ outcome, spec?, messageId?, error? }`; `DELETE
   /:jobId` dismisses a sent job (an open one is `409`). Mutations answer `{
   revision, job }`, and `edit` and `claim` add the full `message`; a send or
   claim held for the agent's turn answers the job with `waiting: true`.
@@ -528,7 +532,13 @@ sees only that final turn, so the report is its evidence.
   that names the step that failed (the write, or the send of the message),
   queued until the agent finishes its turn (`waiting`, where only Back to
   edit acts), sending, or sent with how it went and a dismiss button
-  (`DELETE`). Actions on an open job: send in the default send mode or the
+  (`DELETE`). A sent card in the transcript hides once the user sends another
+  message in that session (`components/chat/goalSpecJobOvertaken.ts`): a user
+  message after the job's own one, found by `messageId`; while that message is
+  not in the loaded transcript, or the job names none, a user message newer
+  than the send. Its own message can reach the session after the job is marked
+  sent, so time alone would hide the card at once. Actions on an open job:
+  send in the default send mode or the
   other one, send the message as typed (also while writing, which stops the
   writer; an armed goal keeps the message as its objective, an automatic one
   goes without a goal), write again (ready, or after a failed write), try
@@ -539,7 +549,8 @@ sees only that final turn, so the report is its evidence.
   `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
   `sendMessage` with the full message assembled as a taken queued message
   (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`),
-  then `settle` with the outcome, or with the reason when the send failed.
+  then `settle` with the outcome and the id of the user message the send
+  created (`onMessageID` on the send), or with the reason when the send failed.
   A claim the server holds for the agent's turn (queue, the agent working)
   returns at once with the message, so the card shows it queued with Back to
   edit open; the window keeps the message by claim id and sends it once the

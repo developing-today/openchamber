@@ -249,6 +249,7 @@ describe('GoalSpecJobCard', () => {
       : Response.json({ revision: 3, job: { ...waiting, status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } } }));
     const sent: Array<{ text: string; provider: string; agent: string | undefined; files: string[]; parts: string[]; goalArm: SessionGoalArm | undefined; composerArmed: boolean }> = [];
     const sendMessage: SendMessage = async (content, providerID, _modelID, agent, attachments, _mention, additionalParts, _variant, _mode, options) => {
+      options?.onMessageID?.('msg_card_1');
       sent.push({
         text: content,
         provider: providerID,
@@ -282,7 +283,8 @@ describe('GoalSpecJobCard', () => {
       goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true },
       composerArmed: true,
     }]);
-    expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec' });
+    // The settle names the user message the send created.
+    expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec', messageId: 'msg_card_1' });
     expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: true, objectiveOverride: null });
     expect(text()).toContain('Sent your message as typed. The spec is its goal.');
   });

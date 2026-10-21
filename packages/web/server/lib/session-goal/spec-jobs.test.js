@@ -657,6 +657,36 @@ describe('goal writer jobs', () => {
     expect(backupsIn(dataDir)).toEqual([]);
   });
 
+  it('a sent job names the user message it sent: the id OpenCode queued the prompt under, or the one the composer reports', async () => {
+    const openCode = createOpenCode();
+    openCode.state.promptAnswer = { data: { id: 'msg_from_server' } };
+    const byServer = createRuntime({ openCode });
+    const written = await byServer.runtime.create(job());
+    expect(written.job.messageId).toBeNull();
+    writeAnswer(byServer.writer);
+    await byServer.runtime.whenIdle();
+    const sent = await byServer.runtime.send(written.job.id, { kind: 'spec', sendMode: 'with-message', spec: SPEC });
+    expect(sent.job.messageId).toBe('msg_from_server');
+
+    const dataDir = makeDataDir();
+    const byComposer = createRuntime({ dataDir });
+    const claimed = await byComposer.runtime.create(job({ message: composerOnlyMessage }));
+    await byComposer.runtime.claim(claimed.job.id, { kind: 'original' });
+    const settled = await byComposer.runtime.settle(claimed.job.id, { outcome: { kind: 'original', withGoal: true }, messageId: 'msg_from_composer' });
+    expect(settled.job.messageId).toBe('msg_from_composer');
+    await byComposer.runtime.flush();
+    const restarted = createRuntime({ dataDir });
+    await restarted.runtime.load();
+    expect(restarted.runtime.snapshot().jobs[0].messageId).toBe('msg_from_composer');
+
+    // A file written before the field existed reads as no message named.
+    const olderDir = makeDataDir();
+    writeStoredFile(olderDir, { version: 1, revision: 3, jobs: [storedJob({ status: 'sent', outcome: { kind: 'original', withGoal: true } })] });
+    const older = createRuntime({ dataDir: olderDir });
+    await older.runtime.load();
+    expect(older.runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', messageId: null });
+  });
+
   it('a composer that claimed the original and failed leaves a job that can be written again', async () => {
     const { runtime, writer } = createRuntime({ settings: {} });
     const created = await runtime.create(job({ message: composerOnlyMessage }));

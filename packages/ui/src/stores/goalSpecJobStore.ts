@@ -76,6 +76,8 @@ const jobSchema = z.object({
      * only that window sends it. Absent from servers before it existed.
      */
     claimId: z.string().nullable().optional(),
+    /** The user message a sent job sent, when OpenCode or the sending window named it. Absent from servers before it existed. */
+    messageId: z.string().nullable().optional(),
     outcome: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('spec'), sendMode: sendModeSchema }),
         z.object({ kind: z.literal('original'), withGoal: z.boolean() }),
@@ -101,8 +103,11 @@ export type GoalSpecJobChoice =
 
 type GoalSpecJobOutcome = NonNullable<GoalSpecJob['outcome']>;
 
-/** How a claimed send went: its outcome (with the spec as sent), or null with the reason it failed. */
-type GoalSpecJobSettlement = { outcome: GoalSpecJobOutcome | null; spec?: string; error?: string };
+/**
+ * How a claimed send went: its outcome (with the spec as sent and the id of the
+ * user message it created), or null with the reason it failed.
+ */
+type GoalSpecJobSettlement = { outcome: GoalSpecJobOutcome | null; spec?: string; messageId?: string; error?: string };
 
 /** The captured message in full, as `claim` and `edit` hand it back. */
 export interface GoalSpecJobMessage {

@@ -119,6 +119,8 @@ const settleInputSchema = z.object({
   outcome: outcomeSchema.nullable(),
   // The spec as it was sent, edits on the card included.
   spec: z.string().trim().min(1).optional().catch(undefined),
+  // The id of the user message the composer sent.
+  messageId: z.string().trim().min(1).optional().catch(undefined),
   error: z.string().optional().catch(undefined),
 });
 
@@ -169,6 +171,7 @@ const storedJobSchema = z.object({
   warning: z.string().nullable().default(null),
   delivery: deliverySchema.nullable().default(null),
   waiting: waitingSchema.nullable().default(null),
+  messageId: z.string().min(1).nullable().default(null),
   outcome: outcomeSchema.nullable(),
   attempt: z.number().int().nonnegative(),
   createdAt: z.number(),
@@ -547,6 +550,8 @@ export function createGoalSpecJobRuntime({
       waiting: job.waiting !== null,
       // A composer's claim, waiting or handed over: its composer sends it, no other.
       claimId: job.waiting?.claimId ?? job.delivery?.claimId ?? null,
+      // The user message a sent job sent, when OpenCode or the composer named it.
+      messageId: job.messageId,
       outcome: job.outcome,
       attempt: job.attempt,
       createdAt: job.createdAt,
@@ -739,8 +744,9 @@ export function createGoalSpecJobRuntime({
    * is read at each step, since the session can move while the message goes
    * out.
    *
-   * Answers a warning, or null: a goal reminder that cannot be sent does not
-   * stop the message, which goes out without it.
+   * Answers the id OpenCode gave the prompt, which becomes the id of the
+   * user message, and a warning or null: a goal reminder that cannot be sent
+   * does not stop the message, which goes out without it.
    */
   const deliver = async (job, choice) => {
     const { sessionId, sendConfig } = job;
@@ -812,7 +818,7 @@ export function createGoalSpecJobRuntime({
     } catch {
       // bookkeeping only
     }
-    return warning;
+    return { messageId: queued.data.id, warning };
   };
 
   const outcomeOf = (job, choice) => (choice.kind === 'spec'
@@ -857,11 +863,13 @@ export function createGoalSpecJobRuntime({
   };
 
   /**
-   * A sent job keeps what its card shows; the writer input and the message
-   * payloads go. A send still waiting for the turn ends too: a composer's late
-   * report that the message went out must not be followed by the server's.
+   * A sent job keeps what its card shows, and the id of the user message it
+   * sent when OpenCode or the composer named it; the writer input and the
+   * message payloads go. A send still waiting for the turn ends too: a
+   * composer's late report that the message went out must not be followed by
+   * the server's.
    */
-  const markSent = (job, outcome, spec, warning) => {
+  const markSent = (job, { outcome, spec, messageId, warning }) => {
     clearClaimTimer(job.id);
     clearTurnTimer(job.id);
     job.status = 'sent';
@@ -870,6 +878,7 @@ export function createGoalSpecJobRuntime({
     job.error = null;
     job.failedStep = null;
     job.warning = warning;
+    job.messageId = messageId ?? null;
     job.delivery = null;
     job.waiting = null;
     job.message = toSentMessage(job.message);
@@ -885,10 +894,10 @@ export function createGoalSpecJobRuntime({
    * saved stays, as it does for any send that fails after it.
    */
   const sendJob = async (job, choice) => {
-    let warning = null;
+    let sent;
     try {
       await startDelivery(job, { by: 'server' });
-      warning = await deliver(job, choice);
+      sent = await deliver(job, choice);
     } catch (error) {
       const reason = describeError(error, 'the message could not be sent');
       console.warn(`[goal-spec-jobs] send to ${job.sessionId} failed:`, reason);
@@ -896,11 +905,11 @@ export function createGoalSpecJobRuntime({
       if (current) releaseDelivery(current, reason);
       throw httpError(reason, 502);
     }
-    if (warning) console.warn(`[goal-spec-jobs] message sent to ${job.sessionId}, but ${warning}`);
+    if (sent.warning) console.warn(`[goal-spec-jobs] message sent to ${job.sessionId}, but ${sent.warning}`);
     const current = jobs.get(job.id);
     // The session was deleted while the message went out.
     if (!current) return { revision, job: null };
-    markSent(current, outcomeOf(current, choice), choice.kind === 'spec' ? choice.spec : null, warning);
+    markSent(current, { outcome: outcomeOf(current, choice), spec: choice.kind === 'spec' ? choice.spec : null, ...sent });
     return publish(current.sessionId, current);
   };
 
@@ -1110,6 +1119,7 @@ export function createGoalSpecJobRuntime({
       warning: null,
       delivery: null,
       waiting: null,
+      messageId: null,
       outcome: null,
       attempt: 1,
       createdAt,
@@ -1208,14 +1218,14 @@ export function createGoalSpecJobRuntime({
    * open job no send is under way for.
    */
   const settle = async (jobId, input) => {
-    const { outcome, spec, error } = settleInputSchema.parse(input);
+    const { outcome, spec, messageId, error } = settleInputSchema.parse(input);
     await load();
     const job = requireJob(jobId);
     const claimed = job.delivery?.by === 'composer';
     const lateSuccess = !job.delivery && outcome !== null && OPEN_STATUSES.has(job.status);
     if (!claimed && !lateSuccess) throw httpError('the message is not being sent from a composer', 409);
     if (!outcome) return releaseDelivery(job, error ?? 'the message was not sent');
-    markSent(job, outcome, outcome.kind === 'spec' ? spec : null, null);
+    markSent(job, { outcome, spec: outcome.kind === 'spec' ? spec : null, messageId, warning: null });
     return publish(job.sessionId, job);
   };
 
