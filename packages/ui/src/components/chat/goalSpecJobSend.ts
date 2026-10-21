@@ -21,8 +21,10 @@ import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
  *
  * The claim, the send and the report belong to the runtime that showed the
  * card. A claim answered after a switch to another runtime is not sent, since
- * this window can no longer reach the server that holds it; that server
- * releases the claim when it expires and offers the message again.
+ * this window can no longer reach the server that holds it. A send under way
+ * when the window switches away goes unreported, so that server releases the
+ * claim when it expires with a reason that says the message may have been
+ * sent, and the card waits for the user to check the session first.
  */
 export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoice): Promise<void> {
     const jobs = useGoalSpecJobStore.getState();

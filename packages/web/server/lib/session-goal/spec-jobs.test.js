@@ -14,6 +14,8 @@ const DIRECTORY = '/repo';
 const SPEC = '## Objective\nShip dark mode';
 const JOBS_FILE = 'goal-spec-jobs.json';
 const RESTART_REASON = 'the server restarted while the message was being sent; check the session before sending it again';
+// A window whose claim expired may have sent the message: the reason says so.
+const CLAIM_EXPIRED_REASON = 'the window sending the message did not report back, so it may have been sent; check the session before sending it again';
 
 const tempDirs = [];
 const makeDataDir = () => {
@@ -794,7 +796,7 @@ describe('goal writer jobs', () => {
     expect(released.job).toMatchObject({ status: 'failed', failedStep: 'send', error: 'network down', sending: false, review: true });
   });
 
-  it('an abandoned claim expires and turns review on', async () => {
+  it('an abandoned claim expires, turns review on, and says the message may have been sent', async () => {
     vi.useFakeTimers();
     try {
       const { runtime, writer } = createRuntime({ claimTtlMs: 1_000 });
@@ -803,7 +805,7 @@ describe('goal writer jobs', () => {
       await runtime.whenIdle();
       await runtime.claim(created.job.id, { kind: 'spec' });
       await vi.advanceTimersByTimeAsync(1_001);
-      expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, sending: false, error: 'the message was not sent' });
+      expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, sending: false, error: CLAIM_EXPIRED_REASON });
 
       // Only a send that went out is believed without the claim.
       await expect(runtime.settle(created.job.id, { outcome: null, error: 'gone' })).rejects.toMatchObject({ status: 409 });
@@ -1669,12 +1671,12 @@ describe('a composer\'s claim while the agent works', () => {
     runtime.processPayload(statusEvent('idle'));
     // Its composer never reports: the claim expires as any claim does.
     await vi.waitFor(() => expect(runtime.snapshot().jobs[0]).toMatchObject({
-      sending: false, waiting: false, review: true, failedStep: 'send', error: 'the message was not sent', claimId: null,
+      sending: false, waiting: false, review: true, failedStep: 'send', error: CLAIM_EXPIRED_REASON, claimId: null,
     }));
     expect(broadcasts.slice(-3).map(({ properties: { job: state } }) => [state.waiting, state.sending, state.error])).toEqual([
       [true, false, null],
       [false, true, null],
-      [false, false, 'the message was not sent'],
+      [false, false, CLAIM_EXPIRED_REASON],
     ]);
   });
 

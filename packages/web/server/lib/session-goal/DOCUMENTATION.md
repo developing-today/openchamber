@@ -295,8 +295,12 @@ persisted, revisioned, broadcast).
   keeps the message meanwhile and sends it when the job shows that claim
   being sent. Only the claim the job names is sent, so a composer that missed
   its hand-over never sends a later claim's message. A claim nobody settles
-  expires two minutes after it was handed over, never while it waits, and the
-  job then waits for the user with review on. A composer reports under the
+  expires two minutes after it was handed over, never while it waits. The job
+  then waits for the user with review on and a reason that says the window
+  sending the message did not report back, so it may have been sent and the
+  session needs a look before it is sent again: a window that switched to
+  another runtime mid-send can no longer report to this server. A composer
+  reports under the
   claim it sent with (`settle` carries `claimId`): while a composer's claim is
   being sent, a report under any other claim, or under none, is `409`, so a
   window whose claim expired never settles the claim another window now

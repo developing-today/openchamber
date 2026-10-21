@@ -64,6 +64,10 @@ const TURN_RETRY_BASE_MS = 2_000;
 const TURN_RETRY_MAX_MS = 60_000;
 
 const RESTART_REASON = 'the server restarted while the message was being sent; check the session before sending it again';
+// A claim nobody reported on: the window that took it may have sent the
+// message before it went quiet (a runtime switch, a closed tab, a lost
+// connection), so the job waits for the user to look first.
+const CLAIM_EXPIRED_REASON = 'the window sending the message did not report back, so it may have been sent; check the session before sending it again';
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const OPEN_STATUSES = new Set(['writing', 'ready', 'failed']);
@@ -1112,7 +1116,7 @@ export function createGoalSpecJobRuntime({
     const timer = setTimeout(() => {
       claimTimers.delete(job.id);
       const current = jobs.get(job.id);
-      if (current?.delivery?.by === 'composer') releaseDelivery(current, 'the message was not sent');
+      if (current?.delivery?.by === 'composer') releaseDelivery(current, CLAIM_EXPIRED_REASON);
     }, claimTtlMs);
     timer.unref?.();
     claimTimers.set(job.id, timer);
