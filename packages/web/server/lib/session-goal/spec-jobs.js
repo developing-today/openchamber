@@ -631,6 +631,20 @@ export function createGoalSpecJobRuntime({
     return publish(job.sessionId, job);
   };
 
+  /**
+   * Puts back an open job `cancel` ended, as it was. A stopped write starts
+   * again, and a send waiting for the turn looks at the session again.
+   */
+  const reopen = (job, { status, waiting }) => {
+    job.status = status;
+    job.waiting = waiting;
+    jobs.set(job.id, job);
+    touch(job);
+    publish(job.sessionId, job);
+    if (job.waiting) armTurnLook(job);
+    else if (job.status === 'writing') runWriter(job, readSettings());
+  };
+
   const remove = (job) => {
     jobs.delete(job.id);
     return publish(job.sessionId, null);
@@ -1227,7 +1241,20 @@ export function createGoalSpecJobRuntime({
     const job = requireJob(jobId);
     requireNotSending(job);
     requireOpen(job);
-    return { ...cancel(job), message: job.message };
+    const before = { status: job.status, waiting: job.waiting };
+    const result = cancel(job);
+    const written = latestWrite;
+    // The message goes back only once the file no longer holds the job. A job
+    // left on file would come back after a restart and offer the message a
+    // second time, beside the copy the composer got.
+    try {
+      await written;
+    } catch (error) {
+      // A job a new one replaced meanwhile stays ended, as replacing ends it.
+      if (!jobForSession(job.sessionId)) reopen(job, before);
+      throw httpError(`the message could not be taken back: ${describeError(error, 'write failed')}`, 500);
+    }
+    return { ...result, message: job.message };
   };
 
   /**

@@ -1716,6 +1716,84 @@ describe('a composer\'s claim while the agent works', () => {
   });
 });
 
+describe('Back to edit the jobs file does not record', () => {
+  /**
+   * Every write of the jobs file fails from here on, as on a disk that turned
+   * read-only, and the file keeps what it held. The target is the file's real
+   * path, so it is matched by name.
+   */
+  const failJobsFileWrites = () => {
+    const rename = fs.renameSync;
+    const failing = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (path.basename(String(to)) === JOBS_FILE) throw Object.assign(new Error('read-only file system'), { code: 'EROFS' });
+      return rename(from, to);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    return () => {
+      failing.mockRestore();
+      warn.mockRestore();
+    };
+  };
+
+  /** Back to edit while the file refuses the write; writes work again once it answers. */
+  const editRefused = async (runtime, jobId) => {
+    const restore = failJobsFileWrites();
+    try {
+      await expect(runtime.edit(jobId)).rejects.toMatchObject({ status: 500 });
+    } finally {
+      restore();
+    }
+  };
+
+  it('is refused and leaves the job open, so the message is never both back in the composer and on file', async () => {
+    const dataDir = makeDataDir();
+    const { runtime, writer, broadcasts } = createRuntime({ dataDir });
+    const written = await writtenJob(runtime, writer);
+    await runtime.flush();
+
+    await editRefused(runtime, written.id);
+    await runtime.flush();
+
+    expect(runtime.snapshot().jobs).toEqual([expect.objectContaining({ id: written.id, status: 'ready', spec: SPEC })]);
+    // Windows heard it end and come back.
+    expect(broadcasts.slice(-2).map((event) => event.properties.job?.status)).toEqual(['cancelled', 'ready']);
+    expect(readJobsFile(dataDir).jobs.map((stored) => stored.id)).toEqual([written.id]);
+    // Once the file takes writes, Back to edit hands the message back and the file lets go of the job.
+    expect((await runtime.edit(written.id)).message).toMatchObject({ text: 'add dark mode' });
+    await runtime.flush();
+    expect(readJobsFile(dataDir).jobs).toEqual([]);
+  });
+
+  it('starts a write it stopped again', async () => {
+    const { runtime, writer } = createRuntime();
+    const created = await runtime.create(job());
+
+    await editRefused(runtime, created.job.id);
+
+    expect(writer.calls.map((call) => call.input.signal.aborted)).toEqual([true, false]);
+    // The stopped write answers too, first; only the new one counts.
+    writer.calls[0].resolve({ spec: 'Spec of the stopped write', providerID: 'p', modelID: 'm' });
+    writeAnswer(writer, 1);
+    await runtime.whenIdle();
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ id: created.job.id, status: 'ready', spec: SPEC });
+  });
+
+  it('a send waiting for the turn looks again, so a turn that ended meanwhile still sends it', async () => {
+    const openCode = createOpenCode();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { runtime, writer, prompts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer, { review: false });
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ waiting: true });
+    // The turn ends with the job off the map, so its idle event finds nothing.
+    openCode.state.active = {};
+
+    await editRefused(runtime, written.id);
+
+    await vi.waitFor(() => expect(prompts()).toHaveLength(1));
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ id: written.id, status: 'sent' });
+  });
+});
+
 describe('goal writer job routes', () => {
   const createApp = (runtime) => {
     const app = express();

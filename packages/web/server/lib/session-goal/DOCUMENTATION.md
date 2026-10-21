@@ -308,8 +308,13 @@ persisted, revisioned, broadcast).
   from the text. The attachment bytes, the attached context and the writer
   input are dropped when it is sent.
 - Back to edit: `edit` cancels an open job, stops its write and answers the
-  full message for the composer. An open job ends only through a send, an
-  edit, a new job in its session, its session ending, or the cap.
+  full message for the composer once the file no longer holds the job. When
+  that write fails, the job is put back as it was, a stopped write starts
+  again and a waiting send looks at the session again, and the answer is
+  `500` without the message, since a job left on file would come back after
+  a restart and offer the message a second time. An open job ends only
+  through a send, an edit, a new job in its session, its session ending, or
+  the cap.
 - Sessions: a session deleted in OpenCode (`session.deleted`) or archived in
   OpenChamber (the `openchamber:session-archived` broadcast, which
   `server/index.js` hands to `processPayload`; an unarchive ends nothing) ends
