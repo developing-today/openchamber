@@ -102,6 +102,7 @@ describe('session goal creation', () => {
       directory: '/repo/app',
       providerID: 'openai',
       modelID: 'gpt-5.5',
+      ignoreLimit: false,
       settings: goalWriterSettings,
     });
     expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', '## Objective\nShip it.');
@@ -125,6 +126,55 @@ describe('session goal creation', () => {
     expect(onWarning).toHaveBeenCalledWith('goal spec rewrite failed, keeping the objective as written', expect.any(Error));
     expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', 'ship it');
     expect(result.spec).toBeNull();
+  });
+
+  // The composer's goal flags, carried by a queued message (message-queue/runtime.js).
+  it('leaves a settled objective alone even when rewrite-all is on', async () => {
+    const writeSpec = vi.fn();
+    const result = await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'the approved spec',
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: { model: 'anthropic/claude', rewriteAll: true },
+      writeSpec,
+      settled: true,
+    });
+
+    expect(writeSpec).not.toHaveBeenCalled();
+    expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', 'the approved spec');
+    expect(result.spec).toBeNull();
+  });
+
+  it('keeps a long objective whole and marks the goal when it ignores the limit', async () => {
+    const persistSessionGoal = vi.fn(async () => undefined);
+    const long = 'x'.repeat(6_000);
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: long,
+      persistSessionGoal,
+      goalWriterSettings: WRITER_OFF,
+      ignoreLimit: true,
+    });
+
+    expect(generateSmallModelTextMock).not.toHaveBeenCalled();
+    expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', long);
+    expect(persistSessionGoal.mock.calls[0][2]).toMatchObject({ ignoreObjectiveLimit: true, objectiveFile: true });
+  });
+
+  it('fits a long objective to the limit when the goal does not ignore it', async () => {
+    const persistSessionGoal = vi.fn(async () => undefined);
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'x'.repeat(6_000),
+      persistSessionGoal,
+      goalWriterSettings: WRITER_OFF,
+    });
+
+    expect(writeObjectiveMock.mock.calls[0][1].length).toBeLessThanOrEqual(5_000);
+    expect(persistSessionGoal.mock.calls[0][2]).toMatchObject({ ignoreObjectiveLimit: false });
   });
 
   it('leaves the objective alone when rewrite-all is off', async () => {

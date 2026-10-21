@@ -51,15 +51,20 @@ send never re-resolves mutable UI state:
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
   sendConfig: { providerID, modelID, agent?, variant? },  // required
-  goal?: { objective?, tokenBudget }  // queued with "run as goal" armed
+  goal?: { objective?, tokenBudget, settled?, briefAgent?, ignoreLimit? }  // queued with "run as goal" armed
 }
 ```
 
 `goal` is the composer's armed goal, taken off the composer when the message
 is queued so it belongs to this message and no other. `objective` is present
 only when the arming flow supplied its own (the plan flow); otherwise the
-delivered `text` is the objective. A goal needs message text. Snapshots keep
-`goal`, so the queue row can show it.
+delivered `text` is the objective. `settled`, `briefAgent` and `ignoreLimit`
+are the composer's goal flags, kept only when true (anything but a boolean is
+refused): a settled objective is not rewritten by "Rewrite every goal", a
+`briefAgent` goal briefs the agent with `objective` in the intro's
+`<goal-spec>`, and `ignoreLimit` keeps the objective whole and marks the goal.
+Without `briefAgent` the intro carries the spec the writer produced, if any.
+A goal needs message text. Snapshots keep `goal`, so the queue row can show it.
 
 The server is a courier for `context`: it validates the shape (a kind it
 knows, a `metadata` object on `context` entries) and delivers each entry as a

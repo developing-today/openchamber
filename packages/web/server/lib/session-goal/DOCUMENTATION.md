@@ -130,8 +130,11 @@ progress check judges against. `spec-writer.js` owns it.
 - Rewrite all: with `sessionGoalRewriteAll` on, `createSessionGoal` runs every
   server-created objective (scheduled tasks, CLI `--goal`, the agent tool's
   `goalAction: set`) through the writer before fitting it. A failed rewrite
-  logs a warning and keeps the objective as written. `createSessionGoal`
-  returns `{ goal, spec }`; scheduled tasks and the sessions route pass the
+  logs a warning and keeps the objective as written. `settled: true` skips
+  the rewrite, and `ignoreLimit: true` keeps the objective unfitted, tells the
+  writer to drop its length line, and stores `ignoreObjectiveLimit: true`; a
+  queued message passes both from the composer. `createSessionGoal`
+  returns `{ goal, spec }`; scheduled tasks, queued messages and the sessions route pass the
   spec to `buildGoalIntroText(tokenBudget, spec)`, whose reminder then
   carries it in an escaped `<goal-spec>` block. A slash command normally gets
   no reminder; with a rewritten spec the reminder is admitted with

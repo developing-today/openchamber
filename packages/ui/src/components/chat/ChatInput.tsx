@@ -1450,12 +1450,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // when this message is delivered, whatever is sent in between.
         const goalArm = textToQueue.trim()
             ? useSessionGoalArmStore.getState().consume()
-            : { armed: false, objectiveOverride: null };
+            : { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false };
         const goalSettings = useUIStore.getState();
         const goal: QueuedMessageGoal | undefined = goalArm.armed ? {
             tokenBudget: goalSettings.sessionGoalDefaultBudgetEnabled ? goalSettings.sessionGoalDefaultBudget : null,
         } : undefined;
         if (goal && goalArm.objectiveOverride?.trim()) goal.objective = goalArm.objectiveOverride;
+        if (goal && goalArm.settled) goal.settled = true;
+        if (goal && goalArm.briefAgent) goal.briefAgent = true;
+        if (goal && goalArm.ignoreLimit) goal.ignoreLimit = true;
 
         // Sending while the agent works must still take the reader to the
         // live edge — a queued message produces no user row yet, so the
