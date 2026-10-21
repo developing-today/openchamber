@@ -270,7 +270,12 @@ other.
   `OPENCODE_CONFIG` names, the file Settings writes when it is set. Without
   `OPENCODE_CONFIG` a custom write is refused rather than redirected.
   OpenChamber's managed config file is set only in OpenCode's environment, so
-  this layer never points at it. `merged` is read only.
+  this layer never points at it. `merged` is read only. The merged view and the
+  `shadowed` answer follow OpenCode's order: user, then custom, then project, a
+  later file winning (`readConfigLayers` in `../opencode/shared.js`). In
+  enterprise mode every `opencode.config.set` is refused with 403
+  (`code: 'enterprise_mode'`): one write can add a provider or a destination for
+  conversation content.
 - `session.archive` / `session.unarchive` move a session out of (and back
   into) the active list through the session service's `archive` /
   `unarchive`, so open windows hear the same broadcast as a UI archive; a

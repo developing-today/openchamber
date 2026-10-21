@@ -36,6 +36,7 @@ import { isPersistableSettingsKey } from '../opencode/settings-helpers.js';
 import { SETTINGS_SURFACES } from '../opencode/settings-files.js';
 import { isSelfHandoffEnabled } from '../opencode/self-handoff.js';
 import { OpenChamberControlError } from './error.js';
+import { isEnterpriseMode } from '../enterprise-mode.js';
 
 const settingsRegistry = createRequire(import.meta.url)('../opencode/settings-registry.json');
 
@@ -401,6 +402,12 @@ export const createConfigActions = (deps) => {
   };
 
   const configSet = (input, ctx) => {
+    // A config write can add a provider or a destination for conversation
+    // content (share, a remote MCP server, a messaging endpoint), which
+    // enterprise mode refuses. Fail closed: no agent config writes there.
+    if (isEnterpriseMode()) {
+      throw new OpenChamberControlError('Changing OpenCode configuration from the agent tool is not available in enterprise mode', 403, { code: 'enterprise_mode' });
+    }
     const scope = resolveScope(input, { allowRead: false });
     const directory = resolveDirectory(input, ctx);
     if (scope === 'project' && !directory) throw new OpenChamberControlError('directory is required for the project config', 400);

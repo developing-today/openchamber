@@ -357,6 +357,35 @@ describe('opencode.config.set', () => {
     }
   });
 
+  it('says a custom write is overridden by the project file, as OpenCode loads the project file later', async () => {
+    const customPath = path.join(root, 'custom', 'opencode.json');
+    writeFile(customPath, '{}');
+    writeFile(path.join(projectDir, 'opencode.json'), JSON.stringify({ model: 'project/model' }));
+    process.env.OPENCODE_CONFIG = customPath;
+    try {
+      const { actions } = createActions();
+      const result = await actions.execute('opencode.config.set', { configScope: 'custom', configPath: 'model', configValue: 'custom/model' }, { contextDirectory: projectDir });
+      expect(result).toMatchObject({ scope: 'custom', shadowed: true, effectiveValue: 'project/model' });
+      expect(readJson(customPath)).toEqual({ model: 'custom/model' });
+    } finally {
+      delete process.env.OPENCODE_CONFIG;
+    }
+  });
+
+  it('refuses every config write in enterprise mode and leaves the file alone', async () => {
+    writeFile(userConfigPath, JSON.stringify({ model: 'a/b' }));
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      const { actions } = createActions();
+      await expectError(actions.execute('opencode.config.set', { configPath: 'share', configValue: 'auto' }), 403, /enterprise mode/);
+      expect(readJson(userConfigPath)).toEqual({ model: 'a/b' });
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
+    const { actions } = createActions();
+    await expect(actions.execute('opencode.config.set', { configPath: 'share', configValue: 'manual' })).resolves.toMatchObject({ scope: 'user' });
+  });
+
   it('says when another file overrides the value it wrote', async () => {
     writeFile(path.join(projectDir, 'opencode.json'), JSON.stringify({ model: 'openai/gpt' }));
     const { actions } = createActions();
