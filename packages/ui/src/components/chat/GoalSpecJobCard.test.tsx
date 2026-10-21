@@ -6,7 +6,7 @@ import { OpenCode } from '@opencode/client';
 import { I18nProvider } from '@/lib/i18n';
 import { opencodeClient, type MessagePage } from '@/lib/opencode/client';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useGoalSpecJobStore, type GoalSpecJob } from '@/stores/goalSpecJobStore';
 import { useSessionGoalArmStore, type SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 import { ChildStoreManager } from '@/sync/child-store';
@@ -15,6 +15,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { setSyncRefs } from '@/sync/sync-refs';
 import { ChatColumnTakesPromptsContext } from './chatColumnSession';
 import { GoalSpecJobCard } from './GoalSpecJobCard';
+import { sendGoalSpecJob } from './goalSpecJobSend';
 
 // The stores above load without a DOM, as their own tests load them. React
 // DOM probes for one when first imported: give the probe a document, then
@@ -591,6 +592,64 @@ describe('GoalSpecJobCard', () => {
 
     expect(sent).toEqual([]);
     expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim']);
+  });
+
+  // `runtimeFetch` and the send path reach only the active runtime, so a
+  // claim must never be sent or reported after the user switched away from
+  // the server that holds it; that server releases the claim when it expires.
+  describe('after a switch to another runtime', () => {
+    const originalBase = getRuntimeApiBaseUrl();
+    const originalRuntime = getRuntimeKey();
+    const switchAway = () => switchRuntimeEndpoint({ apiBaseUrl: 'http://other-goal-card.test', runtimeKey: 'goal-card-other' });
+    const ready = job({ status: 'ready', spec: 'Spec', composerOnly: true });
+    const specChoice = { kind: 'spec', sendMode: 'with-message', spec: 'Spec' } as const;
+    const claimAnswer = () => Response.json({
+      revision: 2,
+      job: { ...ready, sending: true, claimId: 'claim-now' },
+      message: { content: 'x', text: 'x', attachments: [], context: [{ kind: 'synthetic', text: 'Resolve the conflict' }] },
+    });
+
+    afterEach(() => {
+      if (getRuntimeKey() !== originalRuntime) switchRuntimeEndpoint({ apiBaseUrl: originalBase, runtimeKey: originalRuntime });
+    });
+
+    test('a claim answered after the switch is not sent on the new runtime', async () => {
+      show(ready);
+      respond = (call) => {
+        if (!call.path.endsWith('/claim')) return Response.json({ revision: 3, job: null });
+        // The user switches while the claim is on its way back.
+        switchAway();
+        return claimAnswer();
+      };
+      const sent: string[] = [];
+      const sendMessage: SendMessage = async (content) => {
+        sent.push(content);
+      };
+      useSessionUIStore.setState({ sendMessage });
+
+      await expect(sendGoalSpecJob(ready, specChoice)).rejects.toThrow('the runtime changed');
+
+      expect(sent).toEqual([]);
+      expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim']);
+    });
+
+    for (const outcome of ['goes out', 'fails'] as const) {
+      test(`a send that ${outcome} after the switch reports nothing to the new runtime`, async () => {
+        show(ready);
+        respond = (call) => (call.path.endsWith('/claim') ? claimAnswer() : Response.json({ revision: 3, job: null }));
+        const sendMessage: SendMessage = async () => {
+          switchAway();
+          if (outcome === 'fails') throw new Error('OpenCode is not reachable');
+        };
+        useSessionUIStore.setState({ sendMessage });
+
+        const sending = sendGoalSpecJob(ready, specChoice);
+        if (outcome === 'fails') await expect(sending).rejects.toThrow('OpenCode is not reachable');
+        else await sending;
+
+        expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim']);
+      });
+    }
   });
 
   test('a sent job says how it went and can be dismissed', async () => {

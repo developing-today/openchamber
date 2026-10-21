@@ -18,6 +18,11 @@ import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
  * Into a working session the claim follows the user's follow-up setting, as a
  * message from the composer does: with queue the server holds it until the
  * agent's turn is over and then hands it to this window, which sends it then.
+ *
+ * The claim, the send and the report belong to the runtime that showed the
+ * card. A claim answered after a switch to another runtime is not sent, since
+ * this window can no longer reach the server that holds it; that server
+ * releases the claim when it expires and offers the message again.
  */
 export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoice): Promise<void> {
     const jobs = useGoalSpecJobStore.getState();
@@ -26,13 +31,15 @@ export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoic
         return;
     }
 
+    const runtimeKey = getRuntimeKey();
     const claimed = await jobs.claimJob(job, choice.kind);
+    if (getRuntimeKey() !== runtimeKey) throw new Error('The message was not sent because the runtime changed.');
     if (!claimed.waiting) {
-        await sendClaimed(job, choice, claimed.message, claimed.claimId);
+        await sendClaimed(job, choice, claimed.message, claimed.claimId, runtimeKey);
         return;
     }
     if (!claimed.claimId) throw new Error('The server queued the message without naming its claim');
-    holdUntilHandedOver({ claimId: claimed.claimId, jobId: job.id, sessionId: job.sessionId, choice, message: claimed.message, runtimeKey: getRuntimeKey() });
+    holdUntilHandedOver({ claimId: claimed.claimId, jobId: job.id, sessionId: job.sessionId, choice, message: claimed.message, runtimeKey });
 }
 
 /** A claim the server holds until the agent's turn is over; this window sends it when it is handed over. */
@@ -62,7 +69,7 @@ const sendHandedOver = () => {
         if (named && current.waiting) continue;
         heldClaims.delete(held.claimId);
         if (!named || !current.sending || held.runtimeKey !== getRuntimeKey()) continue;
-        void sendClaimed(current, held.choice, held.message, held.claimId).catch((error) => {
+        void sendClaimed(current, held.choice, held.message, held.claimId, held.runtimeKey).catch((error) => {
             // The job carries the reason: the failed send was reported with it.
             console.warn('[goal-spec-jobs] the queued message was not sent:', error);
         });
@@ -83,12 +90,14 @@ const holdUntilHandedOver = (held: HeldClaim) => {
 /**
  * Sends a claimed message through the session's send path and reports the
  * outcome under the claim, so a report from a window whose claim expired
- * never settles a newer one.
+ * never settles a newer one. The send and the report go to the runtime that
+ * holds the claim; after a switch away from it the report is left out, since
+ * `settleJob` reaches only the active runtime.
  */
-async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message: GoalSpecJobMessage, claimId: string | null): Promise<void> {
+async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message: GoalSpecJobMessage, claimId: string | null, runtimeKey: string): Promise<void> {
     const jobs = useGoalSpecJobStore.getState();
     const claim = claimId ? { claimId } : {};
-    const target = createMessageQueueTarget(job.sessionId, job.directory, getRuntimeKey());
+    const target = createMessageQueueTarget(job.sessionId, job.directory, runtimeKey);
     const outgoing = buildOutgoingMessage({
         queued: [{
             text: choice.kind === 'spec' && choice.sendMode === 'goal-as-message' ? choice.spec : message.text,
@@ -137,9 +146,10 @@ async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message:
         );
     } catch (error) {
         const reason = error instanceof Error && error.message ? error.message : 'The message could not be sent';
-        await jobs.settleJob(job, { outcome: null, error: reason, ...claim }).catch(() => undefined);
+        if (getRuntimeKey() === runtimeKey) await jobs.settleJob(job, { outcome: null, error: reason, ...claim }).catch(() => undefined);
         throw error;
     }
+    if (getRuntimeKey() !== runtimeKey) return;
     await jobs.settleJob(job, choice.kind === 'spec'
         ? { outcome: { kind: 'spec', sendMode: choice.sendMode }, spec: choice.spec, messageId, ...claim }
         : { outcome: { kind: 'original', withGoal: job.trigger === 'armed' }, messageId, ...claim });

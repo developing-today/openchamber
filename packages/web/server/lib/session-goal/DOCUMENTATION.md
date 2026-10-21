@@ -664,7 +664,12 @@ sees only that final turn, so the report is its evidence.
   names (taken back, released, or another window's claim since) is dropped,
   and so is every held claim on a runtime switch. A window that closes or
   reloads while its claim waits sends nothing: the hand-over expires after
-  two minutes and the job waits for the user again. The composer's arm store
+  two minutes and the job waits for the user again. The claim, the send and
+  the report belong to the runtime the claim was made on. A claim answered
+  after the user switched to another runtime is not sent, and a send that
+  ends after such a switch reports nothing, since this window reaches only
+  the active runtime. The server that holds the claim releases it when it
+  expires, as for a window that closed. The composer's arm store
   stays out of it: a send held while OpenCode starts waits behind any send
   made before it, and an armed goal there would go to whichever of them
   consumes the store first. Back to edit (`components/chat/goalSpecJobEdit.ts`)
