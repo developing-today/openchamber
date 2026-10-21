@@ -200,6 +200,14 @@ both settings are `false`.
 - `projects.add`/`projects.remove` expose project registration itself —
   adding/removing the configured entry only, via the same settings path the
   UI's directory picker uses. Session/worktree deletion is still not exposed.
+- Connected services (`integrations.list`, `github.*`, `gitlab.*`,
+  `linear.*`, `binding.*`, `extensions.*`;
+  `../openchamber-control/integration-service-actions.js`) can be read and
+  changed, never signed in to: no action takes a token, password or client
+  secret, an input holding a key named like one is refused, and answers have
+  such keys removed. Signing out and changing Git credentials need `confirm`.
+  Approving an extension's capabilities and installing, updating or removing
+  one stay with the user.
 - A cancelled turn aborts the session's in-flight actions. OpenCode 2 gives a
   plugin tool no abort signal and the plugin's request stays open, so the
   server tracks in-flight actions per session and `abortSession(sessionID)` is

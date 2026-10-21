@@ -1229,80 +1229,88 @@ export function registerGitHubRoutes(app, options = {}) {
     });
   });
 
+  // The account operations below answer `{ status, body }` like the routes do,
+  // so the routes and the `openchamber` agent tool (see
+  // ../openchamber-control/integration-service-actions.js) share one
+  // implementation. Lock and storage failures are thrown, as before.
+  const readAuthStatus = async () => {
+    const { getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
+    const { getGhCliToken } = await import('./gh-cli-credential.js');
+
+    const auth = await getGitHubAuth();
+    let accounts = await getGitHubAuthAccounts();
+    const ghCliDisabled = isGhCliDisabled();
+    const ghCliActive = isGhCliActive();
+    const ghToken = getGhCliToken();
+    const usingOwnToken = Boolean(auth?.accessToken);
+    const selectedPersisted = accounts.some((account) => account.current);
+    let ghCliUser = null;
+    let ghCliRejected = false;
+
+    if (ghToken !== null && !ghCliDisabled) {
+      try {
+        const { createOctokit } = await import('./octokit.js');
+        ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
+      } catch (error) {
+        ghCliUser = null;
+        ghCliRejected = error?.status === 401;
+      }
+    }
+    // The user's switch to the gh account is undone only when that account is
+    // really gone: gh logged out, disabled here, or its token rejected. A
+    // network blip leaves this read without a user but keeps the choice.
+    if (ghCliActive && (ghToken === null || ghCliDisabled || ghCliRejected)) {
+      setGhCliActive(false);
+    }
+
+    const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && ghCliActive;
+    if (ghCliUser) {
+      accounts = accounts
+        .map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) }))
+        .concat(cliAccountView(ghCliUser, ghCliCurrent));
+    }
+
+    const buildGhCli = (activeUser = null) => ({
+      available: ghToken !== null,
+      disabled: ghCliDisabled,
+      active: ghCliCurrent,
+      ...(!ghCliDisabled && (activeUser || ghCliUser) ? { user: activeUser || ghCliUser } : {}),
+    });
+
+    // A current-but-invalid saved account means disconnected only while it,
+    // not the gh CLI login, is the selected source.
+    if (selectedPersisted && !usingOwnToken && !ghCliCurrent) {
+      return { connected: false, accounts, ghCli: buildGhCli() };
+    }
+    const octokit = await getOctokitOrNull();
+    if (!octokit) {
+      return { connected: false, accounts, ghCli: buildGhCli() };
+    }
+
+    let user = null;
+    try {
+      user = await getGitHubUserSummary(octokit);
+    } catch (error) {
+      if (isGitHubAuthInvalid(error)) {
+        if (usingOwnToken) await invalidateAccount(auth.accountId);
+        return { connected: false, accounts: await getGitHubAuthAccounts(), ghCli: buildGhCli() };
+      }
+    }
+
+    const fallback = usingOwnToken ? auth.user : null;
+    const mergedUser = user || fallback;
+    return {
+      connected: true,
+      user: mergedUser,
+      scope: ghCliCurrent ? undefined : auth?.scope,
+      accounts,
+      ghCli: buildGhCli(ghCliCurrent ? mergedUser : null),
+    };
+  };
+
   app.get(githubAuthRoutePaths('/auth/status'), async (_req, res) => {
     try {
-      const { getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, githubCliAccountId, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
-      const { getGhCliToken } = await import('./gh-cli-credential.js');
-
-      const auth = await getGitHubAuth();
-      let accounts = await getGitHubAuthAccounts();
-      const ghCliDisabled = isGhCliDisabled();
-      const ghCliActive = isGhCliActive();
-      const ghToken = getGhCliToken();
-      const usingOwnToken = Boolean(auth?.accessToken);
-      const selectedPersisted = accounts.some((account) => account.current);
-      let ghCliUser = null;
-      let ghCliRejected = false;
-
-      if (ghToken !== null && !ghCliDisabled) {
-        try {
-          const { createOctokit } = await import('./octokit.js');
-          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
-        } catch (error) {
-          ghCliUser = null;
-          ghCliRejected = error?.status === 401;
-        }
-      }
-      // The user's switch to the gh account is undone only when that account is
-      // really gone: gh logged out, disabled here, or its token rejected. A
-      // network blip leaves this read without a user but keeps the choice.
-      if (ghCliActive && (ghToken === null || ghCliDisabled || ghCliRejected)) {
-        setGhCliActive(false);
-      }
-
-      const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && ghCliActive;
-      if (ghCliUser) {
-        accounts = accounts
-          .map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) }))
-          .concat(cliAccountView(ghCliUser, ghCliCurrent));
-      }
-
-      const buildGhCli = (activeUser = null) => ({
-        available: ghToken !== null,
-        disabled: ghCliDisabled,
-        active: ghCliCurrent,
-        ...(!ghCliDisabled && (activeUser || ghCliUser) ? { user: activeUser || ghCliUser } : {}),
-      });
-
-      // A current-but-invalid saved account means disconnected only while it,
-      // not the gh CLI login, is the selected source.
-      if (selectedPersisted && !usingOwnToken && !ghCliCurrent) {
-        return res.json({ connected: false, accounts, ghCli: buildGhCli() });
-      }
-      const octokit = await getOctokitOrNull();
-      if (!octokit) {
-        return res.json({ connected: false, accounts, ghCli: buildGhCli() });
-      }
-
-      let user = null;
-      try {
-        user = await getGitHubUserSummary(octokit);
-      } catch (error) {
-        if (isGitHubAuthInvalid(error)) {
-          if (usingOwnToken) await invalidateAccount(auth.accountId);
-          return res.json({ connected: false, accounts: await getGitHubAuthAccounts(), ghCli: buildGhCli() });
-        }
-      }
-
-      const fallback = usingOwnToken ? auth.user : null;
-      const mergedUser = user || fallback;
-      return res.json({
-        connected: true,
-        user: mergedUser,
-        scope: ghCliCurrent ? undefined : auth?.scope,
-        accounts,
-        ghCli: buildGhCli(ghCliCurrent ? mergedUser : null),
-      });
+      return res.json(await readAuthStatus());
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
@@ -1322,13 +1330,15 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
+  const setGhCliDisabledState = async (disabled) => {
+    const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
+    setGhCliDisabled(disabled);
+    return { disabled: isGhCliDisabled() };
+  };
+
   app.post(githubAuthRoutePaths('/auth/gh-cli'), async (req, res) => {
     try {
-      const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
-
-      const disabled = Boolean(req.body?.disabled);
-      setGhCliDisabled(disabled);
-      return res.json({ disabled: isGhCliDisabled() });
+      return res.json(await setGhCliDisabledState(Boolean(req.body?.disabled)));
     } catch (error) {
       console.error('Failed to update gh CLI setting:', error);
       return res.status(500).json({ error: error.message || 'Failed to update gh CLI setting' });
@@ -1456,31 +1466,31 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
-  app.post(githubAuthRoutePaths('/auth/activate'), async (req, res) => {
-    try {
-      const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, githubCliAccountId, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
-      const accountId = typeof req.body?.accountId === 'string' ? req.body.accountId : '';
-      if (!accountId) {
-        return res.status(400).json({ error: 'accountId is required' });
+  const activateAccount = async (accountId) => {
+    const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, githubCliAccountId, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
+    if (!accountId) {
+      return { status: 400, body: { error: 'accountId is required' } };
+    }
+    if (accountId === GH_CLI_ACCOUNT_ID || accountId.startsWith('github.com#cli:')) {
+      const { getGhCliToken } = await import('./gh-cli-credential.js');
+      const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
+      if (!ghToken) {
+        return { status: 404, body: { error: 'GitHub CLI account not found' } };
       }
-      if (accountId === GH_CLI_ACCOUNT_ID || accountId.startsWith('github.com#cli:')) {
-        const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
-        if (!ghToken) {
-          return res.status(404).json({ error: 'GitHub CLI account not found' });
-        }
 
-        const { createOctokit } = await import('./octokit.js');
-        const user = await getGitHubUserSummary(createOctokit(ghToken));
-        const cliAccountId = githubCliAccountId(user.id);
-        if (accountId !== GH_CLI_ACCOUNT_ID && accountId !== cliAccountId) {
-          return res.status(404).json({ error: 'GitHub CLI account not found' });
-        }
-        setGhCliActive(true);
-        const accounts = (await getGitHubAuthAccounts())
-          .map((account) => ({ ...account, current: false }))
-          .concat(cliAccountView(user, true));
-        return res.json({
+      const { createOctokit } = await import('./octokit.js');
+      const user = await getGitHubUserSummary(createOctokit(ghToken));
+      const cliAccountId = githubCliAccountId(user.id);
+      if (accountId !== GH_CLI_ACCOUNT_ID && accountId !== cliAccountId) {
+        return { status: 404, body: { error: 'GitHub CLI account not found' } };
+      }
+      setGhCliActive(true);
+      const accounts = (await getGitHubAuthAccounts())
+        .map((account) => ({ ...account, current: false }))
+        .concat(cliAccountView(user, true));
+      return {
+        status: 200,
+        body: {
           connected: true,
           user,
           accounts,
@@ -1490,50 +1500,53 @@ export function registerGitHubRoutes(app, options = {}) {
             active: true,
             user,
           },
-        });
-      }
+        },
+      };
+    }
 
-      const activated = await activateGitHubAuth(accountId);
-      if (!activated) {
-        return res.status(404).json({ error: 'GitHub account not found' });
-      }
+    const activated = await activateGitHubAuth(accountId);
+    if (!activated) {
+      return { status: 404, body: { error: 'GitHub account not found' } };
+    }
 
-      const auth = await getGitHubAuth();
-      let accounts = await getGitHubAuthAccounts();
-      if (!auth?.accessToken) {
-        return res.json({ connected: false, accounts });
-      }
+    const auth = await getGitHubAuth();
+    let accounts = await getGitHubAuthAccounts();
+    if (!auth?.accessToken) {
+      return { status: 200, body: { connected: false, accounts } };
+    }
 
-      const { getGhCliToken } = await import('./gh-cli-credential.js');
-      const ghCliDisabled = isGhCliDisabled();
-      const ghToken = !ghCliDisabled ? getGhCliToken() : null;
-      let ghCliUser = null;
-      if (ghToken) {
-        try {
-          const { createOctokit } = await import('./octokit.js');
-          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
-          accounts = accounts.concat(cliAccountView(ghCliUser, false));
-        } catch {
-          ghCliUser = null;
-        }
-      }
-
-      const octokit = await getOctokitOrNull();
-      if (!octokit) {
-        return res.json({ connected: false, accounts, ghCli: { available: ghToken !== null, disabled: ghCliDisabled, active: false, ...(ghCliUser ? { user: ghCliUser } : {}) } });
-      }
-
-      let user = auth.user || null;
+    const { getGhCliToken } = await import('./gh-cli-credential.js');
+    const ghCliDisabled = isGhCliDisabled();
+    const ghToken = !ghCliDisabled ? getGhCliToken() : null;
+    let ghCliUser = null;
+    if (ghToken) {
       try {
-        user = await getGitHubUserSummary(octokit);
-      } catch (error) {
-        if (isGitHubAuthInvalid(error)) {
-          await invalidateAccount(auth.accountId);
-          return res.json({ connected: false, accounts: await getGitHubAuthAccounts() });
-        }
+        const { createOctokit } = await import('./octokit.js');
+        ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
+        accounts = accounts.concat(cliAccountView(ghCliUser, false));
+      } catch {
+        ghCliUser = null;
       }
+    }
 
-      return res.json({
+    const octokit = await getOctokitOrNull();
+    if (!octokit) {
+      return { status: 200, body: { connected: false, accounts, ghCli: { available: ghToken !== null, disabled: ghCliDisabled, active: false, ...(ghCliUser ? { user: ghCliUser } : {}) } } };
+    }
+
+    let user = auth.user || null;
+    try {
+      user = await getGitHubUserSummary(octokit);
+    } catch (error) {
+      if (isGitHubAuthInvalid(error)) {
+        await invalidateAccount(auth.accountId);
+        return { status: 200, body: { connected: false, accounts: await getGitHubAuthAccounts() } };
+      }
+    }
+
+    return {
+      status: 200,
+      body: {
         connected: true,
         user,
         scope: auth.scope,
@@ -1544,7 +1557,14 @@ export function registerGitHubRoutes(app, options = {}) {
           active: false,
           ...(ghCliUser ? { user: ghCliUser } : {}),
         },
-      });
+      },
+    };
+  };
+
+  app.post(githubAuthRoutePaths('/auth/activate'), async (req, res) => {
+    try {
+      const { status, body } = await activateAccount(typeof req.body?.accountId === 'string' ? req.body.accountId : '');
+      return res.status(status).json(body);
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
@@ -1553,35 +1573,40 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
+  /** Removes exactly `requestedAccountId`; bindings on it are reconciled first. */
+  const removeAccount = async (requestedAccountId) => {
+    const {
+      getGitHubAuthAccounts, githubCliAccountId, isGhCliDisabled,
+      setGhCliActive, removeGitHubAuthAccount,
+    } = await getGitHubLibraries();
+    if (!requestedAccountId || requestedAccountId.trim() !== requestedAccountId) {
+      return { status: 400, body: { error: 'accountId is required' } };
+    }
+    const accounts = await getGitHubAuthAccounts();
+    if (requestedAccountId.startsWith('github.com#cli:')) {
+      const { getGhCliToken } = await import('./gh-cli-credential.js');
+      const token = isGhCliDisabled() ? null : getGhCliToken();
+      if (!token) return { status: 200, body: { success: true, removed: false } };
+      const { createOctokit } = await import('./octokit.js');
+      const user = await getGitHubUserSummary(createOctokit(token));
+      if (githubCliAccountId(user.id) !== requestedAccountId) {
+        return { status: 200, body: { success: true, removed: false } };
+      }
+      await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
+      setGhCliActive(false);
+      return { status: 200, body: { success: true, removed: true } };
+    }
+    if (!accounts.some((account) => account.id === requestedAccountId)) return { status: 200, body: { success: true, removed: false } };
+    await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
+    const removed = await removeGitHubAuthAccount(requestedAccountId);
+    return { status: 200, body: { success: true, removed } };
+  };
+
   app.delete(githubAuthRoutePaths('/auth'), async (req, res) => {
     try {
-      const {
-        getGitHubAuthAccounts, githubCliAccountId, isGhCliDisabled,
-        setGhCliActive, removeGitHubAuthAccount,
-      } = await getGitHubLibraries();
       const requested = req.query?.accountId ?? req.body?.accountId;
-      const requestedAccountId = Object.prototype.toString.call(requested) === '[object String]' ? requested : '';
-      if (!requestedAccountId || requestedAccountId.trim() !== requestedAccountId) {
-        return res.status(400).json({ error: 'accountId is required' });
-      }
-      const accounts = await getGitHubAuthAccounts();
-      if (requestedAccountId.startsWith('github.com#cli:')) {
-        const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const token = isGhCliDisabled() ? null : getGhCliToken();
-        if (!token) return res.json({ success: true, removed: false });
-        const { createOctokit } = await import('./octokit.js');
-        const user = await getGitHubUserSummary(createOctokit(token));
-        if (githubCliAccountId(user.id) !== requestedAccountId) {
-          return res.json({ success: true, removed: false });
-        }
-        await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
-        setGhCliActive(false);
-        return res.json({ success: true, removed: true });
-      }
-      if (!accounts.some((account) => account.id === requestedAccountId)) return res.json({ success: true, removed: false });
-      await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
-      const removed = await removeGitHubAuthAccount(requestedAccountId);
-      return res.json({ success: true, removed });
+      const { status, body } = await removeAccount(Object.prototype.toString.call(requested) === '[object String]' ? requested : '');
+      return res.status(status).json(body);
     } catch (error) {
       if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
         return res.status(error.status).json({ error: error.message, code: error.code });
@@ -3291,6 +3316,13 @@ export function registerGitHubRoutes(app, options = {}) {
   });
 
   return Object.freeze({
+    /** Account operations shared with the `openchamber` agent tool; each answers like its route. */
+    accounts: Object.freeze({
+      status: readAuthStatus,
+      activate: activateAccount,
+      remove: removeAccount,
+      setCliDisabled: setGhCliDisabledState,
+    }),
     /**
      * The account GitHub reads use when none is named: the gh login while the
      * user has switched to it, else OpenChamber's active account. Null when

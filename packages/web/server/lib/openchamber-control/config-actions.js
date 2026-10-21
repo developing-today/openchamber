@@ -56,7 +56,7 @@ export const CONFIG_PARAMETERS = {
   configPath: { type: 'string', description: 'Dot path into the OpenCode config, such as model or mcp.servers.github.disabled; quote a key containing dots as ["gpt-4.1"]' },
   configValue: { description: 'Value for opencode.config.set; any JSON value, null removes the key' },
   configDelete: { type: 'boolean', description: 'opencode.config.set: remove configPath instead of setting it' },
-  confirm: { type: 'boolean', description: 'Confirms an action that turns off the openchamber tool itself; set only when the user explicitly asked for that' },
+  confirm: { type: 'boolean', description: 'Confirms an action that turns off the openchamber tool itself, signs the user out of a connected service (github.remove, gitlab.remove, linear.disconnect, extensions.disconnect), or changes which credentials Git uses (binding.set); set only when the user explicitly asked for that' },
 };
 
 const CONFIG_ACTIONS = CONFIG_ACTION_DEFINITIONS.map(({ action }) => action);

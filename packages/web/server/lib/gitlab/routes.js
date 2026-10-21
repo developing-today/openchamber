@@ -489,21 +489,27 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  // The account operations below answer like their routes (`{ status, body }`
+  // where a route can refuse), so the routes and the `openchamber` agent tool
+  // (../openchamber-control/integration-service-actions.js) share them.
+  // Lock and storage failures are thrown, as before.
+  const readAuthStatus = async (origin) => {
+    try {
+      return await buildStatus(origin);
+    } catch (error) {
+      if (error?.kind === 'unreachable' || error?.kind === 'temporarily-unavailable') {
+        return { provider: 'gitlab', instance: origin, status: error.kind, connected: false, message: error.message };
+      }
+      throw error;
+    }
+  };
+
   app.get('/api/source-control/gitlab/auth/status', async (req, res) => {
     try {
-      return res.json(await buildStatus(requestOrigin(req)));
+      return res.json(await readAuthStatus(requestOrigin(req)));
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
-      if (error?.kind === 'unreachable' || error?.kind === 'temporarily-unavailable') {
-        let origin;
-        try {
-          origin = requestOrigin(req);
-        } catch {
-          return res.status(400).json({ error: 'Invalid GitLab instance URL' });
-        }
-        return res.json({ provider: 'gitlab', instance: origin, status: error.kind, connected: false, message: error.message });
-      }
       return res.status(400).json({ error: error?.message || 'Failed to get GitLab auth status' });
     }
   });
@@ -613,18 +619,21 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  const activateAccount = async (origin, accountId) => {
+    if (accountId.startsWith(`${origin}#cli:`)) {
+      const usable = await getUsableGlab(origin);
+      if (!usable || accountId !== `${origin}#cli:${usable.user.id}`) return { status: 404, body: { error: 'GitLab CLI account not found' } };
+      await store.setCliActive(origin, true);
+      return { status: 200, body: await buildStatus(origin) };
+    }
+    if (!accountId || !(await store.activate(origin, accountId))) return { status: 404, body: { error: 'GitLab account not found' } };
+    return { status: 200, body: await buildStatus(origin) };
+  };
+
   app.post('/api/source-control/gitlab/auth/activate', async (req, res) => {
     try {
-      const origin = requestOrigin(req);
-      const accountId = isString(req.body?.accountId) ? req.body.accountId : '';
-      if (accountId.startsWith(`${origin}#cli:`)) {
-        const usable = await getUsableGlab(origin);
-        if (!usable || accountId !== `${origin}#cli:${usable.user.id}`) return res.status(404).json({ error: 'GitLab CLI account not found' });
-        await store.setCliActive(origin, true);
-        return res.json(await buildStatus(origin));
-      }
-      if (!accountId || !(await store.activate(origin, accountId))) return res.status(404).json({ error: 'GitLab account not found' });
-      return res.json(await buildStatus(origin));
+      const { status, body } = await activateAccount(requestOrigin(req), isString(req.body?.accountId) ? req.body.accountId : '');
+      return status === 200 ? res.json(body) : res.status(status).json(body);
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
@@ -632,18 +641,37 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  const setCliDisabled = async (origin, requested) => {
+    const disabled = await store.setCliDisabled(origin, requested);
+    const usable = await getUsableGlab(origin);
+    return { available: Boolean(usable), disabled };
+  };
+
   app.post('/api/source-control/gitlab/auth/cli', async (req, res) => {
     try {
-      const origin = requestOrigin(req);
-      const disabled = await store.setCliDisabled(origin, Boolean(req.body?.disabled));
-      const usable = await getUsableGlab(origin);
-      return res.json({ available: Boolean(usable), disabled });
+      return res.json(await setCliDisabled(requestOrigin(req), Boolean(req.body?.disabled)));
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
       return res.status(400).json({ error: error?.message || 'Failed to inspect glab authentication' });
     }
   });
+
+  /** Removes exactly `requestedAccountId`; bindings on it are reconciled first. */
+  const removeAccount = async (origin, requestedAccountId) => {
+    const instance = await store.readInstance(origin);
+    if (requestedAccountId.startsWith(`${origin}#cli:`)) {
+      const cli = await getUsableGlab(origin);
+      if (!cli || `${origin}#cli:${cli.user.id}` !== requestedAccountId) {
+        return { status: 200, body: { removed: false } };
+      }
+      await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
+      return { status: 200, body: { removed: await store.setCliActive(origin, false) } };
+    }
+    if (!instance.accounts.some((account) => account.id === requestedAccountId)) return { status: 200, body: { removed: false } };
+    await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
+    return { status: 200, body: { removed: await store.removeAccount(origin, requestedAccountId) } };
+  };
 
   app.delete('/api/source-control/gitlab/auth', async (req, res) => {
     try {
@@ -653,18 +681,8 @@ export function registerGitLabRoutes(app, options = {}) {
       if (!requestedAccountId || requested !== requestedAccountId) {
         return res.status(400).json({ error: 'accountId is required' });
       }
-      const instance = await store.readInstance(origin);
-      if (requestedAccountId.startsWith(`${origin}#cli:`)) {
-        const cli = await getUsableGlab(origin);
-        if (!cli || `${origin}#cli:${cli.user.id}` !== requestedAccountId) {
-          return res.json({ removed: false });
-        }
-        await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
-        return res.json({ removed: await store.setCliActive(origin, false) });
-      }
-      if (!instance.accounts.some((account) => account.id === requestedAccountId)) return res.json({ removed: false });
-      await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
-      return res.json({ removed: await store.removeAccount(origin, requestedAccountId) });
+      const { status, body } = await removeAccount(origin, requestedAccountId);
+      return status === 200 ? res.json(body) : res.status(status).json(body);
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
@@ -1232,6 +1250,14 @@ export function registerGitLabRoutes(app, options = {}) {
 
   return {
     listInstances: async () => store.listInstances?.() ?? [],
+    /** Account operations shared with the `openchamber` agent tool; each answers like its route. */
+    accounts: Object.freeze({
+      listInstances: async () => store.listInstances?.() ?? [],
+      status: readAuthStatus,
+      activate: activateAccount,
+      remove: removeAccount,
+      setCliDisabled,
+    }),
     /** Live state of known merge requests and issues, read with the instance's current account. */
     readLiveSummaries: async ({ instance, accountId = null, refs, issueRefs }) => {
       let service;

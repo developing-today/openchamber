@@ -119,66 +119,73 @@ export function registerLinearRoutes(app) {
     }
   });
 
+  // The account operations below are shared by the routes and the
+  // `openchamber` agent tool (../openchamber-control/integration-service-actions.js).
+  // Each answers like its route; a refusal is `{ status, body }`.
+  const readStatus = async () => {
+    const libraries = await getLinearLibraries();
+    const {
+      getLinearAuth,
+      getLinearAuthWorkspaces,
+      getValidLinearAccessToken,
+      fetchLinearIdentity,
+      setLinearAuth,
+      clearLinearAuth,
+      toLinearPublicStatus,
+      pollAuthorizationBroker,
+      completeAuthorizationBroker,
+    } = libraries;
+
+    try {
+      const result = await pollAuthorizationBroker();
+      if (result) {
+        await storeAuthorizationResult(libraries, result);
+        await completeAuthorizationBroker(result.brokerReceipt).catch((error) => {
+          console.warn('Failed to acknowledge Linear authorization broker result:', error);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to complete Linear authorization through broker:', error);
+    }
+
+    const accessToken = await getValidLinearAccessToken();
+    if (!accessToken) {
+      return { connected: false };
+    }
+
+    const auth = getLinearAuth();
+    try {
+      const identity = await fetchLinearIdentity(accessToken);
+      const next = setLinearAuth({
+        accessToken,
+        refreshToken: auth?.refreshToken,
+        tokenType: auth?.tokenType,
+        expiresAt: auth?.expiresAt,
+        scope: auth?.scope,
+        user: identity.user,
+        organization: identity.organization,
+        workspaceId: auth?.workspaceId,
+      }, { activate: false });
+      return toLinearPublicStatus(next, getLinearAuthWorkspaces());
+    } catch (error) {
+      if (error?.status === 401) {
+        clearLinearAuth(auth?.workspaceId);
+        const remaining = getLinearAuth();
+        if (!remaining) {
+          return { connected: false };
+        }
+        return toLinearPublicStatus(remaining, getLinearAuthWorkspaces());
+      }
+      if (auth) {
+        return toLinearPublicStatus(auth, getLinearAuthWorkspaces());
+      }
+      throw error;
+    }
+  };
+
   app.get('/api/linear/auth/status', async (_req, res) => {
     try {
-      const libraries = await getLinearLibraries();
-      const {
-        getLinearAuth,
-        getLinearAuthWorkspaces,
-        getValidLinearAccessToken,
-        fetchLinearIdentity,
-        setLinearAuth,
-        clearLinearAuth,
-        toLinearPublicStatus,
-        pollAuthorizationBroker,
-        completeAuthorizationBroker,
-      } = libraries;
-
-      try {
-        const result = await pollAuthorizationBroker();
-        if (result) {
-          await storeAuthorizationResult(libraries, result);
-          await completeAuthorizationBroker(result.brokerReceipt).catch((error) => {
-            console.warn('Failed to acknowledge Linear authorization broker result:', error);
-          });
-        }
-      } catch (error) {
-        console.error('Failed to complete Linear authorization through broker:', error);
-      }
-
-      const accessToken = await getValidLinearAccessToken();
-      if (!accessToken) {
-        return res.json({ connected: false });
-      }
-
-      const auth = getLinearAuth();
-      try {
-        const identity = await fetchLinearIdentity(accessToken);
-        const next = setLinearAuth({
-          accessToken,
-          refreshToken: auth?.refreshToken,
-          tokenType: auth?.tokenType,
-          expiresAt: auth?.expiresAt,
-          scope: auth?.scope,
-          user: identity.user,
-          organization: identity.organization,
-          workspaceId: auth?.workspaceId,
-        }, { activate: false });
-        return res.json(toLinearPublicStatus(next, getLinearAuthWorkspaces()));
-      } catch (error) {
-        if (error?.status === 401) {
-          clearLinearAuth(auth?.workspaceId);
-          const remaining = getLinearAuth();
-          if (!remaining) {
-            return res.json({ connected: false });
-          }
-          return res.json(toLinearPublicStatus(remaining, getLinearAuthWorkspaces()));
-        }
-        if (auth) {
-          return res.json(toLinearPublicStatus(auth, getLinearAuthWorkspaces()));
-        }
-        throw error;
-      }
+      return res.json(await readStatus());
     } catch (error) {
       console.error('Failed to get Linear auth status:', error);
       return res.status(500).json({ error: error.message || 'Failed to get Linear auth status' });
@@ -266,70 +273,89 @@ export function registerLinearRoutes(app) {
     }
   });
 
-  app.get('/api/linear/mapping', async (_req, res) => {
+  const readMapping = async () => {
+    const {
+      listLinearTeams,
+      readStoredLinearMapping,
+      mergeLinearMappingView,
+      LinearMappingError,
+    } = await getLinearLibraries();
+    const teamsResult = await listLinearTeams();
+    if (teamsResult.connected === false) {
+      return { status: 200, body: { connected: false } };
+    }
+    let stored;
     try {
-      const {
-        listLinearTeams,
-        readStoredLinearMapping,
-        mergeLinearMappingView,
-        LinearMappingError,
-      } = await getLinearLibraries();
-      const teamsResult = await listLinearTeams();
-      if (teamsResult.connected === false) {
-        return res.json({ connected: false });
+      stored = readStoredLinearMapping();
+    } catch (error) {
+      if (error instanceof LinearMappingError && error.code === 'MALFORMED') {
+        return { status: 500, body: { error: error.message } };
       }
-      let stored;
-      try {
-        stored = readStoredLinearMapping();
-      } catch (error) {
-        if (error instanceof LinearMappingError && error.code === 'MALFORMED') {
-          return res.status(500).json({ error: error.message });
-        }
-        throw error;
-      }
-      return res.json({
+      throw error;
+    }
+    return {
+      status: 200,
+      body: {
         connected: true,
         ...mergeLinearMappingView(stored, teamsResult.teams),
-      });
+      },
+    };
+  };
+
+  app.get('/api/linear/mapping', async (_req, res) => {
+    try {
+      const { status, body } = await readMapping();
+      return res.status(status).json(body);
     } catch (error) {
       console.error('Failed to load Linear mapping:', error);
       return res.status(500).json({ error: error.message || 'Failed to load Linear mapping' });
     }
   });
 
-  app.put('/api/linear/mapping', parseJsonBody, async (req, res) => {
+  const writeMapping = async (mapping) => {
+    const {
+      getValidLinearAccessToken,
+      listLinearTeams,
+      setStoredLinearMapping,
+      mergeLinearMappingView,
+      LinearMappingError,
+    } = await getLinearLibraries();
+    const accessToken = await getValidLinearAccessToken();
+    if (!accessToken) {
+      return { status: 200, body: { connected: false } };
+    }
+    let stored;
     try {
-      const {
-        getValidLinearAccessToken,
-        listLinearTeams,
-        setStoredLinearMapping,
-        mergeLinearMappingView,
-        LinearMappingError,
-      } = await getLinearLibraries();
-      const accessToken = await getValidLinearAccessToken();
-      if (!accessToken) {
-        return res.json({ connected: false });
+      stored = setStoredLinearMapping(mapping);
+    } catch (error) {
+      if (error instanceof LinearMappingError && error.code === 'INVALID') {
+        return { status: 400, body: { error: error.message } };
       }
-      let stored;
-      try {
-        stored = setStoredLinearMapping(req.body);
-      } catch (error) {
-        if (error instanceof LinearMappingError && error.code === 'INVALID') {
-          return res.status(400).json({ error: error.message });
-        }
-        throw error;
-      }
-      const teamsResult = await listLinearTeams();
-      if (teamsResult.connected === false) {
-        return res.json({
+      throw error;
+    }
+    const teamsResult = await listLinearTeams();
+    if (teamsResult.connected === false) {
+      return {
+        status: 200,
+        body: {
           connected: true,
           ...mergeLinearMappingView(stored, []),
-        });
-      }
-      return res.json({
+        },
+      };
+    }
+    return {
+      status: 200,
+      body: {
         connected: true,
         ...mergeLinearMappingView(stored, teamsResult.teams),
-      });
+      },
+    };
+  };
+
+  app.put('/api/linear/mapping', parseJsonBody, async (req, res) => {
+    try {
+      const { status, body } = await writeMapping(req.body);
+      return res.status(status).json(body);
     } catch (error) {
       console.error('Failed to save Linear mapping:', error);
       return res.status(500).json({ error: error.message || 'Failed to save Linear mapping' });
@@ -362,71 +388,99 @@ export function registerLinearRoutes(app) {
     }
   });
 
+  const readPreferences = async () => {
+    const { getLinearSessionCommentsEnabled } = await getLinearLibraries();
+    return { sessionComments: getLinearSessionCommentsEnabled() };
+  };
+
   app.get('/api/linear/preferences', async (_req, res) => {
     try {
-      const { getLinearSessionCommentsEnabled } = await getLinearLibraries();
-      return res.json({ sessionComments: getLinearSessionCommentsEnabled() });
+      return res.json(await readPreferences());
     } catch (error) {
       console.error('Failed to load Linear preferences:', error);
       return res.status(500).json({ error: error.message || 'Failed to load Linear preferences' });
     }
   });
 
+  const writePreferences = async (sessionComments) => {
+    if (sessionComments !== true && sessionComments !== false) {
+      return { status: 400, body: { error: 'sessionComments must be a boolean' } };
+    }
+    const { setLinearSessionCommentsEnabled } = await getLinearLibraries();
+    return { status: 200, body: { sessionComments: setLinearSessionCommentsEnabled(sessionComments) } };
+  };
+
   app.put('/api/linear/preferences', parseJsonBody, async (req, res) => {
     try {
-      const sessionComments = req.body?.sessionComments;
-      if (sessionComments !== true && sessionComments !== false) {
-        return res.status(400).json({ error: 'sessionComments must be a boolean' });
-      }
-      const { setLinearSessionCommentsEnabled } = await getLinearLibraries();
-      return res.json({ sessionComments: setLinearSessionCommentsEnabled(sessionComments) });
+      const { status, body } = await writePreferences(req.body?.sessionComments);
+      return res.status(status).json(body);
     } catch (error) {
       console.error('Failed to save Linear preferences:', error);
       return res.status(500).json({ error: error.message || 'Failed to save Linear preferences' });
     }
   });
 
+  const activateWorkspace = async (requested) => {
+    const {
+      activateLinearAuth,
+      getLinearAuth,
+      getLinearAuthWorkspaces,
+      toLinearPublicStatus,
+    } = await getLinearLibraries();
+    const organizationId = readTrimmedString(requested);
+    if (!organizationId) {
+      return { status: 400, body: { error: 'organizationId is required' } };
+    }
+    const activated = activateLinearAuth(organizationId);
+    if (!activated) {
+      return { status: 404, body: { error: 'Linear workspace not found' } };
+    }
+    const auth = getLinearAuth();
+    if (!auth) {
+      return { status: 200, body: { connected: false } };
+    }
+    return { status: 200, body: toLinearPublicStatus(auth, getLinearAuthWorkspaces()) };
+  };
+
   app.post('/api/linear/auth/activate', parseJsonBody, async (req, res) => {
     try {
-      const {
-        activateLinearAuth,
-        getLinearAuth,
-        getLinearAuthWorkspaces,
-        toLinearPublicStatus,
-      } = await getLinearLibraries();
-      const organizationId = readTrimmedString(req.body?.organizationId);
-      if (!organizationId) {
-        return res.status(400).json({ error: 'organizationId is required' });
-      }
-      const activated = activateLinearAuth(organizationId);
-      if (!activated) {
-        return res.status(404).json({ error: 'Linear workspace not found' });
-      }
-      const auth = getLinearAuth();
-      if (!auth) {
-        return res.json({ connected: false });
-      }
-      return res.json(toLinearPublicStatus(auth, getLinearAuthWorkspaces()));
+      const { status, body } = await activateWorkspace(req.body?.organizationId);
+      return res.status(status).json(body);
     } catch (error) {
       console.error('Failed to switch Linear workspace:', error);
       return res.status(500).json({ error: error.message || 'Failed to switch Linear workspace' });
     }
   });
 
+  /** Revokes and drops the current workspace only; other workspaces and the mapping stay. */
+  const disconnectCurrent = async () => {
+    const { getLinearAuth, clearLinearAuth, revokeToken } = await getLinearLibraries();
+    const auth = getLinearAuth();
+    if (auth?.refreshToken) {
+      await revokeToken(auth.refreshToken, 'refresh_token');
+    } else if (auth?.accessToken) {
+      await revokeToken(auth.accessToken, 'access_token');
+    }
+    const removed = clearLinearAuth(auth?.workspaceId);
+    return { success: true, removed };
+  };
+
   app.delete('/api/linear/auth', async (_req, res) => {
     try {
-      const { getLinearAuth, clearLinearAuth, revokeToken } = await getLinearLibraries();
-      const auth = getLinearAuth();
-      if (auth?.refreshToken) {
-        await revokeToken(auth.refreshToken, 'refresh_token');
-      } else if (auth?.accessToken) {
-        await revokeToken(auth.accessToken, 'access_token');
-      }
-      const removed = clearLinearAuth(auth?.workspaceId);
-      return res.json({ success: true, removed });
+      return res.json(await disconnectCurrent());
     } catch (error) {
       console.error('Failed to disconnect Linear:', error);
       return res.status(500).json({ error: error.message || 'Failed to disconnect Linear' });
     }
+  });
+
+  return Object.freeze({
+    status: readStatus,
+    activate: activateWorkspace,
+    disconnect: disconnectCurrent,
+    readMapping,
+    writeMapping,
+    readPreferences,
+    writePreferences,
   });
 }
