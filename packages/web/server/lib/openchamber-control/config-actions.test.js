@@ -305,6 +305,23 @@ describe('maskConfigSecrets', () => {
     });
   });
 
+  it('masks passphrase values, as a leaf, in plural form and through a subtree', () => {
+    expect(maskConfigSecrets('LEAK', 'passphrase')).toBe('********');
+    expect(maskConfigSecrets('LEAK', 'passphrases')).toBe('********');
+    expect(maskConfigSecrets('LEAK', 'myPassphrase')).toBe('********');
+    expect(maskConfigSecrets({
+      passphrase: 'LEAK',
+      passphrases: ['LEAK2', { value: 'LEAK3' }],
+      nested: { passphrase: { material: 'LEAK4' } },
+      refs: { passphrase: '{env:PP}', keyPassphrase: '{file:/keys/id}' },
+    })).toEqual({
+      passphrase: '********',
+      passphrases: ['********', { value: '********' }],
+      nested: { passphrase: { material: '********' } },
+      refs: { passphrase: '{env:PP}', keyPassphrase: '{file:/keys/id}' },
+    });
+  });
+
   it('masks plural secret names and pins the fail-closed bare-keys reading', () => {
     expect(maskConfigSecrets({
       privateKeys: 'LEAK', accessKeys: 'LEAK', apiKeys: 'LEAK', tokens: 'LEAK',
