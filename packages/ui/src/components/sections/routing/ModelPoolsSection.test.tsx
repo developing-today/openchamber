@@ -600,7 +600,7 @@ describe('ModelPoolsSection', () => {
       const rows = () => [...dom.container.querySelectorAll('button[aria-expanded]')].map((row) => row.textContent);
       expect(rows()).toEqual([
         'smallIncludes *luna*, *haiku* · Excludes *-5 · Includes models whose id contains flash · Excludes models whose id contains preview'
-          + ' · Includes models matching *luna* and not *mini* · Offers levels low, medium, high · rules',
+          + ' · Includes models matching *luna* and not *mini* · Offers levels low, medium, high · Rules',
         'kept1 targets · Excludes *-5 · Offers no levels',
       ]);
       expect(dom.container.textContent).not.toContain('JSON only');

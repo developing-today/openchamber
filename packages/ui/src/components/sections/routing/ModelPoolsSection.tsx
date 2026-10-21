@@ -362,7 +362,7 @@ const poolSummary = (route: ModelRoute, t: Translate): string => {
   const rules = poolRuleTexts(route, t);
   // A pool that only takes models by pattern has no target list to count.
   const count = route.targets !== undefined || rules.length === 0 ? [t('settings.pools.targetCount', { count: route.targets?.length ?? 0 })] : [];
-  return [...count, ...rules, ...(route.autonomy ? [route.autonomy] : [])].join(' · ');
+  return [...count, ...rules, ...(route.autonomy ? [t(`settings.pools.autonomy.${route.autonomy}`)] : [])].join(' · ');
 };
 
 /** The matching keys, declared levels and variant rules, read only: the structured editor keeps them as read and they change in the pool's JSON. */
