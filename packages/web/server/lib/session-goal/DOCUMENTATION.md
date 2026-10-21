@@ -574,7 +574,10 @@ sees only that final turn, so the report is its evidence.
     from it. The rules the server adds after every prompt are shown under the
     field. "Describe a change" asks the rewrite route with the composer's model
     as the fallback and no directory, since Settings edits this server's
-    settings; the answer is shown next to the current prompt (stacked on a
+    settings. It sends the prompt it will show as the current one: the text in
+    the field, or the built-in prompt while the field is empty, so Rewrite
+    stays off until that has loaded and never sends an empty prompt. The
+    answer is shown next to the current prompt (stacked on a
     narrow pane) until Apply, which puts it in the field and saves it, or
     Discard. A failure keeps the field and shows its reason.
 

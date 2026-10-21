@@ -52,14 +52,21 @@ const typeInto = (field: HTMLTextAreaElement | HTMLInputElement, prototype: HTML
 });
 
 /** The editor over a store in miniature: what it saves is what it is handed back. */
-async function fixture(initial: string, rewrite: Rewrite = async () => ({ ok: false, message: 'unused' })) {
+async function fixture(
+  initial: string,
+  rewrite: Rewrite = async () => ({ ok: false, message: 'unused' }),
+  initialBuiltin: GoalWriterBuiltinPromptResult | null = BUILTIN,
+) {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
   mounted.push(root);
   const saves: string[] = [];
+  let answerBuiltin: (value: GoalWriterBuiltinPromptResult) => void = () => undefined;
   const Harness = () => {
     const [stored, setStored] = React.useState(initial);
+    const [builtin, setBuiltin] = React.useState(initialBuiltin);
+    answerBuiltin = setBuiltin;
     return (
       <GoalWriterPromptEditor
         stored={stored}
@@ -67,7 +74,7 @@ async function fixture(initial: string, rewrite: Rewrite = async () => ({ ok: fa
           saves.push(value);
           setStored(value);
         }}
-        builtin={BUILTIN}
+        builtin={builtin}
         rewrite={rewrite}
         disabled={false}
       />
@@ -91,13 +98,27 @@ async function fixture(initial: string, rewrite: Rewrite = async () => ({ ok: fa
     if (!target) throw new Error(`No button "${label}" in: ${host.textContent}`);
     target.click();
   });
-  const describeChange = async (instruction: string) => {
+  const typeChange = (instruction: string) => {
     const field = host.querySelector('input');
     if (!field) throw new Error(`No change field in: ${host.textContent}`);
-    await typeInto(field, HTMLInputElement.prototype, instruction);
+    return typeInto(field, HTMLInputElement.prototype, instruction);
+  };
+  const describeChange = async (instruction: string) => {
+    await typeChange(instruction);
     await click('Rewrite');
   };
-  return { host, saves, textarea, hasButton, hasTextarea, typePrompt, click, describeChange };
+  /** Enter in the change field: the form is submitted whatever the button shows. */
+  const submitChange = () => act(async () => {
+    host.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  const isDisabled = (label: string) => button(label)?.disabled ?? null;
+  /** The text shown under "Current prompt" in a proposal. */
+  const proposalCurrent = () => {
+    const label = Array.from(host.querySelectorAll('p')).find((element) => element.textContent === 'Current prompt');
+    return label?.nextElementSibling?.textContent ?? null;
+  };
+  const loadBuiltin = (value: GoalWriterBuiltinPromptResult) => act(async () => answerBuiltin(value));
+  return { host, saves, textarea, hasButton, hasTextarea, typePrompt, click, describeChange, typeChange, submitChange, isDisabled, proposalCurrent, loadBuiltin };
 }
 
 describe('GoalWriterPromptEditor', () => {
@@ -166,5 +187,44 @@ describe('GoalWriterPromptEditor', () => {
     expect(view.host.textContent).toContain('Could not rewrite the prompt: No small model available');
     expect(view.textarea()?.value).toBe(BUILTIN.prompt);
     expect(view.saves).toEqual([]);
+  });
+
+  test('Rewrite waits for the prompt to load, and the prompt it sends is the current prompt it shows', async () => {
+    const calls: Array<[string, string]> = [];
+    const view = await fixture('', async (prompt, instruction) => {
+      calls.push([prompt, instruction]);
+      return { ok: true, prompt: 'Turn the request into a short goal spec.', providerID: 'p', modelID: 'm' };
+    }, null);
+
+    await view.typeChange('make the specs shorter');
+    expect(view.isDisabled('Rewrite')).toBe(true);
+    await view.submitChange();
+    expect(calls).toEqual([]);
+
+    await view.loadBuiltin(BUILTIN);
+    expect(view.isDisabled('Rewrite')).toBe(false);
+    await view.click('Rewrite');
+    expect(calls).toEqual([[BUILTIN.prompt, 'make the specs shorter']]);
+    expect(view.proposalCurrent()).toBe(BUILTIN.prompt);
+
+    // An emptied field stands for the built-in prompt, which is what is sent.
+    await view.click('Discard');
+    await view.typePrompt('');
+    await view.click('Rewrite');
+    expect(calls.at(-1)).toEqual([BUILTIN.prompt, 'make the specs shorter']);
+    expect(view.proposalCurrent()).toBe(BUILTIN.prompt);
+  });
+
+  test('without a saved prompt, Rewrite stays off when the built-in prompt could not be loaded', async () => {
+    const calls: string[] = [];
+    const view = await fixture('', async (prompt) => {
+      calls.push(prompt);
+      return { ok: false, message: 'unused' };
+    }, { ok: false, message: 'HTTP 503' });
+
+    await view.typeChange('make the specs shorter');
+    expect(view.isDisabled('Rewrite')).toBe(true);
+    await view.submitChange();
+    expect(calls).toEqual([]);
   });
 });

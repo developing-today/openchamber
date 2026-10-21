@@ -51,6 +51,10 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
   const toStored = (value: string): string => (
     value.trim() === '' || value.trim() === builtinPrompt?.trim() ? '' : value
   );
+  // What "Describe a change" rewrites and shows as the current prompt: an
+  // empty field stands for the built-in prompt, so there is nothing to
+  // rewrite until that has loaded.
+  const currentPrompt = toStored(text) === '' ? builtinPrompt || null : text;
   const custom = toStored(text) !== '';
   // Nothing to compare with until the server has answered.
   const canReset = builtin !== null && text.trim() !== (builtinPrompt ?? '').trim();
@@ -74,20 +78,20 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
 
   const submitChange = async () => {
     const change = instruction.trim();
-    if (!change || working) return;
+    if (!change || working || !currentPrompt) return;
     const controller = new AbortController();
     controllerRef.current = controller;
     setRewriteState({ status: 'working' });
     let result: GoalWriterPromptRewriteResult;
     try {
-      result = await rewrite(text, change, controller.signal);
+      result = await rewrite(currentPrompt, change, controller.signal);
     } catch (error) {
       result = { ok: false, message: error instanceof Error ? error.message : String(error) };
     }
     if (controller.signal.aborted) return;
     controllerRef.current = null;
     setRewriteState(result.ok
-      ? { status: 'proposed', current: text || builtinPrompt || '', proposed: result.prompt, model: `${result.providerID}/${result.modelID}` }
+      ? { status: 'proposed', current: currentPrompt, proposed: result.prompt, model: `${result.providerID}/${result.modelID}` }
       : { status: 'failed', reason: result.message });
   };
 
@@ -181,7 +185,7 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
           disabled={disabled || working}
           className="min-w-0 flex-1"
         />
-        <Button type="submit" variant="outline" disabled={disabled || working || !instruction.trim()}>
+        <Button type="submit" variant="outline" disabled={disabled || working || !instruction.trim() || !currentPrompt}>
           <Icon name={working ? 'loader-4' : 'sparkling'} className={cn('size-3.5', working && 'animate-spin')} aria-hidden="true" />
           {t('settings.openchamber.visual.goal.writer.changeSubmit')}
         </Button>
