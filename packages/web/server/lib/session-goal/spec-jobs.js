@@ -140,6 +140,8 @@ const settleInputSchema = z.object({
   // The id of the user message the composer sent.
   messageId: z.string().trim().min(1).optional().catch(undefined),
   error: z.string().optional().catch(undefined),
+  // The claim the composer sent under.
+  claimId: z.string().trim().min(1).optional().catch(undefined),
 });
 
 const writerSchema = z.object({
@@ -1166,7 +1168,19 @@ export function createGoalSpecJobRuntime({
     };
     jobs.set(job.id, job);
     const result = publish(job.sessionId, job);
-    runWriter(job, settings);
+    const written = latestWrite;
+    // The composer lets go of the message once the job is accepted, so the job
+    // is accepted only once it is on file: one held in memory alone would be
+    // gone after a restart, and the message with it.
+    try {
+      await written;
+    } catch (error) {
+      if (jobs.get(job.id) === job) remove(job);
+      throw httpError(`the goal writer job could not be saved: ${describeError(error, 'write failed')}`, 500);
+    }
+    // A job replaced while it was saved needs no writer, nor one whose message
+    // a send already took meanwhile, as `resume` leaves it.
+    if (jobs.get(job.id) === job && job.status === 'writing' && !job.delivery && !job.waiting) runWriter(job, settings);
     return result;
   };
 
@@ -1255,16 +1269,19 @@ export function createGoalSpecJobRuntime({
   };
 
   /**
-   * The composer reports its send: sent, or not sent with the reason. A
-   * message the composer sent is out whether or not its claim is still held
-   * (it expired, or the server restarted), so that report is taken for any
-   * open job no send is under way for.
+   * The composer reports its send: sent, or not sent with the reason. While a
+   * composer's claim is being sent, only a report under that claim counts: a
+   * window whose own claim expired must not settle the one another window now
+   * holds. A message the composer sent is out whether or not its claim is
+   * still held (it expired, or the server restarted), so with no send under
+   * way that report is taken for any open job.
    */
   const settle = async (jobId, input) => {
-    const { outcome, spec, messageId, error } = settleInputSchema.parse(input);
+    const { outcome, spec, messageId, error, claimId } = settleInputSchema.parse(input);
     await load();
     const job = requireJob(jobId);
     const claimed = job.delivery?.by === 'composer';
+    if (claimed && claimId !== job.delivery.claimId) throw httpError('the message is being sent under another claim', 409);
     const lateSuccess = !job.delivery && outcome !== null && OPEN_STATUSES.has(job.status);
     if (!claimed && !lateSuccess) throw httpError('the message is not being sent from a composer', 409);
     if (!outcome) return releaseDelivery(job, error ?? 'the message was not sent');
@@ -1333,6 +1350,8 @@ export function createGoalSpecJobRuntime({
       if (!job || !OPEN_STATUSES.has(job.status) || job.directory === directory) return;
       job.directory = directory;
       touch(job);
+      // A write under way asked the old directory: it starts again in the new one.
+      if (job.status === 'writing' && writers.has(job.id)) runWriter(job, readSettings());
       publish(job.sessionId, job);
       return;
     }

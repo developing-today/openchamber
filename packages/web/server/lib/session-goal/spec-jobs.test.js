@@ -677,7 +677,7 @@ describe('goal writer jobs', () => {
     expect(claimed.job.sending).toBe(true);
     await expect(runtime.edit(created.job.id)).rejects.toMatchObject({ status: 409 });
 
-    const settled = await runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC });
+    const settled = await runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC, claimId: claimed.job.claimId });
     expect(settled.job).toMatchObject({ status: 'sent', sending: false, outcome: { kind: 'spec', sendMode: 'with-message' } });
   });
 
@@ -702,8 +702,8 @@ describe('goal writer jobs', () => {
     await runtime.whenIdle();
     const before = runtime.snapshot().jobs[0];
 
-    await runtime.claim(created.job.id, { kind: 'spec' });
-    const settled = await runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC });
+    const claimed = await runtime.claim(created.job.id, { kind: 'spec' });
+    const settled = await runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC, claimId: claimed.job.claimId });
     await runtime.flush();
 
     expect(settled.job.message).toEqual(before.message);
@@ -742,8 +742,8 @@ describe('goal writer jobs', () => {
     const dataDir = makeDataDir();
     const byComposer = createRuntime({ dataDir });
     const claimed = await byComposer.runtime.create(job({ message: composerOnlyMessage }));
-    await byComposer.runtime.claim(claimed.job.id, { kind: 'original' });
-    const settled = await byComposer.runtime.settle(claimed.job.id, { outcome: { kind: 'original', withGoal: true }, messageId: 'msg_from_composer' });
+    const claim = await byComposer.runtime.claim(claimed.job.id, { kind: 'original' });
+    const settled = await byComposer.runtime.settle(claimed.job.id, { outcome: { kind: 'original', withGoal: true }, messageId: 'msg_from_composer', claimId: claim.job.claimId });
     expect(settled.job.messageId).toBe('msg_from_composer');
     await byComposer.runtime.flush();
     const restarted = createRuntime({ dataDir });
@@ -787,10 +787,10 @@ describe('goal writer jobs', () => {
   it('a composer that claimed the original and failed leaves a job that can be written again', async () => {
     const { runtime, writer } = createRuntime({ settings: {} });
     const created = await runtime.create(job({ message: composerOnlyMessage }));
-    await runtime.claim(created.job.id, { kind: 'original' });
+    const claimed = await runtime.claim(created.job.id, { kind: 'original' });
     expect(writer.calls[0].input.signal.aborted).toBe(true);
 
-    const released = await runtime.settle(created.job.id, { outcome: null, error: 'network down' });
+    const released = await runtime.settle(created.job.id, { outcome: null, error: 'network down', claimId: claimed.job.claimId });
     expect(released.job).toMatchObject({ status: 'failed', failedStep: 'send', error: 'network down', sending: false, review: true });
   });
 
@@ -813,6 +813,82 @@ describe('goal writer jobs', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('a report under an older claim is refused while a newer claim holds the job', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runtime, writer } = createRuntime({ claimTtlMs: 1_000 });
+      const created = await runtime.create(job({ message: composerOnlyMessage }));
+      writeAnswer(writer);
+      await runtime.whenIdle();
+      const first = await runtime.claim(created.job.id, { kind: 'spec' });
+      await vi.advanceTimersByTimeAsync(1_001);
+      const second = await runtime.claim(created.job.id, { kind: 'spec' });
+      expect(second.job.claimId).not.toBe(first.job.claimId);
+
+      // The first window's late reports, sent or not, leave the newer claim alone.
+      await expect(runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC, claimId: first.job.claimId }))
+        .rejects.toMatchObject({ status: 409 });
+      await expect(runtime.settle(created.job.id, { outcome: null, error: 'gone', claimId: first.job.claimId })).rejects.toMatchObject({ status: 409 });
+      await expect(runtime.settle(created.job.id, { outcome: null, error: 'no claim named' })).rejects.toMatchObject({ status: 409 });
+      expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', sending: true, claimId: second.job.claimId });
+
+      const settled = await runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC, claimId: second.job.claimId });
+      expect(settled.job).toMatchObject({ status: 'sent', sending: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a job that cannot be put on file is refused, and nothing of it stays', async () => {
+    const dataDir = makeDataDir();
+    const { runtime, writer, broadcasts } = createRuntime({ dataDir });
+    await runtime.load();
+    // A folder where the file goes: every write of it fails.
+    fs.mkdirSync(jobsFilePath(dataDir));
+
+    await expect(runtime.create(job())).rejects.toMatchObject({ status: 500 });
+    expect(runtime.snapshot().jobs).toEqual([]);
+    expect(writer.calls).toEqual([]);
+    expect(broadcasts.at(-1).properties).toMatchObject({ sessionId: SESSION, job: null });
+  });
+
+  it('a job a window claims while it is being put on file gets no writer', async () => {
+    const { runtime, writer, broadcasts } = createRuntime();
+    let claiming = null;
+    const record = broadcasts.push.bind(broadcasts);
+    // A window claims the message as soon as it hears of the job, before the job's file write lands.
+    broadcasts.push = (event) => {
+      if (!claiming && event.properties.job?.status === 'writing') {
+        claiming = runtime.claim(event.properties.job.id, { kind: 'original' });
+      }
+      return record(event);
+    };
+    await runtime.create(job({ message: composerOnlyMessage }));
+    await claiming;
+
+    expect(writer.calls).toEqual([]);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'writing', sending: true });
+  });
+
+  it('a write under way when its session moves starts again in the new directory', async () => {
+    const { runtime, writer, emit } = createRuntime();
+    runtime.start();
+    await runtime.load();
+    await runtime.create(job());
+    expect(writer.calls[0].input.directory).toBe(DIRECTORY);
+
+    emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/repo-moved' } } });
+
+    expect(writer.calls[0].input.signal.aborted).toBe(true);
+    expect(writer.calls).toHaveLength(2);
+    expect(writer.calls[1].input.directory).toBe('/repo-moved');
+    // The first write answers too, first; only the write in the new directory counts.
+    writer.calls[0].resolve({ spec: 'Spec written in the old directory', providerID: 'p', modelID: 'm' });
+    writeAnswer(writer, 1);
+    await runtime.whenIdle();
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', spec: SPEC, directory: '/repo-moved' });
   });
 
   it('Back to edit cancels the job and hands the whole message back', async () => {
@@ -849,7 +925,7 @@ describe('goal writer jobs', () => {
     runtime.start();
     await runtime.load();
     const created = await runtime.create(job({ review: false }));
-    await runtime.claim(created.job.id, { kind: 'original' });
+    const claimed = await runtime.claim(created.job.id, { kind: 'original' });
 
     connect();
     await runtime.load();
@@ -859,7 +935,7 @@ describe('goal writer jobs', () => {
     await runtime.whenIdle();
     expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'writing', spec: null, sending: true });
 
-    await runtime.settle(created.job.id, { outcome: { kind: 'original', withGoal: true } });
+    await runtime.settle(created.job.id, { outcome: { kind: 'original', withGoal: true }, claimId: claimed.job.claimId });
     connect();
     await runtime.load();
     await runtime.whenIdle();
@@ -1564,7 +1640,7 @@ describe('a composer\'s claim while the agent works', () => {
 
     // The server sends nothing itself; the composer reports its send.
     expect(openCode.state.calls).toEqual([]);
-    const settled = await runtime.settle(written.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC });
+    const settled = await runtime.settle(written.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC, claimId });
     expect(settled.job).toMatchObject({ status: 'sent', sending: false, waiting: false, claimId: null });
   });
 

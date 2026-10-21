@@ -28,7 +28,7 @@ export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoic
 
     const claimed = await jobs.claimJob(job, choice.kind);
     if (!claimed.waiting) {
-        await sendClaimed(job, choice, claimed.message);
+        await sendClaimed(job, choice, claimed.message, claimed.claimId);
         return;
     }
     if (!claimed.claimId) throw new Error('The server queued the message without naming its claim');
@@ -62,7 +62,7 @@ const sendHandedOver = () => {
         if (named && current.waiting) continue;
         heldClaims.delete(held.claimId);
         if (!named || !current.sending || held.runtimeKey !== getRuntimeKey()) continue;
-        void sendClaimed(current, held.choice, held.message).catch((error) => {
+        void sendClaimed(current, held.choice, held.message, held.claimId).catch((error) => {
             // The job carries the reason: the failed send was reported with it.
             console.warn('[goal-spec-jobs] the queued message was not sent:', error);
         });
@@ -80,9 +80,14 @@ const holdUntilHandedOver = (held: HeldClaim) => {
     sendHandedOver();
 };
 
-/** Sends a claimed message through the session's send path and reports the outcome. */
-async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message: GoalSpecJobMessage): Promise<void> {
+/**
+ * Sends a claimed message through the session's send path and reports the
+ * outcome under the claim, so a report from a window whose claim expired
+ * never settles a newer one.
+ */
+async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message: GoalSpecJobMessage, claimId: string | null): Promise<void> {
     const jobs = useGoalSpecJobStore.getState();
+    const claim = claimId ? { claimId } : {};
     const target = createMessageQueueTarget(job.sessionId, job.directory, getRuntimeKey());
     const outgoing = buildOutgoingMessage({
         queued: [{
@@ -132,10 +137,10 @@ async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message:
         );
     } catch (error) {
         const reason = error instanceof Error && error.message ? error.message : 'The message could not be sent';
-        await jobs.settleJob(job, { outcome: null, error: reason }).catch(() => undefined);
+        await jobs.settleJob(job, { outcome: null, error: reason, ...claim }).catch(() => undefined);
         throw error;
     }
     await jobs.settleJob(job, choice.kind === 'spec'
-        ? { outcome: { kind: 'spec', sendMode: choice.sendMode }, spec: choice.spec, messageId }
-        : { outcome: { kind: 'original', withGoal: job.trigger === 'armed' }, messageId });
+        ? { outcome: { kind: 'spec', sendMode: choice.sendMode }, spec: choice.spec, messageId, ...claim }
+        : { outcome: { kind: 'original', withGoal: job.trigger === 'armed' }, messageId, ...claim });
 }

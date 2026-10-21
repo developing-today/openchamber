@@ -33,11 +33,14 @@ export async function takeGoalSpecJobBack(job: GoalSpecJob): Promise<void> {
  * draft in its place. Answers the draft's id, or null when the session
  * stays: it is not the one on screen, it has a message (in this window or on
  * the server), OpenCode could not say, or the removal failed. A session with
- * any message is never removed.
+ * any message is never removed. The window is checked again once OpenCode
+ * answers, since a message sent from it or a switch to another session or
+ * runtime during that read keeps the session too.
  */
 async function replaceEmptySessionWithDraft(job: GoalSpecJob, runtimeKey: string): Promise<number | null> {
-    if (useSessionUIStore.getState().currentSessionId !== job.sessionId) return null;
-    if (getSyncMessages(job.sessionId, job.directory).length > 0) return null;
+    const emptyOnScreen = () => useSessionUIStore.getState().currentSessionId === job.sessionId
+        && getSyncMessages(job.sessionId, job.directory).length === 0;
+    if (!emptyOnScreen()) return null;
     let empty: boolean;
     try {
         const page = await opencodeClient.getSessionMessages(job.sessionId, { limit: 1 }, job.directory);
@@ -46,7 +49,7 @@ async function replaceEmptySessionWithDraft(job: GoalSpecJob, runtimeKey: string
         console.warn('[goal-spec-jobs] could not check the session before removing it:', error);
         return null;
     }
-    if (!empty || runtimeKey !== getRuntimeKey()) return null;
+    if (!empty || runtimeKey !== getRuntimeKey() || !emptyOnScreen()) return null;
     if (!(await useSessionUIStore.getState().deleteSession(job.sessionId, { expectedRuntimeKey: runtimeKey }))) return null;
     // A chat's directory names no project, so it opens another chat.
     useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: job.directory });

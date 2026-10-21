@@ -215,7 +215,11 @@ persisted, revisioned, broadcast).
 - One job per session. A new job replaces the session's job: an open one is
   cancelled (a waiting send with it) and its write stopped, a sent card
   removed. While that job's message is being sent (by the server, or by a
-  composer that claimed it) a new job is `409`. A sent card stays until it is
+  composer that claimed it) a new job is `409`. A new job is accepted only
+  once it is on file: the composer lets go of the message on that answer, and
+  a job held in memory alone would be gone after a restart. A start whose
+  write fails is `500` and leaves no job, so the composer gives the message
+  back. A sent card stays until it is
   dismissed, the session starts another job, or a day has passed; an hourly
   sweep removes it. Open jobs have no time limit. At most 50 jobs: the sent
   card that changed longest ago makes room, else the open job that changed
@@ -226,7 +230,8 @@ persisted, revisioned, broadcast).
   directory, and the card's choices: the picked writer and effort win over
   Settings (`writerProviderID`, `writerModelID`, `writerVariant`), and
   `ignoreLimit` drops the length rule. A failure is `failed` with the reason and `failedStep: 'write'`.
-  Every redo, send of the original, claim of the original, cancel and stop
+  Every redo, send of the original, claim of the original, move of the
+  session to another directory, cancel and stop
   aborts the running write first, so an answer arriving after that is
   dropped.
 - Sending by the server: with review off, a written spec goes out at once;
@@ -291,10 +296,13 @@ persisted, revisioned, broadcast).
   being sent. Only the claim the job names is sent, so a composer that missed
   its hand-over never sends a later claim's message. A claim nobody settles
   expires two minutes after it was handed over, never while it waits, and the
-  job then waits for the user with review on. A composer's report that the
-  message went out is taken for any open job no send is under way for, so a
-  send that finished after its claim expired, or after a restart, still
-  lands.
+  job then waits for the user with review on. A composer reports under the
+  claim it sent with (`settle` carries `claimId`): while a composer's claim is
+  being sent, a report under any other claim, or under none, is `409`, so a
+  window whose claim expired never settles the claim another window now
+  holds. A composer's report that the message went out is taken for any open
+  job no send is under way for, so a send that finished after its claim
+  expired, or after a restart, still lands.
 - A sent job keeps what its card shows: the text, the attachment names, the
   context count (`contextCount` in the file) and the instructions derived
   from the text. The attachment bytes, the attached context and the writer
@@ -307,7 +315,8 @@ persisted, revisioned, broadcast).
   `server/index.js` hands to `processPayload`; an unarchive ends nothing) ends
   its job. A `session.updated` carrying `info.directory` moves an open job to
   that directory, so the writer, the goal, Auto routing and the knowledge use
-  the session's current one.
+  the session's current one; a write under way when the session moves starts
+  again in the new directory, and the old write's answer is dropped.
 - Restart: jobs live in `<data-dir>/goal-spec-jobs.json`, mode 0600, written
   through `writeFileAtomic` (`../opencode/atomic-write.js`). A file that is
   not JSON, has an unknown `version`, or whose `jobs` is not a list is moved
@@ -337,14 +346,16 @@ persisted, revisioned, broadcast).
   goal the send starts; `POST /:jobId/redo` with `{ writerChoice?, ignoreLimit?
   }`, the card's choices for this write and the goal, a choice left out
   keeping the job's; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
-  }`; `POST /:jobId/settle` with `{ outcome, spec?, messageId?, error? }`; `DELETE
+  }`; `POST /:jobId/settle` with `{ outcome, spec?, messageId?, error?,
+  claimId? }`; `DELETE
   /:jobId` dismisses a sent job (an open one is `409`). Mutations answer `{
   revision, job }`, and `edit` and `claim` add the full `message`; a send or
   claim held for the agent's turn answers the job with `waiting: true`.
   Refusals are `400` (an invalid body, a `tokenBudget` other than a positive
   integer or null, a `writerInput` other than `{ conversation?, openItems? }`
   strings, a `message.scheduledTask`, which only the server's scheduled sends
-  carry, a `writerChoice` without a provider and model), `404` and `409`; a failed send is `502`.
+  carry, a `writerChoice` without a provider and model), `404` and `409`; a failed send is `502`, and a
+  start that cannot be written to the file is `500`.
 - Every change broadcasts `openchamber:goal-spec-job.updated` with `{
   revision, sessionId, job }` on the control stream (`job` is null once a sent
   job is removed). The revision is global and monotonic, as the queue's.
@@ -640,8 +651,9 @@ sees only that final turn, so the report is its evidence.
   `sendMessage` with the full message assembled as a taken queued message
   (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`, with
   the card's length limit switch as `ignoreLimit`),
-  then `settle` with the outcome and the id of the user message the send
-  created (`onMessageID` on the send), or with the reason when the send failed.
+  then `settle` under the claim's id with the outcome and the id of the user
+  message the send created (`onMessageID` on the send), or with the reason
+  when the send failed.
   A claim the server holds for the agent's turn (queue, the agent working)
   returns at once with the message, so the card shows it queued with Back to
   edit open; the window keeps the message by claim id and sends it once the
@@ -662,8 +674,12 @@ sees only that final turn, so the report is its evidence.
   session's directory (another chat for a chat), and the message goes to that
   draft's composer by its draft id. A session with any message, a list
   OpenCode does not answer, or a removal that fails keeps the session, and
-  the message goes to its composer. The new draft starts on the default model
-  and agent, as any new draft does.
+  the message goes to its composer. The window is checked again once OpenCode
+  answers the list: a message sent from it meanwhile, or a switch to another
+  session or runtime, keeps the session as well. A message another window
+  sends between that check and the removal is not covered, since OpenCode has
+  no removal that holds only for an empty session. The new draft starts on
+  the default model and agent, as any new draft does.
   The job is the server's, so switching threads changes nothing.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by

@@ -349,6 +349,45 @@ describe('GoalSpecJobCard', () => {
       expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
     });
 
+    test('a message this window sends while OpenCode is asked keeps the session', async () => {
+      const sdk = OpenCode.make({ baseUrl: 'https://sync.test', fetch: async () => Response.json({ data: [] }) });
+      const childStores = new ChildStoreManager();
+      const child = childStores.ensureChild('/repo', { bootstrap: false });
+      setSyncRefs(sdk, childStores, '/repo');
+      // OpenCode answers as of before the send: the session still looks empty there.
+      listed.mockImplementation(async () => {
+        child.setState({ message: { ses_card: [{ id: 'msg_new', sessionID: 'ses_card', role: 'user', time: { created: 2 } }] } });
+        return page([]);
+      });
+      try {
+        show(job({ newSession: true }));
+        await render();
+        await click('Back to edit');
+      } finally {
+        setSyncRefs(sdk, new ChildStoreManager(), '');
+      }
+
+      expect(listed.mock.calls.length).toBe(1);
+      expect(deleted).toEqual([]);
+      expect(opened).toEqual([]);
+      expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
+    });
+
+    test('a switch to another session while OpenCode is asked keeps the session and opens no draft', async () => {
+      listed.mockImplementation(async () => {
+        useSessionUIStore.setState({ currentSessionId: 'ses_other' });
+        return page([]);
+      });
+      show(job({ newSession: true }));
+      await render();
+      await click('Back to edit');
+
+      expect(listed.mock.calls.length).toBe(1);
+      expect(deleted).toEqual([]);
+      expect(opened).toEqual([]);
+      expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
+    });
+
     test('a new chat\'s session in a side column stays; only the one on screen in the main chat makes way', async () => {
       useSessionUIStore.setState({ currentSessionId: 'ses_main' });
       show(job({ newSession: true }));
@@ -372,7 +411,7 @@ describe('GoalSpecJobCard', () => {
     respond = (call) => (call.path.endsWith('/claim')
       ? Response.json({
         revision: 2,
-        job: { ...waiting, sending: true },
+        job: { ...waiting, sending: true, claimId: 'claim-now' },
         message: {
           content: 'See the mock',
           text: 'See the mock',
@@ -417,8 +456,8 @@ describe('GoalSpecJobCard', () => {
       goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true, ignoreLimit: false },
       composerArmed: true,
     }]);
-    // The settle names the user message the send created.
-    expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec', messageId: 'msg_card_1' });
+    // The settle names the user message the send created, and the claim it was sent under.
+    expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec', messageId: 'msg_card_1', claimId: 'claim-now' });
     expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: true, objectiveOverride: null });
     expect(text()).toContain('Sent your message as typed. The spec is its goal.');
   });
@@ -427,7 +466,7 @@ describe('GoalSpecJobCard', () => {
     const waiting = job({ status: 'ready', spec: 'Spec', composerOnly: true });
     show(waiting);
     respond = (call) => (call.path.endsWith('/claim')
-      ? Response.json({ revision: 2, job: { ...waiting, sending: true }, message: { content: 'x', text: 'x', attachments: [], context: [{ kind: 'synthetic', text: 'Resolve the conflict' }] } })
+      ? Response.json({ revision: 2, job: { ...waiting, sending: true, claimId: 'claim-now' }, message: { content: 'x', text: 'x', attachments: [], context: [{ kind: 'synthetic', text: 'Resolve the conflict' }] } })
       : Response.json({ revision: 3, job: { ...waiting, error: 'OpenCode is not reachable', failedStep: 'send' } }));
     const sendMessage: SendMessage = async () => {
       throw new Error('OpenCode is not reachable');
@@ -439,7 +478,7 @@ describe('GoalSpecJobCard', () => {
     expect(calls[1]).toEqual({
       method: 'POST',
       path: '/api/goals/spec-jobs/job-1/settle',
-      body: { outcome: null, error: 'OpenCode is not reachable' },
+      body: { outcome: null, error: 'OpenCode is not reachable', claimId: 'claim-now' },
     });
     expect(text()).toContain('The message was not sent.');
   });
@@ -512,7 +551,7 @@ describe('GoalSpecJobCard', () => {
 
     expect(sent).toEqual([{ text: 'See the mock', files: ['mock.png'], goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true, ignoreLimit: false } }]);
     expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim', '/api/goals/spec-jobs/job-1/settle']);
-    expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec' });
+    expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec', claimId: 'claim-1' });
     expect(text()).toContain('Sent your message as typed. The spec is its goal.');
   });
 

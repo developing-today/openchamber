@@ -131,7 +131,7 @@ type GoalSpecJobOutcome = NonNullable<GoalSpecJob['outcome']>;
  * How a claimed send went: its outcome (with the spec as sent and the id of the
  * user message it created), or null with the reason it failed.
  */
-type GoalSpecJobSettlement = { outcome: GoalSpecJobOutcome | null; spec?: string; messageId?: string; error?: string };
+type GoalSpecJobSettlement = { outcome: GoalSpecJobOutcome | null; spec?: string; messageId?: string; error?: string; claimId?: string };
 
 /** The captured message in full, as `claim` and `edit` hand it back. */
 export interface GoalSpecJobMessage {
