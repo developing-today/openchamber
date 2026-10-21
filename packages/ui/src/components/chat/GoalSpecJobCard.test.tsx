@@ -297,6 +297,27 @@ describe('GoalSpecJobCard', () => {
     expect(text()).toContain('The message was not sent.');
   });
 
+  test('a send waiting for the agent to finish its turn says so, and only Back to edit changes it', async () => {
+    // An earlier failed send is over once the message waits to go out again.
+    show(job({ status: 'ready', spec: 'Spec', waiting: true, error: 'OpenCode is not reachable', failedStep: 'send' }));
+    respond = () => Response.json({
+      revision: 2,
+      job: job({ status: 'cancelled' }),
+      message: { content: 'Add dark mode\nto settings', text: 'Add dark mode\nto settings', attachments: [], context: [] },
+    });
+    await render();
+
+    expect(text()).toContain('Queued. It is sent when the agent finishes its turn.');
+    expect(text()).not.toContain('OpenCode is not reachable');
+    for (const label of ['Send message with goal', 'Send goal as message', 'Use my message as the goal', 'Write again']) {
+      expect(`${label}: ${findButton(label)?.disabled}`).toBe(`${label}: true`);
+    }
+    expect(document.querySelector('textarea')?.disabled).toBe(true);
+
+    await click('Back to edit');
+    expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/edit', body: undefined }]);
+  });
+
   test('a sent job says how it went and can be dismissed', async () => {
     show(job({ status: 'sent', trigger: 'auto-create', outcome: { kind: 'original', withGoal: false } }));
     await render();

@@ -80,6 +80,21 @@ describe('goal writer jobs in the client', () => {
     expect(jobs().ses_two?.spec).toBe('Spec');
   });
 
+  test('a job read from the server keeps the step that failed and whether it waits for the agent', async () => {
+    // The schema drops what it does not name, and the card titles and locks by these.
+    respond = () => Response.json({
+      revision: 4,
+      jobs: [
+        job({ status: 'failed', error: 'OpenCode is not reachable', failedStep: 'send' }),
+        job({ id: 'job-2', sessionId: 'ses_two', status: 'ready', spec: 'Spec', waiting: true }),
+      ],
+    });
+    await useGoalSpecJobStore.getState().hydrate();
+
+    expect(jobs().ses_one?.failedStep).toBe('send');
+    expect(jobs().ses_two?.waiting).toBe(true);
+  });
+
   test('an event older than the job on screen never replaces it', () => {
     apply('ses_one', job({ status: 'ready', spec: 'Spec' }), 5);
     apply('ses_one', job({ status: 'writing' }), 4);

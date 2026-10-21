@@ -15,6 +15,12 @@
 // A send in flight, the server's or a composer's, is written to the file
 // before anything goes out (`delivery`). A restart cannot tell whether such a
 // message went out, so the job goes back to review and waits for the user.
+//
+// A server send into a session whose agent is still working follows the
+// user's follow-up setting, as a message sent from the composer does: steer
+// joins the running turn, queue (the default) waits on the job (`waiting`)
+// until the turn is over and then sends once. The wait is the message
+// queue's: idle events arm a look, and the look asks OpenCode.
 
 import fs from 'fs';
 import path from 'path';
@@ -25,6 +31,8 @@ import { parseQueuedItemInput } from '../message-queue/runtime.js';
 import { writeFileAtomic } from '../opencode/atomic-write.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { isAutoModel } from '../routing/defaults.js';
 import { parseModelRef } from '../small-model/index.js';
 import { buildGoalIntroText, createSessionGoal } from './create.js';
@@ -34,6 +42,7 @@ const JOBS_FILE_NAME = 'goal-spec-jobs.json';
 const JOBS_FILE_VERSION = 1;
 // Messages are conversation content: readable by the owner only.
 const JOBS_FILE_MODE = 0o600;
+const SETTINGS_FILE_NAME = 'settings.json';
 
 const MAX_JOBS = 50;
 // A sent card stays until it is dismissed, the session starts another job, or
@@ -44,12 +53,26 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 // must not hold it forever.
 const CLAIM_TTL_MS = 2 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
+// A message waiting for the turn to end uses the message queue's timings: an
+// idle event is acted on after a quiet moment, a running subagent is looked at
+// again after 5 s, and a session OpenCode could not answer for after 2 s
+// doubling to 60 s.
+const TURN_QUIET_MS = 500;
+const SUBAGENT_RECHECK_MS = 5_000;
+const TURN_RETRY_BASE_MS = 2_000;
+const TURN_RETRY_MAX_MS = 60_000;
 
 const RESTART_REASON = 'the server restarted while the message was being sent; check the session before sending it again';
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const OPEN_STATUSES = new Set(['writing', 'ready', 'failed']);
-const HANDLED_EVENT_TYPES = new Set(['session.deleted', 'session.updated', 'openchamber:session-archived']);
+const HANDLED_EVENT_TYPES = new Set([
+  'session.deleted',
+  'session.updated',
+  'openchamber:session-archived',
+  'session.status',
+  'message.updated',
+]);
 
 // A cancelled job leaves the map before it is written, so the file never holds one.
 const storedStatusSchema = z.enum(['writing', 'ready', 'failed', 'sent']);
@@ -108,6 +131,9 @@ const writerSchema = z.object({
 /** A send in flight: the server's own, or a composer's after `claim`. */
 const deliverySchema = z.object({ by: z.enum(['server', 'composer']), startedAt: z.number() });
 
+/** A server send chosen while the agent was working, waiting for its turn to end. */
+const waitingSchema = z.object({ choice: choiceSchema, since: z.number() });
+
 const storedJobSchema = z.object({
   id: z.string().min(1),
   sessionId: z.string().regex(SESSION_ID_PATTERN),
@@ -127,6 +153,7 @@ const storedJobSchema = z.object({
   failedStep: failedStepSchema.nullable().default(null),
   warning: z.string().nullable().default(null),
   delivery: deliverySchema.nullable().default(null),
+  waiting: waitingSchema.nullable().default(null),
   outcome: outcomeSchema.nullable(),
   attempt: z.number().int().nonnegative(),
   createdAt: z.number(),
@@ -173,13 +200,51 @@ const movedSessionSchema = z.object({
     info: z.object({ id: z.string().min(1), directory: z.string().trim().min(1) }),
   }),
 });
+const sessionStatusSchema = z.object({
+  type: z.literal('session.status'),
+  properties: z.object({ sessionID: z.string().min(1), status: z.object({ type: z.string().min(1) }) }),
+});
+const finishedReplySchema = z.object({
+  type: z.literal('message.updated'),
+  properties: z.object({
+    info: z.object({ role: z.literal('assistant'), sessionID: z.string().min(1), time: z.object({ completed: z.number() }) }),
+  }),
+});
 const hubStatusSchema = z.object({ type: z.string() });
 // v2 answers a prompt with the inbox item it recorded.
 const queuedMessageSchema = z.object({ id: z.string().trim().min(1) });
+// v2 lists a session's records newest first, in a page that keeps its envelope.
+const recordPageSchema = z.object({ data: z.array(z.unknown()) });
+// A reply still streaming has no `completed` time.
+const replyRecordSchema = z.object({
+  type: z.literal('assistant'),
+  time: z.object({
+    created: z.number().optional().catch(undefined),
+    completed: z.number().optional().catch(undefined),
+  }).catch({}),
+});
+const followUpSettingsSchema = z.object({
+  followUpBehavior: z.enum(['steer', 'queue', 'immediate']).optional().catch(undefined),
+  queueModeEnabled: z.boolean().optional().catch(undefined),
+});
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
 const describeError = (error, fallback) => (error instanceof Error && error.message ? error.message : fallback);
+
+const turnRetryDelay = (failures) => Math.min(TURN_RETRY_BASE_MS * 2 ** Math.max(failures - 1, 0), TURN_RETRY_MAX_MS);
+
+/**
+ * The user's follow-up setting (Settings → Chat), which the composer applies
+ * to a message sent while the agent works: `queue` unless `steer` was
+ * picked. The removed `immediate` and the legacy `queueModeEnabled: false`
+ * read as steer, as the settings parsers read them.
+ */
+const readFollowUpBehaviorFrom = (settingsFilePath) => {
+  const { followUpBehavior, queueModeEnabled } = followUpSettingsSchema.parse(readMergedSettingsSync({ fs, path, settingsFilePath }));
+  if (followUpBehavior) return followUpBehavior === 'queue' ? 'queue' : 'steer';
+  return queueModeEnabled === false ? 'steer' : 'queue';
+};
 
 /**
  * The captured message and its send settings, validated like a queued
@@ -272,10 +337,16 @@ export function createGoalSpecJobRuntime({
   dataDir,
   writeSpec = writeGoalSpec,
   readWriterSettings = readGoalWriterSettings,
+  // The follow-up setting is read when a send is decided, as the writer's
+  // settings are read when a write starts.
+  readFollowUpBehavior = () => readFollowUpBehaviorFrom(path.join(dataDir, SETTINGS_FILE_NAME)),
   createGoal = createSessionGoal,
   fetchImpl = fetch,
   now = Date.now,
   claimTtlMs = CLAIM_TTL_MS,
+  turnQuietMs = TURN_QUIET_MS,
+  subagentRecheckMs = SUBAGENT_RECHECK_MS,
+  turnRetryDelayMs = turnRetryDelay,
 }) {
   const filePath = path.join(dataDir, JOBS_FILE_NAME);
 
@@ -289,10 +360,18 @@ export function createGoalSpecJobRuntime({
   let latestWrite = Promise.resolve();
   let stopped = false;
   let pruneTimer = null;
+  // A reply left unfinished before this server started belongs to a run that
+  // died with the previous one; it never finishes, so it must not hold a
+  // waiting message forever (the message queue's rule).
+  const runtimeStartedAt = now();
 
-  // In memory only. A send in flight is on the job itself (`delivery`).
+  // In memory only. A send in flight is on the job itself (`delivery`), and
+  // so is a send waiting for the turn to end (`waiting`).
   const writers = new Map(); // jobId → AbortController
   const claimTimers = new Map(); // jobId → timeout that ends a composer's claim
+  const turnTimers = new Map(); // jobId → timeout that looks at a waiting job's session again
+  const turnLooks = new Set(); // jobIds whose session is being looked at from a timer
+  const turnFailures = new Map(); // jobId → looks in a row OpenCode did not answer
   const work = new Set(); // background writes and sends, for `whenIdle`
 
   const track = (promise) => {
@@ -316,8 +395,10 @@ export function createGoalSpecJobRuntime({
     const sent = parsed.data.status === 'sent';
     try {
       const { message, sendConfig } = (sent ? parseSentJobMessage : parseJobMessage)(parsed.data.message, parsed.data.sendConfig);
-      // A sent job is past its send; only an open one can have been cut off mid-send.
-      return { ...parsed.data, message, sendConfig, delivery: sent ? null : parsed.data.delivery };
+      // A sent job is past its send; only an open one can have been cut off
+      // mid-send. A send that started is no longer waiting.
+      const delivery = sent ? null : parsed.data.delivery;
+      return { ...parsed.data, message, sendConfig, delivery, waiting: sent || delivery ? null : parsed.data.waiting };
     } catch {
       return null;
     }
@@ -448,6 +529,7 @@ export function createGoalSpecJobRuntime({
       failedStep: job.failedStep,
       warning: job.warning,
       sending: job.delivery !== null,
+      waiting: job.waiting !== null,
       outcome: job.outcome,
       attempt: job.attempt,
       createdAt: job.createdAt,
@@ -477,13 +559,21 @@ export function createGoalSpecJobRuntime({
     claimTimers.delete(jobId);
   };
 
+  const clearTurnTimer = (jobId) => {
+    clearTimeout(turnTimers.get(jobId));
+    turnTimers.delete(jobId);
+  };
+
   /** Ends an open job without sending it; the broadcast carries the cancelled state once. */
   const cancel = (job) => {
     stopWriter(job.id);
     clearClaimTimer(job.id);
+    clearTurnTimer(job.id);
+    turnFailures.delete(job.id);
     jobs.delete(job.id);
     job.status = 'cancelled';
     job.delivery = null;
+    job.waiting = null;
     touch(job);
     return publish(job.sessionId, job);
   };
@@ -521,6 +611,11 @@ export function createGoalSpecJobRuntime({
 
   const requireNotSending = (job) => {
     if (job.delivery) throw httpError('the message is being sent', 409);
+  };
+
+  /** A send waiting for the turn to end is taken back with "Back to edit"; nothing else changes it. */
+  const requireNotWaiting = (job) => {
+    if (job.waiting) throw httpError('the message waits for the agent to finish its turn', 409);
   };
 
   const requireOpen = (job) => {
@@ -588,7 +683,7 @@ export function createGoalSpecJobRuntime({
       touch(current);
       publish(current.sessionId, current);
       if (sendsByItself(current)) {
-        await sendJob(current, { kind: 'spec', sendMode: current.sendMode, spec: current.spec }).catch(() => undefined);
+        await sendWhenFree(current, { kind: 'spec', sendMode: current.sendMode, spec: current.spec }).catch(() => undefined);
       }
     })());
   };
@@ -716,10 +811,14 @@ export function createGoalSpecJobRuntime({
   /**
    * Puts the send on record before anything goes out: a restart that finds
    * it cannot tell whether the message went out. Throws when the record
-   * could not be written; the caller then releases the job.
+   * could not be written; the caller then releases the job. A send that
+   * waited for the turn to end stops waiting in the same record.
    */
   const startDelivery = async (job, by) => {
     job.delivery = { by, startedAt: now() };
+    job.waiting = null;
+    clearTurnTimer(job.id);
+    turnFailures.delete(job.id);
     touch(job);
     publish(job.sessionId, job);
     await latestWrite;
@@ -734,9 +833,14 @@ export function createGoalSpecJobRuntime({
     return publish(job.sessionId, job);
   };
 
-  /** A sent job keeps what its card shows; the writer input and the message payloads go. */
+  /**
+   * A sent job keeps what its card shows; the writer input and the message
+   * payloads go. A send still waiting for the turn ends too: a composer's late
+   * report that the message went out must not be followed by the server's.
+   */
   const markSent = (job, outcome, spec, warning) => {
     clearClaimTimer(job.id);
+    clearTurnTimer(job.id);
     job.status = 'sent';
     job.outcome = outcome;
     if (spec) job.spec = spec;
@@ -744,20 +848,20 @@ export function createGoalSpecJobRuntime({
     job.failedStep = null;
     job.warning = warning;
     job.delivery = null;
+    job.waiting = null;
     job.message = toSentMessage(job.message);
     job.writerInput = {};
     touch(job);
   };
 
   /**
-   * Sends the job from the server. A failure before OpenCode queued the
-   * prompt leaves the job open with the reason and review on, so nothing goes
-   * out again until the user decides; a goal already saved stays, as it does
-   * for any send that fails after it.
+   * Sends the job from the server, once it is decided the message goes now
+   * (`sendWhenFree`, or the look that found the turn over). A failure before
+   * OpenCode queued the prompt leaves the job open with the reason and review
+   * on, so nothing goes out again until the user decides; a goal already
+   * saved stays, as it does for any send that fails after it.
    */
   const sendJob = async (job, choice) => {
-    // Sending the original stops a write still running.
-    stopWriter(job.id);
     let warning = null;
     try {
       await startDelivery(job, 'server');
@@ -775,6 +879,143 @@ export function createGoalSpecJobRuntime({
     if (!current) return { revision, job: null };
     markSent(current, outcomeOf(current, choice), choice.kind === 'spec' ? choice.spec : null, warning);
     return publish(current.sessionId, current);
+  };
+
+  // --- waiting for the turn to end -------------------------------------------
+
+  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
+
+  /** The follow-up setting; one that cannot be read is the default, queue. */
+  const followUpBehavior = () => {
+    try {
+      return readFollowUpBehavior();
+    } catch (error) {
+      console.warn('[goal-spec-jobs] could not read the follow-up setting:', describeError(error, 'read failed'));
+      return 'queue';
+    }
+  };
+
+  /** The session's newest record in a list, or null when OpenCode could not be asked. */
+  const fetchNewestRecords = async (job) => {
+    const fetchPath = `/api/session/${encodeURIComponent(job.sessionId)}/message`;
+    const query = new URLSearchParams({ limit: '1', directory: job.directory });
+    try {
+      const response = await fetchImpl(`${buildOpenCodeUrl(fetchPath, '')}?${query}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!response.ok) return null;
+      const page = recordPageSchema.safeParse(await response.json());
+      return page.success ? page.data.data : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * A reply still streaming is a turn OpenCode does not list as running, as
+   * after a missed event. One begun before this server started never ends.
+   */
+  const isStreamingReply = (record) => {
+    const reply = replyRecordSchema.safeParse(record);
+    if (!reply.success || reply.data.time.completed !== undefined) return false;
+    const { created } = reply.data.time;
+    return created === undefined || created >= runtimeStartedAt;
+  };
+
+  /**
+   * Where the session's turn stands, checked as the message queue checks
+   * before it sends: `running` while OpenCode lists the session or its newest
+   * reply still streams, `subagents` while a subagent of it works (the
+   * session runs again on the subagent's result), else `over`. Null when
+   * OpenCode could not be asked: unknown is never over.
+   */
+  const readTurn = async (job) => {
+    const statuses = await activityProbe.fetchActiveSessionStatuses();
+    if (!statuses) return null;
+    if (statuses[job.sessionId]) return 'running';
+    const records = await fetchNewestRecords(job);
+    if (!records) return null;
+    if (isStreamingReply(records[0])) return 'running';
+    const subagents = await activityProbe.hasWorkingDescendants(job.sessionId, statuses);
+    if (subagents === null) return null;
+    return subagents ? 'subagents' : 'over';
+  };
+
+  /** Still waiting with this choice: not taken back, replaced, ended or already going out. */
+  const stillWaiting = (job, waiting) => !stopped && jobs.get(job.id) === job && job.waiting === waiting;
+
+  /** Looks at the session again after `delayMs`; a newer arm replaces a pending one. */
+  const armTurnLook = (job, delayMs = turnQuietMs) => {
+    clearTurnTimer(job.id);
+    const timer = setTimeout(() => {
+      turnTimers.delete(job.id);
+      track(lookAtTurn(job));
+    }, Math.max(0, delayMs));
+    timer.unref?.();
+    turnTimers.set(job.id, timer);
+  };
+
+  /**
+   * A turn still going. The session's next idle event looks again while it
+   * runs; a working subagent is looked at again after a while; a look
+   * OpenCode did not answer is retried with backoff.
+   */
+  const waitOn = (job, turn) => {
+    if (turn === null) {
+      const failures = (turnFailures.get(job.id) ?? 0) + 1;
+      turnFailures.set(job.id, failures);
+      armTurnLook(job, turnRetryDelayMs(failures));
+      return;
+    }
+    turnFailures.delete(job.id);
+    if (turn === 'subagents') armTurnLook(job, subagentRecheckMs);
+  };
+
+  /** One look for a waiting job; its message goes out once the turn is over. */
+  const lookAtTurn = async (job) => {
+    const { waiting } = job;
+    if (!waiting || !stillWaiting(job, waiting)) return;
+    // An idle event that lands during a look must not be lost: that look may
+    // have seen the session running a moment before.
+    if (turnLooks.has(job.id)) {
+      armTurnLook(job);
+      return;
+    }
+    turnLooks.add(job.id);
+    try {
+      const turn = await readTurn(job);
+      if (!stillWaiting(job, waiting)) return;
+      if (turn === 'over') await sendJob(job, waiting.choice).catch(() => undefined);
+      else waitOn(job, turn);
+    } finally {
+      turnLooks.delete(job.id);
+    }
+  };
+
+  /**
+   * Sends what the user chose, or a written spec that sends itself, the way
+   * a message from the composer goes out: into an idle session at once, and
+   * into a working one as the user's follow-up setting says. Steer sends now
+   * and joins the running turn. Queue, the default, keeps the choice on the
+   * job (`waiting`, written to the file, so a restart keeps it) and sends it
+   * once the turn is over. The choice is on the job before OpenCode is asked,
+   * so no second send of the job can start meanwhile.
+   */
+  const sendWhenFree = async (job, choice) => {
+    // Sending the original stops a write still running, before anything else.
+    stopWriter(job.id);
+    if (followUpBehavior() === 'steer') return sendJob(job, choice);
+    const waiting = { choice, since: now() };
+    job.waiting = waiting;
+    const turn = await readTurn(job);
+    if (!stillWaiting(job, waiting)) return { revision, job: jobs.get(job.id) === job ? toPublicJob(job) : null };
+    if (turn === 'over') return sendJob(job, choice);
+    touch(job);
+    const result = publish(job.sessionId, job);
+    waitOn(job, turn);
+    return result;
   };
 
   // --- claims: the composer sends ------------------------------------------
@@ -824,6 +1065,7 @@ export function createGoalSpecJobRuntime({
       failedStep: null,
       warning: null,
       delivery: null,
+      waiting: null,
       outcome: null,
       attempt: 1,
       createdAt,
@@ -840,16 +1082,18 @@ export function createGoalSpecJobRuntime({
     await load();
     const job = requireJob(jobId);
     requireNotSending(job);
+    requireNotWaiting(job);
     requireOpen(job);
     if (isComposerOnly(job)) throw httpError('this message is sent from the session\'s composer', 409);
     if (choice.kind === 'spec' && job.status !== 'ready') throw httpError('the goal spec is not ready', 409);
-    return sendJob(job, choice);
+    return sendWhenFree(job, choice);
   };
 
   const redo = async (jobId) => {
     await load();
     const job = requireJob(jobId);
     requireNotSending(job);
+    requireNotWaiting(job);
     requireOpen(job);
     if (job.status === 'writing') throw httpError('the goal spec is still being written', 409);
     // Settings may have changed since the last write.
@@ -881,6 +1125,7 @@ export function createGoalSpecJobRuntime({
     await load();
     const job = requireJob(jobId);
     requireNotSending(job);
+    requireNotWaiting(job);
     requireOpen(job);
     if (kind === 'spec' && job.status !== 'ready') throw httpError('the goal spec is not ready', 409);
     if (kind === 'original') stopWriter(job.id);
@@ -932,14 +1177,43 @@ export function createGoalSpecJobRuntime({
     return archivedSessionSchema.safeParse(value).data?.properties.sessionID ?? null;
   };
 
+  /** The waiting job of a session, if it has one. */
+  const waitingJobFor = (sessionId) => {
+    const job = jobForSession(sessionId);
+    return job?.waiting ? job : null;
+  };
+
+  /**
+   * A waiting job looks at its session when the session goes idle, and when a
+   * reply finishes, which also covers an idle event that was missed. A busy
+   * session drops the pending look; its next idle event arms another.
+   */
+  const noteTurnEvent = (value) => {
+    const status = sessionStatusSchema.safeParse(value);
+    if (status.success) {
+      const job = waitingJobFor(status.data.properties.sessionID);
+      if (!job) return;
+      if (status.data.properties.status.type === 'idle') armTurnLook(job);
+      else clearTurnTimer(job.id);
+      return;
+    }
+    const reply = finishedReplySchema.safeParse(value);
+    const job = reply.success ? waitingJobFor(reply.data.properties.info.sessionID) : null;
+    if (job && !turnTimers.has(job.id)) armTurnLook(job);
+  };
+
   /**
    * OpenCode events from the hub, and OpenChamber's archive broadcast: a job
-   * ends with its session, and an open job follows its session to another
+   * ends with its session, an open job follows its session to another
    * directory, so the writer, Auto routing, the goal and the knowledge use
-   * the current one.
+   * the current one, and a waiting job hears when the turn may be over.
    */
   const processPayload = (value) => {
     if (stopped || jobs.size === 0 || !HANDLED_EVENT_TYPES.has(value?.type)) return;
+    if (value.type === 'session.status' || value.type === 'message.updated') {
+      noteTurnEvent(value);
+      return;
+    }
     const moved = movedSessionSchema.safeParse(value);
     if (moved.success) {
       const { id, directory } = moved.data.properties.info;
@@ -956,18 +1230,21 @@ export function createGoalSpecJobRuntime({
   };
 
   /**
-   * Writes cut off by a restart start again, and a written spec that sends
-   * itself goes out. A job with a send under way is never touched: its
-   * stopped write stays stopped, and its message goes out once.
+   * Writes cut off by a restart start again, a written spec that sends itself
+   * goes out, and a send waiting for the turn to end looks at the session.
+   * A job with a send under way is never touched: its stopped write stays
+   * stopped, and its message goes out once.
    */
   const resume = () => {
     if (stopped) return;
     for (const job of jobs.values()) {
       if (job.delivery) continue;
-      if (job.status === 'writing' && !writers.has(job.id)) {
+      if (job.waiting) {
+        armTurnLook(job);
+      } else if (job.status === 'writing' && !writers.has(job.id)) {
         runWriter(job, readSettings());
       } else if (sendsByItself(job)) {
-        track(sendJob(job, { kind: 'spec', sendMode: job.sendMode, spec: job.spec }).catch(() => undefined));
+        track(sendWhenFree(job, { kind: 'spec', sendMode: job.sendMode, spec: job.spec }).catch(() => undefined));
       }
     }
   };
@@ -1003,7 +1280,7 @@ export function createGoalSpecJobRuntime({
     };
   };
 
-  /** Stops writes, claims and the sweep; answers once the last file write has finished, so shutdown can wait for it. */
+  /** Stops writes, claims, waits and the sweep; answers once the last file write has finished, so shutdown can wait for it. */
   const stop = () => {
     stopped = true;
     clearInterval(pruneTimer);
@@ -1012,6 +1289,8 @@ export function createGoalSpecJobRuntime({
     writers.clear();
     for (const timer of claimTimers.values()) clearTimeout(timer);
     claimTimers.clear();
+    for (const timer of turnTimers.values()) clearTimeout(timer);
+    turnTimers.clear();
     return writePromise;
   };
 

@@ -56,6 +56,9 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
   const spec = editedSpec ?? job.spec ?? '';
   const trimmedSpec = spec.trim();
   const busy = acting || job.sending;
+  // A send waiting for the agent's turn to end goes out by itself; only Back to edit changes it.
+  const waiting = job.waiting === true && !job.sending;
+  const locked = busy || waiting;
 
   const run = (action: () => Promise<void>, failureKey: 'chat.goal.writer.toast.sendFailed' | 'chat.goal.writer.toast.actionFailed') => {
     if (busy) return;
@@ -156,19 +159,25 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
         </p>
       ) : null}
 
-      {job.sending || writing ? (
+      {job.sending || waiting || writing ? (
         <div className="mt-2 flex items-center gap-2" role="status">
-          <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+          {waiting ? (
+            <Icon name="time" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          ) : (
+            <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+          )}
           <span className="typography-meta text-foreground">
-            {job.sending ? t('chat.goal.writer.card.sending') : t('chat.goal.writer.card.writing')}
+            {job.sending
+              ? t('chat.goal.writer.card.sending')
+              : waiting ? t('chat.goal.writer.card.waitingForTurn') : t('chat.goal.writer.card.writing')}
           </span>
-          {!job.sending && !job.review && !job.composerOnly ? (
+          {!job.sending && !waiting && !job.review && !job.composerOnly ? (
             <span className="typography-meta text-muted-foreground">{t('chat.goal.writer.card.sendsWhenWritten')}</span>
           ) : null}
         </div>
       ) : null}
 
-      {job.error && !job.sending ? (
+      {job.error && !job.sending && !waiting ? (
         <div className="mt-2 rounded-lg bg-[var(--status-error-background)] px-2.5 py-1.5" role="alert">
           <p className="typography-meta font-medium text-[var(--status-error-text)]">
             {sendFailed ? t('chat.goal.writer.card.sendFailed') : t('chat.goal.writer.card.failed')}
@@ -184,7 +193,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
             onChange={(event) => useGoalSpecJobStore.getState().setSpecEdit(job, event.target.value)}
             maxLength={SESSION_GOAL_OBJECTIVE_CHAR_LIMIT}
             rows={isMobile ? 5 : 8}
-            disabled={busy}
+            disabled={locked}
             aria-label={t('chat.goal.writer.card.specAria')}
             endSlot={(
               <span className="typography-micro tabular-nums text-muted-foreground/70" aria-label={t('chat.goal.counter.aria')}>
@@ -202,13 +211,13 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
           {t('chat.goal.writer.action.backToEdit')}
         </Button>
         {!writing ? (
-          <Button type="button" variant="ghost" size="sm" onClick={redo} disabled={busy}>
+          <Button type="button" variant="ghost" size="sm" onClick={redo} disabled={locked}>
             <Icon name="restart" className="size-3.5" aria-hidden="true" />
             {ready ? t('chat.goal.writer.action.rewrite') : t('chat.goal.writer.action.retry')}
           </Button>
         ) : null}
         <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
-          <Button type="button" variant={ready ? 'ghost' : 'outline'} size="sm" onClick={() => send({ kind: 'original' })} disabled={busy}>
+          <Button type="button" variant={ready ? 'ghost' : 'outline'} size="sm" onClick={() => send({ kind: 'original' })} disabled={locked}>
             {sendOriginalLabel}
           </Button>
           {ready ? (
@@ -217,7 +226,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={busy || !trimmedSpec}
+                disabled={locked || !trimmedSpec}
                 onClick={() => send({ kind: 'spec', sendMode: otherSendMode(job.sendMode), spec: trimmedSpec })}
               >
                 {t(SEND_LABEL_KEYS[otherSendMode(job.sendMode)])}
@@ -225,7 +234,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
               <Button
                 type="button"
                 size="sm"
-                disabled={busy || !trimmedSpec}
+                disabled={locked || !trimmedSpec}
                 onClick={() => send({ kind: 'spec', sendMode: job.sendMode, spec: trimmedSpec })}
               >
                 {t(SEND_LABEL_KEYS[job.sendMode])}

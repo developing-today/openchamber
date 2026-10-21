@@ -36,13 +36,39 @@ afterEach(async () => {
 /**
  * A fake OpenCode that records every session call in order. `timeline` also
  * gets the goal and the Auto resolution from the runtime's other doubles, so
- * a test can assert the order across all of them.
+ * a test can assert the order across all of them. Reads (is the session
+ * running, its newest record, a session's parent) go to `reads` instead:
+ * they send nothing.
  */
 const createOpenCode = () => {
-  const state = { calls: [], timeline: [], failPath: null, down: false, hold: null, promptAnswer: null };
+  const state = {
+    calls: [],
+    timeline: [],
+    reads: [],
+    failPath: null,
+    down: false,
+    readsFail: false,
+    hold: null,
+    promptAnswer: null,
+    // `/api/session/active` lists only running sessions; an absent id is idle.
+    active: {},
+    // Subagent sessions per parent session.
+    children: {},
+    // The session's records, newest first.
+    records: [],
+  };
   const fetchImpl = vi.fn(async (url, init = {}) => {
     if (state.down) throw new TypeError('fetch failed');
     const { pathname } = new URL(url);
+    if ((init.method ?? 'GET') === 'GET') {
+      state.reads.push(pathname);
+      if (state.readsFail) return new Response('unavailable', { status: 503 });
+      if (pathname === '/api/session/active') return Response.json({ data: state.active });
+      if (pathname.endsWith('/message')) return Response.json({ data: state.records, cursor: {} });
+      const id = decodeURIComponent(pathname.split('/').at(-1));
+      const parentID = Object.keys(state.children).find((parent) => state.children[parent].includes(id));
+      return Response.json({ data: { id, parentID } });
+    }
     if (state.hold?.pattern.test(pathname)) {
       state.hold.reached.resolve();
       await state.hold.released.promise;
@@ -105,6 +131,7 @@ const createRuntime = ({
   now,
   resolveAutoSelection,
   sessionKnowledgeRuntime,
+  readFollowUpBehavior,
 } = {}) => {
   const broadcasts = [];
   const goals = [];
@@ -133,11 +160,18 @@ const createRuntime = ({
       return { goal: { id: 'goal-1' }, spec: null };
     },
     fetchImpl: openCode.fetchImpl,
+    // A waiting job looks at its session at once after an idle event, and
+    // again soon while a subagent works or OpenCode does not answer.
+    turnQuietMs: 0,
+    subagentRecheckMs: 20,
+    turnRetryDelayMs: () => 20,
   };
   if (claimTtlMs) options.claimTtlMs = claimTtlMs;
   if (now) options.now = now;
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
   if (sessionKnowledgeRuntime) options.sessionKnowledgeRuntime = sessionKnowledgeRuntime;
+  // Without one, the runtime reads the settings file in `dataDir`; none means queue.
+  if (readFollowUpBehavior) options.readFollowUpBehavior = readFollowUpBehavior;
   const runtime = createGoalSpecJobRuntime(options);
   runtimes.push(runtime);
   return {
@@ -1090,6 +1124,233 @@ describe('goal writer jobs', () => {
     }
     expect(writer.calls).toEqual([]);
     expect(runtime.snapshot().jobs).toEqual([]);
+  });
+});
+
+describe('a server send while the agent works', () => {
+  const statusEvent = (type, sessionID = SESSION) => ({ type: 'session.status', properties: { sessionID, status: { type } } });
+  // Long enough for the zero-delay looks and the 20 ms rechecks createRuntime sets.
+  const afterLooks = async (runtime) => {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await runtime.whenIdle();
+  };
+  const writtenJob = async (runtime, writer, overrides = {}) => {
+    const created = await runtime.create(job(overrides));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+    return created.job;
+  };
+
+  it('with queue, the message waits for the turn to end, then goes out once', async () => {
+    const openCode = createOpenCode();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { runtime, writer, goals, prompts, dataDir } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer);
+
+    const edited = '## Objective\nEdited';
+    const waiting = await runtime.send(written.id, { kind: 'spec', sendMode: 'goal-as-message', spec: edited });
+
+    expect(waiting.job).toMatchObject({ status: 'ready', waiting: true, sending: false });
+    // Nothing reached the session yet: no switch, no goal, no prompt.
+    expect(openCode.state.calls).toEqual([]);
+    expect(goals).toEqual([]);
+    await runtime.flush();
+    expect(readJobsFile(dataDir).jobs[0]).toMatchObject({
+      delivery: null,
+      waiting: { choice: { kind: 'spec', sendMode: 'goal-as-message', spec: edited } },
+    });
+    // While it waits, only Back to edit changes it.
+    await expect(runtime.send(written.id, { kind: 'original' })).rejects.toMatchObject({ status: 409 });
+    await expect(runtime.redo(written.id)).rejects.toMatchObject({ status: 409 });
+    await expect(runtime.claim(written.id, { kind: 'spec' })).rejects.toMatchObject({ status: 409 });
+
+    runtime.processPayload(statusEvent('busy'));
+    await afterLooks(runtime);
+    expect(prompts()).toEqual([]);
+
+    openCode.state.active = {};
+    runtime.processPayload(statusEvent('idle'));
+    await vi.waitFor(() => expect(runtime.snapshot().jobs[0].status).toBe('sent'));
+    // A later idle event finds nothing left to send.
+    runtime.processPayload(statusEvent('idle'));
+    await afterLooks(runtime);
+
+    expect(prompts()).toEqual([{ route: 'prompt', body: { text: edited } }]);
+    expect(goals).toEqual([expect.objectContaining({ objective: edited })]);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ waiting: false, sending: false, outcome: { kind: 'spec', sendMode: 'goal-as-message' } });
+  });
+
+  it('with steer, the message goes out at once into the running turn', async () => {
+    const openCode = createOpenCode();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { runtime, prompts } = createRuntime({ openCode, readFollowUpBehavior: () => 'steer' });
+    const created = await runtime.create(job());
+
+    const sent = await runtime.send(created.job.id, { kind: 'original' });
+
+    expect(sent.job).toMatchObject({ status: 'sent', waiting: false });
+    expect(prompts()).toHaveLength(1);
+    // Steer never asks whether the agent is working.
+    expect(openCode.state.reads).toEqual([]);
+  });
+
+  it.each([
+    ['steer', { followUpBehavior: 'steer' }, { status: 'sent', waiting: false }],
+    ['the removed immediate', { followUpBehavior: 'immediate' }, { status: 'sent', waiting: false }],
+    ['the legacy queue mode turned off', { queueModeEnabled: false }, { status: 'sent', waiting: false }],
+    ['queue', { followUpBehavior: 'queue' }, { waiting: true, sending: false }],
+    ['no setting', {}, { waiting: true, sending: false }],
+  ])('reads the follow-up setting from the settings file: %s', async (_label, settingsFile, expected) => {
+    const dataDir = makeDataDir();
+    fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify(settingsFile));
+    const openCode = createOpenCode();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { runtime } = createRuntime({ dataDir, openCode });
+    const created = await runtime.create(job());
+
+    const result = await runtime.send(created.job.id, { kind: 'original' });
+
+    expect(result.job).toMatchObject(expected);
+  });
+
+  it('a written spec that sends itself waits too, and Back to edit takes it back unsent', async () => {
+    const openCode = createOpenCode();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { runtime, writer, prompts, broadcasts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer, { review: false });
+
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', waiting: true, sending: false });
+    expect(broadcasts.at(-1).properties.job).toMatchObject({ waiting: true });
+
+    const edited = await runtime.edit(written.id);
+    expect(edited.job).toMatchObject({ status: 'cancelled', waiting: false });
+    openCode.state.active = {};
+    runtime.processPayload(statusEvent('idle'));
+    await afterLooks(runtime);
+    expect(prompts()).toEqual([]);
+  });
+
+  it('a waiting message survives a restart and goes out once the turn is over, once', async () => {
+    const dataDir = makeDataDir();
+    const busy = createOpenCode();
+    busy.state.active = { [SESSION]: { type: 'running' } };
+    const first = createRuntime({ dataDir, openCode: busy });
+    const written = await writtenJob(first.runtime, first.writer);
+    await first.runtime.send(written.id, { kind: 'spec', sendMode: 'with-message', spec: SPEC });
+    await first.runtime.flush();
+    first.runtime.stop();
+
+    const second = createRuntime({ dataDir, connected: false });
+    second.runtime.start();
+    await second.runtime.load();
+    // Nothing went out, so the job waits on; it is not put back to review.
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', waiting: true, sending: false, review: true, error: null });
+    expect(second.openCode.state.reads).toEqual([]);
+
+    second.connect();
+    await vi.waitFor(() => expect(second.prompts()).toHaveLength(1));
+    second.connect();
+    await afterLooks(second.runtime);
+
+    expect(second.prompts()).toEqual([{ route: 'prompt', body: { text: 'add dark mode' } }]);
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', waiting: false, outcome: { kind: 'spec', sendMode: 'with-message' } });
+  });
+
+  it('an idle event while the message goes out does not send it again', async () => {
+    const openCode = createOpenCode();
+    const { runtime, writer, prompts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer);
+    const held = holdRoute(openCode, /\/model$/);
+
+    // The session is idle, so the send starts at once and stops at the model switch.
+    const sending = runtime.send(written.id, { kind: 'original' });
+    await held.reached;
+    runtime.processPayload(statusEvent('idle'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    held.release();
+    await sending;
+    await afterLooks(runtime);
+
+    expect(prompts()).toHaveLength(1);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', waiting: false });
+  });
+
+  it('a composer\'s late report that the message went out ends the wait, so the server never sends it too', async () => {
+    const openCode = createOpenCode();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { runtime, writer, prompts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer);
+    await runtime.send(written.id, { kind: 'original' });
+
+    // A send that finished after its claim expired is taken for any open job.
+    const settled = await runtime.settle(written.id, { outcome: { kind: 'original', withGoal: true } });
+    expect(settled.job).toMatchObject({ status: 'sent', waiting: false });
+
+    openCode.state.active = {};
+    runtime.processPayload(statusEvent('idle'));
+    await afterLooks(runtime);
+    expect(prompts()).toEqual([]);
+  });
+
+  it('a subagent still at work holds the message until it is done', async () => {
+    const openCode = createOpenCode();
+    openCode.state.active = { ses_goal_child: { type: 'running' } };
+    openCode.state.children = { [SESSION]: ['ses_goal_child'] };
+    const { runtime, writer, prompts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer);
+
+    expect((await runtime.send(written.id, { kind: 'original' })).job.waiting).toBe(true);
+    await afterLooks(runtime);
+    expect(prompts()).toEqual([]);
+
+    // No idle event for the parent: the recheck finds the subagent done.
+    openCode.state.active = {};
+    await vi.waitFor(() => expect(prompts()).toHaveLength(1));
+  });
+
+  it('a reply still streaming holds the message although OpenCode lists nothing running, and its finish sends it', async () => {
+    const openCode = createOpenCode();
+    const { runtime, writer, prompts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer);
+    const created = Date.now();
+    openCode.state.records = [{ type: 'assistant', time: { created } }];
+
+    expect((await runtime.send(written.id, { kind: 'original' })).job.waiting).toBe(true);
+    await afterLooks(runtime);
+    expect(prompts()).toEqual([]);
+
+    // The reply finishes; its update ends the wait without an idle event.
+    openCode.state.records = [{ type: 'assistant', time: { created, completed: created + 1 } }];
+    runtime.processPayload({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: SESSION, time: { completed: created + 1 } } } });
+    await vi.waitFor(() => expect(prompts()).toHaveLength(1));
+  });
+
+  it('a reply left unfinished before this server started does not hold the message', async () => {
+    const openCode = createOpenCode();
+    openCode.state.records = [{ type: 'assistant', time: { created: 1 } }];
+    const { runtime, writer, prompts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer);
+
+    const sent = await runtime.send(written.id, { kind: 'original' });
+
+    expect(sent.job.status).toBe('sent');
+    expect(prompts()).toHaveLength(1);
+  });
+
+  it('a session OpenCode cannot answer for holds the message, which goes out once OpenCode answers', async () => {
+    const openCode = createOpenCode();
+    const { runtime, writer, prompts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer);
+    openCode.state.readsFail = true;
+
+    expect((await runtime.send(written.id, { kind: 'original' })).job.waiting).toBe(true);
+    await afterLooks(runtime);
+    expect(prompts()).toEqual([]);
+    // Asked again, with no event needed.
+    expect(openCode.state.reads.filter((read) => read === '/api/session/active').length).toBeGreaterThan(1);
+
+    openCode.state.readsFail = false;
+    await vi.waitFor(() => expect(prompts()).toHaveLength(1));
   });
 });
 

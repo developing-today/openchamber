@@ -148,33 +148,35 @@ persisted, revisioned, broadcast).
 
 - Job: `{ id, sessionId, directory, status, trigger, review, sendMode,
   tokenBudget, message, composerOnly, spec, writer, sendConfig, error,
-  failedStep, warning, sending, outcome, attempt, createdAt, updatedAt }`.
-  `status` is `writing`, `ready`, `failed`, `sent` or `cancelled`; `trigger`
-  is `armed` or `auto-create`. `message` is the captured composer message in
-  the queue item's form (`content` as typed, `text` to deliver,
-  `agentMention`, `attachments`, `context`); `sendConfig` is the composer's
-  model, agent and effort when the job started, and `review`, `sendMode` and
-  `tokenBudget` are the settings of that moment. `writer` names who writes:
-  `settings` (the picked writer model and its effort), `session` (the
-  session's model at its default) or `small-model` (a session on Auto); after
-  a write it names the model that answered. `outcome` says how a sent job went
-  out: `{ kind: 'spec', sendMode }` or `{ kind: 'original', withGoal }`.
-  `error` is why an open job stopped and `failedStep` the step it came from,
-  `write` or `send`. A send of the message as typed that fails while the spec
-  is being written leaves a job without a spec, so its status is `failed`
-  although the write never failed. `warning` is set on a sent job when a step
-  after the prompt failed. `writerInput` (conversation and open items for a
+  failedStep, warning, sending, waiting, outcome, attempt, createdAt,
+  updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
+  `cancelled`; `trigger` is `armed` or `auto-create`. `message` is the
+  captured composer message in the queue item's form (`content` as typed,
+  `text` to deliver, `agentMention`, `attachments`, `context`); `sendConfig`
+  is the composer's model, agent and effort when the job started, and
+  `review`, `sendMode` and `tokenBudget` are the settings of that moment.
+  `writer` names who writes: `settings` (the picked writer model and its
+  effort), `session` (the session's model at its default) or `small-model` (a
+  session on Auto); after a write it names the model that answered. `outcome`
+  says how a sent job went out: `{ kind: 'spec', sendMode }` or `{ kind:
+  'original', withGoal }`. `error` is why an open job stopped and
+  `failedStep` the step it came from, `write` or `send`. A send of the
+  message as typed that fails while the spec is being written leaves a job
+  without a spec, so its status is `failed` although the write never failed.
+  `warning` is set on a sent job when a step after the prompt failed.
+  `sending` is a send under way, `waiting` a server send held until the
+  agent's turn ends (below). `writerInput` (conversation and open items for a
   goal from the next message) and the attachment payloads stay on the server:
   projections carry attachment names and a context count.
 - One job per session. A new job replaces the session's job: an open one is
-  cancelled and its write stopped, a sent card removed. While that job's
-  message is being sent (by the server, or by a composer that claimed it) a
-  new job is `409`. A sent card stays until it is dismissed, the session
-  starts another job, or a day has passed; an hourly sweep removes it. Open
-  jobs have no time limit. At most 50 jobs: the sent card that changed
-  longest ago makes room, else the open job that changed longest ago is
-  cancelled; a job being sent never is, and with 50 of them a new job is
-  `409`.
+  cancelled (a waiting send with it) and its write stopped, a sent card
+  removed. While that job's message is being sent (by the server, or by a
+  composer that claimed it) a new job is `409`. A sent card stays until it is
+  dismissed, the session starts another job, or a day has passed; an hourly
+  sweep removes it. Open jobs have no time limit. At most 50 jobs: the sent
+  card that changed longest ago makes room, else the open job that changed
+  longest ago is cancelled; a job being sent never is, and with 50 of them a
+  new job is `409`.
 - Writing: `writeGoalSpec` on the writer settings read when the write starts,
   with the job's text, writer input, the session model and the job's current
   directory. A failure is `failed` with the reason and `failedStep: 'write'`.
@@ -197,6 +199,27 @@ persisted, revisioned, broadcast).
   with the queued item's id.
   "Send original" stops a running write; an armed goal then keeps the message
   as its objective, a goal from the next message sends without one.
+- A server send into a session whose agent is still working follows the
+  user's follow-up setting (`followUpBehavior`, read from the settings file
+  when the send is decided), as a message from the composer does. `steer`
+  sends at once, and the message joins the running turn. `queue`, the
+  default, keeps the choice on the job (`waiting: { choice, since }`, written
+  to the file) and sends it once the turn is over; nothing reaches the
+  session before that, the goal included. The turn is over by the message
+  queue's test (`../message-queue/DOCUMENTATION.md`, *Delivery loop*):
+  OpenCode does not list the session as running, its newest record is not a
+  reply still streaming (one begun before this server started does not
+  count), and no subagent of it runs (`../opencode/session-activity.js`).
+  The answer is asked for when the send is decided, and again when the
+  session goes idle (after 500 ms), when a reply finishes with no look
+  pending, on every hub `connect`, after 5 s while a subagent works, and
+  after 2 s doubling to 60 s while OpenCode does not answer, which is never
+  taken as over. The wait ends in the record that starts the send
+  (`delivery`), so it goes out once; a composer's late report that the
+  message went out ends it too. While it waits, Back to edit takes the
+  message back; send, redo and claim are `409`. A `composerOnly` message,
+  which the card sends through `sendMessage` in the window, is not held this
+  way.
 - A failure before OpenCode queued the prompt leaves the job open with the
   reason, `failedStep: 'send'` and review on, so nothing goes out again until
   the user picks; a goal saved before the failure stays, as for any send that
@@ -236,12 +259,13 @@ persisted, revisioned, broadcast).
   'composer', startedAt }`) before anything goes out; a claim whose record
   cannot be written is refused. A job loaded with a `delivery` may have gone
   out, so it goes back to review with the reason "the server restarted while
-  the message was being sent". Writes the restart cut off start again, and a
-  written spec that sends itself goes out, once the event stream is
+  the message was being sent". Writes the restart cut off start again, a
+  written spec that sends itself goes out, and a send waiting for the turn to
+  end (nothing of it went out) looks at the session, once the event stream is
   connected: at load when the hub already is, else on its next `connect`, and
   on every later `connect`. A job being sent is never resumed or sent again.
-  `stop` aborts running writes, ends the sweep and answers once the last
-  file write has finished; shutdown waits for it.
+  `stop` aborts running writes, ends the waits and the sweep, and answers once
+  the last file write has finished; shutdown waits for it.
 - Routes (`/api/goals/spec-jobs`, before the generic proxy, JSON through the
   `/api/goals` family): `GET` the snapshot `{ revision, jobs }`; `POST` start
   `{ sessionId, directory, trigger, review, sendMode, tokenBudget?,
@@ -250,7 +274,8 @@ persisted, revisioned, broadcast).
   `POST /:jobId/redo`; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
   }`; `POST /:jobId/settle` with `{ outcome, spec?, error? }`; `DELETE
   /:jobId` dismisses a sent job (an open one is `409`). Mutations answer `{
-  revision, job }`. Refusals are `400` (an invalid body, a `tokenBudget`
+  revision, job }`; a send held for the agent's turn answers the job with
+  `waiting: true`. Refusals are `400` (an invalid body, a `tokenBudget`
   other than a positive integer or null, a `writerInput` other than `{
   conversation?, openItems? }` strings, a `message.scheduledTask`, which
   only the server's scheduled sends carry), `404` and `409`; a failed send is
@@ -483,13 +508,14 @@ sees only that final turn, so the report is its evidence.
   written" when review is off), ready with the spec in an editable field (edits
   stay per write attempt in the store), failed with the reason under a title
   that names the step that failed (the write, or the send of the message),
-  sending, or sent with how it went and a dismiss button (`DELETE`). Actions
-  on an open job: send in the default send mode or the other one, send the
-  message as typed (also while writing, which stops the writer; an armed goal
-  keeps the message as its objective, an automatic one goes without a goal),
-  write again (ready or failed), and back to edit. A message the server cannot
-  send (`composerOnly`: attachments or attached context) says it waits for the
-  user.
+  queued until the agent finishes its turn (`waiting`, where only Back to
+  edit acts), sending, or sent with how it went and a dismiss button
+  (`DELETE`). Actions on an open job: send in the default send mode or the
+  other one, send the message as typed (also while writing, which stops the
+  writer; an armed goal keeps the message as its objective, an automatic one
+  goes without a goal), write again (ready or failed), and back to edit. A
+  message the server cannot send (`composerOnly`: attachments or attached
+  context) says it waits for the user.
   `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
   `sendMessage` with the full message assembled as a taken queued message
   (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`),

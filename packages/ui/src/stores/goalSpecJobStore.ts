@@ -66,6 +66,11 @@ const jobSchema = z.object({
     warning: z.string().nullable().optional(),
     /** The server, or a window that claimed it, is sending the message now. */
     sending: z.boolean(),
+    /**
+     * The server sends it once the agent's turn is over: the user's follow-up
+     * setting is queue and the agent was working. Absent from servers before it existed.
+     */
+    waiting: z.boolean().optional(),
     outcome: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('spec'), sendMode: sendModeSchema }),
         z.object({ kind: z.literal('original'), withGoal: z.boolean() }),
