@@ -20,7 +20,7 @@ const expectError = async (promise, status, pattern) => {
 
 /** Operations shaped like the route modules return them; every answer carries the seeded token under secret-named keys. */
 const makeOperations = () => {
-  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED, apiKey: SEED, api_key: SEED, cookie: SEED, authorization: SEED };
+  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED, apiKey: SEED, api_key: SEED, cookie: SEED, authorization: SEED, privateKey: SEED, accessKey: SEED, sshKey: SEED, licenseKey: SEED, private_key: SEED, key: SEED };
   const ok = (body) => ({ status: 200, body: { ...body, ...leak } });
   const guest = {
     id: 'acme', name: 'Acme', version: '1.0.0', source: 'git', enabled: true,
@@ -30,7 +30,7 @@ const makeOperations = () => {
   };
   return {
     github: {
-      status: vi.fn(async () => ({ connected: true, accounts: [{ id: 'occred:v1:github:a', current: true, ...leak }], ghCli: { available: true, token: SEED } })),
+      status: vi.fn(async () => ({ connected: true, tokenType: 'bearer', scope: 'repo', accounts: [{ id: 'occred:v1:github:a', current: true, ...leak }], ghCli: { available: true, token: SEED } })),
       activate: vi.fn(async (accountId) => (accountId === 'missing' ? { status: 404, body: { error: 'GitHub account not found' } } : ok({ connected: true }))),
       addFromVault: vi.fn(async (reference) => ok({ connected: true, accounts: [{ id: 'occred:v1:github:b', tokenReference: reference }] })),
       remove: vi.fn(async () => ok({ success: true, removed: true })),
@@ -143,10 +143,20 @@ describe('secrets never leave', () => {
     const { ops, run } = setup();
     await expectError(run('binding.set', { bindingOperation: 'provider', bindingIntent: { account: { accessToken: 'x' } } }), 400, /bindingIntent\.account\.accessToken looks like a secret/);
     await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { apiToken: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { privateKey: 'x' } }), 400, /extensionSettings\.privateKey looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { access_key: 'x' } }), 400, /looks like a secret/);
     await expectError(run('linear.mapping', { linearMapping: { clientSecret: 'x' } }), 400, /looks like a secret/);
     expect(ops.bindings.setProvider).not.toHaveBeenCalled();
     expect(ops.extensions.saveSettings).not.toHaveBeenCalled();
     expect(ops.linear.writeMapping).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-secret names that only resemble secret names', async () => {
+    const { run } = setup();
+    const answer = await run('github.status');
+    expect(answer.tokenType).toBe('bearer');
+    expect(answer.scope).toBe('repo');
+    await expect(run('extensions.settings', { extensionId: 'acme', extensionSettings: { tokenType: 'bearer', scope: 'repo' } })).resolves.toBeTruthy();
   });
 
   it('returns no token from a real GitLab account store', async () => {
