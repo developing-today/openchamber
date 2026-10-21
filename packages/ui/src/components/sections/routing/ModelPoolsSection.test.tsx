@@ -557,7 +557,7 @@ describe('ModelPoolsSection', () => {
     const { dom, cleanup } = await renderSection();
     try {
       expect(dom.container.textContent).toContain('kept');
-      expect(dom.container.textContent).toContain('OpenChamber can\'t read these settings. Edit them in opencode.json.');
+      expect(dom.container.textContent).toContain('OpenChamber can\'t read these settings. Edit them in your OpenCode config file.');
       expect(dom.container.querySelector('[role="switch"][aria-label="Review routing history automatically"]')).toBeNull();
     } finally {
       await cleanup();
