@@ -63,6 +63,7 @@ const {
   getCachedMarkdownBlocks,
   LINKIFY_SOURCE_LIMIT,
   renderMarkdownBlocks,
+  renderMarkdownBlocksSync,
   renderMarkdownSync,
   resetScanStatsForTests,
   resetMarkdownHtmlCacheForTests,
@@ -489,6 +490,20 @@ describe('Many short paragraphs', () => {
     expect(html).toContain('class="katex-display"');
     expect(html).toContain('<summary>More</summary>');
     expect(html).toContain('Hidden text');
+  });
+
+  // A user's message renders as one block in one parse (typed text is not
+  // split, see `streamBlocks`), so that parse has to stay linear too.
+  test('a typed message of thousands of paragraphs renders whole in linear work', () => {
+    const source = text.replace(/ *\n/g, '  \n');
+    resetScanStatsForTests();
+    const blocks = renderMarkdownBlocksSync(source, false, 'local', 'literal');
+    expect(blocks).toHaveLength(1);
+    expect(__scanStatsForTests().blockStart).toBeLessThan(4 * source.length);
+    const html = blocks[0]?.html ?? '';
+    expect(html).toContain('Paragraph 15999 is short.');
+    expect(html).toContain('class="katex-display"');
+    expect(html).toContain('&lt;details&gt;&lt;summary&gt;More&lt;/summary&gt;');
   });
 
   // A line that interrupts a paragraph but is not a block of its own (an empty

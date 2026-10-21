@@ -226,6 +226,17 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   Markdown preview opts into rendering raw HTML (`allowRawHtml`, see
   `components/views/files/DOCUMENTATION.md`). Safe custom application links go through the
   app-link confirmation flow in every supported renderer, including VS Code.
+- A user's own message in Markdown mode reaches the renderer as Markdown
+  source, never escaped as HTML first: Markdown shows code spans, code blocks,
+  autolinks and math character for character, so an entity written into the
+  source showed up in them (`{ &quot;ok&quot;: true }`). `UserTextPart`
+  renders with `literalHtml` (`literal` in `markdownCore.ts`): the parser
+  reads no HTML at all, so a typed tag or character reference shows as typed,
+  lines of tags keep their breaks and the Markdown between them renders, and
+  a typed `<details>` stays text. A typed message renders as one block, since
+  the block split reads HTML blocks that typed text does not have. A line
+  starting with an HTML block tag (`<div>`, `<p>`, `<script>`) still ends the
+  paragraph above it, as CommonMark has it, so it opens a new paragraph.
 - File references become links only once the file is confirmed
   (`MarkdownRendererImpl` `useFileReferenceInteractions`): inline code, links
   and path-like tokens inside code blocks are probed through the bounded,
