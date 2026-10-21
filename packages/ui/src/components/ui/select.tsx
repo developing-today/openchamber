@@ -28,6 +28,11 @@ type SelectPortalContextValue = {
 
 const SelectPortalContext = React.createContext<SelectPortalContextValue | null>(null);
 
+// Base UI labels the trigger only from an `items` prop on the root and
+// otherwise shows the raw value. The items are declared as children here, so
+// `SelectValue` looks the chosen item's label up in them.
+const SelectChildrenContext = React.createContext<React.ReactNode>(null);
+
 const resolveDialogContainer = (element: HTMLElement | null): HTMLElement | null => {
   if (!element) {
     return null;
@@ -52,6 +57,7 @@ function Select<Value extends string = string>({
   open,
   defaultOpen,
   onOpenChange,
+  children,
   ...props
 }: SelectRootProps<Value>) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
@@ -87,14 +93,18 @@ function Select<Value extends string = string>({
 
   return (
     <SelectPortalContext.Provider value={portalContextValue}>
-      <BaseSelect.Root
-        {...props}
-        modal={modal}
-        open={open}
-        defaultOpen={defaultOpen}
-        onOpenChange={handleOpenChange}
-        onValueChange={handleValueChange}
-      />
+      <SelectChildrenContext.Provider value={children}>
+        <BaseSelect.Root
+          {...props}
+          modal={modal}
+          open={open}
+          defaultOpen={defaultOpen}
+          onOpenChange={handleOpenChange}
+          onValueChange={handleValueChange}
+        >
+          {children}
+        </BaseSelect.Root>
+      </SelectChildrenContext.Provider>
     </SelectPortalContext.Provider>
   )
 }
@@ -110,7 +120,26 @@ type SelectValueProps = Omit<React.ComponentProps<typeof BaseSelect.Value>, "chi
   children?: React.ReactNode | ((value: string | undefined) => React.ReactNode);
 };
 
+type SelectItemDeclaration = Pick<React.ComponentProps<typeof BaseSelect.Item>, "value" | "children">;
+
+// Searches arrays, fragments, groups and wrapper elements. An item rendered by
+// another component is not visible here; such a select gives `SelectValue` its
+// label as children.
+function findItemLabel(node: React.ReactNode, value: SelectItemDeclaration["value"]): React.ReactNode {
+  let label: React.ReactNode = null;
+  React.Children.forEach(node, (child) => {
+    if (label !== null || !React.isValidElement<SelectItemDeclaration>(child)) return;
+    if (child.type !== SelectItem) {
+      label = findItemLabel(child.props.children, value);
+    } else if (child.props.value === value) {
+      label = child.props.children ?? null;
+    }
+  });
+  return label;
+}
+
 function SelectValue({ placeholder, children, ...props }: SelectValueProps) {
+  const selectChildren = React.useContext(SelectChildrenContext);
   return (
     <BaseSelect.Value data-slot="select-value" {...props}>
       {(value: unknown) => {
@@ -128,7 +157,7 @@ function SelectValue({ placeholder, children, ...props }: SelectValueProps) {
         if (resolvedValue === undefined || resolvedValue === "") {
           return placeholder as React.ReactNode;
         }
-        return resolvedValue;
+        return findItemLabel(selectChildren, value) ?? resolvedValue;
       }}
     </BaseSelect.Value>
   )
