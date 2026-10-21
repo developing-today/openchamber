@@ -174,6 +174,9 @@ type ManagedCredentialSourceLabelKey =
   | 'settings.github.page.accountSource.cli'
   | 'settings.gitlab.token.label';
 
+/** The source shown for a token account added from 1Password; a product name, so not translated. */
+export const VAULT_ACCOUNT_SOURCE_LABEL = '1Password';
+
 export const getManagedCredentialSourceLabelKey = (source: 'oauth' | 'pat' | 'cli'): ManagedCredentialSourceLabelKey => (
   source === 'oauth' ? 'settings.github.page.accountSource.oauth'
     : source === 'cli' ? 'settings.github.page.accountSource.cli'

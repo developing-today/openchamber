@@ -15,6 +15,8 @@ GitHub アカウントを接続すると、OpenChamber は Issue とプルリク
 
 接続されると、カードにアカウントが表示されます。複数のアカウントを接続して切り替えたり、いつでも切断したりできます。同じマシンで `gh` CLI にサインイン済みなら、OpenChamber はそれをフォールバックとして使えます。
 
+代わりに 1Password に保管したトークンを使うには、**1Password のトークン** に `op://Vault/github_token/credential` のような参照を入力し、**追加** を選びます。OpenChamber はアカウントを使うたびに 1Password CLI でトークンを読み取り、参照だけを保存します。[1Password のシークレット](/ja/environment/#1password-のシークレット)を参照してください。
+
 ## Issue または PR から作業を始める
 
 GitHub 接続済みで [worktree セッション](/worktrees/) を作成すると、Issue または pull request から開始できます。

@@ -3,7 +3,8 @@ import os from 'node:os';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { createSourceControlAuthStore } from './auth-storage.js';
+import { createSourceControlAuthStore, readGitLabVaultToken } from './auth-storage.js';
+import { isVaultReference } from '../environment/vault.js';
 import { exchangeGitLabDeviceCode, resolveGitLabClientId, probeGitLabAuth, startGitLabDeviceFlow } from './device-flow.js';
 import { getGlabToken } from './glab-credential.js';
 import { normalizeGitLabInstance } from './instance.js';
@@ -16,7 +17,13 @@ import { createOAuthFlowRegistry } from '../source-control/oauth-flow-registry.j
 import { digestMutationInput, mutationReceipt } from '../source-control/mutation-executor.js';
 import { createChangeRequestStatusCache } from '../source-control/status-cache.js';
 
-const accountView = (origin, account, current, accounts) => ({
+// Where the token is kept, not the token, for an account added from a vault.
+const withTokenReference = (account, view) => {
+  if (account.tokenReference) view.tokenReference = account.tokenReference;
+  return view;
+};
+
+const accountView = (origin, account, current, accounts) => withTokenReference(account, {
   id: account.id,
   credentialId: account.id,
   credentialRevision: account.credentialRevision,
@@ -228,6 +235,13 @@ export function registerGitLabRoutes(app, options = {}) {
       };
     }
 
+    // An account added from a vault: a token that cannot be read, or that
+    // GitLab refuses, is reported as it is. It is never written off, since the
+    // next read after the user fixes or rotates it in the vault picks it up.
+    if (active.tokenReference && !active.token) {
+      return { provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, tokenReadError: active.tokenReadError, message: `The token at ${active.tokenReference} could not be read (${active.tokenReadError})`, accounts };
+    }
+
     try {
       const user = await verify(origin, active.token);
       const status = {
@@ -239,6 +253,9 @@ export function registerGitLabRoutes(app, options = {}) {
       return status;
     } catch (error) {
       const kind = classifyGitLabFailure(error);
+      if (error?.kind === 'invalid-token' && active.tokenReference) {
+        return { provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, message: `GitLab refused the token at ${active.tokenReference}; update it there`, accounts };
+      }
       if (error?.kind === 'invalid-token') {
         // A renewed token gets one more try; refused again, the account is written off.
         const renewedNow = await invalidateAccount(origin, active.id, { renew: !renewed });
@@ -597,11 +614,43 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  /**
+   * Adds an account whose token stays in a vault: `reference` (op://…) is read,
+   * the token is checked against the instance, and only the reference is
+   * stored. The token is read again whenever the account is used.
+   */
+  const addAccountFromVault = async (origin, reference) => {
+    const trimmed = isString(reference) ? reference.trim() : '';
+    if (!isVaultReference(trimmed)) {
+      return { status: 400, body: { error: 'reference must be a 1Password reference such as op://Vault/item/field', code: 'INVALID_REFERENCE' } };
+    }
+    const read = await readGitLabVaultToken(trimmed);
+    if (!read.ok) {
+      return { status: 400, body: { error: `The token could not be read from 1Password (${read.reason})`, code: 'VAULT_READ_FAILED', reason: read.reason } };
+    }
+    let user;
+    try {
+      user = await verify(origin, read.value);
+    } catch (error) {
+      if (error?.kind === 'invalid-token') return { status: 401, body: { error: 'GitLab refused the token from 1Password', code: 'INVALID_TOKEN' } };
+      throw error;
+    }
+    const credential = await store.setAccount(origin, { tokenReference: trimmed, user, source: 'pat' });
+    await announceConnectedAccount(origin, credential, user);
+    return { status: 200, body: { connected: true, user } };
+  };
+
   app.post('/api/source-control/gitlab/auth/token', async (req, res) => {
     try {
       const origin = requestOrigin(req);
       const token = isString(req.body?.token) ? req.body.token.trim() : '';
       if (!token) return res.status(400).json({ error: 'token is required' });
+      // A 1Password reference in the token field adds an account that keeps
+      // only the reference.
+      if (isVaultReference(token)) {
+        const { status, body } = await addAccountFromVault(origin, token);
+        return res.status(status).json(body);
+      }
       const user = await verify(origin, token);
       const credential = await store.setAccount(origin, { token, user, source: 'pat' });
       await announceConnectedAccount(origin, credential, user);
@@ -1255,6 +1304,7 @@ export function registerGitLabRoutes(app, options = {}) {
       listInstances: async () => store.listInstances?.() ?? [],
       status: readAuthStatus,
       activate: activateAccount,
+      addFromVault: addAccountFromVault,
       remove: removeAccount,
       setCliDisabled,
     }),

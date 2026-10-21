@@ -2,6 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { registerGitLabRoutes } from './routes.js';
+import { configureGitLabVaultReader } from './auth-storage.js';
 import { createMutationExecutor, digestMutationInput } from '../source-control/mutation-executor.js';
 
 const origin = 'https://gitlab.example.com';
@@ -971,6 +972,49 @@ describe('GitLab routes', () => {
 
     expect(store.markAccountInvalid).toHaveBeenCalledWith(origin, account.id, 'unauthorized');
     expect(onAccountInvalidated).toHaveBeenCalledWith({ provider: 'gitlab', instance: origin, accountId: account.id });
+  });
+
+  describe('accounts from a vault', () => {
+    const REFERENCE = 'op://Vertex SRE/gitlab_token/credential';
+    const vaultAccount = { id: `${origin}#9`, user: { id: 9, username: 'gitlab-user' }, source: 'pat', scope: '', tokenReference: REFERENCE };
+
+    it('adds an account from a reference in the token field, keeping only the reference', async () => {
+      configureGitLabVaultReader(async (reference) => (reference === REFERENCE ? { ok: true, value: 'glpat-from-vault' } : { ok: false, reason: 'op-read-failed' }));
+      const store = makeStore();
+      const fetch = vi.fn(async () => userResponse());
+      const app = appWith({ store, fetch });
+
+      await request(app).post('/api/source-control/gitlab/auth/token').query({ instance: origin }).send({ token: REFERENCE }).expect(200);
+
+      expect(store.setAccount).toHaveBeenCalledWith(origin, { tokenReference: REFERENCE, user: expect.objectContaining({ id: 9 }), source: 'pat' });
+      expect(JSON.stringify(store.setAccount.mock.calls)).not.toContain('glpat-from-vault');
+      // The token was checked against the instance before anything was stored.
+      expect(fetch).toHaveBeenCalled();
+    });
+
+    it('says why when the reference cannot be read, and stores nothing', async () => {
+      configureGitLabVaultReader(async () => ({ ok: false, reason: 'op-not-installed' }));
+      const store = makeStore();
+      const response = await request(appWith({ store, fetch: vi.fn() })).post('/api/source-control/gitlab/auth/token')
+        .query({ instance: origin }).send({ token: REFERENCE }).expect(400);
+      expect(response.body).toMatchObject({ code: 'VAULT_READ_FAILED', reason: 'op-not-installed' });
+      expect(store.setAccount).not.toHaveBeenCalled();
+    });
+
+    // Marking a vault account invalid is a no-op, so the old "write it off and
+    // read the status again" path would retry the same refused token forever.
+    it('reports a refused or unreadable vault token once, without writing the account off', async () => {
+      const refused = makeStore({ ...vaultAccount, token: 'glpat-rotated' });
+      const fetch = vi.fn(async () => new Response('unauthorized', { status: 401 }));
+      const status = await request(appWith({ store: refused, fetch })).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+      expect(status.body).toMatchObject({ connected: false, status: 'provider-error' });
+      expect(status.body.message).toContain(REFERENCE);
+      expect(refused.markAccountInvalid).not.toHaveBeenCalled();
+
+      const unreadable = makeStore({ ...vaultAccount, tokenReadError: 'timeout' });
+      const read = await request(appWith({ store: unreadable, fetch: vi.fn() })).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+      expect(read.body).toMatchObject({ connected: false, status: 'provider-error', tokenReadError: 'timeout' });
+    });
   });
 
   it('names a refused token so the interface can say what to fix', async () => {

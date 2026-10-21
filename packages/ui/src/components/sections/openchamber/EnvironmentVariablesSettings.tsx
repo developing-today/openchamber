@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { EnvironmentVariablesEditor } from '@/components/sections/shared/EnvironmentVariablesEditor';
-import { fetchUserEnvironment, updateUserEnvironment, type EnvironmentVariablesPatch } from '@/lib/environmentApi';
+import { fetchUserEnvironment, updateUserEnvironment, type EnvironmentVariablesPatch, type UserEnvironment } from '@/lib/environmentApi';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { restartOpenCodeWithFeedback } from '@/lib/restartOpenCode';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
@@ -11,7 +11,7 @@ import { useI18n } from '@/lib/i18n';
 
 type LoadState =
   | { state: 'loading' }
-  | { state: 'ready'; names: string[] }
+  | { state: 'ready'; environment: UserEnvironment }
   | { state: 'failed' };
 
 /**
@@ -30,7 +30,7 @@ export const EnvironmentVariablesSettings: React.FC = () => {
     let cancelled = false;
     fetchUserEnvironment()
       .then((environment) => {
-        if (!cancelled) setLoad({ state: 'ready', names: environment.names });
+        if (!cancelled) setLoad({ state: 'ready', environment });
       })
       .catch(() => {
         if (!cancelled) setLoad({ state: 'failed' });
@@ -44,7 +44,7 @@ export const EnvironmentVariablesSettings: React.FC = () => {
     reportSettingsSaveState('saving');
     try {
       const environment = await updateUserEnvironment(patch);
-      setLoad({ state: 'ready', names: environment.names });
+      setLoad({ state: 'ready', environment });
       setChanged(true);
       reportSettingsSaveState('saved');
       return true;
@@ -79,7 +79,9 @@ export const EnvironmentVariablesSettings: React.FC = () => {
           <p className="typography-meta text-[var(--status-error)]">{t('settings.environment.editor.loadFailed')}</p>
         ) : (
           <EnvironmentVariablesEditor
-            names={load.state === 'ready' ? load.names : []}
+            names={load.state === 'ready' ? load.environment.names : []}
+            references={load.state === 'ready' ? load.environment.references : undefined}
+            vault={load.state === 'ready' ? load.environment.vault : undefined}
             disabled={load.state !== 'ready'}
             onSet={(name, value) => save({ [name]: value })}
             onRemove={(name) => save({ [name]: null })}

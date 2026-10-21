@@ -956,7 +956,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'git.gitlab-connect',
     page: 'integrations',
     titleKey: 'settings.gitlab.actions.connect',
-    keywords: ['gitlab', 'connect', 'add account', 'oauth', 'pat', 'token', 'instance'],
+    keywords: ['gitlab', 'connect', 'add account', 'oauth', 'pat', 'token', 'instance', '1password', 'op://', 'vault'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -1644,6 +1644,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'integrations',
     titleKey: 'settings.github.page.actions.connect',
     keywords: ['github', 'connect', 'add account', 'oauth', 'device flow'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'git.github-vault',
+    page: 'integrations',
+    titleKey: 'settings.vault.github.label',
+    descriptionKey: 'settings.vault.github.info',
+    keywords: ['github', '1password', 'op://', 'vault', 'token', 'pat', 'secret'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

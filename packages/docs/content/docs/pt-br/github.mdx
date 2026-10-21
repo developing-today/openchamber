@@ -15,6 +15,8 @@ Conecte sua conta do GitHub e o OpenChamber pode trazer issues e pull requests, 
 
 Quando estiver conectado, sua conta aparece no cartão. Você pode conectar mais de uma conta e alternar entre elas, ou desconectar a qualquer momento. Se a CLI `gh` estiver logada na mesma máquina, o OpenChamber pode usá-la como alternativa.
 
+Para usar um token que você guarda no 1Password, digite a referência dele, por exemplo `op://Vault/github_token/credential`, em **Token do 1Password** e escolha **Adicionar**. O OpenChamber lê o token com a CLI do 1Password toda vez que usa a conta e guarda só a referência. Veja [Segredos do 1Password](/pt-br/environment/#segredos-do-1password).
+
 ## Começar o trabalho a partir de uma issue ou PR
 
 Quando você cria uma [sessão de worktree](/pt-br/worktrees/) com o GitHub conectado, pode iniciá-la a partir de uma issue ou de um pull request:

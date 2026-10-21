@@ -29,6 +29,54 @@ afterEach(async () => {
   await fs.rm(directory, { recursive: true, force: true });
 });
 
+describe('GitHub accounts from a vault', () => {
+  const REFERENCE = 'op://Vertex SRE/github_token/credential';
+  const user = { id: 42, login: 'octo' };
+
+  it('stores only the reference and fills the token in when the account is read', async () => {
+    const readSecret = vi.fn(async () => ({ ok: true, value: 'ghp_from_vault' }));
+    auth.configureGitHubVaultReader(readSecret);
+    const credential = await auth.setGitHubAuth({ tokenReference: REFERENCE, user, source: 'pat' });
+
+    const stored = await fs.readFile(path.join(directory, 'github-auth.json'), 'utf8');
+    expect(stored).toContain(REFERENCE);
+    expect(stored).not.toContain('ghp_from_vault');
+    expect(JSON.parse(stored).credentials[0]).not.toHaveProperty('accessToken');
+
+    await expect(auth.getGitHubAuth()).resolves.toMatchObject({ accessToken: 'ghp_from_vault', tokenReference: REFERENCE });
+    await expect(auth.getGitHubAuthByAccountId(credential.credentialId, credential.credentialRevision))
+      .resolves.toMatchObject({ accessToken: 'ghp_from_vault' });
+    expect(readSecret).toHaveBeenCalledWith(REFERENCE);
+    const [account] = await auth.getGitHubAuthAccounts();
+    expect(account).toMatchObject({ source: 'pat', tokenReference: REFERENCE });
+    expect(JSON.stringify(account)).not.toContain('ghp_from_vault');
+  });
+
+  it('reads as an account without a token when the reference cannot be read', async () => {
+    auth.configureGitHubVaultReader(async () => ({ ok: false, reason: 'op-not-installed' }));
+    await auth.setGitHubAuth({ tokenReference: REFERENCE, user, source: 'pat' });
+    const active = await auth.getGitHubAuth();
+    expect(active).not.toHaveProperty('accessToken');
+    expect(active.tokenReadError).toBe('op-not-installed');
+  });
+
+  // A refused vault token is most likely rotated there; marking it invalid
+  // would keep the account off after the user fixes it.
+  it('is not written off when GitHub refuses its token', async () => {
+    auth.configureGitHubVaultReader(async () => ({ ok: true, value: 'ghp_old' }));
+    const credential = await auth.setGitHubAuth({ tokenReference: REFERENCE, user, source: 'pat' });
+    await auth.markGitHubAuthAccountInvalid(credential.credentialId);
+    const [account] = await auth.getGitHubAuthAccounts();
+    expect(account.status).toBe('valid');
+  });
+
+  it('refuses a reference that is not a vault reference, and a token and reference together', async () => {
+    await expect(auth.setGitHubAuth({ tokenReference: 'ghp_plain', user, source: 'pat' })).rejects.toThrow();
+    await expect(auth.setGitHubAuth({ tokenReference: REFERENCE, accessToken: 'x', user, source: 'pat' })).rejects.toThrow();
+    await expect(auth.setGitHubAuth({ tokenReference: REFERENCE, user, source: 'oauth' })).rejects.toThrow();
+  });
+});
+
 describe('GitHub auth credentials', () => {
   it('migrates the shipped array once while preserving the exact legacy credential ID and secret', async () => {
     const filePath = path.join(directory, 'github-auth.json');

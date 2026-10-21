@@ -135,6 +135,9 @@ import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes
 import { configureGitEnvironment, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
+import { createVaultResolver } from './lib/environment/vault.js';
+import { configureGitHubVaultReader } from './lib/github/auth.js';
+import { configureGitLabVaultReader } from './lib/gitlab/auth-storage.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
@@ -163,6 +166,7 @@ import { createProviderActions } from './lib/openchamber-control/provider-action
 import { createConfigActions } from './lib/openchamber-control/config-actions.js';
 import { createIntegrationActions } from './lib/openchamber-control/integration-actions.js';
 import { createIntegrationServiceActions } from './lib/openchamber-control/integration-service-actions.js';
+import { createEnvironmentActions } from './lib/openchamber-control/environment-actions.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1318,7 +1322,14 @@ const listConfiguredProjects = async () => {
   const settings = await readSettingsFromDiskMigrated();
   return sanitizeProjects(settings?.projects || []);
 };
+// One vault reader for every secret kept as an op:// reference: environment
+// variables and integration accounts share its cache. The terminal's PATH, so
+// a packaged server finds `op` where the user installed it.
+const vaultResolver = createVaultResolver({ env: () => ({ ...process.env, PATH: buildAugmentedPath() }) });
+configureGitHubVaultReader(vaultResolver.readSecret);
+configureGitLabVaultReader(vaultResolver.readSecret);
 const environmentRuntime = createEnvironmentRuntime({
+  vault: vaultResolver,
   store: environmentStore,
   listProjects: listConfiguredProjects,
   spawn,
@@ -1548,6 +1559,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
+  resolveUserEnvironment: () => environmentRuntime.forOpenCodeResolved(),
 });
 
 // Quota lookups, voice keys and routing read provider credentials from the
@@ -1908,6 +1920,7 @@ const openChamberControlService = createOpenChamberControlService({
     }),
     createIntegrationActions({ readSettingsFromDiskMigrated, persistSettings }),
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
+    createEnvironmentActions({ store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects }),
   ],
 });
 

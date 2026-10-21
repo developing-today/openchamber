@@ -15,6 +15,8 @@ Connectez votre compte GitHub et OpenChamber peut récupérer les issues et pull
 
 Une fois connecté, votre compte apparaît sur la carte. Vous pouvez connecter plusieurs comptes et passer de l’un à l’autre, ou vous déconnecter à tout moment. Si la CLI `gh` est connectée sur la même machine, OpenChamber peut l’utiliser en secours.
 
+Pour utiliser plutôt un jeton conservé dans 1Password, saisissez sa référence, par exemple `op://Vault/github_token/credential`, sous **Jeton depuis 1Password** et choisissez **Ajouter**. OpenChamber lit le jeton avec la CLI 1Password chaque fois qu’il utilise le compte et n’enregistre que la référence. Voir [Secrets depuis 1Password](/fr/environment/#secrets-depuis-1password).
+
 ## Démarrer le travail depuis une issue ou une PR
 
 Lorsque vous créez une [session worktree](/worktrees/) avec GitHub connecté, vous pouvez la démarrer depuis une issue ou une pull request :

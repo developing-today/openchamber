@@ -12,8 +12,19 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 /** Same rule as the server: an environment identifier. */
 export const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+// Vault references (`op://…`) are the one value the server shows: a
+// reference names where a secret is kept. Servers before 2026-10 send neither field.
+const vaultReadSchema = z.object({
+  state: z.enum(['resolved', 'failed']),
+  reason: z.enum(['op-not-installed', 'timeout', 'op-read-failed', 'empty']).optional().catch(undefined),
+});
+const referencesSchema = z.record(z.string(), z.string()).optional().catch(undefined).transform((value) => value ?? {});
+const vaultSchema = z.record(z.string(), vaultReadSchema).optional().catch(undefined).transform((value) => value ?? {});
+
 const userEnvironmentSchema = z.object({
   names: z.array(z.string()),
+  references: referencesSchema,
+  vault: vaultSchema,
 });
 
 const commandStatusSchema = z.discriminatedUnion('state', [
@@ -25,9 +36,12 @@ const projectEnvironmentSchema = z.object({
   names: z.array(z.string()),
   command: z.string().nullable(),
   status: commandStatusSchema.nullable(),
+  references: referencesSchema,
+  vault: vaultSchema,
 });
 
-type UserEnvironment = z.infer<typeof userEnvironmentSchema>;
+export type UserEnvironment = z.infer<typeof userEnvironmentSchema>;
+export type EnvironmentVaultRead = z.infer<typeof vaultReadSchema>;
 export type ProjectEnvironment = z.infer<typeof projectEnvironmentSchema>;
 export type EnvironmentCommandStatus = z.infer<typeof commandStatusSchema>;
 
