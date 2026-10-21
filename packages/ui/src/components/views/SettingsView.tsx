@@ -14,6 +14,7 @@ import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { projectSettingsTabForSearchTarget, useProjectSettingsTabStore } from '@/components/sections/projects/projectSettingsTabs';
 import { routingTabForSearchTarget, useRoutingPageViewStore } from '@/components/sections/routing/routingTabs';
+import { chatSettingsTabForSearchTarget, useChatSettingsTabStore } from '@/components/sections/openchamber/chatSettingsTabs';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
@@ -75,6 +76,12 @@ const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
 // The desktop close button: top-1 offset plus its h-7 height.
 const SETTINGS_CLOSE_BUTTON_CLEARANCE = 32;
 const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
+/** The Chat page shows one tab at a time: open the one that holds the item. */
+const openChatSettingsTabFor = (itemId: string): void => {
+  const chatTab = chatSettingsTabForSearchTarget(itemId);
+  if (chatTab) useChatSettingsTabStore.getState().setTab(chatTab);
+};
+
 /** How long (in frames, ~0.5 s) a search result or a link waits for its item to render. */
 const PENDING_ITEM_MAX_FRAMES = 30;
 
@@ -488,6 +495,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return 'plugins.spec';
     }
 
+    // The Git identity picker lives in the Add extension dialog; the add card opens it.
+    if (result.id === 'extensions.gitIdentity') {
+      return 'extensions.add';
+    }
+
     const projectTab = projectSettingsTabForSearchTarget(result.id);
     if (projectTab) {
       useProjectSettingsTabStore.getState().setTab(projectTab);
@@ -497,6 +509,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (routingTab) {
       useRoutingPageViewStore.getState().setTab(routingTab);
     }
+
+    openChatSettingsTabFor(result.id);
 
     return result.id;
   }, []);
@@ -598,6 +612,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
     useUIStore.getState().clearSettingsJumpRequest();
+    if (settingsJumpRequest.itemId) openChatSettingsTabFor(settingsJumpRequest.itemId);
     setPendingSearchItemId(settingsJumpRequest.itemId);
     openPage(resolveSettingsSlug(settingsJumpRequest.page));
     if (isMobile) {

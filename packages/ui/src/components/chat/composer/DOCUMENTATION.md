@@ -156,11 +156,18 @@ writer as a send would; editing it arms the target again (*Queued goals* in
 `selectComposerQueue` in the submission builder excludes server-scheduled items
 before the composer counts manual content or reads captured send configuration.
 Mixed queues use only ordinary items for manual send; a scheduled-only queue
-cannot trigger an empty composer send. Only the send button flushes the queue
-from an empty composer; Enter and Ctrl/Cmd+Enter with nothing typed do
-nothing, so a stray keystroke cannot push the queue into a running turn
-(#4749). Scheduled items stay visible in the
+cannot trigger an empty composer send. Enter and Ctrl/Cmd+Enter in an empty
+composer send the whole queue now, as one visible message (#4746). While a turn
+runs only Enter does this: the send button gives way to Stop until the turn
+ends, and a row's own Send sends just that message. Like any send, it dismisses
+open permission requests and forms. Scheduled items stay visible in the
 queue rows with reorder and remove, but no edit or send action.
+
+While a turn runs and the composer has content, a follow-up button sits above
+Stop (inside the pill on collapsed mobile). It takes the same path as plain
+Enter under the follow-up setting: with Queue it queues and shows the rotated
+icon labelled "Queue message"; with Steer it steers into the running turn and
+looks like the ordinary send button.
 
 `BackgroundShellsStrip` lists the commands that went to the background (not the ones
 a turn is waiting for, see `background` in `sync/background-shells.ts`) of
@@ -271,8 +278,12 @@ panel, draft target selectors and preset chips) are memoized, and the props
 read the text through `messageRef` or `useStableHandler`, derived objects are
 memoized, and `useBtwPanelState` and `useMobileComposerShell` return stable
 objects. `useBtwPanelState` reads the parent and fork sessions as primitives,
-so a streaming turn's `session.updated` events do not re-render the composer.
-`__tests__/ChatInput.keystroke.test.tsx` counts the renders per keystroke.
+and `useChatSearchDirectory` reads only the session's directory, so a
+streaming turn's `session.updated` events do not re-render the composer. The
+editor is memoized and every handler `ChatInput` passes it is a
+`useStableHandler`, so it renders only when what it shows changes.
+`__tests__/ChatInput.keystroke.test.tsx` counts the renders per keystroke and
+per streamed session update.
 
 A glass surface never carries its own shadow: the shadow sits on a wrapper
 (or the glass moves to an inner layer). Chromium grows a backdrop-filter
@@ -324,6 +335,28 @@ to read the declaration again when the composer takes focus, since the IME reads
 element takes focus and that can be before the report arrives. The paste handler re-checks
 focus as a backstop for that window. Every other runtime pastes images through `handlePaste` unchanged, and an IME
 without content insertion keeps refusing.
+With the profile setting `savePastedImagesAsFiles` on, pasted, dropped and
+picked images (`attachFilesWithCitation`, `attachFiles`) are written into a new
+folder under OpenCode's own temp folder (`opencodeClient.writeOpenCodeTempFiles`:
+`GET /api/info` names the folder, `POST /api/experimental/fs/write` writes it)
+and cited as `[name](absolute path)` (a plain link: a draft starting with `!`
+turns into a shell command), so the model, a subagent or a tool reads the file
+by path; OpenCode's agents may read that folder without asking.
+`imageSaveModeForModel` picks one of three cases. A model whose metadata lists
+no `image` input gets only the link, since it could not read the attachment
+(#5087), and the modality toast says where the images went. Any other model,
+unknown metadata included, also gets the image attached under the link's name,
+with no second `[name]` citation (#5218). An image that could not be saved
+attaches as before, with an error toast. With the setting off nothing is
+saved. One setting covers both cases: a split by model kind read as a puzzle of
+exceptions in Settings, and nobody needs the files for one kind of model only.
+The browser annotation screenshot and comment-field image pastes keep
+attaching. The bytes go through the active runtime's OpenCode route (the
+OpenChamber server's proxy, the VS Code bridge, the relay for a phone), so the
+file lands on the machine OpenCode runs on, which may not be the user's. Why
+OpenCode writes the file and not the OpenChamber server: only OpenCode knows
+its temp folder and its filesystem, and an external OpenCode or a space runs
+elsewhere than the server.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline` / `inline-double-paste`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
@@ -456,6 +489,11 @@ CodeMirror enforce cursor association on the native selection, which iOS
 answers with severe input lag. **That much is not platform-specific and must
 not be undone.** What differs is who paints the selection, and
 `composerSelectionExtension` (`editor/theme.ts`) picks that per platform.
+
+The drawn caret blinks from a 600 ms timer (`timerCaretBlink`,
+`lib/codemirror/caretBlink.ts`). CodeMirror's own blink is an infinite CSS
+animation that kept the compositor ticking every frame for as long as the
+composer had focus: 4.1% of a core against 1.3% on the animation fixture.
 
 When CodeMirror 6.43.9's iOS predicate does not match,
 `composerNativeSelectionExtension` layers over `drawSelection()`: it re-shows
@@ -625,20 +663,39 @@ and the send path reading the same grammar.
   including for **Insert and send**, and a toast says where it went.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
-  branch list, or the selector snaps back to the project root mid-creation. It
-  also owns the advisory dirty state for the selected directory, clearing it as
-  soon as the target changes so a warning never names a previous branch.
+  branch list, or the selector snaps back to the project root mid-creation. A
+  draft opened on a given directory (Mini Chat, a worktree or space row) pins
+  it with `preserveDirectoryOverride`: the app does not move the draft until
+  the directory shows up as a known branch. The pin stops only the app. A pick
+  in the project or worktree picker always applies and clears it, because a
+  project without git never lists a branch and its pin never clears by itself.
+  Re-picking what a pinned draft already shows changes nothing, so one click
+  cannot drop an unlisted space or worktree directory. Only a worktree still being created (`pendingWorktreeRequestId`,
+  `bootstrapPendingDirectory`) keeps both pickers inert. The hook also owns the
+  advisory dirty state for the selected directory, clearing it as soon as the
+  target changes so a warning never names a previous branch. It re-reads the
+  project's branch list and worktree topology when the window regains focus or
+  becomes visible and when the branch picker opens, throttled to one read every
+  two seconds. The branch list's 30-second window has no timer of its own, so
+  without these triggers a branch changed outside the app stayed on screen
+  until the project changed.
 - `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
   state and registers its application shortcuts locally. The desktop project
   picker is a searchable popup: it ranks the current projects with
   `rankByQuery` over display label and path, keeps the query and the active
   result as transient local state that resets on every close, and commits
   through the existing project-change flow only on explicit activation.
-  Filtering changes the result area below the anchored input without moving
-  the search field. The worktree picker remains a Select; mobile keeps its
-  bottom sheets. Both end with the two ways to make a worktree: **Quick
-  worktree** (`createWorktreeDraft`, auto-named, at once) and **New worktree…**,
-  which opens `NewWorktreeDialog` for the draft's own project. `ChatInput` hosts
+  Filtering changes the result area beyond the anchored input without moving
+  the search field. When less than 240px is left under the trigger and more
+  is above it, as in Mini Chat where the picker sits near the window's bottom,
+  the popup opens upward with the search field at its bottom, next to the
+  trigger, and the results above it. The side is chosen once per open
+  (`usePopupSideOnOpen`, `components/ui/popup-side.ts`) and never flips while
+  open. The worktree picker remains a Select and follows the same rule, with
+  its items in the same order either way; mobile keeps its bottom sheets.
+  Both end with the two ways to make a worktree: **Quick worktree**
+  (`createWorktreeDraft`, auto-named, at once) and **New worktree…**, which
+  opens `NewWorktreeDialog` for the draft's own project. `ChatInput` hosts
   that dialog, like the isolated-space one, because Timeline has no project
   headers to open it from; a plain worktree pins the draft to the new
   directory, one made for an issue or PR opens its session. `ProjectPickerSheet` shares the mobile project list and
@@ -694,6 +751,28 @@ and the send path reading the same grammar.
   (`packages/web/server/lib/openchamber-control/DOCUMENTATION.md`).
 - `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
   mention picker after its IME guard.
+
+## Autocomplete details
+
+`ui/useAutocompleteDetails.ts` owns detail visibility for the command, skill and
+`@` mention pickers (in the mention picker only agent rows carry details). Each list attaches its scroll handler to its own `ScrollableOverlay`.
+Scrolling hides details and cancels the row's pending 200ms display through
+`active`, while selection and the draft stay intact. Details stay closed until
+a fresh mouse move after a 150ms scroll gap or another keyboard navigation.
+
+The hook runs `scrollIntoView` in the layout phase and records its resulting
+position so its deferred scroll event preserves the requested details. A
+keyboard request also handles one-item lists with an unchanged selected index.
+The row clears its display timer on deactivation or unmount; React removes the
+list's scroll handler on unmount.
+
+`../AutocompleteDetails.test.tsx` mounts the command and skill pickers and their
+row tooltips; the mention picker uses the same hook and wiring without its own test. It covers delayed display cancellation, sustained scrolling, unrelated
+scrolls, same-row hover recovery, keyboard recovery with and without an index
+change, pending manual scroll events, selection callbacks and unmount cleanup.
+Its input forwards keys directly to the picker handle; it does not exercise
+the full composer's key routing or draft persistence. Happy DOM models
+`scrollIntoView`; native scrolling and positioning require a full-app live run.
 
 ## Input recall ownership
 
@@ -965,6 +1044,8 @@ through the timeline controller and flashes it. Ranges are
 re-resolved by text and context whenever the marked message re-renders or
 remounts. Offsets only break ties. Quotes sent before anchors existed are
 found only when their text appears once in the message.
+
+A quote taken inside a page the agent showed (`openchamber_render`) has `page: { partId }` in its anchor: its text stream is the page's body, measured and re-found inside the page's frame. The layer does not paint those marks; it publishes them, asks for reveals and hears clicks through `message/pageQuoteBridge.ts` (see `message/parts/DOCUMENTATION.md`).
 
 ## Mobile comment mode
 

@@ -44,6 +44,7 @@ import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
+import { timerCaretBlink } from '@/lib/codemirror/caretBlink';
 
 export interface ComposerSelection {
     start: number;
@@ -176,7 +177,9 @@ const placeholderCompartment = new Compartment();
 /** Marks the transaction that writes a changed `value` prop into the editor. */
 const valuePropWrite = Annotation.define<true>();
 
-export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEditorProps>(
+// Memoized: the view is built once and reads its handlers through a ref, so a
+// parent render with equal props has nothing to tell it.
+export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, ComposerEditorProps>(
     function ComposerEditor(props, ref) {
         const {
             value,
@@ -271,6 +274,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         // makes CodeMirror enforce cursor association on the
                         // native selection, which iOS answers with severe lag.
                         drawSelection(),
+                        // Blinks the drawn caret from a timer; CodeMirror's
+                        // CSS blink keeps the compositor busy every frame.
+                        timerCaretBlink(),
                         composerSelectionExtension(),
                         EditorView.lineWrapping,
                         // Highest precedence: the composer's own keys must win
@@ -620,7 +626,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             />
         );
     },
-);
+));
 
 function readSelection(state: EditorState): ComposerSelection {
     const range = state.selection.main;

@@ -43,13 +43,13 @@ const ensureNotificationTemplates = (templates) => {
 /** Settings that decide which OpenChamber plugins the managed OpenCode loads. */
 const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentControlToolEnabled',
+  'agentScheduleToolEnabled',
   'agentWebToolEnabled',
   'agentMemoryToolEnabled',
   'agentKnowledgeToolEnabled',
   'agentNotifyToolEnabled',
   'agentRenderToolEnabled',
   'agentToolsCodeMode',
-  'agentWorktreeMoveWithoutAsking',
 ]);
 
 export const createSettingsRuntime = (deps) => {
@@ -74,6 +74,8 @@ export const createSettingsRuntime = (deps) => {
     onManagedPluginSettingsChanged = async () => {},
     onMessageSearchEnabledChanged = () => {},
     onMessageSearchReasoningChanged = () => {},
+    onPermissionDefaultModeChanged = () => {},
+    onLastDirectoryChanged = () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
@@ -1041,6 +1043,17 @@ export const createSettingsRuntime = (deps) => {
     return { settings: next, changed: true };
   };
 
+  // Scheduled tasks used to be part of the agent control tool. Someone who had
+  // switched that tool off keeps them off after the split instead of getting a
+  // scheduling tool they never chose.
+  const migrateSettingsScheduleToolFromControl = (settings) => {
+    const chosen = settings.agentScheduleToolEnabled === true || settings.agentScheduleToolEnabled === false;
+    if (settings.agentControlToolEnabled !== false || chosen) {
+      return { settings, changed: false };
+    }
+    return { settings: { ...settings, agentScheduleToolEnabled: false }, changed: true };
+  };
+
   let hasCleanedOrphanedTempFiles = false;
 
   const readSettingsFromDiskMigrated = async ({ surface = null } = {}) => {
@@ -1057,116 +1070,140 @@ export const createSettingsRuntime = (deps) => {
     const migration6 = normalizeSettingsPaths(migration5.settings);
     const migration7 = await migrateSettingsToDeterministicProjectIds(migration6.settings);
     const migration8 = migrateSettingsRemoveApprovedDirectories(migration7.settings);
-    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed) {
-      await writeSettingsToDisk(migration8.settings);
+    const migration9 = migrateSettingsScheduleToolFromControl(migration8.settings);
+    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed) {
+      await writeSettingsToDisk(migration9.settings);
     }
     // Migrations run on the base view; a surface asks for its own resolution
     // of the per-surface keys on top of the migrated files.
-    return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration8.settings;
+    return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   };
 
-  const persistSettings = async (changes, { surface = null } = {}) => {
-    persistSettingsLock = persistSettingsLock.then(async () => {
-      // Log field names only — changes can carry credentials (UI password,
-      // client tokens, tunnel tokens) that must never reach the log file.
-      console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk({ surface });
-      const sanitized = sanitizeSettingsUpdate(changes);
-      for (const key of Object.keys(sanitized)) {
-        // Device state belongs to the install in front of the user, never to
-        // the instance; a client that still sends it is simply ignored.
-        if (isDeviceSettingsKey(key)) {
-          delete sanitized[key];
-        } else if (preferencesUnavailable && isProfileSettingsKey(key)) {
-          console.warn(`[persistSettings] Dropping ${key}: preferences file is unreadable`);
-          delete sanitized[key];
-        }
-      }
-      let next = mergePersistedSettings(current, sanitized);
-
-      const normalizedState = normalizeSettingsPaths(next);
-      if (normalizedState.changed) {
-        next = normalizedState.settings;
-      }
-
-      const deterministicProjectIdMigration = await migrateSettingsToDeterministicProjectIds(next);
-      if (deterministicProjectIdMigration.changed) {
-        next = deterministicProjectIdMigration.settings;
-      }
-
-      const approvedDirectoriesMigration = migrateSettingsRemoveApprovedDirectories(next);
-      if (approvedDirectoriesMigration.changed) {
-        next = approvedDirectoriesMigration.settings;
-      }
-
-      // Validating project paths hits the filesystem for every entry, so only
-      // do it when the incoming update actually touches the projects list —
-      // not on every theme/window-state/etc. save.
-      if (Object.prototype.hasOwnProperty.call(sanitized, 'projects') && Array.isArray(next.projects)) {
-        const validated = await validateProjectEntries(next.projects);
-        next = { ...next, projects: validated };
-      }
-
-      if (Array.isArray(next.projects) && next.projects.length > 0) {
-        const activeId = typeof next.activeProjectId === 'string' ? next.activeProjectId : '';
-        const active = next.projects.find((project) => project.id === activeId) || null;
-        if (!active) {
-          console.log(`[persistSettings] Active project ID ${activeId} not found, switching to ${next.projects[0].id}`);
-          next = { ...next, activeProjectId: next.projects[0].id };
-        }
-      } else if (next.activeProjectId) {
-        console.log(`[persistSettings] No projects found, clearing activeProjectId ${next.activeProjectId}`);
-        next = { ...next, activeProjectId: undefined };
-      }
-
-      if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')) {
-        await syncManagedRemoteTunnelConfigWithPresets(next.managedRemoteTunnelPresets);
-      }
-
-      if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresetTokens') && sanitized.managedRemoteTunnelPresetTokens) {
-        const presetsById = new Map((next.managedRemoteTunnelPresets || []).map((entry) => [entry.id, entry]));
-        const updates = Object.entries(sanitized.managedRemoteTunnelPresetTokens)
-          .map(([presetId, token]) => {
-            const preset = presetsById.get(presetId);
-            if (!preset || typeof token !== 'string' || token.trim().length === 0) {
-              return null;
-            }
-            return {
-              id: preset.id,
-              name: preset.name,
-              hostname: preset.hostname,
-              token: token.trim(),
-            };
-          })
-          .filter(Boolean);
-
-        for (const update of updates) {
-          await upsertManagedRemoteTunnelToken(update);
-        }
-      }
-
-      const changedKeys = Object.keys(sanitized);
-      await writeSettingsToDisk(next, { surface, changedKeys });
-      // OpenChamber's own OpenCode plugins live in a config file OpenCode
-      // watches, so flipping one of these switches takes effect in the running
-      // process instead of waiting for a restart.
-      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
-        await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
-          console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
-        });
-      }
-      // The search index starts or stops in the background; the save does not wait for it.
-      if (changedKeys.includes('messageSearchEnabled')) {
-        onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
-      }
-      if (changedKeys.includes('messageSearchReasoningEnabled')) {
-        onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
-      }
-      return formatSettingsResponse(next);
-    });
-
-    return persistSettingsLock;
+  // Settings writes run one at a time. The chain continues past a failed
+  // write: chaining on the rejected promise itself would skip every later
+  // write and fail it with the same error until the server restarted.
+  const runExclusive = (task) => {
+    const run = persistSettingsLock.then(task);
+    persistSettingsLock = run.catch(() => {});
+    return run;
   };
+
+  const applySettingsChanges = async (changes, { surface = null } = {}) => {
+    // Log field names only — changes can carry credentials (UI password,
+    // client tokens, tunnel tokens) that must never reach the log file.
+    console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
+    const current = await readSettingsFromDisk({ surface });
+    const sanitized = sanitizeSettingsUpdate(changes);
+    for (const key of Object.keys(sanitized)) {
+      // Device state belongs to the install in front of the user, never to
+      // the instance; a client that still sends it is simply ignored.
+      if (isDeviceSettingsKey(key)) {
+        delete sanitized[key];
+      } else if (preferencesUnavailable && isProfileSettingsKey(key)) {
+        console.warn(`[persistSettings] Dropping ${key}: preferences file is unreadable`);
+        delete sanitized[key];
+      }
+    }
+    let next = mergePersistedSettings(current, sanitized);
+
+    const normalizedState = normalizeSettingsPaths(next);
+    if (normalizedState.changed) {
+      next = normalizedState.settings;
+    }
+
+    const deterministicProjectIdMigration = await migrateSettingsToDeterministicProjectIds(next);
+    if (deterministicProjectIdMigration.changed) {
+      next = deterministicProjectIdMigration.settings;
+    }
+
+    const approvedDirectoriesMigration = migrateSettingsRemoveApprovedDirectories(next);
+    if (approvedDirectoriesMigration.changed) {
+      next = approvedDirectoriesMigration.settings;
+    }
+
+    // Validating project paths hits the filesystem for every entry, so only
+    // do it when the incoming update actually touches the projects list —
+    // not on every theme/window-state/etc. save.
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'projects') && Array.isArray(next.projects)) {
+      const validated = await validateProjectEntries(next.projects);
+      next = { ...next, projects: validated };
+    }
+
+    if (Array.isArray(next.projects) && next.projects.length > 0) {
+      const activeId = typeof next.activeProjectId === 'string' ? next.activeProjectId : '';
+      const active = next.projects.find((project) => project.id === activeId) || null;
+      if (!active) {
+        console.log(`[persistSettings] Active project ID ${activeId} not found, switching to ${next.projects[0].id}`);
+        next = { ...next, activeProjectId: next.projects[0].id };
+      }
+    } else if (next.activeProjectId) {
+      console.log(`[persistSettings] No projects found, clearing activeProjectId ${next.activeProjectId}`);
+      next = { ...next, activeProjectId: undefined };
+    }
+
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')) {
+      await syncManagedRemoteTunnelConfigWithPresets(next.managedRemoteTunnelPresets);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresetTokens') && sanitized.managedRemoteTunnelPresetTokens) {
+      const presetsById = new Map((next.managedRemoteTunnelPresets || []).map((entry) => [entry.id, entry]));
+      const updates = Object.entries(sanitized.managedRemoteTunnelPresetTokens)
+        .map(([presetId, token]) => {
+          const preset = presetsById.get(presetId);
+          if (!preset || typeof token !== 'string' || token.trim().length === 0) {
+            return null;
+          }
+          return {
+            id: preset.id,
+            name: preset.name,
+            hostname: preset.hostname,
+            token: token.trim(),
+          };
+        })
+        .filter(Boolean);
+
+      for (const update of updates) {
+        await upsertManagedRemoteTunnelToken(update);
+      }
+    }
+
+    const changedKeys = Object.keys(sanitized);
+    await writeSettingsToDisk(next, { surface, changedKeys });
+    // OpenChamber's own OpenCode plugins live in a config file OpenCode
+    // watches, so flipping one of these switches takes effect in the running
+    // process instead of waiting for a restart.
+    if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
+      await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
+        console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
+      });
+    }
+    // The search index starts or stops in the background; the save does not wait for it.
+    if (changedKeys.includes('messageSearchEnabled')) {
+      onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+    }
+    if (changedKeys.includes('messageSearchReasoningEnabled')) {
+      onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
+    }
+    if (changedKeys.includes('permissionDefaultMode') && next.permissionDefaultMode !== current.permissionDefaultMode) {
+      onPermissionDefaultModeChanged(next.permissionDefaultMode);
+    }
+    if (changedKeys.includes('lastDirectory') && next.lastDirectory !== current.lastDirectory) {
+      onLastDirectoryChanged(next.lastDirectory);
+    }
+    return formatSettingsResponse(next);
+  };
+
+  const persistSettings = (changes, options = {}) => runExclusive(() => applySettingsChanges(changes, options));
+
+  // Read-modify-write under the same lock as persistSettings, for a change
+  // computed from the current value (a list edited by id). `compute` gets the
+  // settings as stored and returns the changes to write, or null to write
+  // nothing; an error it throws fails this call only.
+  const updateSettings = (compute, { surface = null } = {}) => runExclusive(async () => {
+    const changes = await compute(await readSettingsFromDisk({ surface }));
+    if (!changes) return null;
+    return applySettingsChanges(changes, { surface });
+  });
 
   return {
     readSettingsFromDisk,
@@ -1174,5 +1211,6 @@ export const createSettingsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    updateSettings,
   };
 };

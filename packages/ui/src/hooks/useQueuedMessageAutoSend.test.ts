@@ -367,6 +367,7 @@ describe('buildQueuedAutoSendPayload', () => {
             restorableAttachments: [],
           },
         ],
+        queuedGoal: null,
     });
   });
 
@@ -416,6 +417,8 @@ describe('buildQueuedAutoSendPayload', () => {
             restorableAttachments: [],
           },
         ],
+        // Queued without a goal: the composer's armed goal is not this message's.
+        queuedGoal: null,
       },
     ]);
   });
@@ -434,5 +437,20 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(sendMessageCalls[0]?.[9]).toMatchObject({
       goalArm: { armed: true, objectiveOverride: null, settled: false, briefAgent: false },
     });
+  });
+
+  test('a message queued as a goal is sent with that goal', async () => {
+    const goal = { objective: 'the whole plan', tokenBudget: 5000 };
+    const payload = buildQueuedAutoSendPayload([
+      { id: 'queued-goal', content: 'Implement this plan', text: 'Implement this plan', createdAt: 1, goal },
+    ]);
+
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, payload!, { providerID: 'provider-1', modelID: 'model-1' });
+
+    expect(sendMessageCalls[0]?.[9]).toMatchObject({ queuedGoal: goal });
   });
 });

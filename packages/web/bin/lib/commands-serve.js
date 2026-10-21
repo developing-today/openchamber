@@ -219,6 +219,8 @@ async function serveCommand(options) {
         apiOnly: options.apiOnly === true,
         attachSignals: false,
         exitOnShutdown: false,
+        // The successor takes over its predecessor's instance folder (instance-dir.js).
+        handoffPredecessor,
       });
 
       const resolvedPort = controller.getPort();

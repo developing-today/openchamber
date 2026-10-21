@@ -13,6 +13,7 @@ import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight
 import { mergeCommandAutocompleteItems, rankCommandAutocompleteItems } from './commandAutocompleteItems';
 import { useGuestCommands } from '@/hooks/useGuestSurfaces';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
+import { useAutocompleteDetails } from './composer/ui/useAutocompleteDetails';
 
 // Skills are not here: they have their own `$` picker.
 type CommandSource = 'openchamber' | 'opencode' | 'extension';
@@ -93,6 +94,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const selectedIndexRef = React.useRef(0);
   const keyboardNavigationRef = React.useRef(false);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  const { listRef, detailsVisible, onListScroll, onItemMouseMove, onKeyboardNavigate } =
+    useAutocompleteDetails(selectedIndex, itemRefs);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true);
   const ignoreClickRef = React.useRef(false);
@@ -232,12 +235,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
 
-  React.useEffect(() => {
-    itemRefs.current[selectedIndex]?.scrollIntoView({
-      block: 'nearest'
-    });
-  }, [selectedIndex]);
-
   React.useImperativeHandle(ref, () => ({
     handleKeyDown: (key: string) => {
       const total = commands.length;
@@ -252,12 +249,14 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
 
       if (key === 'ArrowDown') {
         keyboardNavigationRef.current = true;
+        onKeyboardNavigate();
         setSelectedIndex((prev) => (prev + 1) % total);
         return;
       }
 
       if (key === 'ArrowUp') {
         keyboardNavigationRef.current = true;
+        onKeyboardNavigate();
         setSelectedIndex((prev) => (prev - 1 + total) % total);
         return;
       }
@@ -270,7 +269,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         }
       }
     }
-  }), [commands, onClose, onCommandSelect]);
+  }), [commands, onClose, onCommandSelect, onKeyboardNavigate]);
 
   const getCommandIcon = (command: CommandInfo) => {
 
@@ -308,13 +307,13 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
-      <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
+      <ScrollableOverlay ref={listRef} onScroll={onListScroll} preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
           <div>
             {commands.map((command, index) => {
               const isSystem = command.isBuiltIn;
               const isOpenChamberBadge = command.isOpenChamber;
               return (
-                <AutocompleteRowTooltip description={command.description} active={!isMobile && index === selectedIndex}>
+                <AutocompleteRowTooltip description={command.description} active={!isMobile && index === selectedIndex && detailsVisible}>
                 <div
                   key={command.id}
                   ref={(el) => { itemRefs.current[index] = el; }}
@@ -373,6 +372,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                   }}
                   onMouseMove={() => {
                     keyboardNavigationRef.current = false;
+                    onItemMouseMove();
                     setSelectedIndex(index);
                   }}
                 >

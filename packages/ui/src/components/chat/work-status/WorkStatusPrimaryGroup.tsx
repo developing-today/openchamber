@@ -27,6 +27,7 @@ import {
   WorkStatusValue,
 } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
+import { WorkStatusWarmingToggle } from './WorkStatusWarmingToggle';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
@@ -182,8 +183,13 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const openSurface = React.useCallback(
-    (mode: 'git' | 'pr') => { if (directory) openContextSurface(directory, mode); },
-    [directory, openContextSurface],
+    (mode: 'git' | 'pr') => {
+      if (!directory) return;
+      // The branch's pull request is the Tracker's branch tab, whichever item tab was last in front.
+      if (mode === 'pr') openContextPanelTab(directory, { mode: 'pr' });
+      else openContextSurface(directory, mode);
+    },
+    [directory, openContextPanelTab, openContextSurface],
   );
   // Working-tree diff without a target path: the panel opens on the whole
   // change set rather than picking a file on the user's behalf.
@@ -266,6 +272,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 label={t('chat.workStatus.context.label')}
                 value={(
                   <>
+                    {/* Keeping the cache warm is about this context, so its switch sits on the row. */}
+                    <WorkStatusWarmingToggle sessionId={sessionId} directory={directory} />
                     <WorkStatusValue>{usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}

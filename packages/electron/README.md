@@ -103,6 +103,28 @@ command and the OS protocol handler. `external-url-policy.mjs` validates schemes
 again in main, with the same exclusions as the shared UI classifier. Native
 opening failures do not fall back to a browser window for application links.
 
+Native menu actions reach the renderer as one DOM event per click. Main must not also send them over IPC: preload turns every IPC emit into a call to its bridge listeners and a DOM event, so the action would run again. Update-check notifications go over IPC only, for the same reason.
+
+The local diagnostics IPC combines the desktop log with the SSH manager's in-memory history. `main.mjs` classifies SSH messages in the native process before returning them; host names, stderr and other raw SSH output never cross to the renderer. Remote SSH files are not read.
+
+A window whose renderer crashes is reloaded (`renderer-recovery.mjs`). A crash
+counts as one in a row when it comes within two minutes of the previous one.
+The first two in a row reload as they are. The third reloads once in a safe
+start: preload asks main over sync IPC before any page script runs and exposes
+`window.__OPENCHAMBER_SAFE_START__`. The shared UI then forgets expanded
+folders, open files and open panels before the first render, saves that, and
+says so in a toast. A fourth crash in a row leaves the window alone; View >
+Reload is still there. A quiet spell of two minutes starts the count again.
+
+### Why a safe start and not a fixed reload budget
+
+Issue 4907: a restored expanded folder with 28,000 files crashed the window
+about 25 seconds after every load. The earlier budget of three reloads per
+minute never ran out at that pace, and every reload restored the same folder,
+so the window crashed for hours. Counting crashes in a row stops any such
+loop, and dropping the saved layout removes the trigger seen so far. Settings
+and the open chat stay; a crash they cause still stops at the fourth crash.
+
 The compatibility gate can reuse the embedded managed OpenCode CLI preflight
 through `desktop_managed_opencode_compatible`. Main matches the requested
 API origin to the local backend and reads the lifecycle-owned preflight promise.
@@ -120,7 +142,7 @@ IPC results if its endpoint changes while the read is pending.
 | `entry.mjs` | What Electron loads: pre-`ready` configuration, single-instance lock, the first window, then a dynamic import of `main.mjs` |
 | `compile-cache.mjs` | Node's V8 code cache for the packaged main process: enabling it under userData, keeping it out of child environments, flushing and pruning after startup |
 | `packaged-runtime-config.mjs` | Runtime values for packaged application documents: inline injection, and the blocking script and gate used while the first navigation runs ahead of the local server |
-| `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles |
+| `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles. Its window icon in an unpackaged Windows run is `dev-icon.ico`, the Windows icon behind construction tape (source `resources/icons/dev-icon-win.svg`), so the taskbar tells a dev copy apart; Linux keeps the usual icon, because GNOME takes the dock icon from the installed app's `.desktop` entry |
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
@@ -133,15 +155,17 @@ IPC results if its endpoint changes while the read is pending.
 | `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
 | `startup-ssh.mjs` | Opening the default SSH instance's tunnel during startup, bounded, with teardown so a failed attempt boots Local (`sshStartupFallbackHostId` in the boot outcome) |
 | `dev-dock-identity.mjs` | Unpackaged macOS runs only: the dev icon, the app icon behind construction tape, in the Dock and the issue or PR number from the checked-out branch on its badge, so copies from several worktrees can be told apart. On a numbered branch the number keeps the badge over the unread-chats count; without a number the count works as in the packaged app |
+| `dev-window-tape.mjs` | Unpackaged runs only, every platform: a 5px strip of the same construction tape along the top edge of the main and mini chat windows, so a dev window can be told apart on screen. It ignores the pointer, so clicks and window dragging pass through |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/ensure-electron.mjs` | Verifies the installed Electron binary is complete and repairs it via the postinstall under Bun |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
 | `scripts/prepare-opencode-cli.mjs` | Downloads and stages the pinned OpenCode CLI into `resources/opencode-cli` |
+| `scripts/windows-executable.mjs` | Reads the CPU architecture of a Windows executable from its PE header |
 | `scripts/opencode-cli-version.mjs` | Reads the pinned OpenCode CLI version and parses `opencode --version` output |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/{entry,main,early-startup}.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
 | `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing |
-| `resources/` | Packaged web assets, icons, and macOS entitlements |
+| `resources/` | Packaged web assets, icons, macOS entitlements, and the NSIS include for the Windows installer |
 
 ## Development
 
@@ -228,9 +252,10 @@ That runs, in order:
 
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
 2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
-3. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
-4. `rebuild:native` to rebuild native modules for Electron.
-5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
+3. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
+4. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
+5. `rebuild:native` to rebuild native modules for Electron.
+6. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
 
@@ -242,7 +267,7 @@ macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS i
 
 macOS packaging needs Xcode/build tools for notarized builds and icon asset compilation.
 
-Windows packaging needs NSIS support through `electron-builder`. If no Windows signing env is set, `package.mjs` disables code signing and builds an unsigned installer. Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
+Windows packaging needs NSIS support through `electron-builder`. If no Windows signing env is set, `package.mjs` disables code signing and builds an unsigned installer. `build.nsis.include` adds `resources/installer.nsh`, which declares the installer and uninstaller DPI-aware; without it Windows scales their windows as a bitmap and they look blurred at a display scale above 100% (#5010). Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 
 Linux packages must be built natively. Set `OPENCHAMBER_TARGET_ARCH=x64` or `OPENCHAMBER_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the bundled OpenCode CLI, native Electron rebuild, and Electron Builder architecture. Linux identity is stable across architectures: executable `openchamber`, desktop file `openchamber.desktop`, icon `openchamber`, and `StartupWMClass=openchamber`.
 
@@ -278,7 +303,7 @@ The macOS menu bar item is enabled by default and can be disabled in General set
 
 ## Bundled OpenCode CLI
 
-Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version.
+Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. A Windows build for another architecture does not run the binary, because the arm64 release job runs on an x64 runner that cannot start it; there the step checks the version in the package's `package.json` instead; on Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and fail when it was built for another architecture.
 
 Managed local Desktop startup prefers OpenCode binaries in this order:
 
@@ -292,13 +317,19 @@ Managed local Desktop startup prefers OpenCode binaries in this order:
 
 Use an explicit override when testing a different OpenCode CLI build or when a user needs to point Desktop at a custom binary. The configured path must point to the standalone CLI, not the OpenCode Desktop app executable.
 
+## Bundled ripgrep
+
+Find in files (the contents mode of the sidebar's file search) runs ripgrep, which `@openchamber/web` gets from `@vscode/ripgrep`. That package installs one platform package (`@vscode/ripgrep-<os>-<arch>`) for the machine running `bun install`, so a desktop build for the other architecture would ship the wrong binary. `prepare:ripgrep` downloads the target architecture's platform package tarball from npm at the version the lockfile pins, checks the tarball, downloaded or cached, against the sha512 that `bun.lock` records for that package, caches it under `packages/electron/.cache/ripgrep`, stages `rg` or `rg.exe` into `resources/ripgrep`, and runs `rg --version` on it. A Windows arm64 build runs on an x64 runner, so its workflow step passes `OPENCHAMBER_TARGET_ARCH` and the version run is skipped there. `extraResources` ships that directory as `Resources/ripgrep`, and `build.files` keeps every `@vscode/ripgrep-*` platform package out of the asar. The `afterPack` check fails the build when the staged binary is missing or a platform package was packed; the Linux AppImage verifier also checks the binary's ELF architecture.
+
+The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this order: `Resources/ripgrep` in a packaged build, the installed `@vscode/ripgrep` platform package (desktop development, web installs, Docker), then `rg` on the PATH. Without any of them the search route answers 501 and the file tree says the server cannot search contents.
+
 ## Common Env Vars
 
 | Variable | Use |
 |----------|-----|
 | `OPENCHAMBER_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
 | `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
-| `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery. The host switcher then lists no Local entry |
+| `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery. The host switcher then lists no Local entry and names the window's address as the current instance. Every start that skips the server, or opens `OPENCHAMBER_SERVER_URL`, says so in `main.log`, because a launcher that inherits these variables leaves no other trace |
 | `OPENCHAMBER_SERVER_URL` | Opens this instance instead of the default one. With `OPENCHAMBER_SKIP_LOCAL_SERVER=1` and a loopback origin (`http://127.0.0.1:<port>`, `localhost`, `[::1]`, no sub-path), Desktop treats it as its Local server (a service-managed `openchamber serve` for the same user): it keeps the local-only capabilities and the `desktop-local` client identity, and when `OPENCHAMBER_UI_PASSWORD` is set it signs in with it at startup to mint the local client token |
 | `OPENCHAMBER_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
@@ -338,7 +369,11 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
   while terminal and file-editor focus adjust their own font sizes.
 - New Mini Chat windows default to the managed Chats target. Explicit project/worktree drafts retain their target, existing managed chat sessions reopen in their own directory, and the compact header omits project/branch metadata for Chats. Opening a managed draft back in the main window preserves that target.
 - Multiple native windows.
-- Native notifications.
+- Native notifications. On macOS, viewing a session (the UI's
+  `markSessionViewed`: opening it, or returning to the window while it is
+  open) removes that session's delivered notifications from Notification
+  Center through `desktop_clear_session_notifications`. Main removes only
+  notifications it delivered in the current run.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - Theme-file selection uses the local `~/.vscode/extensions` directory when present.
   The local-page-gated `desktop_pick_theme_file` command returns only the selected
@@ -367,7 +402,24 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
   session too, so icons behind the page's own login resolve and the app's origin
   never requests anything from a third-party host. Self-signed loopback HTTPS
   pages may use an untrusted certificate authority; certificate failures for
-  external hosts and all other certificate errors remain blocked.
+  external hosts and all other certificate errors remain blocked. Its cookies
+  and storage are flushed to disk before quitting, because `app.exit()` skips
+  Chromium's own shutdown write and a fresh sign-in would be lost. Electron
+  drops session cookies (no expiry) on quit, and many sign-ins live in one, so
+  before quitting they are rewritten with an expiry (`browser-panel-cookies.mjs`),
+  as Chrome keeps them when it continues where you left off.
+- `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
+  scripted popup opens as a sandboxed child window of the app window, keeping
+  `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
+  the popup itself may open nothing further. Chromium reports `window.open(url)`
+  without window features as a new tab, the same as a target=_blank link, so the
+  session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
+  `window.open` that keeps its opener as a popup. A link aimed at a new tab is
+  noopener by default and becomes a panel tab
+  (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
+  isolated space keep everything in place, so nothing leaves the space's session.
+  Popups close with the window that opened them and do not count as app windows
+  when closing the last one hides the app on macOS.
 
 ## IPC Pattern
 

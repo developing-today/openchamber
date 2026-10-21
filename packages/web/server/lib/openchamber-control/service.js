@@ -17,6 +17,8 @@ const EDITABLE_PROJECT_SETTINGS = Object.freeze([
 ]);
 // One service, both capabilities: which tool asked is the caller's concern.
 const CONTROL_ACTIONS = new Set(OPENCHAMBER_ALL_ACTIONS);
+// models.search ranks a favorite 2 and a recent model 1.
+const PREFERENCE_BY_RANK = { 2: 'favorite', 1: 'recent' };
 const SCHEDULE_TASK_ID_ACTIONS = new Set([
   'schedule.get',
   'schedule.update',
@@ -254,6 +256,10 @@ export const createOpenChamberControlService = (dependencies) => {
     validateDirectoryPath = null,
     persistSettings = null,
     createProjectIdFromPath = null,
+    // The settings runtime's updateSettings: read, change and write the
+    // project list under the save lock, so two changes close together cannot
+    // write over each other. Unwired, projects.* read and then persist.
+    updateSettings = null,
     // session.create makes a worktree by default (see resolveAutoWorktree).
     // Injectable for tests; the defaults load the git service lazily so a
     // server that never creates a session never pays for the import.
@@ -320,6 +326,13 @@ export const createOpenChamberControlService = (dependencies) => {
     EDITABLE_PROJECT_SETTINGS.filter((key) => project[key] !== undefined).map((key) => [key, project[key]]),
   );
 
+  // Runs compute(current settings) and writes the changes it returns, under
+  // the settings lock when the server wired updateSettings.
+  const modifySettings = updateSettings ?? (async (compute) => {
+    const changes = await compute(await readSettingsFromDiskMigrated());
+    if (changes) await persistSettings(changes);
+  });
+
   // Same writer and sanitizer as Project settings: a value the sanitizer
   // drops or rewrites is refused rather than reported as saved.
   const updateProject = async (input) => {
@@ -336,30 +349,33 @@ export const createOpenChamberControlService = (dependencies) => {
     if (unknown.length > 0) {
       throw new OpenChamberControlError(`Nothing was saved. Not a project setting: ${unknown.join(', ')}. Editable: ${EDITABLE_PROJECT_SETTINGS.join(', ')}`, 400);
     }
-    const settings = await readSettingsFromDiskMigrated();
-    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
-    const target = existingProjects.find((project) => project.id === projectID) || null;
-    if (!target) throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
-
-    const next = { ...target };
-    for (const [key, value] of Object.entries(changes)) {
-      if (value === null) delete next[key];
-      else next[key] = value;
-    }
-    const nextProjects = existingProjects.map((project) => (project.id === projectID ? next : project));
-    const accepted = sanitizeProjects(nextProjects).find((project) => project.id === projectID);
     // The sanitizer trims text and lowercases a hex colour; either is the value kept, not a refusal.
     const kept = (key, value) => {
       if (!isString(value)) return value;
       return key === 'iconBackground' ? value.trim().toLowerCase() : value.trim();
     };
-    const rejected = Object.entries(changes)
-      .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(kept(key, value)))
-      .map(([key]) => key);
-    if (rejected.length > 0) {
-      throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${rejected.join(', ')} (defaultModel is provider/model, defaultVariant needs a defaultModel, iconBackground is a #hex color, sidebarCollapsed is a boolean)`, 400);
-    }
-    await persistSettings({ projects: nextProjects });
+    let target = null;
+    let accepted = null;
+    await modifySettings((settings) => {
+      const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+      target = existingProjects.find((project) => project.id === projectID) || null;
+      if (!target) throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
+
+      const next = { ...target };
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === null) delete next[key];
+        else next[key] = value;
+      }
+      const nextProjects = existingProjects.map((project) => (project.id === projectID ? next : project));
+      accepted = sanitizeProjects(nextProjects).find((project) => project.id === projectID);
+      const rejected = Object.entries(changes)
+        .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(kept(key, value)))
+        .map(([key]) => key);
+      if (rejected.length > 0) {
+        throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${rejected.join(', ')} (defaultModel is provider/model, defaultVariant needs a defaultModel, iconBackground is a #hex color, sidebarCollapsed is a boolean)`, 400);
+      }
+      return { projects: nextProjects };
+    });
     // A setting can depend on another: clearing defaultModel drops defaultVariant with it.
     const alsoCleared = EDITABLE_PROJECT_SETTINGS.filter((key) => (
       target[key] !== undefined && accepted?.[key] === undefined && !Object.hasOwn(changes, key)
@@ -396,29 +412,30 @@ export const createOpenChamberControlService = (dependencies) => {
       throw new OpenChamberControlError(validated.error, 400);
     }
     const resolvedPath = validated.directory;
-    const settings = await readSettingsFromDiskMigrated();
-    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
-    const existing = existingProjects.find((project) => project.path === resolvedPath) || null;
     const label = asNonEmptyString(input.projectLabel);
-
-    const nextProjects = existing
-      ? existingProjects
-      : [
-          ...existingProjects,
-          {
-            id: createProjectIdFromPath(resolvedPath),
-            path: resolvedPath,
-            ...(label ? { label } : {}),
-            addedAt: now(),
-            lastOpenedAt: now(),
-          },
-        ];
-
-    const entry = existing ?? nextProjects[nextProjects.length - 1];
-    await persistSettings({
-      projects: nextProjects,
-      activeProjectId: entry.id,
-      lastDirectory: resolvedPath,
+    let existing = null;
+    let entry = null;
+    await modifySettings((settings) => {
+      const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+      existing = existingProjects.find((project) => project.path === resolvedPath) || null;
+      const nextProjects = existing
+        ? existingProjects
+        : [
+            ...existingProjects,
+            {
+              id: createProjectIdFromPath(resolvedPath),
+              path: resolvedPath,
+              ...(label ? { label } : {}),
+              addedAt: now(),
+              lastOpenedAt: now(),
+            },
+          ];
+      entry = existing ?? nextProjects[nextProjects.length - 1];
+      return {
+        projects: nextProjects,
+        activeProjectId: entry.id,
+        lastDirectory: resolvedPath,
+      };
     });
 
     return {
@@ -445,14 +462,15 @@ export const createOpenChamberControlService = (dependencies) => {
     if (!projectID) {
       throw new OpenChamberControlError('projectId is required', 400);
     }
-    const settings = await readSettingsFromDiskMigrated();
-    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
-    const target = existingProjects.find((project) => project.id === projectID) || null;
-    if (!target) {
-      throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
-    }
-    const nextProjects = existingProjects.filter((project) => project.id !== projectID);
-    await persistSettings({ projects: nextProjects });
+    let target = null;
+    await modifySettings((settings) => {
+      const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+      target = existingProjects.find((project) => project.id === projectID) || null;
+      if (!target) {
+        throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
+      }
+      return { projects: existingProjects.filter((project) => project.id !== projectID) };
+    });
 
     return {
       removed: {
@@ -500,6 +518,73 @@ export const createOpenChamberControlService = (dependencies) => {
       defaultAgent: asNonEmptyString(settings?.defaultAgent),
       favoriteModels: Array.isArray(settings?.favoriteModels) ? settings.favoriteModels : [],
       recentModels: Array.isArray(settings?.recentModels) ? settings.recentModels : [],
+    };
+  };
+
+  /**
+   * `models.search`: the catalog of the caller's directory, the way the model
+   * picker sees it. Models the user hid in the picker stay out, favorites and
+   * then recent models come first, and only the newest of a family shows
+   * unless `all` asks for older versions. OpenCode's own `models` tool is
+   * removed from the agent's list in favour of this one.
+   */
+  const searchModels = async (input, contextDirectory) => {
+    const client = await getClient(asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory) || '');
+    const [settings, catalog, providerList] = await Promise.all([
+      readSettingsFromDiskMigrated(),
+      client.model.list(),
+      client.provider.list(),
+    ]);
+    const providerNames = new Map(providerList.data.map((provider) => [provider.id, provider.name]));
+    const refKey = (ref) => `${ref?.providerID}/${ref?.modelID}`;
+    const modelKey = (model) => `${model.providerID}/${model.id}`;
+    const refs = (value) => new Set((Array.isArray(value) ? value : []).map(refKey));
+    const hidden = refs(settings?.hiddenModels);
+    // 2 for a favorite, 1 for a recent model, absent for the rest.
+    const rank = new Map([
+      ...[...refs(settings?.recentModels)].map((key) => [key, 1]),
+      ...[...refs(settings?.favoriteModels)].map((key) => [key, 2]),
+    ]);
+    const provider = asNonEmptyString(input.provider)?.toLowerCase();
+    const terms = (asNonEmptyString(input.query) ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const shownFamilies = new Set();
+    const matching = catalog.data
+      .filter((model) => !hidden.has(modelKey(model)))
+      .filter((model) => !provider
+        || model.providerID.toLowerCase() === provider
+        || providerNames.get(model.providerID)?.toLowerCase() === provider)
+      .filter((model) => {
+        const text = `${modelKey(model)} ${model.name}`.toLowerCase();
+        return terms.every((term) => text.includes(term));
+      })
+      .toSorted((left, right) => (rank.get(modelKey(right)) ?? 0) - (rank.get(modelKey(left)) ?? 0)
+        || left.providerID.localeCompare(right.providerID)
+        || right.time.released - left.time.released)
+      // Newest first within a provider, so the first of a family is its newest.
+      .filter((model) => {
+        if (input.all === true || !model.family || rank.has(modelKey(model))) return true;
+        const family = `${model.providerID}/${model.family}`;
+        if (shownFamilies.has(family)) return false;
+        shownFamilies.add(family);
+        return true;
+      });
+    const offset = Number.isSafeInteger(input.offset) && input.offset > 0 ? input.offset : 0;
+    const limit = Number.isSafeInteger(input.limit) && input.limit > 0 ? Math.min(input.limit, 100) : 10;
+    const page = matching.slice(offset, offset + limit);
+    return {
+      models: page.map((model) => ({
+        id: modelKey(model),
+        name: model.name,
+        provider: providerNames.get(model.providerID) ?? model.providerID,
+        // Absent for a model the user has not picked; JSON drops the undefined.
+        preference: PREFERENCE_BY_RANK[rank.get(modelKey(model))],
+        released: model.time.released,
+        variants: model.variants.map((variant) => variant.id),
+        cost: model.cost,
+        status: model.status,
+      })),
+      total: matching.length,
+      next: offset + limit < matching.length ? offset + limit : null,
     };
   };
 
@@ -1060,6 +1145,7 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action === 'projects.remove') return removeProject(input);
       if (action === 'projects.update') return updateProject(input);
       if (action === 'models.list') return models();
+      if (action === 'models.search') return searchModels(input, contextDirectory);
       if (action === 'schedule.status') return scheduledTaskService.status();
       if (action.startsWith('schedule.')) {
         const taskID = asNonEmptyString(input.taskId);
@@ -1144,6 +1230,7 @@ export const createOpenChamberControlService = (dependencies) => {
         if (existingBranch) worktree.existingBranch = existingBranch.trim();
         const payload = { worktree };
         if (directory) payload.directory = directory;
+        if (input.carry !== undefined) payload.carry = input.carry;
         return sessionService.moveToWorktree(sessionID, payload);
       }
       if (action.startsWith('session.')) {

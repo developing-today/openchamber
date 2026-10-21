@@ -8,8 +8,10 @@
  * going through `ChatMessage`. So does a background subagent run, which v2
  * reports as a synthetic message (see `@/lib/opencode/subagent-run`), the
  * result of a session the agent dispatched with `returnResult` (see
- * `@/lib/opencode/dispatched-session`), and a message that another session or
- * the person sent through OpenCode messaging (see `@/lib/opencode/messaging`).
+ * `@/lib/opencode/dispatched-session`), a message that another session or
+ * the person sent through OpenCode messaging (see `@/lib/opencode/messaging`),
+ * and a session notice that landed between turns (see
+ * `@/lib/opencode/session-notices`).
  */
 
 import React from 'react';
@@ -26,6 +28,8 @@ import { MESSAGING_USER, isMessagingSession, readMessagingNotice, type Messaging
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMessagingStore } from '@/stores/useMessagingStore';
 import { useTopicLabel } from '@/components/messaging/messagingLabels';
+import { readSessionNotice } from '@/lib/opencode/session-notices';
+import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { IconName } from '@/components/icon/icons';
 import { useUIStore } from '@/stores/useUIStore';
@@ -392,6 +396,14 @@ const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) =>
  * message itself.
  */
 export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
+    const notice = readSessionNotice(message);
+    if (notice) {
+        return (
+            <NoticeRow>
+                <SessionNoticeBlock notice={notice} blockId={`notice:${message.id}`} />
+            </NoticeRow>
+        );
+    }
     switch (message.role) {
         case 'synthetic':
             return <SubagentNotice message={message} />;

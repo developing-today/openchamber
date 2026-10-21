@@ -83,9 +83,11 @@ const parseSendConfig = (value) => {
 };
 
 /**
- * The goal a message armed in the composer starts when it goes out, with the
- * token budget captured when it was queued. Null for a message without one;
- * anything else is refused.
+ * The goal a message starts when it goes out: the composer's armed goal
+ * ("Run as goal"), taken when the message was queued, with the token budget of
+ * that moment. `objective` only when the arming flow supplied its own (the
+ * plan flow); otherwise the delivered text is the objective. Null for a
+ * message without one; anything else is refused.
  */
 const parseGoal = (value) => {
   if (value === undefined || value === null) return null;
@@ -94,7 +96,10 @@ const parseGoal = (value) => {
   if (!raw || (tokenBudget !== null && !(Number.isInteger(tokenBudget) && tokenBudget > 0))) {
     throw new TypeError('item goal needs a tokenBudget that is a positive integer or null');
   }
-  return { tokenBudget };
+  const goal = { tokenBudget };
+  const objective = asNonEmptyString(raw.objective);
+  if (objective) goal.objective = objective;
+  return goal;
 };
 
 const parseAttachment = (value) => {
@@ -159,6 +164,8 @@ export const parseQueuedItemInput = (value) => {
   const taskId = asNonEmptyString(provenance?.taskId);
   if (provenance && (!projectId || !taskId)) throw new TypeError('invalid scheduledTask provenance');
   if (!sendConfig && !provenance) throw new TypeError('item sendConfig with providerID and modelID is required');
+  const goal = parseGoal(raw.goal);
+  if (goal && !text.trim()) throw new TypeError('a goal needs message text');
   const item = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
@@ -267,7 +274,8 @@ export function createMessageQueueRuntime({
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
   resolveAutoSelection = null,
-  // Saves the goal a queued message carries, as every server-created goal is saved.
+  // Saves the goal a queued message carries, as every server-created goal is
+  // saved: the goal record goes to the session metadata store.
   persistSessionGoal = null,
   createGoal = createSessionGoal,
   dataDir,
@@ -573,44 +581,46 @@ export function createMessageQueueRuntime({
     // whole send, so a retry does not admit the context twice.
     const command = await resolveSlashCommand(item.text, directory);
 
-    // A goal armed with the message starts now that the message goes out. It
-    // is saved as every server-created goal is, on the model the message goes
-    // out on, and before anything is admitted: a save that fails fails the
-    // send with nothing in the session yet.
+    // Standing project context is written into the session first, exactly as
+    // a UI send does it; a failed write sends without it rather than not at all.
+    if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
+
+    // A message queued as a goal starts it now, as a direct send would. It is
+    // saved as every server-created goal is, on the model the message goes out
+    // on, and before anything is admitted: a save that fails fails the send
+    // with nothing in the session for the retry to duplicate.
     const goal = item.goal
       ? await createGoal({
+        persistSessionGoal,
         sessionID: sessionId,
         directory,
-        objective: item.text,
+        objective: item.goal.objective || item.text,
         tokenBudget: item.goal.tokenBudget,
         providerID: model.providerID,
         modelID: model.id,
-        persistSessionGoal,
+        onWarning: (message, error) => console.warn(`[message-queue] ${message}:`, error?.message || error),
       })
       : null;
-
-    // Standing project context rides the send exactly as a UI send would
-    // attach it; a failed lookup sends without it rather than not at all.
-    const knowledge = sessionKnowledgeRuntime
-      ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionId, directory)
-        .catch(() => ({ text: '', signature: '' }))
-      : { text: '', signature: '' };
 
     // Same order as a UI send: everything attached to the message is admitted
     // before the message itself, so the model reads it as background. This
     // holds for a command too: its route takes file attachments only, and
     // sending "/name args" as a prompt instead would skip the template
     // OpenCode 2.x expands only on the command route.
-    const preamble = [...contextMessages];
-    if (knowledge.text) preamble.push({ text: knowledge.text, resume: false });
-    // The goal reminder comes last, right before the message it names, as the
-    // composer sends it. A spec "rewrite every goal" wrote rides along.
-    if (goal) preamble.push({ text: buildGoalIntroText(item.goal.tokenBudget, goal.spec), resume: false });
-    for (const synthetic of preamble) {
+    for (const synthetic of contextMessages) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
         body: synthetic,
+      });
+    }
+
+    // The goal briefing goes last, right before the message the goal is about.
+    if (item.goal) {
+      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
+        directory,
+        method: 'POST',
+        body: { text: buildGoalIntroText(item.goal.tokenBudget), resume: false },
       });
     }
 
@@ -635,10 +645,6 @@ export function createMessageQueueRuntime({
           ...(item.agentMention ? { agents: [{ name: item.agentMention }] } : {}),
         },
       });
-    }
-    if (knowledge.text && sessionKnowledgeRuntime) {
-      // After the send is accepted, so a rejected dispatch carries it again.
-      await sessionKnowledgeRuntime.recordDelivered(sessionId, directory, knowledge.signature).catch(() => undefined);
     }
   };
 

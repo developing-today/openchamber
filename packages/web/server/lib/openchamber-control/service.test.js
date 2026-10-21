@@ -299,6 +299,77 @@ describe('OpenChamber control service', () => {
     expect(cleared.note).toMatch(/defaultVariant was cleared too/);
   });
 
+  it('runs concurrent project changes through updateSettings so none writes over another', async () => {
+    // A store whose reads and writes yield, so two read-then-write sequences
+    // interleave unless something serializes them. updateSettings serializes
+    // the way the settings runtime does: one read-compute-write at a time.
+    let stored = { projects: [{ id: 'a', path: '/a' }, { id: 'b', path: '/b' }, { id: 'c', path: '/c' }] };
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+    const persistSettings = vi.fn(async (changes) => { await tick(); stored = { ...stored, ...changes }; return stored; });
+    let lock = Promise.resolve();
+    const updateSettings = vi.fn((compute) => {
+      const run = lock.then(async () => {
+        await tick();
+        const changes = await compute(structuredClone(stored));
+        if (changes) await persistSettings(changes);
+      });
+      lock = run.catch(() => {});
+      return run;
+    });
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => { await tick(); return structuredClone(stored); }),
+      sanitizeProjects: (entries) => entries,
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(async (directory) => ({ ok: true, directory })),
+      persistSettings,
+      createProjectIdFromPath: (p) => `id${p}`,
+      updateSettings,
+    });
+
+    await Promise.all([
+      service.execute('projects.update', { projectId: 'a', projectSettings: { label: 'A' } }),
+      service.execute('projects.update', { projectId: 'b', projectSettings: { label: 'B' } }),
+      service.execute('projects.remove', { projectId: 'c' }),
+      service.execute('projects.add', { directory: '/d' }),
+    ]);
+
+    expect(stored.projects).toEqual([
+      { id: 'a', path: '/a', label: 'A' },
+      { id: 'b', path: '/b', label: 'B' },
+      expect.objectContaining({ id: 'id/d', path: '/d' }),
+    ]);
+    expect(updateSettings).toHaveBeenCalledTimes(4);
+  });
+
+  it('a refused project change inside updateSettings writes nothing and does not block the next one', async () => {
+    let stored = { projects: [{ id: 'a', path: '/a' }] };
+    const persistSettings = vi.fn(async (changes) => { stored = { ...stored, ...changes }; return stored; });
+    let lock = Promise.resolve();
+    const updateSettings = (compute) => {
+      const run = lock.then(async () => {
+        const changes = await compute(structuredClone(stored));
+        if (changes) await persistSettings(changes);
+      });
+      lock = run.catch(() => {});
+      return run;
+    };
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => structuredClone(stored)),
+      sanitizeProjects: (entries) => entries,
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(),
+      persistSettings,
+      createProjectIdFromPath: (p) => p,
+      updateSettings,
+    });
+
+    await expect(service.execute('projects.update', { projectId: 'nope', projectSettings: { label: 'x' } }))
+      .rejects.toMatchObject({ statusCode: 404 });
+    expect(persistSettings).not.toHaveBeenCalled();
+    await expect(service.execute('projects.update', { projectId: 'a', projectSettings: { label: 'A' } }))
+      .resolves.toMatchObject({ project: { id: 'a', settings: { label: 'A' } } });
+  });
+
   it('removes a configured project by id, leaving its checkout untouched, and rejects an unknown id', async () => {
     const persistSettings = vi.fn(async () => ({}));
     const { service } = createService({
@@ -325,6 +396,37 @@ describe('OpenChamber control service', () => {
       statusCode: 400,
       message: 'projectId is required',
     });
+  });
+
+  it('searches the model catalog the way the picker shows it', async () => {
+    const model = (providerID, id, released, family) => ({
+      providerID, id, name: id, family, time: { released }, variants: [{ id: 'high' }], cost: [], status: 'active',
+    });
+    const { service, client } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({
+        favoriteModels: [{ providerID: 'b', modelID: 'old' }],
+        recentModels: [],
+        hiddenModels: [{ providerID: 'a', modelID: 'secret' }],
+      })),
+    });
+    client.model = { list: vi.fn(async () => ({ data: [
+      model('a', 'new', 3, 'fam'), model('a', 'older', 2, 'fam'), model('a', 'secret', 4),
+      model('b', 'old', 1, 'bfam'), model('b', 'newer', 5, 'bfam'),
+    ] })) };
+    client.provider = { list: vi.fn(async () => ({ data: [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }] })) };
+
+    const first = await service.execute('models.search', {}, '/repo');
+    // The favorite leads, a hidden model never shows, older versions fold into their family.
+    expect(first.models.map(({ id }) => id)).toEqual(['b/old', 'a/new', 'b/newer']);
+    expect(first.models[0]).toMatchObject({ preference: 'favorite', provider: 'Beta', variants: ['high'] });
+    expect(first.models[1].preference).toBeUndefined();
+    expect(first.total).toBe(3);
+
+    const all = await service.execute('models.search', { all: true, provider: 'alpha' }, '/repo');
+    expect(all.models.map(({ id }) => id)).toEqual(['a/new', 'a/older']);
+
+    const paged = await service.execute('models.search', { query: 'NEW', limit: 1 }, '/repo');
+    expect(paged).toMatchObject({ models: [{ id: 'a/new' }], total: 2, next: 1 });
   });
 
   it('maps schedule creation into the shared scheduled-task service', async () => {
@@ -507,6 +609,19 @@ describe('OpenChamber control service', () => {
     expect(moveToWorktree).toHaveBeenCalledWith('ses_me', {
       directory: '/repo',
       worktree: { name: 'review', existingBranch: 'origin/review' },
+    });
+  });
+
+  it('passes the files to carry through to the move', async () => {
+    const moveToWorktree = vi.fn(async () => ({}));
+    const { service } = createService({ sessionService: { moveToWorktree } });
+
+    await service.execute('session.moveToWorktree', { worktree: 'fix', carry: ['src/a.ts'] }, '/repo', { contextSessionId: 'ses_me' });
+
+    expect(moveToWorktree).toHaveBeenCalledWith('ses_me', {
+      directory: '/repo',
+      worktree: { name: 'fix' },
+      carry: ['src/a.ts'],
     });
   });
 
@@ -980,11 +1095,26 @@ describe('render.page', () => {
     expect(result.note).toContain("Don't announce");
   });
 
+  it('names a page sent without a title after its own title or first heading', async () => {
+    const { service } = createService();
+    const named = (html) => service.execute('render.page', { html }, '/repo').then((result) => result.title);
+
+    expect(await named('<html><head><title> Q3 &amp; Q4 </title></head><h1>Other</h1></html>')).toBe('Q3 & Q4');
+    expect(await named('<title></title><div><h2>Release <b>2.4</b></h2></div>')).toBe('Release 2.4');
+    expect(await named(`<h1>${'x'.repeat(200)}</h1>`)).toBe('x'.repeat(120));
+    expect(await named(page)).toBe('Page');
+  });
+
+  it('asks for html and title in one call when html is missing', async () => {
+    const { service } = createService();
+    await expect(service.execute('render.page', { title: 'Coverage' }, '/repo'))
+      .rejects.toMatchObject({ message: expect.stringContaining('Send html and title together in one call') });
+  });
+
   it.each([
     [{ title: 'Coverage' }, 'html is required'],
     [{ html: '   ', title: 'Coverage' }, 'html is required'],
     [{ html: 'x'.repeat(200_001), title: 'Coverage' }, 'the limit is 200000'],
-    [{ html: page }, 'title is required'],
     [{ html: page, title: 't'.repeat(121) }, 'the limit is 120'],
   ])('refuses %o with a reason the agent can act on', async (input, reason) => {
     const { service } = createService();
@@ -1147,6 +1277,27 @@ describe('browser capture', () => {
     expect(request).toHaveBeenLastCalledWith('browser.capture', {}, expect.objectContaining({
       context: { directory, sessionId: null },
     }));
+  });
+});
+
+describe('browser close', () => {
+  const createCloseService = () => {
+    const request = vi.fn(async () => ({ closed: true, tabId: 'tab-1' }));
+    const { service } = createService({ browserControl: { request } });
+    return { service, request };
+  };
+
+  it('forwards the tab the agent named, trimmed', async () => {
+    const { service, request } = createCloseService();
+    const result = await service.execute('browser.close', { tabId: ' tab-1 ' }, '/repo');
+    expect(request).toHaveBeenCalledWith('browser.close', { tabId: 'tab-1' }, expect.anything());
+    expect(result).toEqual({ closed: true, tabId: 'tab-1' });
+  });
+
+  it('forwards a close with no tab, so the browser closes the session\'s own', async () => {
+    const { service, request } = createCloseService();
+    await service.execute('browser.close', {}, '/repo');
+    expect(request).toHaveBeenCalledWith('browser.close', {}, expect.anything());
   });
 });
 

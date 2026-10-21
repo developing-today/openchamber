@@ -12,7 +12,12 @@ import { fileURLToPath } from 'node:url';
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const APK_PATH = join(mobileRoot, 'android', 'app', 'build', 'outputs', 'apk', 'standard', 'debug', 'app-standard-debug.apk');
 const APP_ID = 'today.developing.openchamber';
-const LAUNCH_ACTIVITY = `${APP_ID}/.MainActivity`;
+// MainActivity lives in the native namespace (build.gradle `namespace`), not the
+// application id — the two diverged when the application id was unified, and
+// `am start -n <applicationId>/.MainActivity` expands the class against the
+// application id, naming a class that does not exist.
+const ACTIVITY_CLASS = 'com.openchamber.app.MainActivity';
+const LAUNCH_ACTIVITY = `${APP_ID}/${ACTIVITY_CLASS}`;
 
 const adb = (args, { capture = false, allowFail = false } = {}) => {
   const result = spawnSync('adb', args, { stdio: capture ? 'pipe' : 'inherit', encoding: 'utf8' });

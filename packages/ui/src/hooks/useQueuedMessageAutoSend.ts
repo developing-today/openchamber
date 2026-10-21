@@ -96,7 +96,7 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     agentMentionName: queued.agentMention,
     additionalParts: queuedContextToParts(queued.context ?? []),
     sendConfig: queued.sendConfig,
-    goal: queued.goal,
+    goal: queued.goal ?? null,
   };
 };
 
@@ -126,7 +126,7 @@ export const sendQueuedAutoSendPayload = (
     payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
     'normal',
-    { target, historySubmissions: payload.historySubmissions, goalArm },
+    { target, historySubmissions: payload.historySubmissions, queuedGoal: payload.goal },
   );
 };
 

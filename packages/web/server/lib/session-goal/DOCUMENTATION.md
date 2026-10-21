@@ -39,7 +39,10 @@ message queued while the agent works takes the composer's arm with it and
 starts the goal when it is delivered (*Queued goals*).
 The plan flow additionally supplies an objective OVERRIDE carrying the plan
 content, since "Implement this plan: X" alone gives the audit nothing to
-judge against. The armed send also attaches a synthetic system-reminder
+judge against. Queueing a message consumes the arm too: the goal travels on
+that queued item (`goal` in `../message-queue`) and starts when that item is
+delivered, by the server queue or by a send from the queue row, and a queued
+item without a goal never consumes the composer's arm. The armed send also attaches a synthetic system-reminder
 part telling the agent goal mode is active and that each turn should end
 with a factual done/verified/remaining statement for the independent audit.
 Freshness/stale-write protection is by `id`: every runtime write re-reads the

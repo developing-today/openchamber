@@ -52,9 +52,15 @@ send never re-resolves mutable UI state:
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
   sendConfig: { providerID, modelID, agent?, variant? },  // required
-  goal?: { tokenBudget }  // the composer's armed goal, started when the message goes out
+  goal?: { objective?, tokenBudget }  // the armed goal ("run as goal") taken when it was queued, started when the message goes out
 }
 ```
+
+`goal` is the composer's armed goal, taken off the composer when the message
+is queued so it belongs to this message and no other. `objective` is present
+only when the arming flow supplied its own (the plan flow); otherwise the
+delivered `text` is the objective. A goal needs message text. Snapshots keep
+`goal`, so the queue row can show it.
 
 The server is a courier for `context`: it validates the shape (a kind it
 knows, a `metadata` object on `context` entries) and delivers each entry as a
@@ -166,18 +172,20 @@ persisted "sending" flag would strand a message forever.
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a
    captured `openchamber/auto` is resolved into a real pair by the routing
-   runtime beforehand. A message with a `goal` then saves it after the command
-   lookup and before anything is admitted, through `createSessionGoal` with the
-   text as the objective, on the model the message goes out on, and the
-   `persistSessionGoal` seam `server/index.js` hands the runtime (the objective
-   file and the goal record, as every server-created goal; "rewrite every goal"
-   applies). A save that fails fails the send with nothing admitted. Then the
-   captured context goes ahead as synthetic
-   messages (`POST /session/:id/synthetic` with `resume: false`, an attached
-   item's metadata riding along), followed by pending project knowledge
-   (`sessionKnowledgeRuntime.resolvePendingForSession`, recorded as delivered
-   only after the send is accepted), then the goal reminder
-   (`buildGoalIntroText`, carrying a rewritten spec), and then the message itself:
+   runtime beforehand. The session's project knowledge is written into its
+   instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
+   send). A message with a `goal` then saves it after the command lookup and
+   before anything is admitted, through `createSessionGoal`
+   (`../session-goal/create.js`) with the goal's `objective` or else the text,
+   on the model the message goes out on, and the `persistSessionGoal` seam
+   `server/index.js` hands the runtime (the objective file and the goal record,
+   as every server-created goal; "rewrite every goal" applies). A save that
+   fails fails the send with nothing admitted, so the retry has nothing to
+   duplicate. Then the captured context goes ahead as synthetic messages
+   (`POST /session/:id/synthetic` with `resume: false`, an attached item's
+   metadata riding along), then the goal reminder as the last synthetic
+   message (`buildGoalIntroText`, carrying a spec "rewrite every goal" wrote),
+   and then the message itself:
    - text starting with `/` that names a command in OpenCode's `/command`
      list (skills included) goes to `POST /session/:id/command` (body fields
      `name` and `text` since OpenCode 2.0.8) with its file attachments. The
@@ -196,7 +204,7 @@ persisted "sending" flag would strand a message forever.
    context and the reminder again.
 6. The next item goes out after the next busy → idle cycle.
 
-A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff. Project knowledge is recorded as delivered only after the prompt or command is accepted.
+A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.
 
 ## Holds
 
@@ -241,6 +249,11 @@ by the route family's 50 MB JSON limit.
 ## UI ownership
 
 `packages/ui/src/stores/messageQueueStore.ts` is the projection: see its
-section in `packages/ui/src/stores/DOCUMENTATION.md`. VS Code intentionally
+section in `packages/ui/src/stores/DOCUMENTATION.md`. A session in an isolated
+space is queued in this module inside that space, not on the host: the host's
+runtime sees the host's events only and never delivers into a space. The host
+forwards the space's `openchamber:message-queue.updated` changes to the
+browsers, see "Sessions and events" in
+`packages/web/server/lib/spaces/DOCUMENTATION.md`. VS Code intentionally
 does not use this module; with all OpenChamber webviews closed, queued
 messages there are not delivered.
