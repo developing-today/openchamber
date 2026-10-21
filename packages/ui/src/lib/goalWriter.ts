@@ -156,6 +156,8 @@ interface GoalWriterPromptRewriteRequest {
   prompt: string;
   /** The change to make, in the user's words. */
   instruction: string;
+  /** Scopes the model to the location the user works in, a space's included. */
+  directory?: string | null;
   /** The session's model; the server uses it unless Settings names a writer model. */
   providerID?: string | null;
   modelID?: string | null;
@@ -166,6 +168,7 @@ interface GoalWriterPromptRewriteRequest {
 interface GoalWriterPromptRewriteBody {
   prompt: string;
   instruction: string;
+  directory?: string;
   providerID?: string;
   modelID?: string;
 }
@@ -178,17 +181,24 @@ const GoalWriterPromptRewriteResponseSchema = z.object({
 
 /**
  * Ask the goal writer's model to rewrite the prompt as the instruction says.
- * Never throws: a failure comes back with its reason. No directory goes along:
- * Settings edits this server's settings, so the server that reads them answers.
+ * Never throws: a failure comes back with its reason. The directory goes
+ * along as it does for a spec. OpenCode resolves the session's model in that
+ * project's configuration, which may be the only one that defines it; without
+ * a directory the server's default directory answers, often another
+ * project's. A space's directory sends the request to that space, as it does
+ * a spec for the space's sessions.
  */
 export async function requestGoalWriterPromptRewrite(input: GoalWriterPromptRewriteRequest): Promise<GoalWriterPromptRewriteResult> {
+  const directory = input.directory?.trim() || undefined;
   const body: GoalWriterPromptRewriteBody = { prompt: input.prompt, instruction: input.instruction };
+  if (directory) body.directory = directory;
   if (input.providerID) body.providerID = input.providerID;
   if (input.modelID) body.modelID = input.modelID;
   try {
     const response = await runtimeFetch('/api/goals/spec/prompt/rewrite', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      directory,
       signal: input.signal,
       body: JSON.stringify(body),
     });

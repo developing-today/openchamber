@@ -23,6 +23,7 @@ import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { isDirectoryUnknown, useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore, type SessionGoalAutoCreate, type SessionGoalWriterSendMode } from '@/stores/useUIStore';
 import { GoalWriterPromptEditor } from './GoalWriterPromptEditor';
 
@@ -268,9 +269,13 @@ const SessionGoalWriterPromptField: React.FC<{ disabled: boolean }> = ({ disable
   }, []);
 
   const rewrite = React.useCallback(
-    (prompt: string, instruction: string, signal: AbortSignal) => (
-      requestGoalWriterPromptRewrite({ prompt, instruction, providerID, modelID, signal })
-    ),
+    (prompt: string, instruction: string, signal: AbortSignal) => {
+      // The directory the session's model belongs to, read when the user asks;
+      // none while the app does not know it yet.
+      const directoryState = useDirectoryStore.getState();
+      const directory = isDirectoryUnknown(directoryState) ? null : directoryState.currentDirectory || null;
+      return requestGoalWriterPromptRewrite({ prompt, instruction, directory, providerID, modelID, signal });
+    },
     [modelID, providerID],
   );
 

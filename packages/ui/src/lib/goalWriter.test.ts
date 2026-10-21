@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import type { AssistantMessage, Message, Part, TextPart } from '@/lib/opencode/model';
 import { configureRuntimeUrlResolver } from './runtime-url';
 import {
@@ -264,6 +265,34 @@ describe('goal writer prompt', () => {
       expect(await requestGoalWriterPromptRewrite({ prompt: 'Write specs.', instruction: '' }))
         .toEqual({ ok: false, message: 'describe the change to make to the goal writer prompt' });
       expect((await requestGoalWriterPromptRewrite({ prompt: 'Write specs.', instruction: 'shorter' })).ok).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+      configureRuntimeUrlResolver({ apiBaseUrl: '' });
+    }
+  });
+
+  // As for a spec: the model may exist only in that project's configuration,
+  // and a space's directory is answered inside the space.
+  test('a rewrite names the directory the user works in, and a space\'s directory asks the server inside the space', async () => {
+    const requests: Array<{ directory: string | undefined; header: string | null }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      const header = request.headers.get('x-opencode-directory');
+      const body = z.object({ directory: z.string().optional() }).parse(await request.json());
+      requests.push({ directory: body.directory, header: header === null ? null : decodeURIComponent(header) });
+      return Response.json({ prompt: 'Write short specs.', providerID: 'p', modelID: 'm' });
+    };
+    configureRuntimeUrlResolver({ apiBaseUrl: 'http://goal-writer.test' });
+    try {
+      for (const directory of ['/repo/app', '/spaces/a1b2c3d4e5f6/repo', null]) {
+        expect((await requestGoalWriterPromptRewrite({ prompt: 'Write specs.', instruction: 'shorter', directory })).ok).toBe(true);
+      }
+      expect(requests).toEqual([
+        { directory: '/repo/app', header: null },
+        { directory: '/spaces/a1b2c3d4e5f6/repo', header: '/spaces/a1b2c3d4e5f6/repo' },
+        { directory: undefined, header: null },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
       configureRuntimeUrlResolver({ apiBaseUrl: '' });
