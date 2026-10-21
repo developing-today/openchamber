@@ -4,7 +4,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import { useGoalSpecJobStore, type GoalSpecJob, type GoalSpecJobChoice } from '@/stores/goalSpecJobStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { takeGoalSpecJobBack } from './goalSpecJobEdit';
@@ -45,6 +44,8 @@ export const GoalSpecJobCard = React.memo(function GoalSpecJobCard({ sessionId, 
 function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  // The goal length limit from Settings; the server writes the spec within it.
+  const charLimit = useUIStore((state) => state.sessionGoalObjectiveCharLimit);
   // An action from this card is on its way; the job's own `sending` covers sends from anywhere.
   const [acting, setActing] = React.useState(false);
   const editedSpec = useGoalSpecJobStore((state) => {
@@ -183,13 +184,13 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
           <Textarea
             value={spec}
             onChange={(event) => useGoalSpecJobStore.getState().setSpecEdit(job, event.target.value)}
-            maxLength={SESSION_GOAL_OBJECTIVE_CHAR_LIMIT}
+            maxLength={charLimit}
             rows={isMobile ? 5 : 8}
             disabled={locked}
             aria-label={t('chat.goal.writer.card.specAria')}
             endSlot={(
               <span className="typography-micro tabular-nums text-muted-foreground/70" aria-label={t('chat.goal.counter.aria')}>
-                {spec.length}/{SESSION_GOAL_OBJECTIVE_CHAR_LIMIT}
+                {spec.length}/{charLimit}
               </span>
             )}
           />

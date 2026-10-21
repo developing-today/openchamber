@@ -534,7 +534,7 @@ describe('a message queued while the agent works, with a goal armed', () => {
   const queued = () => queueRequests.filter((call) => call.method === 'POST' && call.path === `/api/message-queue/sessions/${SESSION_ID}/items`);
   const takes = () => queueRequests.filter((call) => call.path.endsWith('/take'));
   const anything = () => jobStarts().length > 0 || queued().length > 0 || sends.length > 0;
-  const plainArm: SessionGoalArm = { armed: true, objectiveOverride: null, settled: false, briefAgent: false };
+  const plainArm: SessionGoalArm = { armed: true, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false };
   const settleAnswers = async () => {
     await act(async () => { await new Promise((done) => setTimeout(done, 80)); });
   };

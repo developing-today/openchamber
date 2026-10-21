@@ -410,7 +410,7 @@ describe('GoalSpecJobCard', () => {
       agent: 'build',
       files: ['mock.png'],
       parts: ['Resolve the conflict'],
-      goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true },
+      goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true, ignoreLimit: false },
       composerArmed: true,
     }]);
     // The settle names the user message the send created.
@@ -506,7 +506,7 @@ describe('GoalSpecJobCard', () => {
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 
-    expect(sent).toEqual([{ text: 'See the mock', files: ['mock.png'], goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true } }]);
+    expect(sent).toEqual([{ text: 'See the mock', files: ['mock.png'], goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true, ignoreLimit: false } }]);
     expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim', '/api/goals/spec-jobs/job-1/settle']);
     expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec' });
     expect(text()).toContain('Sent your message as typed. The spec is its goal.');

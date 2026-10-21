@@ -332,8 +332,6 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   if (variant && resolved.source === 'request') modelRef.variant = variant;
   const generationOptions = requestOptions({ timeoutMs, signal });
   const unavailableMessage = `Model unavailable: ${resolved.providerID}/${resolved.modelID}`;
-  const modelRef = { id: resolved.modelID, providerID: resolved.providerID };
-  if (variant && resolved.source === 'request') modelRef.variant = variant;
   const send = async () => {
     const result = await client.generate.text(
       { prompt: fullPrompt, model: modelRef },

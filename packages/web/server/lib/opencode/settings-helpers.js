@@ -584,11 +584,6 @@ export const createSettingsHelpers = (dependencies) => {
       const limit = z.number().int().min(1_000).max(1_000_000).safeParse(candidate[key]);
       if (limit.success) result[key] = limit.data;
     }
-    const goalWriterVariant = z.string().trim().safeParse(candidate.sessionGoalWriterVariant);
-    if (goalWriterVariant.success) {
-      // Empty clears it: the writer model runs at its default effort.
-      result.sessionGoalWriterVariant = goalWriterVariant.data || undefined;
-    }
     const goalWriterModel = z.string().trim().safeParse(candidate.sessionGoalWriterModel);
     if (goalWriterModel.success) {
       // Empty clears the pick: the session's own model writes specs again.
