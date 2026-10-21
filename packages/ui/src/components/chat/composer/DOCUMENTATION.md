@@ -98,6 +98,13 @@ the "looks done" hint or the review offer, the suggestion
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
 
+`CurrentModelIndicator`, the real model of the session's last turn, is a line
+of the composer column above the box on desktop and a line of the model and
+agent row inside the box on mobile; `ChatInput` mounts both. Keep it out of
+`ChatContainer`'s composer slot: the slot lays its children out in a row, and
+the line mounted there sat to the left of the box, cut off, and made the box
+narrower.
+
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
 which clears the revert and puts the messages and the agent's file changes

@@ -4357,6 +4357,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenPicker={setMobileDraftPicker}
                     />
                 ) : null}
+                {/* The real model of the last turn, a line above the box on
+                    desktop; mobile shows it inside the box, by the model button. */}
+                {!isMobile ? (
+                    <CurrentModelIndicator
+                        sessionId={currentSessionId}
+                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                        className="mb-1"
+                    />
+                ) : null}
                 </>) : null}
                 <div
                     // Desktop: layout-transparent. Mobile: positioning host for
