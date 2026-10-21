@@ -74,6 +74,11 @@ const jobSchema = z.object({
 export type GoalSpecJob = z.infer<typeof jobSchema>;
 type GoalSpecJobSendMode = z.infer<typeof sendModeSchema>;
 
+/** Writing, waiting for the user, or failed: not sent and not taken back. */
+export const isOpenGoalSpecJob = (job: GoalSpecJob): boolean => (
+    job.status === 'writing' || job.status === 'ready' || job.status === 'failed'
+);
+
 /** What the user picked on the card. */
 export type GoalSpecJobChoice =
     | { kind: 'spec'; sendMode: GoalSpecJobSendMode; spec: string }

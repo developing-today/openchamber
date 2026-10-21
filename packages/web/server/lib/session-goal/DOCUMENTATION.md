@@ -379,41 +379,45 @@ sees only that final turn, so the report is its evidence.
   default). It shows only while the session has no goal and a progress check
   can run, and reads as on and locked while `sessionGoalRewriteAll` is on.
 - `components/chat/ChatInput.tsx` — `handleSubmit` asks `planGoalWriter`
-  before anything is taken from the composer. Eligible sends are plain text
-  in normal mode: no slash command, shell input, side question, queue flush,
-  or a send that auto-review would queue. Two triggers:
+  once the send has a model and passed the space checks, before anything is
+  taken from the composer. Eligible sends are plain text in normal mode on a
+  session with a known directory or a new-session draft: no slash command,
+  shell input, side question, queue flush, or a send that auto-review would
+  queue. Two triggers:
   - `armed`: the target is armed and the switch or rewrite-all is on. The
     writer reads the message only.
-  - `auto-create`: the session has no goal at all, it is idle, and
-    `sessionGoalAutoCreate` is `review` or `auto`. The writer also gets
+  - `auto-create`: the session has no goal at all, no goal writer job still
+    open (writing, ready or failed), it is idle, and `sessionGoalAutoCreate`
+    is `review` or `auto`. The writer also gets
     `components/chat/goalWriterContext.ts`: the first request and the newest
     turns of the loaded history, open project todos, session-pinned and
     project-pinned plans whose checklist is not done, queued messages and
     running subagent sessions. Every source is best effort; the message alone
     still makes a goal.
-- `components/chat/GoalSpecDialog.tsx` — writes the spec (the session's
-  composer model is sent as the fallback model), then shows it for approval
-  when `sessionGoalWriterReview` is on (armed) or `sessionGoalAutoCreate` is
-  `review`. Choices: send the message with the spec as its goal, send the spec
-  as the message (`sessionGoalWriterSendMode` picks the primary one and the
-  one used without review), write again, or skip: an armed goal keeps the
-  message as typed, an automatic one sends without a goal. A failed write
-  always waits for the user, review or not. Closing the dialog leaves the
-  composer, queue and pending prompts untouched: the choice submits again with
-  a `goal` option, and only then is the arm set, right before `sendMessage`.
-- `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
-  produced or the user kept over it, so rewrite-all leaves it alone;
-  `briefAgent` puts the spec into the reminder when the message itself is not
-  the spec.
+  With a plan, the message leaves the composer as a queued message does
+  (`takeComposerMessage`, shared with queueing: mentions, file mentions,
+  snippets and the skill instruction resolved now, the attached chips and
+  files taken along) and becomes a job: `POST /api/goals/spec-jobs` with the
+  trigger, review (`sessionGoalWriterReview` for armed, `sessionGoalAutoCreate`
+  for automatic), `sessionGoalWriterSendMode`, the default token budget, the
+  writer input and the composer's model, agent and effort. A new-session draft
+  becomes a session first (`materializeOpenDraftSession`, with the automatic
+  worktree when it is on, and the draft's synthetic context added to the
+  message), since a job belongs to a session. Once the job starts, an armed
+  target is disarmed (the server writes the goal) and the prompt joins the
+  session's input history; a start the server refuses gives everything back
+  to the composer, to the new session's composer when one was created, and
+  keeps the arm. The composer never sends the message itself.
 - Rewrite all in the UI: `setSessionGoal` takes `rewrite` with the session's
   model and returns `rewrittenSpec`. `sendMessage` passes it for unsettled
   armed goals (Plan "Run as goal", fork as goal), and `SessionGoalDialog` when
   the typed objective changed. A failed rewrite keeps the user's text and says
   so in a toast. `sendMessage` builds the goal reminder only after the goal is
   saved, so a rewritten spec reaches the agent in the same message.
-- A writer request belongs to the composer it came from: switching the
-  composer to another session or draft closes the dialog, and a late choice is
-  dropped.
+- `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
+  produced or the user kept over it, so rewrite-all leaves it alone;
+  `briefAgent` puts the spec into the reminder when the message itself is not
+  the spec. The card's send from this window sets both.
 - `stores/goalSpecJobStore.ts` follows the goal writer jobs above (snapshot on
   load and on every control-stream connection, then updates in revision order;
   `stores/DOCUMENTATION.md` has the ordering rules).

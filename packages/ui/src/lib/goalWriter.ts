@@ -3,7 +3,7 @@ import type { Message, Part } from '@/lib/opencode/model';
 import { excerptMarkdown, formatMessageText } from '@/lib/messages/messageMarkdown';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
-import type { SessionGoalAutoCreate, SessionGoalWriterSendMode } from '@/stores/useUIStore';
+import type { SessionGoalAutoCreate } from '@/stores/useUIStore';
 
 // The goal writer: a model turns a message into a goal spec of at most
 // SESSION_GOAL_OBJECTIVE_CHAR_LIMIT characters. The server owns the built-in
@@ -12,27 +12,19 @@ import type { SessionGoalAutoCreate, SessionGoalWriterSendMode } from '@/stores/
 // a spec, decides when the composer asks, shapes the context it sends, and
 // reads and rewrites the prompt for Settings.
 
-export type GoalSpecResult =
+type GoalSpecResult =
   | { ok: true; spec: string; providerID: string; modelID: string }
   | { ok: false; message: string };
 
-/** How a send that went through the goal writer carries its goal. */
-export type GoalSubmitChoice =
-  | { kind: 'spec'; spec: string; sendMode: SessionGoalWriterSendMode }
-  /** The typed message is the objective, as it is without the writer. */
-  | { kind: 'unchanged' }
-  /** No goal: the message goes out as an ordinary one. */
-  | { kind: 'none' };
-
 /**
- * Why the composer stops a send to write a goal: the user armed one, or the
- * session has none and "start a goal from the next message" is on.
+ * Why the composer sends a message through the goal writer: the user armed a
+ * goal, or the session has none and "start a goal from the next message" is on.
  */
-export type GoalWriterTrigger = 'armed' | 'auto-create';
+type GoalWriterTrigger = 'armed' | 'auto-create';
 
 export interface GoalWriterPlan {
   trigger: GoalWriterTrigger;
-  /** Show the spec for approval; false sends it as soon as it is written. */
+  /** Wait on the card for approval; false sends the spec as soon as it is written. */
   review: boolean;
 }
 

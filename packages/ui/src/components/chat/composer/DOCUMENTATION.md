@@ -102,7 +102,11 @@ A session with no transcript yet (a new chat whose first message went to the
 goal writer) shows its goal writer card (`GoalSpecJobCard`) above the composer
 box, inside the form: `ChatContainer` passes `goalSpecCardAboveInput` while it
 shows the empty surface, and once the transcript has a row the card is that
-transcript's last row. A goal writer job taken back for editing returns through
+transcript's last row. A send the goal writer takes leaves the composer as a
+queued message does (`takeComposerMessage`, which queueing shares) and starts
+the server's job; a new-session draft becomes a session for it first. The
+rules are in `packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Goal
+writer in the UI*. A goal writer job taken back for editing returns through
 `input-store.pendingComposerEdits`. The composer showing that session takes it
 (a `/btw` composer leaves it waiting), appends its text after anything typed
 since (`restoreDraft`), restores its files and puts its attached chips back,
