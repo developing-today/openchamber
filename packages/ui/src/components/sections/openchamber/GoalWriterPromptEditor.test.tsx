@@ -63,10 +63,12 @@ async function fixture(
   mounted.push(root);
   const saves: string[] = [];
   let answerBuiltin: (value: GoalWriterBuiltinPromptResult) => void = () => undefined;
+  let saveElsewhere: (value: string) => void = () => undefined;
   const Harness = () => {
     const [stored, setStored] = React.useState(initial);
     const [builtin, setBuiltin] = React.useState(initialBuiltin);
     answerBuiltin = setBuiltin;
+    saveElsewhere = setStored;
     return (
       <GoalWriterPromptEditor
         stored={stored}
@@ -118,7 +120,9 @@ async function fixture(
     return label?.nextElementSibling?.textContent ?? null;
   };
   const loadBuiltin = (value: GoalWriterBuiltinPromptResult) => act(async () => answerBuiltin(value));
-  return { host, saves, textarea, hasButton, hasTextarea, typePrompt, click, describeChange, typeChange, submitChange, isDisabled, proposalCurrent, loadBuiltin };
+  /** The saved prompt changes without this editor, as a save from another window does. */
+  const storeElsewhere = (value: string) => act(async () => saveElsewhere(value));
+  return { host, saves, textarea, hasButton, hasTextarea, typePrompt, click, describeChange, typeChange, submitChange, isDisabled, proposalCurrent, loadBuiltin, storeElsewhere };
 }
 
 describe('GoalWriterPromptEditor', () => {
@@ -226,5 +230,40 @@ describe('GoalWriterPromptEditor', () => {
     expect(view.isDisabled('Rewrite')).toBe(true);
     await view.submitChange();
     expect(calls).toEqual([]);
+  });
+
+  test('edits made while a rewrite is written stay, and the proposal is shown against them for a new decision', async () => {
+    let answer: (result: GoalWriterPromptRewriteResult) => void = () => undefined;
+    const view = await fixture('', () => new Promise((resolve) => { answer = resolve; }));
+
+    await view.describeChange('make the specs shorter');
+    // The field stays editable while the rewrite is written.
+    await view.typePrompt('Write one-line specs.');
+    await act(async () => answer({ ok: true, prompt: 'Turn the request into a short goal spec.', providerID: 'p', modelID: 'm' }));
+
+    expect(view.saves).toEqual(['Write one-line specs.']);
+    expect(view.proposalCurrent()).toBe('Write one-line specs.');
+    expect(view.host.textContent).toContain('The prompt changed after this was asked for.');
+
+    await view.click('Apply');
+    expect(view.saves).toEqual(['Write one-line specs.', 'Turn the request into a short goal spec.']);
+    expect(view.textarea()?.value).toBe('Turn the request into a short goal spec.');
+  });
+
+  test('Apply leaves a prompt saved after the proposal showed, and shows the proposal against it', async () => {
+    const view = await fixture('', async () => ({ ok: true, prompt: 'Turn the request into a short goal spec.', providerID: 'p', modelID: 'm' }));
+
+    await view.describeChange('make the specs shorter');
+    expect(view.proposalCurrent()).toBe(BUILTIN.prompt);
+    expect(view.host.textContent).not.toContain('The prompt changed after this was asked for.');
+
+    await view.storeElsewhere('Saved in another window.');
+    await view.click('Apply');
+    expect(view.saves).toEqual([]);
+    expect(view.proposalCurrent()).toBe('Saved in another window.');
+    expect(view.host.textContent).toContain('The prompt changed after this was asked for.');
+
+    await view.click('Apply');
+    expect(view.saves).toEqual(['Turn the request into a short goal spec.']);
   });
 });

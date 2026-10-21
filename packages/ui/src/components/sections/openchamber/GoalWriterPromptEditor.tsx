@@ -13,7 +13,9 @@ type RewriteState =
   | { status: 'idle' }
   | { status: 'working' }
   | { status: 'failed'; reason: string }
-  | { status: 'proposed'; current: string; proposed: string; model: string };
+  // `current` is the prompt the proposal is weighed against, and Apply replaces
+  // only that one. `changed` says it is not the prompt the rewrite was asked for.
+  | { status: 'proposed'; current: string; proposed: string; model: string; changed: boolean };
 
 interface GoalWriterPromptEditorProps {
   /** The saved prompt; empty means the built-in one. */
@@ -55,6 +57,12 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
   // empty field stands for the built-in prompt, so there is nothing to
   // rewrite until that has loaded.
   const currentPrompt = toStored(text) === '' ? builtinPrompt || null : text;
+  // The field stays editable while a rewrite is written, so its answer reads
+  // the prompt as it is now from here.
+  const currentPromptRef = React.useRef(currentPrompt);
+  React.useLayoutEffect(() => {
+    currentPromptRef.current = currentPrompt;
+  }, [currentPrompt]);
   const custom = toStored(text) !== '';
   // Nothing to compare with until the server has answered.
   const canReset = builtin !== null && text.trim() !== (builtinPrompt ?? '').trim();
@@ -79,24 +87,37 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
   const submitChange = async () => {
     const change = instruction.trim();
     if (!change || working || !currentPrompt) return;
+    const asked = currentPrompt;
     const controller = new AbortController();
     controllerRef.current = controller;
     setRewriteState({ status: 'working' });
     let result: GoalWriterPromptRewriteResult;
     try {
-      result = await rewrite(currentPrompt, change, controller.signal);
+      result = await rewrite(asked, change, controller.signal);
     } catch (error) {
       result = { ok: false, message: error instanceof Error ? error.message : String(error) };
     }
     if (controller.signal.aborted) return;
     controllerRef.current = null;
-    setRewriteState(result.ok
-      ? { status: 'proposed', current: currentPrompt, proposed: result.prompt, model: `${result.providerID}/${result.modelID}` }
-      : { status: 'failed', reason: result.message });
+    if (!result.ok) {
+      setRewriteState({ status: 'failed', reason: result.message });
+      return;
+    }
+    // Edits made while it was written stay, and the proposal is shown against
+    // the prompt as it is now for the user to decide again.
+    const now = currentPromptRef.current ?? '';
+    setRewriteState({ status: 'proposed', current: now, proposed: result.prompt, model: `${result.providerID}/${result.modelID}`, changed: now !== asked });
   };
 
-  const apply = (proposed: string) => {
-    edit(proposed);
+  const apply = (shown: Extract<RewriteState, { status: 'proposed' }>) => {
+    // A prompt saved since the proposal was shown, such as from another window,
+    // is kept, and the proposal is shown against it.
+    const now = currentPrompt ?? '';
+    if (now !== shown.current) {
+      setRewriteState({ ...shown, current: now, changed: true });
+      return;
+    }
+    edit(shown.proposed);
     setInstruction('');
     setRewriteState({ status: 'idle' });
   };
@@ -104,6 +125,8 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
   const failure = rewriteState.status === 'failed'
     ? t('settings.openchamber.visual.goal.writer.changeFailed', { reason: rewriteState.reason })
     : '';
+  const changedNote = proposal?.changed ? t('settings.openchamber.visual.goal.writer.proposalSourceChanged') : '';
+  const statusLine = failure || changedNote;
 
   return (
     <SettingsStackedField
@@ -130,7 +153,7 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
             <Button size="sm" variant="ghost" onClick={() => setRewriteState({ status: 'idle' })}>
               {t('settings.openchamber.visual.goal.writer.proposalDiscard')}
             </Button>
-            <Button size="sm" onClick={() => apply(proposal.proposed)} disabled={disabled}>
+            <Button size="sm" onClick={() => apply(proposal)} disabled={disabled}>
               {t('settings.openchamber.visual.goal.writer.proposalApply')}
             </Button>
           </div>
@@ -190,9 +213,13 @@ export const GoalWriterPromptEditor: React.FC<GoalWriterPromptEditorProps> = ({ 
           {t('settings.openchamber.visual.goal.writer.changeSubmit')}
         </Button>
       </form>
-      {/* A reserved line, so a failure never moves what is below it. */}
-      <p className="min-h-4 truncate typography-meta text-[var(--status-error)]" title={failure || undefined} aria-live="polite">
-        {failure}
+      {/* A reserved line, so a failure or a changed prompt never moves what is below it. */}
+      <p
+        className={cn('min-h-4 truncate typography-meta', failure ? 'text-[var(--status-error)]' : 'text-[var(--status-warning-text)]')}
+        title={statusLine || undefined}
+        aria-live="polite"
+      >
+        {statusLine}
       </p>
     </SettingsStackedField>
   );

@@ -725,13 +725,19 @@ sees only that final turn, so the report is its evidence.
     release's prompt applies. Reset to default shows while the text differs
     from it. The rules the server adds after every prompt are shown under the
     field. "Describe a change" asks the rewrite route with the composer's model
-    as the fallback and no directory, since Settings edits this server's
-    settings. It sends the prompt it will show as the current one: the text in
-    the field, or the built-in prompt while the field is empty, so Rewrite
-    stays off until that has loaded and never sends an empty prompt. The
-    answer is shown next to the current prompt (stacked on a
-    narrow pane) until Apply, which puts it in the field and saves it, or
-    Discard. A failure keeps the field and shows its reason.
+    as the fallback, in the directory the app works in (none while the app does
+    not know it yet). It sends the prompt it will show as the current one: the
+    text in the field, or the built-in prompt while the field is empty, so
+    Rewrite stays off until that has loaded and never sends an empty prompt.
+    The answer is shown next to the current prompt (stacked on a narrow pane)
+    until Apply, which puts it in the field and saves it, or Discard. The field
+    stays editable while the answer is written. When the prompt changed after
+    the rewrite was asked for, by an edit or a save from another window, the
+    proposal is shown next to the prompt as it is now with a note that it came
+    from the earlier one, and Apply replaces only the prompt it is shown
+    against: a prompt saved after the proposal showed is kept, and the proposal
+    is shown against it for another decision. A failure keeps the field and
+    shows its reason.
 
 ### Queued goals
 
