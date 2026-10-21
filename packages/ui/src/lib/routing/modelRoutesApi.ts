@@ -17,12 +17,16 @@ export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
 
 // What the structured editor reads and writes. Every object is strict: a key
 // the editor does not know makes the pool JSON-only, so it is never dropped.
+// A level maps to the variant a model runs it at, or to false when the model
+// sits that level out.
+const variantChoiceSchema = z.union([z.string(), z.literal(false)]);
+
 const targetSchema = z.union([
   z.string().min(1),
   z.strictObject({
     model: z.string().min(1),
     defaultVariant: z.string().optional(),
-    variants: z.record(z.string(), z.string()).optional(),
+    variants: z.record(z.string(), variantChoiceSchema).optional(),
     until: z.number().int().positive().optional(),
   }),
 ]);
@@ -67,9 +71,24 @@ const scheduleSchema = z.strictObject({
   note: z.string().optional(),
 });
 
+// The editor shows the keys that pick models by pattern, the declared levels
+// and the variant rules, and keeps them as read; they are edited as JSON.
+const variantRuleSchema = z.strictObject({
+  match: z.string(),
+  map: z.record(z.string(), variantChoiceSchema),
+});
+
 const modelRouteSchema = z.strictObject({
   name: z.string().optional(),
-  targets: z.array(targetSchema),
+  // Optional when include, contains or match supply the models.
+  targets: z.array(targetSchema).optional(),
+  include: z.array(z.string()).optional(),
+  exclude: z.array(z.string()).optional(),
+  contains: z.array(z.string()).optional(),
+  notContains: z.array(z.string()).optional(),
+  match: z.string().optional(),
+  levels: z.array(z.string()).optional(),
+  variantRules: z.array(variantRuleSchema).optional(),
   autonomy: z.enum(AUTONOMY_LEVELS).optional(),
   selection: z.enum(['ordered', 'round-robin', 'weighted']).optional(),
   weights: z.record(z.string(), z.number()).optional(),

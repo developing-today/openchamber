@@ -38,7 +38,7 @@ import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/Po
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
 import { PRESET_ROUTE_IDS, presetTargets, type PresetId } from '@/lib/routing/routePresets';
-import { pickedAutonomy, routeReference, routeReferenceID, targetLabel, targetUntil, withoutAbsentWeights } from '@/lib/routing/poolAdvanced';
+import { hasModelSource, pickedAutonomy, routeReference, routeReferenceID, targetLabel, targetUntil, withoutAbsentWeights } from '@/lib/routing/poolAdvanced';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 
@@ -109,7 +109,7 @@ const PoolFields: React.FC<{
   const [patternUntil, setPatternUntil] = React.useState('');
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
 
-  const targets = route.targets;
+  const targets = route.targets ?? [];
   const addTarget = () => {
     if (!providerId || !modelId) return;
     const ref = `${providerId}/${modelId}`;
@@ -319,6 +319,67 @@ const PoolProblemLines: React.FC<{ problems: readonly PoolProblem[]; className: 
   );
 };
 
+type Translate = ReturnType<typeof useI18n>['t'];
+
+/** A list of patterns, texts or levels as one value, or null when the list is unset or empty. */
+const listed = (values: readonly string[] | undefined): string | null => (values && values.length > 0 ? values.join(', ') : null);
+
+/** The pool's matching keys and declared levels in words, each kind labeled, one entry per key that says something. */
+const poolRuleTexts = (route: ModelRoute, t: Translate): string[] => {
+  const texts: string[] = [];
+  const include = listed(route.include);
+  if (include) texts.push(t('settings.pools.rules.include', { patterns: include }));
+  const exclude = listed(route.exclude);
+  if (exclude) texts.push(t('settings.pools.rules.exclude', { patterns: exclude }));
+  const contains = listed(route.contains);
+  if (contains) texts.push(t('settings.pools.rules.contains', { texts: contains }));
+  const notContains = listed(route.notContains);
+  if (notContains) texts.push(t('settings.pools.rules.notContains', { texts: notContains }));
+  if (route.match !== undefined) texts.push(t('settings.pools.rules.match', { expression: route.match }));
+  // An empty list is a choice too: the pool then offers no levels.
+  const levels = listed(route.levels);
+  if (levels) texts.push(t('settings.pools.rules.levels', { levels }));
+  else if (route.levels !== undefined) texts.push(t('settings.pools.rules.noLevels'));
+  return texts;
+};
+
+/** The pool's variant rules in words: for the models a rule matches, what each level runs at. */
+const variantRuleTexts = (route: ModelRoute, t: Translate): string[] =>
+  (route.variantRules ?? []).map((rule) =>
+    t('settings.pools.rules.variantRule', {
+      match: rule.match,
+      remaps: Object.entries(rule.map)
+        .map(([level, variant]) => (variant === false ? t('settings.pools.rules.sitsOut', { level }) : `${level} → ${variant}`))
+        .join(', '),
+    }),
+  );
+
+/** The pool's one-line summary: its target count, its rules and its autonomy. */
+const poolSummary = (route: ModelRoute, t: Translate): string => {
+  const rules = poolRuleTexts(route, t);
+  // A pool that only takes models by pattern has no target list to count.
+  const count = route.targets !== undefined || rules.length === 0 ? [t('settings.pools.targetCount', { count: route.targets?.length ?? 0 })] : [];
+  return [...count, ...rules, ...(route.autonomy ? [route.autonomy] : [])].join(' · ');
+};
+
+/** The matching keys, declared levels and variant rules, read only: the structured editor keeps them as read and they change in the pool's JSON. */
+const PoolRules: React.FC<{ route: ModelRoute }> = ({ route }) => {
+  const { t } = useI18n();
+  const lines = [...poolRuleTexts(route, t), ...variantRuleTexts(route, t)];
+  if (lines.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <p className="typography-ui-label font-medium text-foreground">{t('settings.pools.rules.title')}</p>
+      {lines.map((line, index) => (
+        <p key={index} className="typography-meta break-words text-muted-foreground">
+          {line}
+        </p>
+      ))}
+      <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.rules.editAsJson')}</p>
+    </div>
+  );
+};
+
 /** One pool: its summary row, its warnings, and its editor when expanded. A pool the editor cannot show is edited as JSON only. */
 const PoolRow: React.FC<{
   id: string;
@@ -332,6 +393,7 @@ const PoolRow: React.FC<{
 }> = ({ id, entry, problems, otherPoolIDs, expanded, onToggle, onChange, onRemove }) => {
   const { t } = useI18n();
   const route = entry.kind === 'editable' ? entry.route : null;
+  const summary = route ? poolSummary(route, t) : t('settings.pools.json.label');
 
   return (
     <div className="py-1">
@@ -345,9 +407,8 @@ const PoolRow: React.FC<{
           <span className="typography-ui-label font-medium text-foreground truncate">
             {route?.name || id}
           </span>
-          <span className="typography-meta text-muted-foreground truncate">
-            {route ? t('settings.pools.targetCount', { count: route.targets.length }) : t('settings.pools.json.label')}
-            {route?.autonomy ? ` · ${route.autonomy}` : ''}
+          <span className="typography-meta text-muted-foreground truncate" title={summary}>
+            {summary}
           </span>
         </button>
         <Button size="sm" variant="ghost" onClick={onRemove}>
@@ -362,13 +423,16 @@ const PoolRow: React.FC<{
       {expanded ? (
         <div className="space-y-4 px-1 pb-4 pt-2">
           {entry.kind === 'editable' ? (
-            <PoolFields
-              id={id}
-              route={entry.route}
-              otherPoolIDs={otherPoolIDs}
-              // A removed target takes its weight with it, so the edit is not refused for a weight without a target.
-              onChange={(next) => onChange({ kind: 'editable', route: withoutAbsentWeights(next) })}
-            />
+            <>
+              <PoolFields
+                id={id}
+                route={entry.route}
+                otherPoolIDs={otherPoolIDs}
+                // A removed target takes its weight with it, so the edit is not refused for a weight without a target.
+                onChange={(next) => onChange({ kind: 'editable', route: withoutAbsentWeights(next) })}
+              />
+              <PoolRules route={entry.route} />
+            </>
           ) : (
             <p className={SETTINGS_HELPER_CLASS}>
               {entry.unreadablePath
@@ -549,7 +613,7 @@ export const ModelPoolsSection: React.FC = () => {
     setExpandedId(PRESET_ROUTE_IDS[preset]);
   };
 
-  // A pool needs at least one target to be saved, so a new pool stays a local draft until it gets one.
+  // A pool needs a target, or a pattern that picks models, to be saved, so a new pool stays a local draft until it has one.
   const addPool = () => {
     const id = newId.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
     if (!id || !routes || routes[id] || drafts[id]) return;
@@ -606,13 +670,13 @@ export const ModelPoolsSection: React.FC = () => {
                     problems={problems[id] ?? []}
                     otherPoolIDs={entry.kind === 'editable'
                       ? Object.keys(routes).filter(
-                        (other) => other !== id && !entry.route.targets.some((target) => routeReferenceID(target) === other),
+                        (other) => other !== id && !(entry.route.targets ?? []).some((target) => routeReferenceID(target) === other),
                       )
                       : []}
                     expanded={expandedId === id}
                     onToggle={() => setExpandedId((current) => (current === id ? null : id))}
                     onChange={(next) => {
-                      if (isDraft && next.kind === 'editable' && next.route.targets.length === 0) {
+                      if (isDraft && next.kind === 'editable' && !hasModelSource(next.route)) {
                         setDrafts((current) => ({ ...current, [id]: next.route }));
                         return;
                       }

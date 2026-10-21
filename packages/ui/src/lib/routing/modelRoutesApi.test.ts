@@ -63,7 +63,7 @@ describe('fetchModelRoutes', () => {
   });
 
   test('reads the problems the server found per pool', async () => {
-    const problems = { kept: [{ message: 'route "kept" needs at least one target', skipsPool: false }] };
+    const problems = { kept: [{ message: 'route "kept" needs at least one target, include or contains entry, or a match', skipsPool: false }] };
     respond = () => reply(JSON.stringify({ routes: { kept: { targets: [] } }, problems }));
     expect((await fetchModelRoutes()).problems).toEqual(problems);
   });
@@ -129,6 +129,49 @@ describe('saveModelRoutes', () => {
       extra: { kind: 'json', unreadablePath: 'targets[0].priority' },
       selection: { kind: 'json', unreadablePath: 'targets[0].providerID' },
       nested: { kind: 'json', unreadablePath: 'targets[0].model' },
+    });
+    respond = (request) => reply(request.body);
+    await saveModelRoutes(read.routes);
+    expect(JSON.parse(sent[1]?.body ?? '')).toEqual({ routes });
+  });
+
+  test('reads a pool that picks its models by pattern as editable, and sends it back unchanged', async () => {
+    const routes = {
+      small: {
+        include: ['*luna*', '*haiku*'],
+        exclude: ['*-5', 're:-mini$'],
+        contains: ['flash'],
+        notContains: ['preview'],
+        match: "(*luna* or 're:haiku-(5|6)') and not *old*",
+        levels: ['low', 'medium', 'high'],
+        variantRules: [{ match: '*argon*', map: { xhigh: 'high', max: false } }],
+        selection: 'weighted',
+        weights: { 'openai/gpt-6-luna': 3 },
+      },
+      big: { targets: [{ model: 'openai/argon', variants: { xhigh: 'high', max: false } }, 'anthropic/claude-opus-5'], levels: [] },
+    } satisfies Record<string, ModelRoute>;
+    respond = () => reply(JSON.stringify({ routes }));
+    const read = await fetchModelRoutes();
+    expect(read.routes).toEqual({ small: editable(routes.small), big: editable(routes.big) });
+    respond = (request) => reply(request.body);
+    await saveModelRoutes(read.routes);
+    expect(JSON.parse(sent[1]?.body ?? '')).toEqual({ routes });
+  });
+
+  test('a pool with a key or value the matching keys do not define stays JSON and goes back unchanged', async () => {
+    const routes = {
+      misspelled: { include: ['*luna*'], includes: ['*haiku*'] },
+      rule: { include: ['*luna*'], variantRules: [{ match: '*', map: {}, extra: 1 }] },
+      remap: { targets: [{ model: 'p/a', variants: { max: true } }] },
+      levels: { targets: ['p/a'], levels: 'low' },
+    };
+    respond = () => reply(JSON.stringify({ routes }));
+    const read = await fetchModelRoutes();
+    expect(read.routes).toMatchObject({
+      misspelled: { kind: 'json', unreadablePath: 'includes' },
+      rule: { kind: 'json', unreadablePath: 'variantRules[0].extra' },
+      remap: { kind: 'json', unreadablePath: 'targets[0].variants.max' },
+      levels: { kind: 'json', unreadablePath: 'levels' },
     });
     respond = (request) => reply(request.body);
     await saveModelRoutes(read.routes);

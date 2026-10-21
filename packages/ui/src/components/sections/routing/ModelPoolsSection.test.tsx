@@ -563,4 +563,64 @@ describe('ModelPoolsSection', () => {
       await cleanup();
     }
   });
+
+  test('a pool that picks its models by pattern shows its rules in words, opens in the editor, and keeps them through an edit', async () => {
+    const small = {
+      include: ['*luna*', '*haiku*'],
+      exclude: ['*-5'],
+      contains: ['flash'],
+      notContains: ['preview'],
+      match: '*luna* and not *mini*',
+      levels: ['low', 'medium', 'high'],
+      variantRules: [{ match: '*argon*', map: { xhigh: 'high', max: false } }],
+      autonomy: 'rules',
+    };
+    const kept = { targets: ['p/cheap'], exclude: ['*-5'], levels: [] };
+    serverRoutes = { small, kept };
+    const { dom, cleanup } = await renderSection();
+    try {
+      const rows = () => [...dom.container.querySelectorAll('button[aria-expanded]')].map((row) => row.textContent);
+      expect(rows()).toEqual([
+        'smallIncludes *luna*, *haiku* · Excludes *-5 · Includes models whose id contains flash · Excludes models whose id contains preview'
+          + ' · Includes models matching *luna* and not *mini* · Offers levels low, medium, high · rules',
+        'kept1 targets · Excludes *-5 · Offers no levels',
+      ]);
+      expect(dom.container.textContent).not.toContain('JSON only');
+      await expandPool(dom.container, 'small');
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('Patterns and levels');
+      expect(text).toContain('Levels for *argon*: xhigh → high, sits out max');
+      expect(text).toContain('To change these rules, edit the pool in Raw JSON.');
+      await typeInto(findInput(dom.container, 'Display name'), 'Small models');
+      expect(routeSaves).toEqual([{ small: { ...small, name: 'Small models' }, kept }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a new pool stays a draft until it has a target or a pattern, and then saves', async () => {
+    const { dom, cleanup } = await renderSection();
+    try {
+      const idInput = findInput(dom.container, 'Add pool');
+      // A controlled input takes an edit the way React reads one: the native setter, then an input event.
+      const setValue = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(idInput), 'value')?.set;
+      await act(async () => {
+        setValue?.call(idInput, 'fresh');
+        idInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await clickButton(dom.container, 'Add');
+      const applyJson = async (text: string) => {
+        const textarea = dom.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Raw JSON (expert)"]');
+        if (!textarea) throw new Error('no JSON view');
+        await editTextArea(textarea, text);
+        await clickButton(dom.container, 'Apply JSON');
+      };
+      await applyJson('{"targets":[],"exclude":["*-mini"],"levels":["low"]}');
+      expect(routeSaves).toEqual([]);
+      await applyJson('{"include":["*luna*"],"exclude":["*-mini"]}');
+      expect(routeSaves).toEqual([{ fresh: { include: ['*luna*'], exclude: ['*-mini'] } }]);
+    } finally {
+      await cleanup();
+    }
+  });
 });

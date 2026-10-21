@@ -293,8 +293,21 @@ through `/api/model-routes`; the server side is in
 - Every pool in the config is listed. A pool the structured editor cannot
   represent shows "JSON only"; expanded, it shows one line naming the value the
   editor cannot show, and its Raw JSON view, which is its only editor.
+- A pool that picks models by pattern (`include`, `exclude`, `contains`,
+  `notContains`, `match`), declares `levels` or has `variantRules` opens in the
+  structured editor. Its row names each rule kind in words, such as
+  `Includes *luna*, *haiku* · Excludes *-5`, and leaves out the target count
+  when it has no `targets`. Expanded, it lists every rule, variant rules
+  included, and says they change in Raw JSON: the structured editor keeps them
+  as read and has no fields for them.
+- A target's level remapped to `false` reads "Sits out <level>" in its options,
+  with Remove; it has no fields, so an edit cannot turn it into a variant name.
 - A save sends every pool. Pools the user did not edit go back as they were
-  read; only the edited pool drops the weights of targets it no longer has.
+  read; only the edited pool drops the weights of targets it no longer has. A
+  pool that takes models by pattern keeps every weight, since one may name a
+  model a pattern picks.
+- A new pool stays a local draft until it has a target, an `include` or
+  `contains` entry, or a `match`.
 - The problems the server finds stay visible under their pool, each saying
   whether OpenCode skips the pool or loads it unchecked.
 - When the server refuses a save, the list rolls back to the last saved pools

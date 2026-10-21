@@ -338,7 +338,10 @@ The client (`packages/ui/src/lib/routing/modelRoutesApi.ts`) reads each pool on
 its own. A pool the structured editor cannot represent (a key it does not know
 anywhere in the pool, a value of another type, a `{ providerID, model }`
 target) becomes a `json` entry: the JSON as received, plus the path the editor
-stopped at, sent back unchanged unless the user edits that JSON. Review
+stopped at, sent back unchanged unless the user edits that JSON. The editor
+represents the matching keys, `levels`, `variantRules` and a target's remap to
+`false`, so a pool using them opens in the structured editor; it shows them
+and keeps them as read, and they change only in Raw JSON. Review
 settings it cannot read come back as `unreadable`, and the pools still load.
 Settings (`packages/ui/src/components/sections/routing/ModelPoolsSection.tsx`)
 rolls a refused or failed save back to the last saved pools, for an edit in
