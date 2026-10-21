@@ -178,6 +178,19 @@ describe('PlansSection', () => {
     expect(buttonNamed(container, 'Update plans')).not.toBeNull();
   });
 
+  test('each select shows the label of the value it holds', async () => {
+    const container = await renderSection();
+    // Send mode, then the plan's coverage, status and fee period, then the new model's tier and the new note's kind.
+    expect([...container.querySelectorAll('[role="combobox"]')].map((trigger) => trigger.textContent)).toEqual([
+      'Prefill command in composer',
+      'Subscription',
+      'Active',
+      'Monthly',
+      'Standard',
+      'Experience',
+    ]);
+  });
+
   test('Review routing opens a new chat with /routing-review ready in its composer', async () => {
     const container = await renderSection();
     const button = buttonNamed(container, 'Review routing');

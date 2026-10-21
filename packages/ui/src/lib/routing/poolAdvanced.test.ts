@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ModelRoute } from './modelRoutesApi';
 import {
   epochToLocalInput,
+  hasModelSource,
   isConcreteTarget,
   parseFormNumber,
   pickedAutonomy,
@@ -154,6 +155,33 @@ describe('withoutAbsentWeights', () => {
     expect(withoutAbsentWeights(stale)).toEqual({ targets: ['c/d'] });
     const plain: ModelRoute = { targets: ['a/b'] };
     expect(withoutAbsentWeights(plain)).toBe(plain);
+  });
+
+  test('keeps every weight of a pool that takes models by pattern, since one may name a model a pattern picks', () => {
+    const included: ModelRoute = { include: ['*luna*'], selection: 'weighted', weights: { 'openai/gpt-6-luna': 3 } };
+    expect(withoutAbsentWeights(included)).toBe(included);
+    const contained: ModelRoute = { targets: ['a/b'], contains: ['luna'], weights: { 'a/b': 1, 'openai/gpt-6-luna': 3 } };
+    expect(withoutAbsentWeights(contained)).toBe(contained);
+    const matched: ModelRoute = { targets: ['a/b'], match: '*luna*', weights: { 'openai/gpt-6-luna': 3 } };
+    expect(withoutAbsentWeights(matched)).toBe(matched);
+    // Only exclude takes nothing in, so the weights of absent targets still go.
+    expect(withoutAbsentWeights({ targets: ['a/b'], exclude: ['*-5'], weights: { 'x/y': 1 } })).toEqual({ targets: ['a/b'], exclude: ['*-5'] });
+  });
+});
+
+describe('hasModelSource', () => {
+  test('a target, an include or contains entry, or a match gives a pool somewhere to take models from', () => {
+    expect(hasModelSource({ targets: ['a/b'] })).toBe(true);
+    expect(hasModelSource({ include: ['*luna*'] })).toBe(true);
+    expect(hasModelSource({ targets: [], contains: ['haiku'] })).toBe(true);
+    expect(hasModelSource({ match: '*luna* and not *-5' })).toBe(true);
+  });
+
+  test('empty lists, an exclude or levels alone give it none', () => {
+    expect(hasModelSource({ targets: [] })).toBe(false);
+    expect(hasModelSource({})).toBe(false);
+    expect(hasModelSource({ targets: [], include: [], contains: [] })).toBe(false);
+    expect(hasModelSource({ exclude: ['*-mini'], levels: ['low'] })).toBe(false);
   });
 });
 
