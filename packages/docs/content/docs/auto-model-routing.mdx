@@ -67,7 +67,8 @@ provider failover. Define ordered pools in OpenCode's
 example, set **Trivial** to `opencode-route/cheap-fast`, **Implement** to
 `opencode-route/smart-slow`, and **Hard** and **Review** to
 `opencode-route/frontier-heavy`. Jev still makes the task decision; the chosen
-route then tries its providers in order.
+route then tries its targets by weight, in the listed order when weights are
+equal.
 
 OpenCode moves to another target on retryable provider failures, quota or
 authentication errors, and a missed first-output deadline. Completed requests
@@ -107,7 +108,7 @@ Choosing any real model in the picker takes the session out of Auto. Pick **Auto
 
 ## Plans, usage and reviews
 
-**Settings → Routing → Plans and usage** keeps what the review cannot measure: your subscriptions and their quota windows (name, unit, limit, how long the window is, how it resets), fees and expiry dates, the date each plan was last checked and where from, a cost tier for each model (`plan`, `common`, `medium`, `high`, with the plans that cover it), what each pool is for, and notes about how usage has felt. Notes are kept as you wrote them and never rewritten. Use them for things like "ran out of Claude too fast" or "I always have GPT left at month end"; the review weighs them against the usage history.
+**Settings → Routing → Plans and usage** keeps what the review cannot measure: your subscriptions and their quota windows (name, unit, limit, how long the window is, how it resets), fees and expiry dates, the date each plan was last checked and where from, a cost tier for each model (`cheap`, `standard` or `frontier`, with the plans that cover it), what each pool is for, and notes about how usage has felt. Notes are kept as you wrote them and never rewritten. Use them for things like "ran out of Claude too fast" or "I always have GPT left at month end"; the review weighs them against the usage history.
 
 Two buttons start a new chat with a command ready to send:
 
