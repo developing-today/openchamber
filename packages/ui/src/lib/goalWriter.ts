@@ -2,15 +2,16 @@ import { z } from 'zod';
 import type { Message, Part } from '@/lib/opencode/model';
 import { excerptMarkdown, formatMessageText } from '@/lib/messages/messageMarkdown';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import type { SessionGoalAutoCreate, SessionGoalWriterSendMode } from '@/stores/useUIStore';
+import type { SessionGoalAutoCreate } from '@/stores/useUIStore';
 
 // The goal writer: a model turns a message into a goal spec within the goal
-// length limit (Settings). The server owns the prompt, the limit and
+// length limit (Settings). The server owns the built-in prompt, the limit and
 // the model choice (`POST /api/goals/spec`, see
 // packages/web/server/lib/session-goal/DOCUMENTATION.md); this module asks for
-// a spec, decides when the composer asks, and shapes the context it sends.
+// a spec, decides when the composer asks, shapes the context it sends, and
+// reads and rewrites the prompt for Settings.
 
-export type GoalSpecResult =
+type GoalSpecResult =
   | { ok: true; spec: string; providerID: string; modelID: string; variant: string | null }
   | { ok: false; message: string };
 
@@ -22,23 +23,15 @@ export interface GoalWriterChoice {
   variant: string | null;
 }
 
-/** How a send that went through the goal writer carries its goal. */
-export type GoalSubmitChoice =
-  | { kind: 'spec'; spec: string; sendMode: SessionGoalWriterSendMode; ignoreLimit: boolean }
-  /** The typed message is the objective, as it is without the writer. */
-  | { kind: 'unchanged' }
-  /** No goal: the message goes out as an ordinary one. */
-  | { kind: 'none' };
-
 /**
- * Why the composer stops a send to write a goal: the user armed one, or the
- * session has none and "start a goal from the next message" is on.
+ * Why the composer sends a message through the goal writer: the user armed a
+ * goal, or the session has none and "start a goal from the next message" is on.
  */
-export type GoalWriterTrigger = 'armed' | 'auto-create';
+type GoalWriterTrigger = 'armed' | 'auto-create';
 
 export interface GoalWriterPlan {
   trigger: GoalWriterTrigger;
-  /** Show the spec for approval; false sends it as soon as it is written. */
+  /** Wait on the card for approval; false sends the spec as soon as it is written. */
   review: boolean;
 }
 
@@ -51,6 +44,19 @@ const GoalSpecResponseSchema = z.object({
 });
 
 const GoalSpecErrorSchema = z.object({ error: z.string().min(1) });
+
+type GoalWriterAnswer<T> = { ok: true; data: T } | { ok: false; message: string };
+
+/** A goal writer route's answer: its parsed body, or the reason it failed. */
+async function readGoalWriterAnswer<T>(response: Response, schema: z.ZodType<T>, emptyMessage: string): Promise<GoalWriterAnswer<T>> {
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const parsedError = GoalSpecErrorSchema.safeParse(payload);
+    return { ok: false, message: parsedError.success ? parsedError.data.error : `HTTP ${response.status}` };
+  }
+  const parsed = schema.safeParse(payload);
+  return parsed.success ? { ok: true, data: parsed.data } : { ok: false, message: emptyMessage };
+}
 
 export interface GoalSpecRequest {
   /** What the spec is written from: the typed message or the goal text. */
@@ -106,20 +112,88 @@ export async function requestGoalSpec(input: GoalSpecRequest): Promise<GoalSpecR
       signal: input.signal,
       body: JSON.stringify(body),
     });
-    const payload: unknown = await response.json().catch(() => null);
-    if (!response.ok) {
-      const parsedError = GoalSpecErrorSchema.safeParse(payload);
-      return { ok: false, message: parsedError.success ? parsedError.data.error : `HTTP ${response.status}` };
-    }
-    const parsed = GoalSpecResponseSchema.safeParse(payload);
-    if (!parsed.success) return { ok: false, message: 'The goal writer returned no spec' };
+    const answer = await readGoalWriterAnswer(response, GoalSpecResponseSchema, 'The goal writer returned no spec');
+    if (!answer.ok) return answer;
     return {
       ok: true,
-      spec: parsed.data.spec,
-      providerID: parsed.data.providerID,
-      modelID: parsed.data.modelID,
-      variant: parsed.data.variant ?? null,
+      spec: answer.data.spec,
+      providerID: answer.data.providerID,
+      modelID: answer.data.modelID,
+      variant: answer.data.variant ?? null,
     };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The goal writer's built-in prompt and the rules the server adds after every prompt. */
+export type GoalWriterBuiltinPromptResult =
+  | { ok: true; prompt: string; rules: string }
+  | { ok: false; message: string };
+
+const GoalWriterBuiltinPromptSchema = z.object({ prompt: z.string().min(1), rules: z.string() });
+
+/**
+ * Read the built-in prompt from the server, which owns its text. Never throws:
+ * a failure comes back with its reason.
+ */
+export async function fetchGoalWriterBuiltinPrompt(): Promise<GoalWriterBuiltinPromptResult> {
+  try {
+    const response = await runtimeFetch('/api/goals/spec/prompt', { headers: { Accept: 'application/json' } });
+    const answer = await readGoalWriterAnswer(response, GoalWriterBuiltinPromptSchema, 'The server sent no built-in prompt');
+    return answer.ok ? { ok: true, prompt: answer.data.prompt, rules: answer.data.rules } : answer;
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export type GoalWriterPromptRewriteResult =
+  | { ok: true; prompt: string; providerID: string; modelID: string }
+  | { ok: false; message: string };
+
+interface GoalWriterPromptRewriteRequest {
+  /** The prompt on screen; empty lets the server take the prompt in use. */
+  prompt: string;
+  /** The change to make, in the user's words. */
+  instruction: string;
+  /** The session's model; the server uses it unless Settings names a writer model. */
+  providerID?: string | null;
+  modelID?: string | null;
+  signal?: AbortSignal;
+}
+
+/** The `POST /api/goals/spec/prompt/rewrite` body; a missing field means "none". */
+interface GoalWriterPromptRewriteBody {
+  prompt: string;
+  instruction: string;
+  providerID?: string;
+  modelID?: string;
+}
+
+const GoalWriterPromptRewriteResponseSchema = z.object({
+  prompt: z.string().trim().min(1),
+  providerID: z.string(),
+  modelID: z.string(),
+});
+
+/**
+ * Ask the goal writer's model to rewrite the prompt as the instruction says.
+ * Never throws: a failure comes back with its reason. No directory goes along:
+ * Settings edits this server's settings, so the server that reads them answers.
+ */
+export async function requestGoalWriterPromptRewrite(input: GoalWriterPromptRewriteRequest): Promise<GoalWriterPromptRewriteResult> {
+  const body: GoalWriterPromptRewriteBody = { prompt: input.prompt, instruction: input.instruction };
+  if (input.providerID) body.providerID = input.providerID;
+  if (input.modelID) body.modelID = input.modelID;
+  try {
+    const response = await runtimeFetch('/api/goals/spec/prompt/rewrite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: input.signal,
+      body: JSON.stringify(body),
+    });
+    const answer = await readGoalWriterAnswer(response, GoalWriterPromptRewriteResponseSchema, 'The model returned no prompt');
+    return answer.ok ? { ok: true, ...answer.data } : answer;
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -167,13 +241,13 @@ export function buildGoalIntroReminder(tokenBudget: number | null, spec: string 
     + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.';
   if (!spec) {
     return '<system-reminder>\n'
-      + 'Goal mode is active for this session. The user message above defines the goal objective. '
+      + 'Goal mode is active for this session. The user message that follows defines the goal objective. '
       + rules
       + budgetLine
       + '\n</system-reminder>';
   }
   return '<system-reminder>\n'
-    + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+    + 'Goal mode is active for this session. The goal spec below was written from the user message that follows. '
     + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
     + rules
     + budgetLine

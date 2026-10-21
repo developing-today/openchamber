@@ -18,6 +18,7 @@ import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { attachmentHint } from '../routing/runtime.js';
+import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -81,6 +82,21 @@ const parseSendConfig = (value) => {
   return sendConfig;
 };
 
+/**
+ * The goal a message armed in the composer starts when it goes out, with the
+ * token budget captured when it was queued. Null for a message without one;
+ * anything else is refused.
+ */
+const parseGoal = (value) => {
+  if (value === undefined || value === null) return null;
+  const raw = asRecord(value);
+  const tokenBudget = raw?.tokenBudget ?? null;
+  if (!raw || (tokenBudget !== null && !(Number.isInteger(tokenBudget) && tokenBudget > 0))) {
+    throw new TypeError('item goal needs a tokenBudget that is a positive integer or null');
+  }
+  return { tokenBudget };
+};
+
 const parseAttachment = (value) => {
   const raw = asRecord(value);
   if (!raw) return null;
@@ -134,6 +150,9 @@ export const parseQueuedItemInput = (value) => {
   if (!text.trim() && attachments.length === 0 && context.length === 0) {
     throw new TypeError('item needs text, attachments, or context');
   }
+  // The text is the goal's objective, so a goal without it could never start.
+  const goal = parseGoal(raw.goal);
+  if (goal && !text.trim()) throw new TypeError('item goal needs the message text');
   const sendConfig = parseSendConfig(raw.sendConfig);
   const provenance = asRecord(raw.scheduledTask);
   const projectId = asNonEmptyString(provenance?.projectId);
@@ -148,6 +167,7 @@ export const parseQueuedItemInput = (value) => {
   const contextPreview = asNonEmptyString(raw.contextPreview).slice(0, 103);
   if (contextPreview) item.contextPreview = contextPreview;
   item.sendConfig = sendConfig ?? {};
+  if (goal) item.goal = goal;
   if (provenance) {
     item.scheduledTask = { projectId, taskId };
     const agent = asNonEmptyString(raw.sendConfig?.agent);
@@ -188,6 +208,7 @@ const toPublicItem = (item) => {
       + (contextPreview.length > firstLine.length || firstLine.length > 100 ? '...' : '');
   }
   publicItem.sendConfig = { ...item.sendConfig };
+  if (item.goal) publicItem.goal = { ...item.goal };
   if (item.scheduledTask) publicItem.scheduledTask = { ...item.scheduledTask };
   return publicItem;
 };
@@ -246,6 +267,9 @@ export function createMessageQueueRuntime({
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
   resolveAutoSelection = null,
+  // Saves the goal a queued message carries, as every server-created goal is saved.
+  persistSessionGoal = null,
+  createGoal = createSessionGoal,
   dataDir,
   fetchImpl = fetch,
   now = Date.now,
@@ -549,6 +573,22 @@ export function createMessageQueueRuntime({
     // whole send, so a retry does not admit the context twice.
     const command = await resolveSlashCommand(item.text, directory);
 
+    // A goal armed with the message starts now that the message goes out. It
+    // is saved as every server-created goal is, on the model the message goes
+    // out on, and before anything is admitted: a save that fails fails the
+    // send with nothing in the session yet.
+    const goal = item.goal
+      ? await createGoal({
+        sessionID: sessionId,
+        directory,
+        objective: item.text,
+        tokenBudget: item.goal.tokenBudget,
+        providerID: model.providerID,
+        modelID: model.id,
+        persistSessionGoal,
+      })
+      : null;
+
     // Standing project context rides the send exactly as a UI send would
     // attach it; a failed lookup sends without it rather than not at all.
     const knowledge = sessionKnowledgeRuntime
@@ -563,6 +603,9 @@ export function createMessageQueueRuntime({
     // OpenCode 2.x expands only on the command route.
     const preamble = [...contextMessages];
     if (knowledge.text) preamble.push({ text: knowledge.text, resume: false });
+    // The goal reminder comes last, right before the message it names, as the
+    // composer sends it. A spec "rewrite every goal" wrote rides along.
+    if (goal) preamble.push({ text: buildGoalIntroText(item.goal.tokenBudget, goal.spec), resume: false });
     for (const synthetic of preamble) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,

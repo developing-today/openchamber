@@ -13,6 +13,7 @@ import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { createInputHistorySubmission } from '@/stores/useInputHistoryStore';
+import { createGoalArm } from '@/stores/useSessionGoalArmStore';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -95,6 +96,7 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     agentMentionName: queued.agentMention,
     additionalParts: queuedContextToParts(queued.context ?? []),
     sendConfig: queued.sendConfig,
+    goal: queued.goal,
   };
 };
 
@@ -111,6 +113,9 @@ export const sendQueuedAutoSendPayload = (
   payload: QueuedAutoSendPayload,
   resolved: ResolvedQueuedSendConfig,
 ) => {
+  // The goal it was queued with goes with this send; without one, the send
+  // reads the composer's arm as it always has.
+  const goalArm = payload.goal ? createGoalArm(true) : undefined;
   return useSessionUIStore.getState().sendMessage(
     payload.primaryText,
     resolved.providerID,
@@ -121,7 +126,7 @@ export const sendQueuedAutoSendPayload = (
     payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
     'normal',
-    { target, historySubmissions: payload.historySubmissions },
+    { target, historySubmissions: payload.historySubmissions, goalArm },
   );
 };
 

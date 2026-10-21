@@ -106,6 +106,7 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
+import { createGoalSpecJobRuntime } from './lib/session-goal/spec-jobs.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
@@ -1126,9 +1127,28 @@ const messageQueueRuntime = createMessageQueueRuntime({
   beforeScheduledTaskSend: (...args) => scheduledTasksRuntime.beforeScheduledTaskSend(...args),
   validateScheduledTaskTarget: (...args) => scheduledTasksRuntime.validateTarget(...args),
   onScheduledTaskResult: (...args) => scheduledTasksRuntime.onScheduledTaskResult(...args),
+  // A message queued with an armed goal starts that goal when it goes out.
+  persistSessionGoal: (sessionID, directory, goal) =>
+    persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   dataDir: OPENCHAMBER_DATA_DIR,
 });
 messageQueueRuntime.start();
+
+// A send through the goal writer is a job this server owns: the spec is
+// written, waits for review, or goes out with its goal without any window open.
+const goalSpecJobRuntime = createGoalSpecJobRuntime({
+  globalEventHub: globalMessageStreamHub,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
+  persistSessionGoal: (sessionID, directory, goal) =>
+    persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
+  sessionKnowledgeRuntime,
+  resolveAutoSelection: (send) => routingRuntime.resolveAutoSelection(send),
+  onPromptSent: (sessionId) => sessionRuntime.markUserMessageSent(sessionId),
+  dataDir: OPENCHAMBER_DATA_DIR,
+});
+goalSpecJobRuntime.start();
 
 // Sessions an agent dispatched with `returnResult` report back to it: their
 // final answer lands in the dispatching session and wakes it.
@@ -1729,7 +1749,12 @@ const openChamberSessionService = createOpenChamberSessionService({
   dataDir: OPENCHAMBER_DATA_DIR,
   sessionMetadataStore,
   persistSessionMetadata: persistSessionMetadataPatch,
-  broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
+  broadcastGlobalUiEvent: (event, options) => {
+    broadcastOpenChamberUiEvent(event, options);
+    // Archiving is OpenChamber's own state and this broadcast its only
+    // signal: an archived session's goal writer job ends with it.
+    goalSpecJobRuntime.processPayload(event);
+  },
   resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,
 });
@@ -1974,6 +1999,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   messageQueueRuntime,
+  goalSpecJobRuntime,
   dispatchResultsRuntime,
   messageSearchRuntime,
   sessionRuntime,
@@ -2647,6 +2673,7 @@ async function main(options = {}) {
     permissionAutoAcceptRuntime,
     worktreeBootstrapStore,
     messageQueueRuntime,
+    goalSpecJobRuntime,
     routingRuntime,
   });
 

@@ -55,6 +55,8 @@ import {
     withdrawComposerInsets,
 } from '@/components/chat/composer/state/composerInsetReaders';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
+import { GoalSpecJobCard } from '@/components/chat/GoalSpecJobCard';
+import { useSentGoalSpecJobOvertaken } from '@/components/chat/goalSpecJobOvertaken';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
@@ -381,10 +383,13 @@ const ChatViewport = React.memo(({
         </div>
     ), [isLoadingOlder, onLoadOlder, showLoadOlderButton, t]);
 
+    const goalSpecCardOvertaken = useSentGoalSpecJobOvertaken(currentSessionId, directory);
     const listFooter = React.useMemo(() => (
         <>
             {/* Permissions and forms dock above the composer (`PermissionDock`, `FormDock`). */}
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
+            {/* A message sent through the goal writer, until it goes out, and after until the user sends another. */}
+            {goalSpecCardOvertaken ? null : <GoalSpecJobCard sessionId={currentSessionId} className="chat-message-column pt-2" />}
 
             {/* Tail spacer. With a floating composer it reserves the band the
                 composer covers, plus any panel docked above it (queue, BTW),
@@ -412,7 +417,7 @@ const ChatViewport = React.memo(({
                 aria-hidden="true"
             />
         </>
-    ), [currentSessionId, directory, floatingComposer, isMobile, sessionIsWorking]);
+    ), [currentSessionId, directory, floatingComposer, goalSpecCardOvertaken, isMobile, sessionIsWorking]);
 
     const endFadeStyle: React.CSSProperties & Record<'--chat-status-row-clearance', string> = {
         '--chat-status-row-clearance': `${statusRowClearance}px`,
@@ -1526,6 +1531,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // On mobile the keyboard choreography still moves the form inside the
     // slot and shrinks the column around it, so the slot rides along unchanged.
     const floatingComposer = !draftLayoutVisible && !isDesktopExpandedInput;
+    // A session with no transcript yet (a new chat whose first message went
+    // to the goal writer) shows the goal writer card above the composer: the
+    // empty surface below has no list footer to hold it.
+    const transcriptEmpty = Boolean(currentSessionId)
+        && !draftLayoutVisible
+        && hasRenderableSessionSnapshot
+        && sessionMessages.length === 0
+        && !sessionIsWorking;
     // The slot's height is published as `--chat-composer-inset` (the end fade
     // reads it) and the list footer's tail spacer reads
     // `--chat-composer-tail-inset` (see composerTailInset: a composer that
@@ -1920,6 +1933,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         scrollToBottom={scrollToBottomOnSend}
                         scrollToLatest={resumeToLatestInstant}
                         draftPresentationExiting={draftPresentationExiting}
+                        goalSpecCardAboveInput={transcriptEmpty}
                     />
                 )}
             </div>

@@ -83,7 +83,7 @@ import {
   type UnarchiveSessionsOptions,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
-import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { createGoalArm, useSessionGoalArmStore, type SessionGoalArm } from "@/stores/useSessionGoalArmStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { buildGoalIntroReminder } from "@/lib/goalWriter"
 import { useUIStore } from "@/stores/useUIStore"
@@ -191,6 +191,8 @@ export async function routeMessage(params: {
    * without waiting for it. Resolves to '' when nothing is owed.
    */
   sessionKnowledge?: Promise<string>
+  /** Told the id a prompt's user message gets; a command or shell send has none. */
+  onMessageID?: (messageID: string) => void
 }): Promise<'command' | 'prompt' | 'shell'> {
   const requestDirectory = params.directory ?? undefined
   // The session carries its own model and agent server-side. Sending them on
@@ -318,6 +320,7 @@ export async function routeMessage(params: {
     context: contextItems,
     leadingContext: params.sessionKnowledge?.then((text) => (text ? { text } : null)),
     appendSubmissions: params.appendSubmissions,
+    onMessageID: params.onMessageID,
     send: (messageID, context) => opencodeClient.sendMessage({
       runtimeKey: params.runtimeKey,
       id: params.sessionId,
@@ -355,6 +358,15 @@ type SendMessageOptions = {
   delivery?: 'steer'
   /** Skills named inline, attached to the prompt once the session exists. */
   skills?: SkillMentions
+  /**
+   * This send's goal, from its caller. The composer's armed goal is neither
+   * read nor cleared, so while this send waits for OpenCode to start, a send
+   * from a composer cannot take this goal, and this send cannot take the
+   * composer's.
+   */
+  goalArm?: SessionGoalArm
+  /** Told the id of the user message a prompt creates, before it is sent; a command or shell send has none. */
+  onMessageID?: (messageID: string) => void
 }
 
 type AssistantMessageSessionExecution = {
@@ -1813,7 +1825,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
       const goalArm = inputMode !== "shell" && content.trim().length > 0
-        ? useSessionGoalArmStore.getState().consume()
+        // A caller's own goal leaves the composer's arm where it is.
+        ? options?.goalArm ?? useSessionGoalArmStore.getState().consume()
         : { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }
       const goalArmed = goalArm.armed
       // Creates the armed goal and returns its goal-mode reminder, which
@@ -1845,11 +1858,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           const saved = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite, ignoreLimit: goalArm.ignoreLimit }, null)
           rewrittenSpec = saved.outcome === 'saved' ? saved.rewrittenSpec : null
         } catch (error) {
-          useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
-            settled: goalArm.settled,
-            briefAgent: goalArm.briefAgent,
-            ignoreLimit: goalArm.ignoreLimit,
-          })
+          // The composer gets its arm back for the retry; a caller's own goal
+          // stays with the caller, which reports the failure.
+          if (!options?.goalArm) {
+            useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
+              settled: goalArm.settled,
+              briefAgent: goalArm.briefAgent,
+              ignoreLimit: goalArm.ignoreLimit,
+            })
+          }
           throw error
         }
         const briefing = goalArm.briefAgent ? goalArm.objectiveOverride : rewrittenSpec
@@ -1916,6 +1933,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           delivery: options?.delivery,
           skills: options?.skills,
           sessionKnowledge: draftKnowledgeRequest?.then((knowledge) => knowledge.text),
+          onMessageID: options?.onMessageID,
           additionalParts: draftParts.map((p) => ({
             text: p.text,
             synthetic: p.synthetic,
@@ -2043,6 +2061,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         delivery: options?.delivery,
         skills: options?.skills,
         sessionKnowledge: knowledgeRequest?.then((knowledge) => knowledge.text),
+        onMessageID: options?.onMessageID,
         additionalParts: additionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,
@@ -2291,13 +2310,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
     }
 
-    // "Run as goal" rides the same arm mechanism as the composer target
-    // button: sendMessage consumes the flag, stamps the goal (objective =
-    // the composed fork message) and attaches the goal-mode intro part.
-    // Set explicitly either way so a stray armed flag cannot leak into a
-    // non-goal fork.
-    useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
-
+    // "Run as goal" goes with this send (`goalArm`): sendMessage stamps the
+    // goal (objective = the composed fork message) and attaches the
+    // goal-mode intro part. The composer's own arm is neither read nor
+    // cleared, so a composer send made while this one waits cannot take the
+    // fork's goal, and a goal the user armed in the composer stays theirs.
     await get().sendMessage(
       composeForkSessionMessage(execution.instructions, assistantPlanText),
       providerID,
@@ -2308,7 +2325,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       undefined,
       execution.variant || undefined,
       undefined,
-      { sessionId: session.id },
+      { sessionId: session.id, goalArm: createGoalArm(execution.runAsGoal === true) },
     )
   },
 

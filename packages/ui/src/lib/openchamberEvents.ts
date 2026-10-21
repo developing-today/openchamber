@@ -6,6 +6,7 @@ import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
+import { goalSpecJobUpdatedEventSchema, type GoalSpecJobUpdatedEvent } from '@/stores/goalSpecJobStore';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
 
@@ -186,6 +187,7 @@ type OpenChamberEvent =
   | RoutingPermissionHeldEvent
   | RoutingSafetySkippedEvent
   | MessageQueueUpdatedEvent
+  | GoalSpecJobUpdatedEvent
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
@@ -387,6 +389,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:message-queue.updated') {
     const parsed = messageQueueUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:goal-spec-job.updated') {
+    const parsed = goalSpecJobUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) {
       for (const listener of listeners) listener(parsed.data);
     }

@@ -116,6 +116,23 @@ agent row inside the box on mobile; `ChatInput` mounts both. Keep it out of
 the line mounted there sat to the left of the box, cut off, and made the box
 narrower.
 
+A session with no transcript yet (a new chat whose first message went to the
+goal writer) shows its goal writer card (`GoalSpecJobCard`) above the composer
+box, inside the form: `ChatContainer` passes `goalSpecCardAboveInput` while it
+shows the empty surface, and once the transcript has a row the card is that
+transcript's last row, until a sent card is followed by another message of the
+user. A send the goal writer takes leaves the composer as a
+queued message does (`takeComposerMessage`, which queueing shares) and starts
+the server's job; a new-session draft becomes a session for it first. The
+rules are in `packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Goal
+writer in the UI*. A goal writer job taken back for editing returns through
+`input-store.pendingComposerEdits`, addressed to a session's composer or, for
+a new chat whose empty session was removed, to one new-session draft by its
+id. The composer showing that session or draft takes it
+(a `/btw` composer leaves it waiting), appends its text after anything typed
+since (`restoreDraft`), restores its files and puts its attached chips back,
+as editing a queued message does.
+
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
 which clears the revert and puts the messages and the agent's file changes
@@ -131,7 +148,10 @@ state is one persisted preference in `useUIStore` (`messageQueueExpanded`,
 collapsed by default), shared by every session and surviving session switches
 and reloads. It receives the composer's main-session queue target instead of
 resolving the global selection, so a chat pinned in the side panel addresses
-its own queue. It stays visible under the form and permission docks.
+its own queue. It stays visible under the form and permission docks. A message
+queued with the goal target armed takes the goal with it, or goes to the goal
+writer as a send would; editing it arms the target again (*Queued goals* in
+`packages/web/server/lib/session-goal/DOCUMENTATION.md`).
 
 `selectComposerQueue` in the submission builder excludes server-scheduled items
 before the composer counts manual content or reads captured send configuration.

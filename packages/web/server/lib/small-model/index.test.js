@@ -238,6 +238,19 @@ describe('generateSmallModelText', () => {
     expect(lastGenerate().body.model).toEqual({ id: 'gpt-5.6-luna', providerID: 'openai' });
   });
 
+  it('sends the thinking level of an explicit request model to OpenCode', async () => {
+    await generateSmallModelText({ prompt: 'hi', model: 'openai/gpt-5.6-luna', variant: 'high', directory: '/proj' });
+
+    expect(lastGenerate().body.model).toEqual({ id: 'gpt-5.6-luna', providerID: 'openai', variant: 'high' });
+  });
+
+  it('drops a thinking level when no request model names the model it belongs to', async () => {
+    const result = await generateSmallModelText({ prompt: 'hi', variant: 'high', directory: '/proj' });
+
+    expect(result.source).toBe('default');
+    expect(lastGenerate().body.model).toEqual({ id: 'claude-haiku-4-5', providerID: 'anthropic' });
+  });
+
   it('sends an explicit Claude Code model like any other', async () => {
     const result = await generateSmallModelText({ prompt: 'hi', model: 'claude-code/haiku', directory: '/proj' });
 
@@ -254,6 +267,26 @@ describe('generateSmallModelText', () => {
     });
 
     expect(result).toMatchObject({ providerID: 'openai', modelID: 'gpt-5.6-luna', source: 'session-model' });
+  });
+
+  it('treats a session or request on Auto as naming no model', async () => {
+    // Auto (openchamber/auto) is OpenChamber's own choice; before, a session on
+    // Auto came back as the "session model" openchamber/auto, which OpenCode
+    // refuses. It now gets what a session naming no model gets.
+    const unnamed = await generateSmallModelText({ prompt: 'hi', directory: '/proj' });
+    expect(unnamed.providerID).not.toBe('openchamber');
+
+    const sessionOnAuto = await generateSmallModelText({
+      prompt: 'hi',
+      directory: '/proj',
+      preferredProviderID: 'openchamber',
+      preferredModelID: 'auto',
+    });
+    expect(sessionOnAuto).toMatchObject({ providerID: unnamed.providerID, modelID: unnamed.modelID, source: unnamed.source });
+    expect(lastGenerate().body.model.providerID).toBe(unnamed.providerID);
+
+    const requestedAuto = await generateSmallModelText({ prompt: 'hi', directory: '/proj', model: 'openchamber/auto' });
+    expect(requestedAuto).toMatchObject({ providerID: unnamed.providerID, modelID: unnamed.modelID, source: unnamed.source });
   });
 
   it('prefers the small model of the session provider over the session model itself', async () => {

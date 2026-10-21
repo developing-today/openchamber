@@ -676,6 +676,14 @@
         "mobile"
       ]
     },
+    "sessionGoalWriterPrompt": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "sessionGoalWriterRememberChoice": {
       "scope": "profile",
       "surfaces": [

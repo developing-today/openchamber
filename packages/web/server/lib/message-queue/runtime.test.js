@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildGoalIntroText } from '../session-goal/create.js';
 import { createMessageQueueRuntime, parseQueuedItemInput } from './runtime.js';
 
 const SESSION = 'ses_queue_test_1';
@@ -86,11 +87,15 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, createGoal } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
   const promptSent = [];
+  // Each goal the queue starts, and how many messages and switches the
+  // session had been sent by then.
+  const goals = [];
+  const persistSessionGoal = vi.fn(async () => undefined);
   const options = {
     globalEventHub: {
       subscribeEvent(handler) { eventHandler = handler; return () => {}; },
@@ -101,6 +106,11 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     sessionKnowledgeRuntime: knowledge,
     broadcastGlobalUiEvent: (event) => broadcasts.push(event),
     onPromptSent: (sessionId) => promptSent.push(sessionId),
+    persistSessionGoal,
+    createGoal: async (input) => {
+      goals.push({ input, sentBefore: openCode.state.sent.length, switchedBefore: openCode.state.switched.length });
+      return createGoal ? createGoal(input) : { goal: { id: `goal-${goals.length}` }, spec: null };
+    },
     dataDir,
     fetchImpl: openCode.fetchImpl,
     dispatchQuietMs: 0,
@@ -118,6 +128,8 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     dataDir,
     broadcasts,
     promptSent,
+    goals,
+    persistSessionGoal,
     // The hub hands server-side subscribers already-translated events.
     emit: (payload, directory = DIRECTORY) => eventHandler({ payload, directory, translated: () => [payload] }),
     connect: () => statusHandler({ type: 'connect' }),
@@ -381,6 +393,22 @@ describe('parseQueuedItemInput', () => {
     const parsed = parseQueuedItemInput(item({ content: '', text: '', context: [{ kind: 'synthetic', text: 'just context' }] }));
     expect(parsed.text).toBe('');
     expect(parsed.context).toHaveLength(1);
+  });
+
+  it('keeps a goal with its budget, and refuses one it could not start', () => {
+    expect(parseQueuedItemInput(item({ goal: { tokenBudget: 5000 } })).goal).toEqual({ tokenBudget: 5000 });
+    expect(parseQueuedItemInput(item({ goal: { tokenBudget: null } })).goal).toEqual({ tokenBudget: null });
+    expect(parseQueuedItemInput(item())).not.toHaveProperty('goal');
+    for (const goal of ['yes', { tokenBudget: 0 }, { tokenBudget: 1.5 }, { tokenBudget: '5000' }]) {
+      expect(() => parseQueuedItemInput(item({ goal }))).toThrow(TypeError);
+    }
+    // The text is the objective, so a message of context alone cannot carry a goal.
+    expect(() => parseQueuedItemInput(item({
+      content: '',
+      text: '',
+      context: [{ kind: 'synthetic', text: 'just context' }],
+      goal: { tokenBudget: null },
+    }))).toThrow(TypeError);
   });
 });
 
@@ -907,5 +935,150 @@ describe('message queue runtime', () => {
       agents: [{ name: 'reviewer' }],
     });
     expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
+  });
+});
+
+describe('a queued message with a goal', () => {
+  const idle = { type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } };
+  const SYNTHETIC = `/api/session/${SESSION}/synthetic`;
+  const PROMPT = `/api/session/${SESSION}/prompt`;
+  const COMMAND = `/api/session/${SESSION}/command`;
+
+  it('starts its goal when it goes out, not when it is queued: saved first, its reminder right before the prompt', async () => {
+    const knowledge = {
+      resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
+      recordDelivered: async () => {},
+    };
+    const { runtime, openCode, emit, goals, persistSessionGoal } = createRuntime({ knowledge });
+    runtime.start();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      context: [{ kind: 'synthetic', text: 'conflict payload' }],
+      goal: { tokenBudget: 5000 },
+    }));
+    await settle();
+    // The agent is still working: no goal yet, nothing sent.
+    expect(goals).toEqual([]);
+    expect(openCode.state.sent).toEqual([]);
+
+    openCode.state.active = {};
+    emit(idle);
+    await settle();
+
+    expect(goals).toHaveLength(1);
+    expect(goals[0].input).toEqual({
+      sessionID: SESSION,
+      directory: DIRECTORY,
+      objective: 'follow up',
+      tokenBudget: 5000,
+      providerID: 'anthropic',
+      modelID: 'claude',
+      persistSessionGoal,
+    });
+    // Saved once the session is on the message's model and agent, and before anything is admitted.
+    expect(goals[0]).toMatchObject({ switchedBefore: 2, sentBefore: 0 });
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([SYNTHETIC, SYNTHETIC, SYNTHETIC, PROMPT]);
+    expect(openCode.state.sent.map((entry) => entry.body)).toEqual([
+      { text: 'conflict payload', resume: false },
+      { text: 'pinned notes', resume: false },
+      { text: buildGoalIntroText(5000, null), resume: false },
+      { text: 'follow up' },
+    ]);
+    expect(openCode.state.sent[2].body.text).toContain('Goal mode is active for this session. The user message that follows defines the goal objective.');
+    expect(openCode.state.sent[2].body.text).toContain('A token budget of 5000 tokens applies to this goal.');
+    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    runtime.stop();
+  });
+
+  it('carries a spec "rewrite every goal" wrote in its reminder, which goes before a queued command too', async () => {
+    const { runtime, openCode, emit, goals } = createRuntime({
+      createGoal: async () => ({ goal: { id: 'goal-1' }, spec: 'Review the parser <and> its tests' }),
+    });
+    runtime.start();
+    openCode.state.commands = [{ name: 'review' }];
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review src', text: '/review src', goal: { tokenBudget: null } }));
+    emit(idle);
+    await settle();
+
+    expect(goals.map((goal) => goal.input.objective)).toEqual(['/review src']);
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([SYNTHETIC, COMMAND]);
+    expect(openCode.state.sent[0].body).toEqual({ text: buildGoalIntroText(null, 'Review the parser <and> its tests'), resume: false });
+    expect(openCode.state.sent[0].body.text).toContain('<goal-spec>\nReview the parser &lt;and&gt; its tests\n</goal-spec>');
+    expect(openCode.state.sent[1].body).toEqual({ name: 'review', text: 'src' });
+    runtime.stop();
+  });
+
+  it('a plain queued message starts no goal and sends no reminder', async () => {
+    const { runtime, openCode, emit, goals, broadcasts } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    expect(runtime.sessionSnapshot(SESSION).items[0]).not.toHaveProperty('goal');
+    expect(broadcasts.at(-1).properties.session.items[0]).not.toHaveProperty('goal');
+    emit(idle);
+    await settle();
+
+    expect(goals).toEqual([]);
+    expect(openCode.state.sent).toEqual([{ path: PROMPT, body: { text: 'follow up' } }]);
+    runtime.stop();
+  });
+
+  it('a goal that cannot be saved fails the send with nothing admitted, and the retry sends the message once', async () => {
+    let failures = 1;
+    const { runtime, openCode, emit, goals } = createRuntime({
+      retryDelayMs: () => 20,
+      createGoal: async () => {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error('the session metadata store is unavailable');
+        }
+        return { goal: { id: 'goal-1' }, spec: null };
+      },
+    });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ goal: { tokenBudget: null } }));
+    emit(idle);
+    await settle(10);
+    expect(goals).toHaveLength(1);
+    expect(openCode.state.sent).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull();
+
+    await settle(40);
+    expect(goals).toHaveLength(2);
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([SYNTHETIC, PROMPT]);
+    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    runtime.stop();
+  });
+
+  it('shows clients which queued message carries a goal, and keeps it across a restart', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir });
+    first.runtime.start();
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { itemId } = await first.runtime.enqueue(SESSION, DIRECTORY, item({ goal: { tokenBudget: 5000 } }));
+    expect(first.runtime.sessionSnapshot(SESSION).items[0].goal).toEqual({ tokenBudget: 5000 });
+    expect(first.broadcasts.at(-1).properties.session.items[0].goal).toEqual({ tokenBudget: 5000 });
+    await first.runtime.flush();
+    first.runtime.stop();
+
+    const second = createRuntime({ dataDir });
+    second.runtime.start();
+    await second.runtime.load();
+    expect(second.runtime.sessionSnapshot(SESSION).items[0]).toMatchObject({ id: itemId, goal: { tokenBudget: 5000 } });
+    second.connect();
+    await settle();
+    expect(second.goals.map((goal) => goal.input.tokenBudget)).toEqual([5000]);
+    expect(second.openCode.state.sent.map((entry) => entry.path)).toEqual([SYNTHETIC, PROMPT]);
+    second.runtime.stop();
+  });
+
+  it('a take hands the goal back with the message', async () => {
+    const { runtime, openCode } = createRuntime();
+    runtime.start();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item({ goal: { tokenBudget: null } }));
+    const taken = await runtime.take(SESSION, itemId);
+    expect(taken.item.goal).toEqual({ tokenBudget: null });
+    runtime.stop();
   });
 });

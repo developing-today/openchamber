@@ -44,6 +44,7 @@ import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
 import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
+import { SESSION_GOAL_WRITER_PROMPT_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -588,8 +589,22 @@ export const SETTINGS_REGISTRY = {
   // `provider/model`; missing means the session's own model. Read by the server,
   // which writes every spec, so no store holds it.
   sessionGoalWriterModel: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseNonEmptyString }),
-  // The writer model's effort level; read by the server with the model above.
-  sessionGoalWriterVariant: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseNonEmptyString }),
+  // The thinking level of the writer model above; empty is the model's
+  // default. The server sends it only with a writer model picked.
+  sessionGoalWriterVariant: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(z.string().trim().max(128)),
+    ui: uiStore('sessionGoalWriterVariant', (v) => useUIStore.getState().setSessionGoalWriterVariant(v)),
+  }),
+  // The prompt the writer follows; empty is the built-in one, which only the
+  // server holds. Kept verbatim: Settings saves it while the user types.
+  sessionGoalWriterPrompt: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseTextUpTo(SESSION_GOAL_WRITER_PROMPT_CHAR_LIMIT),
+    ui: uiStore('sessionGoalWriterPrompt', (v) => useUIStore.getState().setSessionGoalWriterPrompt(v)),
+  }),
   sessionGoalWriterRememberChoice: field({
     scope: 'profile',
     surfaces: ['web', 'desktop', 'mobile'],

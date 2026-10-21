@@ -291,6 +291,10 @@ round-trips re-read instead of guessing. Empty legacy events without a directory
 clear all projections of their session in that runtime. Projection items carry
 attachment metadata only, so `popToInput()` and `takeForSend()` asynchronously
 remove the message on the server and retrieve its complete captured payload.
+An item queued with the composer's goal armed carries `goal` (`QueuedGoal`, its
+token budget) in the projection and in both owners; whoever delivers it starts
+the goal (`packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Queued
+goals*).
 
 `lib/messages/queuedMessagePreview.ts` derives the queue row from typed text,
 then attached comments/context, then the first filename. The store sends a
@@ -404,6 +408,28 @@ Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sess
 Input history keeps both runtime-wide and runtime/directory/session buckets in one bounded browser-storage envelope. The per-bucket cap is configurable from 1 through 100 and defaults to 40. Recall defaults to the current session's bucket merged with the visible transcript's user prompts; the runtime-wide bucket is opt-in through the Chat setting. Lowering the limit trims older entries from every bucket at once and cannot restore what it discards. Every scope change, limit change, append, and session cleanup rereads the latest durable envelope before applying its mutation, so a stale tab preserves history written by another tab. A failed write retains bounded before/after snapshots. The next mutation applies that local delta to the latest durable data, preserving pending appends and session deletions together with unrelated changes from other tabs. A successful durable write clears the pending delta.
 
 Server-owned queue acceptance records the original prompt and restorable attachments against its captured runtime/directory/session identity. Rejection records nothing. Automatic delivery and manual take do not record the accepted item again. VS Code retains recording at dispatch, using the full messages actually taken for sending.
+
+`goalSpecJobStore.ts` follows the goal writer jobs the web server owns
+(`packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Goal writer jobs*):
+one job per session, keyed by session id for the active runtime, nothing
+persisted. `hydrate()` reads `GET /api/goals/spec-jobs` on load and `resync()`
+reads it again on every connection of the control stream
+(`sync/goal-spec-job-sync.ts`), sharing one request; a reconnect during a read
+earns one trailing read. Updates arrive as
+`openchamber:goal-spec-job.updated` and every mutation answer carries the same
+`{ revision, job }`. The revision is the server's global counter: an update
+older than the one applied for its session is dropped, and a snapshot taken
+before a newer update arrived does not replace the job that update set. A
+failed read keeps the jobs shown; a failed action reads the server again and
+reports the server's reason. A cancelled job and a dismissed one (`job: null`)
+leave the store. A started job records its prompt in the session's input
+history, as an accepted queued message does. `claimJob` and `editJob` return
+the full captured message with its files decoded (`toAttachedFile`);
+`claimJob` also names the claim and says whether the server holds it until
+the agent's turn is over. Spec text edited on a card stays in `specEdits`
+per job and write attempt, so a thread switch keeps it. A runtime switch
+clears the jobs and drops reads and answers started before it. VS Code never
+reads the route: it has no goal loop.
 
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 

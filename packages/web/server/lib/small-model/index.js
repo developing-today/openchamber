@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import os from 'os';
 import path from 'path';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { isAutoModel } from '../routing/defaults.js';
 import {
   findModelInfo,
   getConfiguredSmallModelRef,
@@ -177,8 +178,15 @@ const pickSmallModel = (models, accept) => {
  * only where the user sent their own work or configured on purpose.
  */
 const resolveSmallModel = async ({ client, directory, model, preferredProviderID, preferredModelID }) => {
-  const explicit = parseModelRef(model);
+  // Auto (`openchamber/auto`) is OpenChamber's own choice and no provider runs
+  // it. A request or a session on Auto therefore names no model here, and the
+  // small model below answers instead of a model OpenCode would refuse.
+  const requested = parseModelRef(model);
+  const explicit = requested && !isAutoModel(requested) ? requested : null;
   if (explicit) return { ...explicit, source: 'request' };
+  const onAuto = isAutoModel({ providerID: preferredProviderID, modelID: preferredModelID });
+  const preferredProvider = onAuto ? undefined : preferredProviderID;
+  const preferredModel = onAuto ? undefined : preferredModelID;
 
   const fromSettings = parseModelRef(readSmallModelSettingsOverride());
   if (fromSettings) return { ...fromSettings, source: 'settings' };
@@ -192,18 +200,18 @@ const resolveSmallModel = async ({ client, directory, model, preferredProviderID
     if (info?.enabled !== false) return { ...fromConfig, source: 'config' };
   }
 
-  if (preferredProviderID) {
-    const small = pickSmallModelInProvider(await listModelInfos(client, directory), preferredProviderID);
+  if (preferredProvider) {
+    const small = pickSmallModelInProvider(await listModelInfos(client, directory), preferredProvider);
     if (small) return { ...small, source: 'session-provider-small' };
     // OpenCode's own titles end here too: the model the user works with.
-    if (preferredModelID) return { providerID: preferredProviderID, modelID: preferredModelID, source: 'session-model' };
+    if (preferredModel) return { providerID: preferredProvider, modelID: preferredModel, source: 'session-model' };
   }
 
   const fallback = await getDefaultModelInfo(client);
   if (!fallback) return null;
   // Without a configured default, OpenCode answers with its first available
   // model, from any provider. A caller that named its provider stays on it.
-  if (preferredProviderID && fallback.providerID !== preferredProviderID) return null;
+  if (preferredProvider && fallback.providerID !== preferredProvider) return null;
   return { providerID: fallback.providerID, modelID: fallback.id, source: 'default' };
 };
 
@@ -268,6 +276,10 @@ const requestOptions = ({ timeoutMs, signal }) => {
 /**
  * Generates text with the user's small model through the running OpenCode.
  * Credentials stay inside OpenCode; this server only sends a prompt.
+ *
+ * `variant` is a thinking level of the explicit request `model`. It is sent
+ * only when that model is the one resolved: a level picked for one model
+ * means nothing to another, and OpenCode refuses one the model lacks.
  */
 export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, variant, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
@@ -320,6 +332,8 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   if (variant && resolved.source === 'request') modelRef.variant = variant;
   const generationOptions = requestOptions({ timeoutMs, signal });
   const unavailableMessage = `Model unavailable: ${resolved.providerID}/${resolved.modelID}`;
+  const modelRef = { id: resolved.modelID, providerID: resolved.providerID };
+  if (variant && resolved.source === 'request') modelRef.variant = variant;
   const send = async () => {
     const result = await client.generate.text(
       { prompt: fullPrompt, model: modelRef },
