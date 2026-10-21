@@ -134,3 +134,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Android launch targets the real MainActivity class                  | 2026-10-21 | #173, #200                 |
 | ROADMAP Done records the #209 and #214/#215 completions             | 2026-10-21 | #220, #221                 |
 | updateSettings feeds projects the migrated settings                 | 2026-10-21 | #199, #223                 |
+| Electron relay and space-preview ports reject malformed values      | 2026-10-21 | #226, #227                 |
