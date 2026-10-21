@@ -395,6 +395,9 @@ sees only that final turn, so the report is its evidence.
   colors/labels shared across surfaces.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
+  A send that brings its own goal (`SendMessageOptions.goalArm`, built with
+  `createGoalArm`) neither reads nor clears the flag, and a goal it fails to
+  save is not put back on it.
   Armed slash commands resolve their authoritative command template and apply
   OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
   implicit argument suffix) for the audit objective before goal metadata is
@@ -467,7 +470,7 @@ sees only that final turn, so the report is its evidence.
 - `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
   produced or the user kept over it, so rewrite-all leaves it alone;
   `briefAgent` puts the spec into the reminder when the message itself is not
-  the spec. The card's send from this window sets both.
+  the spec. The card's send from this window passes both with its own goal.
 - `stores/goalSpecJobStore.ts` follows the goal writer jobs above (snapshot on
   load and on every control-stream connection, then updates in revision order;
   `stores/DOCUMENTATION.md` has the ordering rules).
@@ -489,9 +492,11 @@ sees only that final turn, so the report is its evidence.
   user.
   `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
   `sendMessage` with the full message assembled as a taken queued message
-  (`buildOutgoingMessage`) and the goal set on the arm store for that send
-  (whatever the user had armed comes back after), then `settle` with the
-  outcome, or with the reason when the send failed. Back to edit ends the job
+  (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`),
+  then `settle` with the outcome, or with the reason when the send failed. The
+  composer's arm store stays out of it: a send held while OpenCode starts
+  waits behind any send made before it, and an armed goal there would go to
+  whichever of them consumes the store first. Back to edit ends the job
   (`edit`), hands the full message to that session's composer through
   `input-store.pendingComposerEdits`, and arms the goal again for an armed job.
   The job is the server's, so switching threads changes nothing.

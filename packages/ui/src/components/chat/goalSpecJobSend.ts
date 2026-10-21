@@ -1,7 +1,7 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGoalSpecJobStore, type GoalSpecJob, type GoalSpecJobChoice } from '@/stores/goalSpecJobStore';
 import { createMessageQueueTarget } from '@/stores/messageQueueStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { createGoalArm } from '@/stores/useSessionGoalArmStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { toServerFileUrl } from './composer/attachments/filePaths';
 import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
@@ -46,17 +46,12 @@ export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoic
         collectSkillNames: () => [],
     });
 
-    // `sendMessage` takes this send's goal from the arm, as for the composer's
-    // own sends. Whatever the user armed for their next message comes back after.
-    const goalArm = useSessionGoalArmStore.getState();
-    const previousArm = { armed: goalArm.armed, objectiveOverride: goalArm.objectiveOverride, settled: goalArm.settled, briefAgent: goalArm.briefAgent };
-    if (choice.kind === 'spec') {
-        goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message' });
-    } else if (job.trigger === 'armed') {
-        goalArm.setArmed(true, null, { settled: true });
-    } else {
-        goalArm.setArmed(false);
-    }
+    // This send carries its goal. On the composer's shared arm it would go to
+    // whichever held send consumes the arm first while OpenCode starts, and
+    // arming or disarming the target meanwhile would replace it.
+    const goalArm = choice.kind === 'spec'
+        ? createGoalArm(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message' })
+        : createGoalArm(job.trigger === 'armed', null, { settled: true });
     try {
         if (!target) throw new Error('The session of this goal spec has no directory');
         await useSessionUIStore.getState().sendMessage(
@@ -69,17 +64,12 @@ export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoic
             outgoing.additionalParts.length > 0 ? outgoing.additionalParts : undefined,
             job.sendConfig.variant,
             'normal',
-            { target, userInitiated: true },
+            { target, userInitiated: true, goalArm },
         );
     } catch (error) {
         const reason = error instanceof Error && error.message ? error.message : 'The message could not be sent';
         await jobs.settleJob(job, { outcome: null, error: reason }).catch(() => undefined);
         throw error;
-    } finally {
-        useSessionGoalArmStore.getState().setArmed(previousArm.armed, previousArm.objectiveOverride, {
-            settled: previousArm.settled,
-            briefAgent: previousArm.briefAgent,
-        });
     }
     await jobs.settleJob(job, choice.kind === 'spec'
         ? { outcome: { kind: 'spec', sendMode: choice.sendMode }, spec: choice.spec }

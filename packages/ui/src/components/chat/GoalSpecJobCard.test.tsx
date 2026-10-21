@@ -6,7 +6,7 @@ import { I18nProvider } from '@/lib/i18n';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGoalSpecJobStore, type GoalSpecJob } from '@/stores/goalSpecJobStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { useSessionGoalArmStore, type SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { GoalSpecJobCard } from './GoalSpecJobCard';
@@ -236,19 +236,21 @@ describe('GoalSpecJobCard', () => {
         },
       })
       : Response.json({ revision: 3, job: { ...waiting, status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } } }));
-    const sent: Array<{ text: string; provider: string; agent: string | undefined; files: string[]; parts: string[]; arm: { armed: boolean; objectiveOverride: string | null; briefAgent: boolean } }> = [];
-    const sendMessage: SendMessage = async (content, providerID, _modelID, agent, attachments, _mention, additionalParts) => {
-      const arm = useSessionGoalArmStore.getState();
+    const sent: Array<{ text: string; provider: string; agent: string | undefined; files: string[]; parts: string[]; goalArm: SessionGoalArm | undefined; composerArmed: boolean }> = [];
+    const sendMessage: SendMessage = async (content, providerID, _modelID, agent, attachments, _mention, additionalParts, _variant, _mode, options) => {
       sent.push({
         text: content,
         provider: providerID,
         agent,
         files: (attachments ?? []).map((file) => file.filename),
         parts: (additionalParts ?? []).map((part) => part.text),
-        arm: { armed: arm.armed, objectiveOverride: arm.objectiveOverride, briefAgent: arm.briefAgent },
+        goalArm: options?.goalArm,
+        composerArmed: useSessionGoalArmStore.getState().armed,
       });
     };
     useSessionUIStore.setState({ sendMessage });
+    // The user armed a goal for their next composer message.
+    useSessionGoalArmStore.getState().setArmed(true, null);
     await render();
 
     expect(text()).toContain('This message has attachments or attached context, so it waits for you to send it.');
@@ -259,17 +261,18 @@ describe('GoalSpecJobCard', () => {
       'POST /api/goals/spec-jobs/job-1/settle',
     ]);
     expect(calls[0]?.body).toEqual({ kind: 'spec' });
+    // The goal goes with the send; the composer's arm is not touched.
     expect(sent).toEqual([{
       text: 'See the mock',
       provider: 'p',
       agent: 'build',
       files: ['mock.png'],
       parts: ['Resolve the conflict'],
-      arm: { armed: true, objectiveOverride: 'Spec', briefAgent: true },
+      goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true },
+      composerArmed: true,
     }]);
     expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec' });
-    // What the user had armed for their next message is theirs again.
-    expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: true, objectiveOverride: null });
     expect(text()).toContain('Sent your message as typed. The spec is its goal.');
   });
 

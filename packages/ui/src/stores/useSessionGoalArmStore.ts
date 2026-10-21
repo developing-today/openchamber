@@ -6,7 +6,7 @@ import { create } from 'zustand';
 // sendMessage in session-ui-store, which turns the sent prompt into the
 // goal objective — unless the arming flow supplied a richer objective
 // override (e.g. the plan content instead of "Implement this plan: X").
-interface SessionGoalArm {
+export interface SessionGoalArm {
   armed: boolean;
   objectiveOverride: string | null;
   /**
@@ -33,16 +33,26 @@ interface SessionGoalArmStore extends SessionGoalArm {
 
 const DISARMED: SessionGoalArm = { armed: false, objectiveOverride: null, settled: false, briefAgent: false };
 
+/**
+ * An arm as `setArmed` stores it. A send that brings its own goal passes one
+ * to `sendMessage` (`goalArm`) instead of arming this store.
+ */
+export const createGoalArm = (
+  armed: boolean,
+  objectiveOverride: string | null = null,
+  options: { settled?: boolean; briefAgent?: boolean } = {},
+): SessionGoalArm => (armed
+  ? {
+      armed,
+      objectiveOverride,
+      settled: options.settled === true,
+      briefAgent: options.briefAgent === true && Boolean(objectiveOverride),
+    }
+  : DISARMED);
+
 export const useSessionGoalArmStore = create<SessionGoalArmStore>((set, get) => ({
   ...DISARMED,
-  setArmed: (armed, objectiveOverride = null, options = {}) => set(armed
-    ? {
-        armed,
-        objectiveOverride,
-        settled: options.settled === true,
-        briefAgent: options.briefAgent === true && Boolean(objectiveOverride),
-      }
-    : DISARMED),
+  setArmed: (armed, objectiveOverride, options) => set(createGoalArm(armed, objectiveOverride, options)),
   consume: () => {
     const { armed, objectiveOverride, settled, briefAgent } = get();
     if (armed) set(DISARMED);

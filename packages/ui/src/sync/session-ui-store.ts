@@ -83,7 +83,7 @@ import {
   type UnarchiveSessionsOptions,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
-import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { useSessionGoalArmStore, type SessionGoalArm } from "@/stores/useSessionGoalArmStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { buildGoalIntroReminder } from "@/lib/goalWriter"
 import { useUIStore } from "@/stores/useUIStore"
@@ -355,6 +355,13 @@ type SendMessageOptions = {
   delivery?: 'steer'
   /** Skills named inline, attached to the prompt once the session exists. */
   skills?: SkillMentions
+  /**
+   * This send's goal, from its caller. The composer's armed goal is neither
+   * read nor cleared, so while this send waits for OpenCode to start, a send
+   * from a composer cannot take this goal, and this send cannot take the
+   * composer's.
+   */
+  goalArm?: SessionGoalArm
 }
 
 type AssistantMessageSessionExecution = {
@@ -1813,7 +1820,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
       const goalArm = inputMode !== "shell" && content.trim().length > 0
-        ? useSessionGoalArmStore.getState().consume()
+        // A caller's own goal leaves the composer's arm where it is.
+        ? options?.goalArm ?? useSessionGoalArmStore.getState().consume()
         : { armed: false, objectiveOverride: null, settled: false, briefAgent: false }
       const goalArmed = goalArm.armed
       // Creates the armed goal and returns its goal-mode reminder, which
@@ -1843,10 +1851,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         try {
           ({ rewrittenSpec } = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite }, null))
         } catch (error) {
-          useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
-            settled: goalArm.settled,
-            briefAgent: goalArm.briefAgent,
-          })
+          // The composer gets its arm back for the retry; a caller's own goal
+          // stays with the caller, which reports the failure.
+          if (!options?.goalArm) {
+            useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
+              settled: goalArm.settled,
+              briefAgent: goalArm.briefAgent,
+            })
+          }
           throw error
         }
         const briefing = goalArm.briefAgent ? goalArm.objectiveOverride : rewrittenSpec
