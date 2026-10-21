@@ -23,9 +23,9 @@ A ferramenta de controle lista projetos e preferências de modelo, busca no cat�
 ## Tenha em mente
 
 - Prompts para sessões novas retornam na hora por padrão. Acompanhe a sessão no OpenChamber ou peça ao agente para conferir depois.
-- Um worktree separado só é criado quando você pede. Mudanças não commitadas do seu worktree atual não são copiadas para ele.
+- Uma sessão nova trabalha em um worktree novo do projeto, a menos que você peça para ela trabalhar na própria pasta. Mudanças não commitadas do seu worktree atual não são copiadas para ele.
 - Quando o checkout parece ocupado, por exemplo outra sessão trabalhando no mesmo branch, o agente pode oferecer mover a própria sessão para um worktree novo. Ele move depois que você concorda e leva só os arquivos que alterou.
-- As ferramentas não podem excluir sessões nem worktrees, registrar caminhos de projeto, rodar comandos de shell arbitrários ou chamar URLs arbitrárias.
+- As ferramentas não podem excluir sessões nem worktrees, rodar comandos de shell arbitrários ou chamar URLs arbitrárias. Elas podem adicionar uma pasta como projeto e tirar um projeto da lista, sem mexer nos arquivos.
 
 ## Ativar ou desativar as ferramentas
 
