@@ -8,7 +8,7 @@ import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageInput, type QueuedMessageSendConfig, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { createGoalArm, useSessionGoalArmStore, type SessionGoalArm } from '@/stores/useSessionGoalArmStore';
+import { useSessionGoalArmStore, type SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 import { isOpenGoalSpecJob, useGoalSpecJobStore } from '@/stores/goalSpecJobStore';
 import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
 import { planGoalWriter, type GoalWriterPlan } from '@/lib/goalWriter';
@@ -1487,9 +1487,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Queueing is the same user intent as sending, so an archived session
         // comes back once the queue accepts the message, not at delivery.
         const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
-        // As for a send, only a typed message takes the arm. The composer's arm
-        // names no objective of its own (sends that bring one pass their own
-        // `goalArm`), so the message is the objective.
+        // As for a send, only a typed message takes the arm. An arm that names
+        // its own objective keeps it with the message (a queued message taken
+        // back to edit and queued again); otherwise the message is the objective.
         const goalArm = inputMode === 'normal' && inputSnapshot.message.trim()
             ? useSessionGoalArmStore.getState().consume()
             : null;
@@ -1500,7 +1500,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!taken) return;
         if (carriesGoal) {
             const uiState = useUIStore.getState();
-            taken.message.goal = { tokenBudget: uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null };
+            const goal: QueuedMessageGoal = { tokenBudget: uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null };
+            const objective = goalArm?.objectiveOverride?.trim();
+            if (objective) goal.objective = objective;
+            taken.message.goal = goal;
         }
 
         // Sending while the agent works must still take the reader to the
@@ -1631,8 +1634,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Back in the composer, the message is armed again as it was queued.
         if (queued.goal) useSessionGoalArmStore.getState().setArmed(true, queued.goal.objective ?? null);
         restoreQueuedContext(queued.context ?? []);
-        // Its goal comes back with it, armed for the message as before it was queued.
-        if (queued.goal) useSessionGoalArmStore.getState().setArmed(true);
         setTimeout(() => {
             composerRef.current?.focus();
         }, 0);
@@ -2245,13 +2246,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
 
-        // A queued message's goal goes with the send that takes it, passed
-        // with the send (`goalArm`). When the composer's own text goes too, its
-        // arm is part of that goal and is taken as well; a failed send gives it back.
+        // A send carries one goal. When a taken message brings its own and the
+        // composer's text goes too, the composer's arm belongs to that goal and
+        // is taken with it, so it cannot start a second goal with the next
+        // message; a failed send gives it back.
         let composerGoalArm: SessionGoalArm | null = null;
-        if (queuedMessagesToSend.some((queued) => queued.goal)) {
-            if (!queuedOnly && inputSnapshot.hasContent) composerGoalArm = useSessionGoalArmStore.getState().consume();
-            sendMessageOptions = { ...sendMessageOptions, goalArm: composerGoalArm?.armed ? composerGoalArm : createGoalArm(true) };
+        if (sendMessageOptions?.queuedGoal && !queuedOnly && inputSnapshot.hasContent) {
+            composerGoalArm = useSessionGoalArmStore.getState().consume();
         }
 
         const historySubmissions = buildChatInputHistorySubmissions({

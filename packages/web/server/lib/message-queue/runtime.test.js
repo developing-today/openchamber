@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildGoalIntroText } from '../session-goal/create.js';
+import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { createMessageQueueRuntime, parseQueuedItemInput } from './runtime.js';
 
 const SESSION = 'ses_queue_test_1';
@@ -87,7 +87,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, createGoal, persistSessionGoal } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, createGoal, persistSessionGoal: goalStore } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -95,7 +95,9 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
   // Each goal the queue starts, and how many messages and switches the
   // session had been sent by then.
   const goals = [];
-  const persistSessionGoal = vi.fn(async () => undefined);
+  // A test that checks the saved goal record passes its own store, and the
+  // real save writes to it; the others see what the queue asked to save.
+  const persistSessionGoal = goalStore ?? vi.fn(async () => undefined);
   const options = {
     globalEventHub: {
       subscribeEvent(handler) { eventHandler = handler; return () => {}; },
@@ -109,7 +111,9 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     persistSessionGoal,
     createGoal: async (input) => {
       goals.push({ input, sentBefore: openCode.state.sent.length, switchedBefore: openCode.state.switched.length });
-      return createGoal ? createGoal(input) : { goal: { id: `goal-${goals.length}` }, spec: null };
+      if (createGoal) return createGoal(input);
+      if (goalStore) return createSessionGoal(input);
+      return { goal: { id: `goal-${goals.length}` }, spec: null };
     },
     dataDir,
     fetchImpl: openCode.fetchImpl,
@@ -121,7 +125,6 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
   if (now) options.now = now;
-  if (persistSessionGoal) options.persistSessionGoal = persistSessionGoal;
   const runtime = createMessageQueueRuntime(options);
   return {
     runtime,
@@ -1020,10 +1023,9 @@ describe('a queued message with a goal', () => {
   const COMMAND = `/api/session/${SESSION}/command`;
 
   it('starts its goal when it goes out, not when it is queued: saved first, its reminder right before the prompt', async () => {
-    const knowledge = {
-      resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
-      recordDelivered: async () => {},
-    };
+    // Project knowledge goes into the session's instruction entries, not as a message.
+    const knowledgeSyncs = [];
+    const knowledge = { sync: async (sessionId, directory) => { knowledgeSyncs.push([sessionId, directory]); return true; } };
     const { runtime, openCode, emit, goals, persistSessionGoal } = createRuntime({ knowledge });
     runtime.start();
     openCode.state.active = { [SESSION]: { type: 'running' } };
@@ -1049,18 +1051,19 @@ describe('a queued message with a goal', () => {
       providerID: 'anthropic',
       modelID: 'claude',
       persistSessionGoal,
+      onWarning: expect.any(Function),
     });
     // Saved once the session is on the message's model and agent, and before anything is admitted.
     expect(goals[0]).toMatchObject({ switchedBefore: 2, sentBefore: 0 });
-    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([SYNTHETIC, SYNTHETIC, SYNTHETIC, PROMPT]);
+    expect(knowledgeSyncs).toEqual([[SESSION, DIRECTORY]]);
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([SYNTHETIC, SYNTHETIC, PROMPT]);
     expect(openCode.state.sent.map((entry) => entry.body)).toEqual([
       { text: 'conflict payload', resume: false },
-      { text: 'pinned notes', resume: false },
       { text: buildGoalIntroText(5000, null), resume: false },
       { text: 'follow up' },
     ]);
-    expect(openCode.state.sent[2].body.text).toContain('Goal mode is active for this session. The user message that follows defines the goal objective.');
-    expect(openCode.state.sent[2].body.text).toContain('A token budget of 5000 tokens applies to this goal.');
+    expect(openCode.state.sent[1].body.text).toContain('Goal mode is active for this session. The user message that follows defines the goal objective.');
+    expect(openCode.state.sent[1].body.text).toContain('A token budget of 5000 tokens applies to this goal.');
     expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
     runtime.stop();
   });

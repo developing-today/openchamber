@@ -1176,9 +1176,6 @@ const messageQueueRuntime = createMessageQueueRuntime({
   beforeScheduledTaskSend: (...args) => scheduledTasksRuntime.beforeScheduledTaskSend(...args),
   validateScheduledTaskTarget: (...args) => scheduledTasksRuntime.validateTarget(...args),
   onScheduledTaskResult: (...args) => scheduledTasksRuntime.onScheduledTaskResult(...args),
-  // A message queued with an armed goal starts that goal when it goes out.
-  persistSessionGoal: (sessionID, directory, goal) =>
-    persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   dataDir: OPENCHAMBER_DATA_DIR,
 });
 messageQueueRuntime.start();

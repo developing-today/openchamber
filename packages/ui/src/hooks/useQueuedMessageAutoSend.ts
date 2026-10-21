@@ -13,7 +13,6 @@ import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { createInputHistorySubmission } from '@/stores/useInputHistoryStore';
-import { createGoalArm } from '@/stores/useSessionGoalArmStore';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -113,9 +112,8 @@ export const sendQueuedAutoSendPayload = (
   payload: QueuedAutoSendPayload,
   resolved: ResolvedQueuedSendConfig,
 ) => {
-  // The goal it was queued with goes with this send; without one, the send
-  // reads the composer's arm as it always has.
-  const goalArm = payload.goal ? createGoalArm(true) : undefined;
+  // The goal it was queued with goes with this send (`queuedGoal`, null
+  // without one), so the composer's arm stays with the composer's text.
   return useSessionUIStore.getState().sendMessage(
     payload.primaryText,
     resolved.providerID,

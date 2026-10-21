@@ -164,8 +164,6 @@ export const parseQueuedItemInput = (value) => {
   const taskId = asNonEmptyString(provenance?.taskId);
   if (provenance && (!projectId || !taskId)) throw new TypeError('invalid scheduledTask provenance');
   if (!sendConfig && !provenance) throw new TypeError('item sendConfig with providerID and modelID is required');
-  const goal = parseGoal(raw.goal);
-  if (goal && !text.trim()) throw new TypeError('a goal needs message text');
   const item = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
@@ -616,11 +614,12 @@ export function createMessageQueueRuntime({
     }
 
     // The goal briefing goes last, right before the message the goal is about.
-    if (item.goal) {
+    // A spec "rewrite every goal" wrote rides along.
+    if (goal) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
-        body: { text: buildGoalIntroText(item.goal.tokenBudget), resume: false },
+        body: { text: buildGoalIntroText(item.goal.tokenBudget, goal.spec), resume: false },
       });
     }
 

@@ -202,8 +202,6 @@ export const serverContextPartSchema = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('synthetic'), text: z.string() }),
 ]);
 
-const serverGoalSchema = z.object({ tokenBudget: z.number().int().positive().nullable() });
-
 const serverItemBaseSchema = z.object({
     id: z.string().min(1),
     createdAt: z.number(),
@@ -304,7 +302,6 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;
     if (item.contextPreview) message.contextPreview = item.contextPreview;
-    if (item.goal) message.goal = item.goal;
     return message;
 };
 

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { GoalSpecJob } from '@/stores/goalSpecJobStore';
+import type { QueuedMessageGoal } from '@/stores/messageQueueStore';
 import type { SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 
 // Mounts the real composer, as ChatInput.keystroke.test.tsx does, to check
@@ -529,12 +530,11 @@ describe('the composer and the goal writer', () => {
 // setting). A goal armed for it must go with it, never stay on the composer.
 describe('a message queued while the agent works, with a goal armed', () => {
   const originalSendMessage = useSessionUIStore.getState().sendMessage;
-  const sends: Array<{ text: string; goalArm: SessionGoalArm | undefined }> = [];
+  const sends: Array<{ text: string; goalArm: SessionGoalArm | undefined; queuedGoal: QueuedMessageGoal | null | undefined }> = [];
   const jobStarts = () => requests.filter((call) => call.method === 'POST' && call.path === '/api/goals/spec-jobs');
   const queued = () => queueRequests.filter((call) => call.method === 'POST' && call.path === `/api/message-queue/sessions/${SESSION_ID}/items`);
   const takes = () => queueRequests.filter((call) => call.path.endsWith('/take'));
   const anything = () => jobStarts().length > 0 || queued().length > 0 || sends.length > 0;
-  const plainArm: SessionGoalArm = { armed: true, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false };
   const settleAnswers = async () => {
     await act(async () => { await new Promise((done) => setTimeout(done, 80)); });
   };
@@ -568,7 +568,7 @@ describe('a message queued while the agent works, with a goal armed', () => {
     useSessionUIStore.setState({ newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: false } });
     useSessionUIStore.setState({
       sendMessage: async (content, _providerID, _modelID, _agent, _attachments, _mention, _parts, _variant, _mode, options) => {
-        sends.push({ text: content, goalArm: options?.goalArm });
+        sends.push({ text: content, goalArm: options?.goalArm, queuedGoal: options?.queuedGoal });
       },
     });
   });
@@ -743,7 +743,7 @@ describe('a message queued while the agent works, with a goal armed', () => {
       await composer.clickQueued('send', () => sends.length > 0);
 
       expect(takes().map((call) => call.method)).toEqual(['POST']);
-      expect(sends).toEqual([{ text: 'Add dark mode', goalArm: plainArm }]);
+      expect(sends).toEqual([{ text: 'Add dark mode', goalArm: undefined, queuedGoal: { tokenBudget: 50_000 } }]);
       expect(useSessionGoalArmStore.getState().armed).toBe(true);
     } finally {
       await composer.unmount();
@@ -762,7 +762,7 @@ describe('a message queued while the agent works, with a goal armed', () => {
 
       await composer.send('And a toggle', () => sends.length > 0);
 
-      expect(sends).toEqual([{ text: 'Add dark mode\n\nAnd a toggle', goalArm: plainArm }]);
+      expect(sends).toEqual([{ text: 'Add dark mode\n\nAnd a toggle', goalArm: undefined, queuedGoal: { tokenBudget: 50_000 } }]);
       expect(useSessionGoalArmStore.getState().armed).toBe(false);
     } finally {
       await composer.unmount();

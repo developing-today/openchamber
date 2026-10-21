@@ -81,11 +81,12 @@ They keep `goal`, so every client knows which queued message starts one.
 ## Goals on queued messages
 
 A message the user queued with the composer's goal armed carries that goal
-(`goal`, the token budget captured when it was queued). Nothing about the goal
-happens while the message waits. The send that delivers the message starts it,
-as the composer starts an armed goal with its send. The file keeps it, so a
-restart keeps it. A composer that takes the message back sends it with the
-goal itself (`goalArm`), and editing it arms the composer again; see
+(`goal`, the token budget captured when it was queued, and an `objective` when
+the arm named one). Nothing about the goal happens while the message waits. The
+send that delivers the message starts it, as the composer starts an armed goal
+with its send. The file keeps it, so a restart keeps it. A composer that takes
+the message back sends it with that goal (`queuedGoal`), and editing it arms
+the composer again; see
 `../session-goal/DOCUMENTATION.md`, *Queued goals*.
 
 Snapshots retain `contextPreview`, capped at 100 characters plus an ellipsis.

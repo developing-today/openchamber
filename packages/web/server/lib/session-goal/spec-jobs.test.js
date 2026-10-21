@@ -367,14 +367,13 @@ describe('goal writer jobs', () => {
     expect(sentToSession(working)).toEqual(reminderThenPrompt(SPEC));
   });
 
-  it('switches model and agent before the goal, and sends instructions, knowledge and the goal reminder before the prompt', async () => {
-    const knowledge = {
-      resolvePendingForSession: vi.fn(async () => ({ text: 'Project notes', signature: 'sig-1' })),
-      recordDelivered: vi.fn(async () => undefined),
-    };
+  it('switches model and agent before the goal, writes the project knowledge into the session, and sends instructions and the goal reminder before the prompt', async () => {
+    // `sync` writes the session's instruction entries and never throws.
+    const knowledge = { sync: vi.fn(async () => true) };
     const { runtime, writer, openCode } = createRuntime({ sessionKnowledgeRuntime: knowledge });
-    knowledge.recordDelivered.mockImplementation(async () => {
-      openCode.state.timeline.push('knowledge recorded');
+    knowledge.sync.mockImplementation(async () => {
+      openCode.state.timeline.push('knowledge');
+      return true;
     });
     await runtime.create(job({
       review: false,
@@ -388,14 +387,12 @@ describe('goal writer jobs', () => {
     writeAnswer(writer);
     await runtime.whenIdle();
 
-    expect(openCode.state.timeline).toEqual(['model', 'agent', 'goal', 'synthetic', 'synthetic', 'synthetic', 'prompt', 'knowledge recorded']);
+    expect(openCode.state.timeline).toEqual(['model', 'agent', 'knowledge', 'goal', 'synthetic', 'synthetic', 'prompt']);
     expect(openCode.state.calls.filter((call) => call.route === 'synthetic').map((call) => call.body.text)).toEqual([
       '<system-reminder>Load the skill</system-reminder>',
-      'Project notes',
       buildGoalIntroText(null, SPEC),
     ]);
-    expect(knowledge.resolvePendingForSession).toHaveBeenCalledWith(SESSION, DIRECTORY);
-    expect(knowledge.recordDelivered).toHaveBeenCalledWith(SESSION, DIRECTORY, 'sig-1');
+    expect(knowledge.sync).toHaveBeenCalledWith(SESSION, DIRECTORY);
   });
 
   it('a failed model switch leaves no goal', async () => {
@@ -958,10 +955,7 @@ describe('goal writer jobs', () => {
   });
 
   it('an open job follows its session to another directory', async () => {
-    const knowledge = {
-      resolvePendingForSession: vi.fn(async () => ({ text: '', signature: '' })),
-      recordDelivered: vi.fn(async () => undefined),
-    };
+    const knowledge = { sync: vi.fn(async () => true) };
     const resolveAutoSelection = vi.fn(async () => null);
     const { runtime, writer, emit, goals, broadcasts } = createRuntime({ sessionKnowledgeRuntime: knowledge, resolveAutoSelection });
     runtime.start();
@@ -980,7 +974,7 @@ describe('goal writer jobs', () => {
 
     expect(goals[0].directory).toBe('/repo-moved');
     expect(resolveAutoSelection).toHaveBeenCalledWith(expect.objectContaining({ directory: '/repo-moved' }));
-    expect(knowledge.resolvePendingForSession).toHaveBeenCalledWith(SESSION, '/repo-moved');
+    expect(knowledge.sync).toHaveBeenCalledWith(SESSION, '/repo-moved');
 
     // A sent job is done with its directory.
     emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/elsewhere' } } });

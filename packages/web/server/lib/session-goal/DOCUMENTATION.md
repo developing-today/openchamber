@@ -222,13 +222,15 @@ persisted, revisioned, broadcast).
   `send` does the same for the user's choice on the card. Auto is resolved
   first (`resolveAutoSelection`, as the OpenChamber session service does; a
   job on Auto with no resolver fails before any request), then the session is
-  switched onto the model and agent, and only then is the goal saved
+  switched onto the model and agent, the session's project knowledge is
+  written into its instruction entries (`sessionKnowledgeRuntime.sync`, which
+  never fails the send), and only then is the goal saved
   (objective file and the goal record through `persistSessionGoal`, on the
   resolved model, `rewriteAll` off since the writer or the user settled the
   objective, and the goal length limit in Settings, the one the writer wrote
   within). The session service saves its goal before the switch; here a
   failed switch leaves no goal. Then come the instructions derived from the
-  text, the session's pending project knowledge and the goal reminder
+  text and the goal reminder
   (`buildGoalIntroText`, carrying the spec only when the message went out as
   typed next to it), each a synthetic message that starts no turn (`resume:
   false`), and last the prompt with the agent mention. The prompt starts one
@@ -678,7 +680,8 @@ for any send. `handleQueueMessage` hands an armed message to `handleSubmit`
   job follows the follow-up setting. With the setting on `steer`, a message
   from the queue button goes into the running turn when the job sends it.
 - Otherwise the queue item carries the goal (`goal: { tokenBudget }`, the
-  default budget captured when it was queued). The server's queue saves the
+  default budget captured when it was queued, with `objective` when the arm
+  named one). The server's queue saves the
   goal and sends its reminder right before the message when it delivers it
   (`../message-queue/DOCUMENTATION.md`, *Delivery loop*). A message queued
   while auto-review runs goes this way even with the writer on, because the
@@ -689,20 +692,21 @@ The composer takes the arm with the message, before any request, so a message
 sent before the queue or the job answers is plain. A refusal gives the message
 back to the composer and arms the target again. As for a send, only text typed
 in normal mode takes the arm; a message whose text is empty after its agent
-mention leaves the target armed. The composer's arm names no objective of its
-own, so the message text is the objective.
+mention leaves the target armed. An arm names an objective of its own only
+when it comes back from a queued message whose goal had one; otherwise the
+message text is the objective.
 
 A queued goal message the composer takes back keeps its goal. A composer send
 that takes it ("send" on its row, or a send that takes the queue along) passes
-it with that send (`goalArm`, `createGoalArm(true)`), and when the composer's
-own text goes along the composer's arm is taken into the same goal and given
-back if the send fails. "Edit" arms the target again. Removing the message
-removes its goal. VS Code's local queue passes the goal from its auto-send the
-same way, though VS Code never arms one (it runs no goal loop). Those
-client-side sends read the token budget from Settings when they send, as the
-goal writer card's composer send does; only the server's delivery uses the
-captured one. A server older than the `goal` field drops it and queues the
-message plain.
+it with that send (`queuedGoal`, with the budget and objective it was queued
+with), and when the composer's own text goes along the composer's arm is taken
+into the same goal and given back if the send fails. A send of queued messages
+alone that carry no goal passes `queuedGoal: null`, so it never takes the arm
+that belongs to the composer's text. "Edit" arms the target again, with the
+goal's objective when it has one. Removing the message removes its goal. VS
+Code's local queue passes the goal from its auto-send the same way, though VS
+Code never arms one (it runs no goal loop). A server older than the `goal`
+field drops it and queues the message plain.
 
 ## Scheduled goals
 

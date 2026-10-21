@@ -434,9 +434,9 @@ describe('buildQueuedAutoSendPayload', () => {
       modelID: 'model-1',
     });
 
-    expect(sendMessageCalls[0]?.[9]).toMatchObject({
-      goalArm: { armed: true, objectiveOverride: null, settled: false, briefAgent: false },
-    });
+    // The send carries the item's own goal, so sendMessage never reads the composer's arm.
+    expect(sendMessageCalls[0]?.[9]).toMatchObject({ queuedGoal: { tokenBudget: null } });
+    expect(sendMessageCalls[0]?.[9]).not.toHaveProperty('goalArm');
   });
 
   test('a message queued as a goal is sent with that goal', async () => {
