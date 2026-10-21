@@ -71,6 +71,8 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   if (path.endsWith('/location')) {
     return Response.json({ directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } });
   }
+  // A response style is on, so a session's first message carries it.
+  if (path === '/api/config/settings') return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
   if (path.endsWith('/session')) return Response.json({ data: [] });
   return Response.json({});
 });
@@ -107,6 +109,8 @@ const { useUIStore } = await import('@/stores/useUIStore');
 const { useSessionGoalArmStore } = await import('@/stores/useSessionGoalArmStore');
 const { useGoalSpecJobStore } = await import('@/stores/goalSpecJobStore');
 const { opencodeClient } = await import('@/lib/opencode/client');
+const { getResponseStylePresetInstructions } = await import('@/lib/responseStyle');
+const { wrapSystemReminder } = await import('@/lib/systemReminder');
 const { OpenCode } = await import('@opencode/client');
 
 const sdk = OpenCode.make({
@@ -271,7 +275,8 @@ describe('the composer and the goal writer', () => {
             content: 'Add dark mode',
             text: 'Add dark mode',
             attachments: [],
-            context: [],
+            // The session's first message carries the response style, as a direct send does.
+            context: [{ kind: 'instruction', text: wrapSystemReminder(getResponseStylePresetInstructions('concise')) }],
             sendConfig: { providerID: 'p', modelID: 'm' },
           },
           sendConfig: { providerID: 'p', modelID: 'm' },
@@ -364,6 +369,9 @@ describe('the composer and the goal writer', () => {
       expect(createdIn).toEqual(['/workspace']);
       expect(actions().map((call) => [call.method, call.path, call.body.sessionId, call.body.directory])).toEqual([
         ['POST', '/api/goals/spec-jobs', 'ses_from_draft', '/workspace'],
+      ]);
+      expect(actions()[0]?.body.message.context).toEqual([
+        { kind: 'instruction', text: wrapSystemReminder(getResponseStylePresetInstructions('concise')) },
       ]);
       expect(useSessionUIStore.getState().currentSessionId).toBe('ses_from_draft');
       expect(directSends).toBe(0);

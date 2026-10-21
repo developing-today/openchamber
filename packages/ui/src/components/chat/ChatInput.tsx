@@ -1910,6 +1910,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (!isBtwActive) setExpandedInput(false);
             if (isMobile) composerRef.current?.blur();
 
+            // A session's first message carries the response style, as a
+            // direct send does; it is derived, so back to edit drops it.
+            if (!capturedTarget || !hasUserMessages(capturedTarget.sessionId, capturedTarget.directory)) {
+                const responseStyle = await fetchResponseStyleInstruction().catch(() => null);
+                const reminder = responseStyle ? wrapSystemReminder(responseStyle) : '';
+                if (reminder) taken.message.context = [...(taken.message.context ?? []), { kind: 'instruction', text: reminder }];
+            }
+
             const sendConfig: QueuedMessageSendConfig = { providerID, modelID };
             if (agentNameToSend) sendConfig.agent = agentNameToSend;
             if (variantToSend) sendConfig.variant = variantToSend;

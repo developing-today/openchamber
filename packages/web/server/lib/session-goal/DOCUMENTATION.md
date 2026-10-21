@@ -403,7 +403,9 @@ sees only that final turn, so the report is its evidence.
   writer input and the composer's model, agent and effort. A new-session draft
   becomes a session first (`materializeOpenDraftSession`, with the automatic
   worktree when it is on, and the draft's synthetic context added to the
-  message), since a job belongs to a session. Once the job starts, an armed
+  message), since a job belongs to a session. A session's first message also
+  carries the response style as a derived instruction, as a direct send does.
+  Once the job starts, an armed
   target is disarmed (the server writes the goal) and the prompt joins the
   session's input history; a start the server refuses gives everything back
   to the composer, to the new session's composer when one was created, and
