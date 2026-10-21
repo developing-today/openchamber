@@ -333,6 +333,20 @@ describe('buildSessionSidebarRowModel', () => {
     expect(statusesOf()).toEqual(['loading:project-b:main', 'load-failed:project-c:main']);
   });
 
+  test('the list by time shows no load line for a project hidden from all sessions', () => {
+    const hidden: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([], { directory: '/other' })] };
+    const input = args([project([group([])]), hidden]);
+    input.viewMode = 'timeline';
+    input.listGrouping = 'time';
+    input.timelineItems = [timelineItem('a1')];
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+    input.groupStatusByKey = new Map([
+      ['project-b:main', { state: 'load-failed' as const, directory: '/other', canGrantAccess: false }],
+    ]);
+
+    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'status')).toEqual([]);
+  });
+
   test('Tree rows carry guide lines for an open worktree and session; List rows carry none', () => {
     const parent = node('parent', [node('child')]);
     const worktree = group([parent, node('last')], { id: 'wt', label: 'wt', isMain: false, directory: '/wt' });

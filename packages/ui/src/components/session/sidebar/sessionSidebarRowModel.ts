@@ -920,6 +920,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const shown = new Set<string>();
     for (const section of args.sections) {
       if (listedProjects.has(section.project.id)) continue;
+      // A project hidden from all sessions stays out of this list, its load status too.
+      if (args.hiddenFromAllProjectIds?.has(section.project.id)) continue;
       const mainGroup = section.groups.find((group) => group.isMain);
       if (!mainGroup) continue;
       const groupKey = `${section.project.id}:${mainGroup.id}`;
