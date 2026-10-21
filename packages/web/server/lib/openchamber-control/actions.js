@@ -13,9 +13,11 @@ import { CONFIG_ACTION_DEFINITIONS } from './config-actions.js';
 import { INTEGRATION_ACTION_DEFINITIONS } from './integration-actions.js';
 import { INTEGRATION_SERVICE_ACTION_DEFINITIONS } from './integration-service-actions.js';
 import { ENVIRONMENT_ACTION_DEFINITIONS } from './environment-actions.js';
+import { PROJECT_SETUP_ACTION_DEFINITIONS } from './project-setup-actions.js';
 
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'projects.list', title: 'List configured projects', description: 'No parameters' },
+  { action: 'projects.list', title: 'List configured projects', description: 'Projects with their per-project settings; no parameters' },
+  { action: 'projects.update', title: 'Change project settings', description: 'Change projectId\'s per-project settings: projectSettings is an object of label, icon, color, iconBackground (#hex), sidebarCollapsed, defaultModel (provider/model), defaultAgent or defaultVariant; null removes one. A value OpenChamber would not keep is refused and nothing is saved' },
   { action: 'projects.add', title: 'Add a project', description: 'Add directory as a configured project; creates it first if create is true. An already-configured directory returns that project unchanged. projectLabel sets its display name; default: the directory\'s own name' },
   { action: 'projects.remove', title: 'Remove a project', description: 'Remove projectId from configured projects. Only the configured entry goes; the checkout, its sessions and worktrees stay on disk' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
@@ -37,6 +39,7 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   ...INTEGRATION_ACTION_DEFINITIONS,
   ...INTEGRATION_SERVICE_ACTION_DEFINITIONS,
   ...ENVIRONMENT_ACTION_DEFINITIONS,
+  ...PROJECT_SETUP_ACTION_DEFINITIONS,
   { action: 'schedule.status', title: 'Check scheduler status', description: 'No parameters', agentExposed: false },
   { action: 'schedule.list', title: 'List scheduled tasks', description: 'Tasks and scheduler status' },
   { action: 'schedule.get', title: 'View a scheduled task', description: 'One task by taskId, with its schedule, prompt, model and run state' },

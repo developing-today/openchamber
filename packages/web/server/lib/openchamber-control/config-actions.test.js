@@ -128,6 +128,63 @@ describe('settings.keys and settings.get', () => {
   });
 });
 
+describe('per-surface settings', () => {
+  // Backed by the real preferences-file logic, so surface resolution here is
+  // the one the settings route uses.
+  const createSurfaceActions = async () => {
+    const files = await import('../opencode/settings-files.js');
+    let fields = files.buildPreferencesFields({}, { sidebarLayout: { attention: 'separate' }, themeId: 'flexoki' }, 1);
+    let now = 1;
+    const read = async ({ surface = null } = {}) => files.flattenPreferences(fields, surface);
+    const persistSettings = vi.fn(async (changes, { surface = null } = {}) => {
+      now += 1;
+      fields = files.buildPreferencesFields(fields, { ...files.flattenPreferences(fields, surface), ...changes }, now, { surface, changedKeys: Object.keys(changes) });
+      return files.flattenPreferences(fields, surface);
+    });
+    const { actions } = createActions({ readSettingsFromDiskMigrated: vi.fn(read), persistSettings });
+    return { actions, persistSettings, read };
+  };
+
+  it('lists which keys are kept per surface', async () => {
+    const { actions } = createActions();
+    const byKey = Object.fromEntries((await actions.execute('settings.keys')).keys.map((entry) => [entry.key, entry]));
+    expect(byKey.sidebarLayout.perSurface).toBe(true);
+    expect(byKey.agentWebToolEnabled.perSurface).toBeUndefined();
+  });
+
+  it('writes a surface value under that surface only, and shows it beside the base', async () => {
+    const { actions, persistSettings, read } = await createSurfaceActions();
+    const layout = { attention: 'separate', otherAttention: 'shared' };
+    const saved = await actions.execute('settings.set', { settingKey: 'sidebarLayout', settingValue: layout, surface: 'desktop' });
+    expect(persistSettings).toHaveBeenCalledWith({ sidebarLayout: layout }, { surface: 'desktop' });
+    expect(saved).toMatchObject({ surface: 'desktop', updated: { sidebarLayout: layout } });
+    expect((await read({ surface: 'desktop' })).sidebarLayout).toEqual(layout);
+    expect((await read()).sidebarLayout).toEqual({ attention: 'separate' });
+
+    const one = await actions.execute('settings.get', { settingKey: 'sidebarLayout' });
+    expect(one).toMatchObject({ value: { attention: 'separate' }, perSurface: true, surfaces: { desktop: layout } });
+    expect(one.surfaces.web).toBeUndefined();
+    await expect(actions.execute('settings.get', { settingKey: 'sidebarLayout', surface: 'desktop' }))
+      .resolves.toMatchObject({ value: layout, surface: 'desktop' });
+    const all = await actions.execute('settings.get', {});
+    expect(all.surfaces).toEqual({ desktop: { sidebarLayout: layout } });
+  });
+
+  it('says a key not kept per surface reaches every surface, even when a surface is named', async () => {
+    const { actions, persistSettings } = await createSurfaceActions();
+    const result = await actions.execute('settings.set', { settingKey: 'agentWebToolEnabled', settingValue: false, surface: 'desktop' });
+    expect(persistSettings).toHaveBeenCalledWith({ agentWebToolEnabled: false }, { surface: 'desktop' });
+    expect(result.note).toMatch(/agentWebToolEnabled is not kept per surface kind/);
+  });
+
+  it('says a base write does not reach a surface that has its own value', async () => {
+    const { actions } = await createSurfaceActions();
+    const result = await actions.execute('settings.set', { settingKey: 'sidebarLayout', settingValue: { attention: 'off' } });
+    expect(result.note).toMatch(/sidebarLayout is kept per surface kind/);
+    await expectError(actions.execute('settings.get', { surface: 'toaster' }), 400, /surface must be/);
+  });
+});
+
 describe('settings.set', () => {
   it('saves one setting and answers the saved value', async () => {
     const { actions, persistSettings } = createActions();

@@ -69,7 +69,7 @@ describe('OpenChamber control service', () => {
   it('serves project and model projections without an HTTP or CLI round trip', async () => {
     const { service } = createService();
     await expect(service.execute('projects.list')).resolves.toEqual({
-      projects: [{ id: 'project-1', path: '/repo', label: 'Repo' }],
+      projects: [{ id: 'project-1', path: '/repo', label: 'Repo', settings: { label: 'Repo' } }],
     });
     await expect(service.execute('models.list')).resolves.toEqual(expect.objectContaining({
       defaultModel: 'provider/model',
@@ -231,6 +231,72 @@ describe('OpenChamber control service', () => {
       statusCode: 400,
       message: 'directory is required',
     });
+  });
+
+  it('changes per-project settings through the settings writer and refuses what the sanitizer would drop', async () => {
+    let storedProjects = [{ id: 'project-1', path: '/repo', label: 'Repo', color: 'blue' }];
+    const persistSettings = vi.fn(async (changes) => {
+      storedProjects = changes.projects;
+      return { projects: storedProjects };
+    });
+    // Stands in for the server sanitizer's rule that a model is provider/model.
+    const sanitizeProjects = (entries) => entries.map((entry) => {
+      const { defaultModel, ...rest } = entry;
+      return defaultModel?.includes('/') ? { ...rest, defaultModel } : rest;
+    });
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ projects: storedProjects })),
+      sanitizeProjects,
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(),
+      persistSettings,
+      createProjectIdFromPath: (p) => p,
+    });
+
+    await expect(service.execute('projects.update', { projectId: 'project-1', projectSettings: { defaultModel: 'openai/gpt', color: null } }))
+      .resolves.toMatchObject({ project: { id: 'project-1', settings: { label: 'Repo', defaultModel: 'openai/gpt' } } });
+    expect(storedProjects[0]).not.toHaveProperty('color');
+    expect(storedProjects[0].defaultModel).toBe('openai/gpt');
+
+    persistSettings.mockClear();
+    await expect(service.execute('projects.update', { projectId: 'project-1', projectSettings: { defaultModel: 'no-provider' } }))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringMatching(/^Nothing was saved.*defaultModel/) });
+    await expect(service.execute('projects.update', { projectId: 'project-1', projectSettings: { path: '/elsewhere' } }))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringMatching(/Not a project setting: path/) });
+    await expect(service.execute('projects.update', { projectId: 'nope', projectSettings: { label: 'x' } }))
+      .rejects.toMatchObject({ statusCode: 404 });
+    expect(persistSettings).not.toHaveBeenCalled();
+  });
+
+  it('keeps a hex colour the sanitizer lowercases, and says when clearing a model clears its variant', async () => {
+    let storedProjects = [{ id: 'project-1', path: '/repo', defaultModel: 'openai/gpt', defaultVariant: 'high' }];
+    const persistSettings = vi.fn(async (changes) => {
+      storedProjects = changes.projects;
+      return { projects: storedProjects };
+    });
+    // Stands in for the server sanitizer: lowercases a hex colour, and keeps a
+    // variant only with a model (settings-normalization-runtime.js).
+    const sanitizeProjects = (entries) => entries.map((entry) => {
+      const next = { ...entry };
+      if (next.iconBackground) next.iconBackground = next.iconBackground.toLowerCase();
+      if (!next.defaultModel) delete next.defaultVariant;
+      return next;
+    });
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ projects: storedProjects })),
+      sanitizeProjects,
+      fsPromises: {},
+      validateDirectoryPath: vi.fn(),
+      persistSettings,
+      createProjectIdFromPath: (p) => p,
+    });
+
+    await expect(service.execute('projects.update', { projectId: 'project-1', projectSettings: { iconBackground: '#AABBCC' } }))
+      .resolves.toMatchObject({ project: { settings: { iconBackground: '#aabbcc' } } });
+
+    const cleared = await service.execute('projects.update', { projectId: 'project-1', projectSettings: { defaultModel: null } });
+    expect(cleared.alsoCleared).toEqual(['defaultVariant']);
+    expect(cleared.note).toMatch(/defaultVariant was cleared too/);
   });
 
   it('removes a configured project by id, leaving its checkout untouched, and rejects an unknown id', async () => {

@@ -296,7 +296,9 @@ past the 2048-character cut.
   CLI, shell, route, or URL forwarding.
 - `projects.add`/`projects.remove` expose project registration itself —
   adding/removing the configured entry only, via the same settings path the
-  UI's directory picker uses. Session/worktree deletion is still not exposed.
+  UI's directory picker uses. `projects.update` changes a project's display
+  and default settings only, never its path or id. Session/worktree deletion
+  is still not exposed.
   OpenCode's own `worktree_remove` stays available to the agent, behind the
   `edit` permission, so the control tool's description says only that this
   tool cannot delete.

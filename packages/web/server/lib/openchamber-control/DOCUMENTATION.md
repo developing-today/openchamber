@@ -223,9 +223,10 @@ other.
   same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `integration-service-actions.js`,
-  `provider-actions.js`, `environment-actions.js`) are passed in as
-  `actionModules` and dispatched by action name before the built-in actions;
-  their definitions are part of `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
+  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`)
+  are passed in as `actionModules` and dispatched by action name before the
+  built-in actions; their definitions are part of
+  `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
 - `integration-service-actions.js` runs the connected-service actions:
   `integrations.list` (every section below at once; a section that fails
   carries `error` and the others stay), `github.status|activate|remove|cli`,
@@ -259,6 +260,12 @@ other.
   secret, so the whole call is refused and nothing is saved. A project change
   calls `invalidateProject`; the managed OpenCode reads a change when it
   restarts.
+- `projects.setup` returns a configured project's setup through
+  `projectConfigRuntime.readProjectSetup`, the same read as
+  `GET /api/projects/:projectId/config`; an unknown id is a 404. It is read
+  only: worktree setup commands and project actions run outside OpenCode's
+  permission rules, so an agent able to write them could run commands it was
+  never allowed to. Writing them stays with the user in Settings.
 - `projects.add`/`projects.remove` are the only destructive-adjacent actions
   wired: `projects.add` mirrors `POST /api/openchamber/directory` exactly
   (`validateDirectoryPath`, `createProjectIdFromPath`, `persistSettings`), so
@@ -269,6 +276,21 @@ other.
   wired `fsPromises`/`validateDirectoryPath`/`persistSettings`/
   `createProjectIdFromPath`. Worktree deletion is still not part of the
   action contract.
+- `projects.list` returns each project's per-project settings
+  (`EDITABLE_PROJECT_SETTINGS` in `service.js`: the fields `sanitizeProjects`
+  keeps that Project settings edits). `projects.update` changes them through
+  `persistSettings`; it runs the new list through `sanitizeProjects` first and
+  refuses the whole call when the sanitizer would drop or rewrite a value, so
+  a value it reports as saved is the value stored. Path, id and timestamps are
+  not editable.
+- `settings.get`/`settings.set` (`config-actions.js`) take an optional
+  `surface` (`web`, `desktop`, `vscode`, `mobile`) and pass it to
+  `readSettingsFromDiskMigrated`/`persistSettings`, the same surface rule as
+  `/api/config/settings`. Without one they read and write the base values;
+  `settings.get` then also returns `surfaces`, each surface kind's own values
+  for the registry's `perSurface` keys, because the sidebar layout, themes and
+  font sizes the user changes in the app are stored per surface and the base
+  read alone shows them as absent.
 - `session.archive` / `session.unarchive` move a session out of (and back
   into) the active list through the session service's `archive` /
   `unarchive`, so open windows hear the same broadcast as a UI archive; a

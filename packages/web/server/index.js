@@ -170,6 +170,7 @@ import { createConfigActions } from './lib/openchamber-control/config-actions.js
 import { createIntegrationActions } from './lib/openchamber-control/integration-actions.js';
 import { createIntegrationServiceActions } from './lib/openchamber-control/integration-service-actions.js';
 import { createEnvironmentActions } from './lib/openchamber-control/environment-actions.js';
+import { createProjectSetupActions } from './lib/openchamber-control/project-setup-actions.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1969,6 +1970,7 @@ const openChamberControlService = createOpenChamberControlService({
     createIntegrationActions({ readSettingsFromDiskMigrated, persistSettings }),
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
     createEnvironmentActions({ store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects }),
+    createProjectSetupActions({ readProjectSetup: projectConfigRuntime.readProjectSetup, listProjects: listConfiguredProjects }),
   ],
 });
 

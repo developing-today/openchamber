@@ -105,6 +105,7 @@ const ALL_PARAMETER_PROPERTIES = {
   directory: { type: 'string', description: "Absolute path; default: this session's directory. For projects.add, the directory to add" },
   create: { type: 'boolean', description: 'projects.add: create the directory first if it does not exist' },
   projectLabel: { type: 'string', description: "projects.add: display name; default: the directory's own name" },
+  projectSettings: { type: 'object', description: 'projects.update: per-project settings to change, key to value; null removes one' },
   sessionId: { type: 'string' },
   messageId: { type: 'string', description: 'Fork boundary for session.fork, the user message to retry for session.retry, the message to pin for session.pin' },
   ...SESSION_EXTRA_PARAMETERS,
