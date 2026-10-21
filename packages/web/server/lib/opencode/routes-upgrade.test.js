@@ -97,6 +97,25 @@ describe('OpenCode upgrade routes', () => {
     });
   });
 
+  it('never claims an upgrade for a malformed version on either side', async () => {
+    const availableFor = async (currentVersion, latestVersion) => {
+      globalThis.fetch = vi.fn(async (input) => jsonResponse({ version: String(input).endsWith('/api/info') ? currentVersion : latestVersion }));
+      const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+      const response = await request(app).get('/api/opencode/upgrade-status').expect(200);
+      return response.body.available;
+    };
+
+    // Trailing junk: parseInt('1junk') is 1, so this read as 2.1 > 2.0.9.
+    expect(await availableFor('2.0.9', '2.1junk')).toBe(false);
+    // Empty part: parseInt('') fell back to 0, so the installed '2..1' read as 2.0.1 < 2.0.2.
+    expect(await availableFor('2..1', '2.0.2')).toBe(false);
+    // Non-numeric part: read as 0, so '2.0.x' silently equalled a real 2.0.0.
+    expect(await availableFor('2.0.0', '2.0.x')).toBe(false);
+    // Parseable versions still compare normally, prerelease included.
+    expect(await availableFor('2.0.1', '2.0.2')).toBe(true);
+    expect(await availableFor('2.0.2', '2.0.2-beta.1')).toBe(false);
+  });
+
   it('runs the managed CLI and leaves restart to the existing Reload action', async () => {
     globalThis.fetch = vi.fn();
     const { app, dependencies } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
