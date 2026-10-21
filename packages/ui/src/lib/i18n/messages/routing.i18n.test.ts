@@ -7,6 +7,9 @@ const locales = ['en', 'nl', 'uk', 'de', 'fr', 'es', 'ja', 'ko', 'pl', 'pt-BR', 
 
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
 
+/** More than one word once placeholders are gone; single words such as Agent or Pool may match English. */
+const sentence = (text: string) => text.replace(/\{\w+\}/g, '').trim().includes(' ');
+
 describe('routing translations', () => {
   const english = routingI18n.en;
   // SAFETY: `english` is a const literal, so its own keys are exactly `keyof typeof english`.
@@ -17,6 +20,13 @@ describe('routing translations', () => {
     for (const locale of locales) {
       expect(Object.keys(routingI18n[locale]).sort()).toEqual([...keys].sort());
       for (const key of keys) expect(placeholders(routingI18n[locale][key])).toEqual(placeholders(english[key]));
+    }
+  });
+
+  test('translate every sentence', () => {
+    for (const locale of locales) {
+      if (locale === 'en') continue;
+      expect(keys.filter((key) => routingI18n[locale][key] === english[key] && sentence(english[key]))).toEqual([]);
     }
   });
 
