@@ -51,6 +51,9 @@ import { z } from 'zod';
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).
  * - Update checks still run but never report usage (`package-manager.js`).
+ * - The agent tool's `opencode.config.set` is refused: one config write can
+ *   add a provider or a destination for conversation content
+ *   (`openchamber-control/config-actions.js`).
  * - Environment variables from Settings and `opencode service set env` do
  *   not reach the managed OpenCode: one could carry a provider key
  *   (`environment/runtime.js`). Git, the terminal and exec still get them.

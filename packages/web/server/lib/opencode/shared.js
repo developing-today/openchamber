@@ -364,9 +364,11 @@ function readConfigLayers(workingDirectory) {
   const userOverrideLayer = readConfigLayer(userOverridePath);
   const projectLayer = readConfigLayer(projectPath);
   const customLayer = readConfigLayer(customPath);
+  // OpenCode's order: global, then the custom file (OPENCODE_CONFIG), then the
+  // project; a later layer wins (https://opencode.ai/docs/config/#precedence-order).
   const mergedConfig = mergeConfigs(
-    mergeConfigs(mergeConfigs(userLayer.config, userOverrideLayer.config), projectLayer.config),
-    customLayer.config,
+    mergeConfigs(mergeConfigs(userLayer.config, userOverrideLayer.config), customLayer.config),
+    projectLayer.config,
   );
 
   const layerErrors = [];
