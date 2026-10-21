@@ -200,7 +200,14 @@ const readAtPath = (root, segments) => {
   return { found: true, value: current };
 };
 
-const SECRET_KEY_PATTERN = /(api[-_]?key|apikey|token|secret|password|passwd|authorization|credential|cookie)/i;
+const SECRET_KEY_PATTERN = /(api[-_]?key|apikey|token|secret|password|passwd|passphrase|authorization|credential|cookie)/i;
+// The secret words above are shared with integration-service-actions.js's
+// SECRET_KEY. Token, secret, password, passwd, passphrase, api-key, cookie
+// and authorization are secrets on both sides, so a widening here must be
+// mirrored there and the other way round. One intentional divergence: this
+// pattern also masks `credential`. The integration guard leaves
+// credential-named binding fields readable because they name a stored
+// account, a reference to it, and hold no secret value themselves.
 // The bare-key rule, shared with integration-service-actions.js: a name that
 // ends in `key` or `keys` (privateKey, accessKeys, a key literally named
 // `key`) holds a secret. Suffix-only, so keybinds and other names that merely
