@@ -227,6 +227,7 @@ other.
   secret, so the whole call is refused and nothing is saved. A project change
   calls `invalidateProject`; the managed OpenCode reads a change when it
   restarts.
+- `projects.setup` returns a configured project's setup through
   `projectConfigRuntime.readProjectSetup`, the same read as
   `GET /api/projects/:projectId/config`; an unknown id is a 404. It is read
   only: worktree setup commands and project actions run outside OpenCode's
