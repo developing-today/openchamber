@@ -36,7 +36,7 @@
   "scripts": {
     "dev": "bun ../../scripts/build-builtin-extensions.mjs && node ./scripts/electron-dev.mjs",
     "build:web-assets": "node ./scripts/build-web-assets.mjs",
-    "build": "bun -e \"process.exit(0)\"",
+    "build": "bun run bundle:main",
     "ensure:electron": "node ./scripts/ensure-electron.mjs",
     "prepare:opencode-cli": "node ./scripts/prepare-opencode-cli.mjs",
     "verify:opencode-cli": "node ./scripts/verify-opencode-cli.mjs --staged",
@@ -57,7 +57,7 @@
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives ."
   },
   "build": {
-    "appId": "dev.openchamber.desktop",
+    "appId": "today.developing.openchamber",
     "productName": "OpenChamber",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",

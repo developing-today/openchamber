@@ -80,7 +80,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
-import { SessionGoalCheckerField, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
+import { SessionGoalCheckerField, SessionGoalLengthFields, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
 import { SessionGoalWriterFields } from './SessionGoalWriterFields';
 
 interface Option<T extends string> {
@@ -1959,6 +1959,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                         <SessionGoalCheckerField disabled={!sessionGoalEnabled} />
                                         <SessionGoalMaxTurnsField disabled={!sessionGoalEnabled} />
+                                        <SessionGoalLengthFields disabled={!sessionGoalEnabled} />
                                         <div data-settings-item="chat.session-goal-budget" className="flex items-center gap-2">
                                             <SettingsCheckboxRow
                                                 checked={sessionGoalDefaultBudgetEnabled}

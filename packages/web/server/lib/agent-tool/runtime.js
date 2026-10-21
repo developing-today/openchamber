@@ -18,6 +18,8 @@ import { SESSION_EXTRA_PARAMETERS } from '../openchamber-control/session-actions
 import { PROVIDER_PARAMETERS } from '../openchamber-control/provider-actions.js';
 import { CONFIG_PARAMETERS } from '../openchamber-control/config-actions.js';
 import { INTEGRATION_PARAMETERS } from '../openchamber-control/integration-actions.js';
+import { INTEGRATION_SERVICE_PARAMETERS } from '../openchamber-control/integration-service-actions.js';
+import { ENVIRONMENT_PARAMETERS } from '../openchamber-control/environment-actions.js';
 import {
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
   RENDER_PAGE_MAX_HTML_LENGTH,
@@ -85,6 +87,8 @@ const ALL_PARAMETER_PROPERTIES = {
   ...PROVIDER_PARAMETERS,
   ...CONFIG_PARAMETERS,
   ...INTEGRATION_PARAMETERS,
+  ...INTEGRATION_SERVICE_PARAMETERS,
+  ...ENVIRONMENT_PARAMETERS,
   link: {
     type: 'object',
     description: 'What session.link records, on any service',
@@ -129,7 +133,7 @@ const ALL_PARAMETER_PROPERTIES = {
   time: { type: 'string', description: 'Weekly or one-time run time in HH:mm format' },
   cron: { type: 'string', description: 'Cron expression' },
   timezone: { type: 'string', description: 'IANA timezone' },
-  disabled: { type: 'boolean', description: 'true disables and false enables; required for schedule.toggle, providers.toggle, models.toggle, mcp.toggle and tools.toggle; skills.toggle blocks or unblocks the skill' },
+  disabled: { type: 'boolean', description: 'true disables and false enables; required for schedule.toggle, providers.toggle, models.toggle, mcp.toggle, tools.toggle, github.cli, gitlab.cli and extensions.toggle; skills.toggle blocks or unblocks the skill' },
   path: { type: 'string', description: 'File to show for file.open; absolute, or relative to the session directory' },
   url: { type: 'string', description: 'http(s) URL for browser.open' },
   selector: { type: 'string', description: 'CSS selector from a browser.snapshot result' },

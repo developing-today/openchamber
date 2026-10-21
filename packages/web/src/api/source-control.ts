@@ -193,6 +193,7 @@ type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise
 type PostBody =
   | { flowId: string }
   | { token: string }
+  | { reference: string }
   | { accountId: string }
   | { disabled: boolean }
   | CreateBody
@@ -1306,6 +1307,7 @@ const parseAuthAccounts = (
     current: account.current,
     source: account.source,
     status: account.status,
+    tokenReference: isNonEmptyString(account.tokenReference) ? account.tokenReference : undefined,
   };
 });
 
@@ -1333,6 +1335,7 @@ const parseGitHubAuthAccounts = (
     current: Boolean(account.current),
     source,
     status: account.status === 'invalid' ? 'invalid' : 'valid',
+    tokenReference: isNonEmptyString(account.tokenReference) ? account.tokenReference : undefined,
   };
 });
 
@@ -1530,7 +1533,13 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     authSetToken: async (identity, token) => {
       const normalized = normalizeIdentity(identity);
-      await post<{ connected: boolean; user?: GitHubUserSummary; error?: string }>(fetch, normalized, '/auth/token', { token });
+      // GitHub takes a token only as a 1Password reference (op://…); GitLab's
+      // token field takes a token or a reference.
+      if (normalized.provider === 'gitlab') {
+        await post<{ connected: boolean; user?: GitHubUserSummary; error?: string }>(fetch, normalized, '/auth/token', { token });
+      } else {
+        await post<{ connected: boolean; user?: GitHubUserSummary; error?: string }>(fetch, normalized, '/auth/vault', { reference: token });
+      }
       if (normalized.provider === 'gitlab') {
         return parseGitLabAuthStatus(await request<GitLabAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
       }

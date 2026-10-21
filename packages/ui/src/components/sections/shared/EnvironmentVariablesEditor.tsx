@@ -3,12 +3,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
 import { SETTINGS_HELPER_CLASS, SETTINGS_ICON_BUTTON_CLASS } from '@/components/sections/shared/SettingsSection';
-import { ENVIRONMENT_VARIABLE_NAME_PATTERN } from '@/lib/environmentApi';
+import { ENVIRONMENT_VARIABLE_NAME_PATTERN, type EnvironmentVaultRead } from '@/lib/environmentApi';
 import { useI18n } from '@/lib/i18n';
+
+const VAULT_FAILURE_KEYS = {
+  'op-not-installed': 'settings.environment.vault.notInstalled',
+  timeout: 'settings.environment.vault.timeout',
+  'op-read-failed': 'settings.environment.vault.readFailed',
+  empty: 'settings.environment.vault.empty',
+} as const;
 
 type EnvironmentVariablesEditorProps = {
   /** Names of the stored variables. Values never reach the UI. */
   names: string[];
+  /** Variables whose value is a vault reference, with the reference. */
+  references?: Readonly<Record<string, string>>;
+  /** Each reference's last read. */
+  vault?: Readonly<Record<string, EnvironmentVaultRead>>;
   disabled?: boolean;
   /** Stores a value; resolves true when it was saved. */
   onSet: (name: string, value: string) => Promise<boolean>;
@@ -22,6 +33,8 @@ type EnvironmentVariablesEditorProps = {
  */
 export const EnvironmentVariablesEditor: React.FC<EnvironmentVariablesEditorProps> = ({
   names,
+  references = {},
+  vault = {},
   disabled = false,
   onSet,
   onRemove,
@@ -75,6 +88,9 @@ export const EnvironmentVariablesEditor: React.FC<EnvironmentVariablesEditorProp
           {names.map((name) => (
             <li key={name} className="flex min-h-8 flex-wrap items-center gap-2">
               <span className="min-w-0 truncate font-mono text-xs text-foreground">{name}</span>
+              {references[name] ? (
+                <span className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={references[name]}>{references[name]}</span>
+              ) : null}
               {replacing === name ? (
                 <form
                   className="flex min-w-0 flex-1 items-center gap-2"
@@ -131,6 +147,11 @@ export const EnvironmentVariablesEditor: React.FC<EnvironmentVariablesEditorProp
                   </Button>
                 </div>
               )}
+              {vault[name]?.state === 'failed' ? (
+                <p className="basis-full typography-micro text-[var(--status-error)]">
+                  {t(VAULT_FAILURE_KEYS[vault[name].reason ?? 'op-read-failed'])}
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>

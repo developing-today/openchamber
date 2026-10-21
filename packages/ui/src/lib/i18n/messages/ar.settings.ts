@@ -618,6 +618,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': 'هذا التطبيق: {version}',
   'settings.openchamber.about.toast.serverLatestVersion': 'يعمل الخادم بأحدث إصدار من OpenChamber',
   'settings.openchamber.about.actions.checkForUpdates': 'التحقق من وجود تحديثات',
+  'settings.openchamber.about.actions.releaseAvailable': 'Release {version} available',
   'settings.openchamber.about.toast.latestVersion': 'لديك أحدث إصدار',
   'settings.agents.sidebar.title': 'الوكلاء',
   'settings.agents.sidebar.total': 'الإجمالي {count}',

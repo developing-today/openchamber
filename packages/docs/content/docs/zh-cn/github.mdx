@@ -15,6 +15,8 @@ description: 连接 GitHub 并从 issue 和拉取请求开始会话。
 
 连接后，你的账号会显示在卡片上。你可以连接多个账号并在它们之间切换，或随时断开连接。如果同一台机器上已登录 `gh` CLI，OpenChamber 可以将其作为备用方式。
 
+如果想改用保存在 1Password 中的令牌，在 **来自 1Password 的令牌** 中填入它的引用，例如 `op://Vault/github_token/credential`，然后选择 **添加**。OpenChamber 每次使用该账号时都会通过 1Password CLI 读取令牌，并且只保存引用。参阅[来自 1Password 的密钥](/zh-cn/environment/#来自-1password-的密钥)。
+
 ## 从 issue 或 PR 开始工作
 
 当你在连接了 GitHub 的情况下创建 [worktree 会话](/zh-cn/worktrees/) 时，可以从一个 issue 或 pull request 开始：

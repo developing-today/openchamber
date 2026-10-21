@@ -21,6 +21,7 @@ describe('environment routes', () => {
       projectStatus: vi.fn(() => null),
       invalidateProject: vi.fn(),
       reloadProject: vi.fn(async () => ({ state: 'applied', count: 3, at: 1 })),
+      vaultStatus: vi.fn(() => ({})),
     };
     app = express();
     app.use(express.json());
@@ -38,10 +39,20 @@ describe('environment routes', () => {
   it('stores user variables and never answers a value', async () => {
     const saved = await request(app).put('/api/environment').send({ variables: { API_TOKEN: 'secret-value' } });
     expect(saved.status).toBe(200);
-    expect(saved.body).toEqual({ names: ['API_TOKEN'] });
+    expect(saved.body).toEqual({ names: ['API_TOKEN'], references: {}, vault: {} });
 
     const read = await request(app).get('/api/environment');
-    expect(read.body).toEqual({ names: ['API_TOKEN'] });
+    expect(read.body).toEqual({ names: ['API_TOKEN'], references: {}, vault: {} });
+    expect(read.text).not.toContain('secret-value');
+  });
+
+  it('shows a vault reference and its last read, and still never a plain value', async () => {
+    runtime.vaultStatus.mockReturnValue({ GITHUB_TOKEN: { state: 'failed', reason: 'op-not-installed', at: 2 } });
+    await request(app).put('/api/environment').send({ variables: { GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential', API_TOKEN: 'secret-value' } });
+
+    const read = await request(app).get('/api/environment');
+    expect(read.body.references).toEqual({ GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' });
+    expect(read.body.vault).toEqual({ GITHUB_TOKEN: { state: 'failed', reason: 'op-not-installed', at: 2 } });
     expect(read.text).not.toContain('secret-value');
   });
 
@@ -61,7 +72,7 @@ describe('environment routes', () => {
       .put('/api/environment/projects/path_project')
       .send({ variables: { DATABASE_URL: 'postgres://user:pw@db' }, command: 'direnv export json' });
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ names: ['DATABASE_URL'], command: 'direnv export json', status: null });
+    expect(response.body).toEqual({ names: ['DATABASE_URL'], command: 'direnv export json', status: null, references: {}, vault: {} });
     expect(response.text).not.toContain('postgres://');
     expect(runtime.invalidateProject).toHaveBeenCalledWith('path_project');
   });

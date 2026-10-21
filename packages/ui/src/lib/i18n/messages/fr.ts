@@ -3026,7 +3026,6 @@ export const dict = {
   'updateDialog.error.restartUnavailable': 'L’installation de la mise à jour nécessite l’application de bureau OpenChamber.',
   'mobileUpdate.toast.available.title': 'Mise à jour OpenChamber disponible',
   'mobileUpdate.toast.available.description': 'La version {version} est prête pour Android.',
-  'mobileUpdate.toast.actions.download': 'Télécharger',
   'mobileUpdate.toast.actions.dismiss': 'Ignorer',
   'opencodeUpdate.toast.available.title': 'Mise à jour OpenCode',
   'opencodeUpdate.toast.available.description': 'Version {version} disponible.',

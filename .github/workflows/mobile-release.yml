@@ -290,17 +290,17 @@ jobs:
           const releaseBlockPattern = /\n\t\t[^\n]+ \/\* Release \*\/ = \{\n\t\t\tisa = XCBuildConfiguration;[\s\S]*?\n\t\t\tname = Release;\n\t\t\};/g;
           const replacements = [
             {
-              bundle: 'com.openchamber.app',
+              bundle: 'today.developing.openchamber',
               profile: process.env.IOS_APP_PROFILE_NAME,
               uuid: process.env.IOS_APP_PROFILE_UUID,
             },
             {
-              bundle: 'com.openchamber.app.OpenChamberWidget',
+              bundle: 'today.developing.openchamber.OpenChamberWidget',
               profile: process.env.IOS_WIDGET_PROFILE_NAME,
               uuid: process.env.IOS_WIDGET_PROFILE_UUID,
             },
             {
-              bundle: 'com.openchamber.app.OpenChamberNotificationService',
+              bundle: 'today.developing.openchamber.OpenChamberNotificationService',
               profile: process.env.IOS_NSE_PROFILE_NAME,
               uuid: process.env.IOS_NSE_PROFILE_UUID,
             },
@@ -376,11 +376,11 @@ jobs:
             <string>manual</string>
             <key>provisioningProfiles</key>
             <dict>
-              <key>com.openchamber.app</key>
+              <key>today.developing.openchamber</key>
               <string>$IOS_APP_PROFILE_NAME</string>
-              <key>com.openchamber.app.OpenChamberWidget</key>
+              <key>today.developing.openchamber.OpenChamberWidget</key>
               <string>$IOS_WIDGET_PROFILE_NAME</string>
-              <key>com.openchamber.app.OpenChamberNotificationService</key>
+              <key>today.developing.openchamber.OpenChamberNotificationService</key>
               <string>$IOS_NSE_PROFILE_NAME</string>
             </dict>
             <key>uploadSymbols</key>

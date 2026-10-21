@@ -133,6 +133,32 @@ describe('checkForUpdates', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('developing-today/openchamber/releases?per_page'))).toBe(false);
   });
 
+  it('reports no update when the update API returns a malformed latest version', async () => {
+    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({ latestVersion: '1.10junk.0', updateAvailable: true }),
+    });
+
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
+
+    // parseInt alone read '10junk' as 10 and claimed the upgrade; a malformed
+    // version must never claim an update.
+    expect(result.available).toBe(false);
+  });
+
+  it('reports no update when the installed version is malformed', async () => {
+    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({ latestVersion: '1.10.0', updateAvailable: true }),
+    });
+
+    const result = await checkForUpdates({ currentVersion: '1..9', appType: 'web' });
+
+    expect(result.available).toBe(false);
+  });
+
   // --- Android APK resolution (the API override still hands over a direct APK URL) ---
 
   it('resolves an Android APK asset from the fork release when the update API returns an AAB', async () => {

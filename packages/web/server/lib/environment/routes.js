@@ -1,4 +1,5 @@
 import { EnvironmentPatchError, isProjectId } from './store.js';
+import { isVaultReference } from './vault.js';
 
 /**
  * Environment variables for what OpenChamber starts. Every answer names the
@@ -15,6 +16,12 @@ import { EnvironmentPatchError, isProjectId } from './store.js';
  * null before it ran, `{ state: "applied", count }`, or
  * `{ state: "failed", reason, exitCode? }`.
  *
+ * Every answer also carries `references` (`{ NAME: "op://…" }`), the
+ * variables whose value is a vault reference, and `vault`, each one's last
+ * read (`{ state: "resolved" | "failed", reason? }`, absent before a read).
+ * A reference only names where a secret is kept, so it is the one value an
+ * answer shows; the secret itself never leaves the server.
+ *
  * `/api/environment` is on the JSON-body allowlist in `opencode/core-routes.js`.
  */
 export const registerEnvironmentRoutes = (app, { store, runtime, listProjects }) => {
@@ -23,8 +30,20 @@ export const registerEnvironmentRoutes = (app, { store, runtime, listProjects })
     return res.status(500).json({ error: error instanceof Error ? error.message : fallback });
   };
 
+  const withReferences = (described, variables) => {
+    const references = Object.fromEntries(Object.entries(variables).filter(([, value]) => isVaultReference(value)));
+    const statuses = runtime.vaultStatus();
+    return {
+      ...described,
+      references,
+      vault: Object.fromEntries(Object.keys(references).filter((name) => statuses[name]).map((name) => [name, statuses[name]])),
+    };
+  };
+
+  const userView = () => withReferences(store.describeUser(), store.userVariables());
+
   const projectView = (projectId) => ({
-    ...store.describeProject(projectId),
+    ...withReferences(store.describeProject(projectId), store.projectEntry(projectId).variables),
     status: runtime.projectStatus(projectId),
   });
 
@@ -37,7 +56,7 @@ export const registerEnvironmentRoutes = (app, { store, runtime, listProjects })
 
   app.get('/api/environment', (_req, res) => {
     try {
-      return res.json(store.describeUser());
+      return res.json(userView());
     } catch (error) {
       return respondWithError(res, error, 'Failed to read environment variables');
     }
@@ -45,7 +64,8 @@ export const registerEnvironmentRoutes = (app, { store, runtime, listProjects })
 
   app.put('/api/environment', async (req, res) => {
     try {
-      return res.json(await store.updateUser(req.body));
+      await store.updateUser(req.body);
+      return res.json(userView());
     } catch (error) {
       return respondWithError(res, error, 'Failed to save environment variables');
     }

@@ -10,7 +10,7 @@ import WidgetKit
 /// updates the App Group snapshot the app wrote, and reloads the widget timelines. The app
 /// still overwrites the snapshot with the authoritative full list on its next foreground.
 class NotificationService: UNNotificationServiceExtension {
-    private static let appGroup = "group.com.openchamber.app"
+    private static let appGroup = "group.today.developing.openchamber"
     private static let snapshotKey = "widgetSnapshot"
 
     private var contentHandler: ((UNNotificationContent) -> Void)?

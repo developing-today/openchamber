@@ -3366,7 +3366,6 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.error.updateFailed': 'Aktualizacja nie powiodła się',
   'mobileUpdate.toast.available.title': 'Dostępna aktualizacja OpenChamber',
   'mobileUpdate.toast.available.description': 'Wersja {version} jest gotowa dla Androida.',
-  'mobileUpdate.toast.actions.download': 'Pobierz',
   'mobileUpdate.toast.actions.dismiss': 'Odrzuć',
   'updateDialog.fallback.updateViaTerminal': 'Lub zaktualizuj przez terminal:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} jest dostępny. Zaktualizuj go na komputerze, na którym działa.',

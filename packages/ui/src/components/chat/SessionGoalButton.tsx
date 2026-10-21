@@ -3,7 +3,6 @@ import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useGoalCheckAvailable, useSessionGoal } from '@/hooks/useSessionGoal';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -209,20 +208,21 @@ interface SessionGoalObjectiveCounterProps {
 }
 
 // Tiny hot-path leaf next to the target button: while goal mode is armed the
-// typed message becomes the objective, which is capped at
-// SESSION_GOAL_OBJECTIVE_CHAR_LIMIT chars — surface that limit during typing
+// typed message becomes the objective, which is capped at the goal length
+// limit (Settings) — surface that limit during typing
 // instead of truncating silently. Renders null when not armed, and when the
 // goal writer turns the message into a spec, which fits the limit by itself.
 export const SessionGoalObjectiveCounter: React.FC<SessionGoalObjectiveCounterProps> = React.memo(({ length }) => {
   const { t } = useI18n();
   const armed = useSessionGoalArmStore((state) => state.armed);
   const writerOn = useUIStore((state) => state.sessionGoalWriterEnabled || state.sessionGoalRewriteAll);
+  const limit = useUIStore((state) => state.sessionGoalObjectiveCharLimit);
 
   if (!armed || writerOn || length === 0) {
     return null;
   }
 
-  const over = length > SESSION_GOAL_OBJECTIVE_CHAR_LIMIT;
+  const over = length > limit;
   return (
     <span
       className={cn(
@@ -232,7 +232,7 @@ export const SessionGoalObjectiveCounter: React.FC<SessionGoalObjectiveCounterPr
       aria-label={t('chat.goal.counter.aria')}
       title={t('chat.goal.counter.aria')}
     >
-      {length}/{SESSION_GOAL_OBJECTIVE_CHAR_LIMIT}
+      {length}/{limit}
     </span>
   );
 });

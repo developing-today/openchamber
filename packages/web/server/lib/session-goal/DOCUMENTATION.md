@@ -11,8 +11,9 @@ the web server and survives UI disconnects.
 ```
 {
   id,                      // opaque per-logical-goal id; stale-write guard
-  objective,               // inline user text (fallback), <= 5000 chars
+  objective,               // inline user text (fallback), <= the goal length limit
   objectiveFile,           // true: objective text lives in a server-side file
+  ignoreObjectiveLimit,    // true: the user switched the length limit off for this goal
   status,                  // active | paused | blocked | budgetLimited | complete
   tokenBudget,             // optional positive int
   tokensUsed,              // tokensCommitted + current segment (snapshot - baseline)
@@ -52,8 +53,17 @@ become a file-read vector (`objectives.js` also validates the id shape
 before touching the filesystem). Rationale: metadata rides every
 `session.updated`, so multi-KB objectives must not live there.
 
-- `objectives.js` — write/read/delete, 5000-char clamp.
-- `routes.js` — `PUT/GET/DELETE /api/goals/objective/:sessionId`
+- `objectives.js` — write/read/delete, and `goalObjectiveLimits(settings)`:
+  the goal length limit (`sessionGoalObjectiveCharLimit`, default 5000) and
+  how much of a goal the progress check reads
+  (`sessionGoalCheckObjectiveCharLimit`, default 20,000), both 1,000 to
+  1,000,000. The file itself only clamps at 1,000,000
+  (`GOAL_OBJECTIVE_HARD_CAP`): the goal limit is applied before the write, by
+  the UI or `create.js`, so a goal whose limit was raised or switched off is
+  kept whole. Before 2026-10 the file clamped at 5000.
+- `routes.js` — `PUT/GET/DELETE /api/goals/objective/:sessionId`; the PUT
+  answers `{ ok, length }`, the length kept, so a client can tell an older
+  server cut the text (an older server answers `{ ok }` alone)
   (OpenChamber-owned, registered before the generic proxy; JSON parsing via
   the `/api/goals` family in core-routes). The UI writes the file BEFORE
   patching the goal metadata and falls back to an inline objective when the
@@ -82,12 +92,14 @@ before touching the filesystem). Rationale: metadata rides every
 ## Goal writer
 
 The goal writer turns a user's message into a goal spec: a clean, detailed
-objective of at most 5000 characters that the agent works from and the
+objective within the goal length limit that the agent works from and the
 progress check judges against. `spec-writer.js` owns it.
 
 - Route: `POST /api/goals/spec` in `routes.js`, body `{ request,
-  conversation?, openItems?, directory?, providerID?, modelID? }`, answer
-  `{ spec, providerID, modelID }` naming the model that wrote it. A blank
+  conversation?, openItems?, directory?, providerID?, modelID?,
+  writerProviderID?, writerModelID?, writerVariant?, ignoreLimit? }`, answer
+  `{ spec, providerID, modelID, variant }` naming the model and effort that
+  wrote it. A blank
   request is `400` (`goal-spec-request-required`), an empty reply `502`
   (`goal-spec-empty`); other errors keep the generate status. A client that
   disconnects aborts the generation.
@@ -97,13 +109,21 @@ progress check judges against. `spec-writer.js` owns it.
   XML-escaped `<request>`, `<open_items>` and `<conversation>` blocks in that
   order, so a prompt clipped at the tail loses conversation first. The reply
   is cleaned by `normalizeGoalSpec`: think blocks dropped, a fence around the
-  whole reply removed, clamped to 5000 characters at a line break when one is
+  whole reply removed, clamped to the goal length limit at a line break when one is
   close.
-- Model: `sessionGoalWriterModel` (`provider/model`) when set, else the
-  session's own provider and model, else the normal small-model chain. All of
-  them go through `generateSmallModelText`, so the writer only reaches models
-  configured in OpenCode through `/api/experimental/generate`, the same
-  boundary as the small model.
+- Model: a model picked for this spec in a goal window
+  (`writerProviderID`/`writerModelID`, with `writerVariant`), else
+  `sessionGoalWriterModel` (`provider/model`) with `sessionGoalWriterVariant`,
+  else the session's own provider and model at its default effort, else the
+  normal small-model chain (`resolveGoalWriterModel`). The effort level goes
+  to OpenCode as `model.variant` only with a model named explicitly; a variant
+  the model does not have fails the generation. All of them go through
+  `generateSmallModelText`, so the writer only reaches models configured in
+  OpenCode through `/api/experimental/generate`, the same boundary as the
+  small model.
+- Length: the system prompt asks for 90% of the goal length limit
+  (`buildGoalSpecSystemPrompt`), and the output budget scales with it;
+  `ignoreLimit` drops the length line and clamps only at the hard cap.
 - Rewrite all: with `sessionGoalRewriteAll` on, `createSessionGoal` runs every
   server-created objective (scheduled tasks, CLI `--goal`, the agent tool's
   `goalAction: set`) through the writer before fitting it. A failed rewrite
@@ -195,7 +215,13 @@ progress check judges against. `spec-writer.js` owns it.
      complete, anything else → continue. Jev answers with probabilities; the
      small model answers the same questions as JSON booleans read as 1/0, so
      there is one format and one decision. The long turn is cut to its head
-     and, mostly, its tail, where the report sits.
+     and, mostly, its tail, where the report sits. The objective is cut to
+     the check limit (`excerptObjective`, 40% head, 60% tail, where Done when
+     sits); a goal within it is passed whole, so the measured wording is
+     unchanged. Without that cut, a goal with no length limit would push the
+     answer and the closing instruction off the end of a small model's
+     prompt, since `generateSmallModelText` truncates from the end. The
+     continuation prompt still carries the whole objective.
      Who answers: Jev when `sessionGoalChecker` is `classifier` (an explicit
      pick; the default is `small-model`, since a classification provider set
      up for another feature is not consent to audit goals with Jev) and a
@@ -246,7 +272,26 @@ sees only that final turn, so the report is its evidence.
 - `lib/sessionGoalMetadata.ts` — payload parsing/types.
 - `lib/sessionGoalActions.ts` — create/edit/pause/resume/clear via
   `patchSessionMetadata`; `lib/sessionGoalPresentation.ts` — status
-  colors/labels shared across surfaces.
+  colors/labels shared across surfaces. `setSessionGoal` takes a cancel
+  signal, `ignoreLimit`, and `kickoff` (false writes `statusReason: ''`
+  instead of `resumed`, so an edit sent with a message does not ask for an
+  immediate check of the last reply against the new objective). An edit
+  saves only over the goal it started from (`nextGoalRecord`: same id,
+  status and `updatedAt`, checked before the objective file is written and
+  again inside the metadata write); otherwise it answers `changed` and
+  writes nothing.
+- `lib/goalEdit.ts` + `stores/useGoalEditStore.ts` — a save from the goal
+  editor runs after the editor closed, one per session (a newer one cancels
+  the older). `components/chat/GoalEditStrip.tsx` shows it among the
+  composer's top rows under the goal row: the writer at work (Cancel), or
+  why it did not land (Reopen brings the edit back into the editor). A
+  message written with the change goes out after the goal is saved, with
+  `buildGoalUpdateReminder` (the changed goal as a synthetic part): idle
+  sessions get a new turn, working ones get it steered into the turn or
+  queued after it, as the editor's toggle says (default `followUpBehavior`).
+  It goes through `routeMessage` and the message queue directly, not the
+  composer, so the composer's armed goal and attachments are untouched; a
+  slash command or mention in it is sent as typed text.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
   Armed slash commands resolve their authoritative command template and apply
@@ -259,7 +304,13 @@ sees only that final turn, so the report is its evidence.
 - `components/chat/SessionGoalButton.tsx` — composer target button
   (arm / status color / cancel confirm); `SessionGoalRow.tsx` — goal row
   among the composer's top rows; `SessionGoalDialog.tsx` — manage dialog
-  (edit/pause/resume/complete/clear).
+  (edit/pause/resume/complete/clear, an optional message, the writer model
+  and effort when the objective will be rewritten, and "No length limit for
+  this goal" under its more-options menu). On desktop it resizes from its
+  corner; the mobile sheet does not.
+- `components/chat/GoalWriterPicker.tsx` — the writer model and effort in a
+  goal window. A pick applies to that window; Remember, or
+  `sessionGoalWriterRememberChoice`, saves it as the Settings default.
 - Sidebar glyph next to the date in `SessionNodeItem`.
 - `components/sections/openchamber/SessionGoalCheckerField.tsx` — Settings →
   Chat → Goal: Jev or the small model checks progress

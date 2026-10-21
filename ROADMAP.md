@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18 and 2026-10-19.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19 and 2026-10-20.
 
 ## Areas
 
@@ -115,3 +115,14 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | `queue: max` on stale, the last non-cancelling workflow           | 2026-10-20 | #133, #134                 |
 | Electron lint stub replaced with the shared oxlint command        | 2026-10-20 | #135, #136                 |
 | Electron `test:linux-desktop` smoke runs in pr checks             | 2026-10-20 | #137, #138                 |
+| Release pipeline actions aligned to the repo's v7 pins            | 2026-10-20 | #143, #144                 |
+| Desktop release pipeline cache aligned to v6.1.0                  | 2026-10-20 | #155, #156                 |
+| pr-intake github-script aligned to v8.0.0                         | 2026-10-20 | #157, #158                 |
+| Electron `build` bundles the main process (was a no-op stub)      | 2026-10-20 | #142, #159                 |
+| Jules action pinned to commit SHA (opencode#184 set)              | 2026-10-20 | #162                       |
+| Tracked `.create-pr-proof` screenshots removed + gitignored         | 2026-10-20 | #165, #166                 |
+| Malformed versions rejected in mobile release update check          | 2026-10-20 | #180, #181                 |
+| Malformed versions rejected in vscode upgrade check                 | 2026-10-21 | #182, #183                 |
+| Malformed versions rejected in web upgrade check                    | 2026-10-21 | #184, #187                 |
+| Malformed versions rejected in web package-manager check            | 2026-10-21 | #188, #189                 |
+| Malformed versions rejected in electron compareSemver               | 2026-10-21 | #185, #190                 |

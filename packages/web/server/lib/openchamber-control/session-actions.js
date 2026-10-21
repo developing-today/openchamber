@@ -40,7 +40,7 @@ export const SESSION_EXTRA_ACTION_DEFINITIONS = Object.freeze([
 
 export const SESSION_EXTRA_PARAMETERS = {
   goalAction: { type: 'string', enum: ['get', 'set', 'pause', 'resume', 'complete', 'clear'], description: 'session.goal: what to do with the goal' },
-  objective: { type: 'string', description: 'session.goal set: what the goal must achieve, written as completion criteria; at most 5000 characters are kept for the progress check, longer text is condensed' },
+  objective: { type: 'string', description: 'session.goal set: what the goal must achieve, written as completion criteria; text over the goal length limit in Settings (5000 characters unless changed) is condensed' },
   pinned: { type: 'boolean', description: 'session.pin: false unpins; default true' },
   pinKind: { type: 'string', enum: ['message', 'note', 'plan'], description: 'session.pin: what to pin; default message (needs messageId), note or plan need pinId' },
   pinId: { type: 'string', description: 'session.pin: id of the project note or plan to pin' },

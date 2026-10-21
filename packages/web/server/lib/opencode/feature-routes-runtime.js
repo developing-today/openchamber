@@ -120,6 +120,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   let gitRepositoryCredentialRuntime = null;
   let networkOperations = null;
   let gitWorktreeCreation = null;
+  let guestOperations = null;
+  let linearOperations = null;
   const getWalkthroughService = async () => {
     if (!walkthroughService) {
       const [service, pullRequest] = await Promise.all([
@@ -684,7 +686,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders });
+    guestOperations = registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,
@@ -716,7 +718,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         }
       },
     });
-    registerLinearRoutes(app);
+    linearOperations = registerLinearRoutes(app);
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {
       fsPromises,
@@ -763,6 +765,19 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerRoutes,
     hydrateBoundCheckout,
     createChangeRequestWorktree,
+    /**
+     * The integration operations the routes use, for the `openchamber` agent
+     * tool; null until the routes are registered.
+     */
+    getIntegrationOperations: () => (walkthroughBindingService && guestOperations && linearOperations
+      ? {
+          github: walkthroughBindingService.accountOperations.github,
+          gitlab: walkthroughBindingService.accountOperations.gitlab,
+          bindings: walkthroughBindingService.bindingOperations,
+          linear: linearOperations,
+          extensions: guestOperations,
+        }
+      : null),
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
   };

@@ -3328,7 +3328,6 @@ export const dict: Record<I18nKey, string> = {
   "updateDialog.error.restartUnavailable": "Instalar a atualização exige o aplicativo de desktop do OpenChamber.",
   "mobileUpdate.toast.available.title": "Atualização do OpenChamber disponível",
   "mobileUpdate.toast.available.description": "A versão {version} está pronta para Android.",
-  "mobileUpdate.toast.actions.download": "Baixar",
   "mobileUpdate.toast.actions.dismiss": "Dispensar",
   "opencodeUpdate.toast.available.title": "Atualização do OpenCode",
   "opencodeUpdate.toast.available.description": "Versão {version} disponível.",

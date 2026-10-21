@@ -17,10 +17,14 @@ export const MobileAppUpdateToast: React.FC = () => {
   const runtimeType = useUpdateStore((state) => state.runtimeType);
   const version = useUpdateStore((state) => state.info?.version);
   const downloadUrl = useUpdateStore((state) => state.info?.downloadUrl);
+  const releaseUrl = useUpdateStore((state) => state.info?.releaseUrl);
   const seenVersionsRef = React.useRef(new Set<string>());
+  // The button opens the release page on GitHub; the user downloads the
+  // signed APK there and installs it over the current app.
+  const updateUrl = releaseUrl || downloadUrl;
 
   React.useEffect(() => {
-    if (getClientPlatform() !== 'android' || runtimeType !== 'mobile' || !available || !version || !downloadUrl) {
+    if (getClientPlatform() !== 'android' || runtimeType !== 'mobile' || !available || !version || !updateUrl) {
       toast.dismiss(TOAST_ID);
       return;
     }
@@ -41,9 +45,9 @@ export const MobileAppUpdateToast: React.FC = () => {
       duration: Infinity,
       icon: <Icon name="download" className="h-4 w-4 text-muted-foreground" />,
       action: {
-        label: t('mobileUpdate.toast.actions.download'),
+        label: t('updateDialog.actions.openMobileUpdate'),
         onClick: () => {
-          void openExternalUrl(downloadUrl);
+          void openExternalUrl(updateUrl);
         },
       },
       cancel: {
@@ -54,7 +58,7 @@ export const MobileAppUpdateToast: React.FC = () => {
         },
       },
     });
-  }, [available, downloadUrl, runtimeType, t, version]);
+  }, [available, runtimeType, t, updateUrl, version]);
 
   return null;
 };

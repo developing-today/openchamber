@@ -668,6 +668,38 @@
         "mobile"
       ]
     },
+    "sessionGoalWriterVariant": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalWriterRememberChoice": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalObjectiveCharLimit": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "sessionGoalCheckObjectiveCharLimit": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "sessionGoalWriterReview": {
       "scope": "profile",
       "surfaces": [

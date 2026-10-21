@@ -1,11 +1,17 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Textarea } from '@/components/ui/textarea';
 import { Icon } from '@/components/icon/Icon';
-import type { GoalSpecResult, GoalSubmitChoice, GoalWriterTrigger } from '@/lib/goalWriter';
-import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
+import type { GoalSpecResult, GoalSubmitChoice, GoalWriterChoice, GoalWriterTrigger } from '@/lib/goalWriter';
+import { GoalWriterPicker } from '@/components/chat/GoalWriterPicker';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore, type SessionGoalWriterSendMode } from '@/stores/useUIStore';
 
@@ -16,7 +22,11 @@ export interface GoalSpecDialogRequest {
   /** False sends the spec as soon as it is written; the dialog only shows progress or a failure. */
   review: boolean;
   defaultSendMode: SessionGoalWriterSendMode;
-  write: (signal: AbortSignal) => Promise<GoalSpecResult>;
+  /** The model the message is sent with; it writes when Settings name no writer model. */
+  sessionModel: { providerID: string; modelID: string } | null;
+  directory: string | null;
+  /** `writer` is a model picked in the dialog; null keeps the default. */
+  write: (signal: AbortSignal, options: { writer: GoalWriterChoice | null; ignoreLimit: boolean }) => Promise<GoalSpecResult>;
 }
 
 interface GoalSpecDialogProps {
@@ -53,7 +63,8 @@ export function GoalSpecDialog({ request, onCancel, onSubmit }: GoalSpecDialogPr
   if (isMobile) return body;
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
-      <DialogContent className="max-w-xl">{body}</DialogContent>
+      {/* Resizes from its corner, like the goal editor; see SessionGoalDialog. */}
+      <DialogContent className="w-[36rem] max-w-[calc(100vw-2rem)] min-w-[20rem] min-h-[16rem] resize transition-[opacity,transform,filter]">{body}</DialogContent>
     </Dialog>
   );
 }
@@ -68,8 +79,15 @@ function GoalSpecDialogBody({
   const [state, setState] = React.useState<WriterState>({ status: 'writing' });
   const [spec, setSpec] = React.useState('');
   const [attempt, setAttempt] = React.useState(0);
+  const [writer, setWriter] = React.useState<GoalWriterChoice | null>(null);
+  const [ignoreLimit, setIgnoreLimit] = React.useState(false);
+  const charLimit = useUIStore((state) => state.sessionGoalObjectiveCharLimit);
   const onSubmitRef = React.useRef(onSubmit);
   onSubmitRef.current = onSubmit;
+  // A writing run reads the picks made when it starts; changing them asks for
+  // another run ("Write again"), never a silent restart.
+  const writeOptionsRef = React.useRef({ writer, ignoreLimit });
+  writeOptionsRef.current = { writer, ignoreLimit };
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -77,7 +95,7 @@ function GoalSpecDialogBody({
     const run = async () => {
       let result: GoalSpecResult;
       try {
-        result = await request.write(controller.signal);
+        result = await request.write(controller.signal, writeOptionsRef.current);
       } catch (error) {
         result = { ok: false, message: error instanceof Error ? error.message : String(error) };
       }
@@ -87,11 +105,11 @@ function GoalSpecDialogBody({
         return;
       }
       if (!request.review) {
-        onSubmitRef.current({ kind: 'spec', spec: result.spec, sendMode: request.defaultSendMode });
+        onSubmitRef.current({ kind: 'spec', spec: result.spec, sendMode: request.defaultSendMode, ignoreLimit: writeOptionsRef.current.ignoreLimit });
         return;
       }
       setSpec(result.spec);
-      setState({ status: 'ready', model: `${result.providerID}/${result.modelID}` });
+      setState({ status: 'ready', model: `${result.providerID}/${result.modelID}${result.variant ? ` · ${result.variant}` : ''}` });
     };
     void run();
     return () => controller.abort();
@@ -108,7 +126,7 @@ function GoalSpecDialogBody({
     : t('chat.goal.writer.dialog.title');
 
   const content = (
-    <div className="space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {state.status === 'writing' ? (
         <div className="flex items-start gap-2 py-2" role="status">
           <Icon name="loader-4" className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
@@ -128,21 +146,48 @@ function GoalSpecDialogBody({
         </div>
       ) : null}
 
+      <div className="flex items-start justify-between gap-2">
+        <GoalWriterPicker
+          directory={request.directory}
+          sessionModel={request.sessionModel}
+          value={writer}
+          onChange={setWriter}
+          disabled={state.status === 'writing'}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 shrink-0 px-0" aria-label={t('chat.goal.dialog.moreAria')}>
+              <Icon name="more-2" className="size-3.5" aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setIgnoreLimit((value) => !value)} className="flex items-center justify-between gap-4">
+              <span>{t('chat.goal.dialog.ignoreLimit')}</span>
+              {ignoreLimit ? <Icon name="check" className="size-4 text-primary" aria-hidden="true" /> : null}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
       {state.status === 'ready' ? (
-        <div className="space-y-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-1">
           <div className="flex items-baseline justify-between gap-2">
             <span className="min-w-0 truncate typography-meta text-muted-foreground" title={state.model}>
               {t('chat.goal.writer.dialog.writtenBy', { model: state.model })}
             </span>
-            <span className="flex-shrink-0 typography-micro tabular-nums text-muted-foreground/70" aria-label={t('chat.goal.counter.aria')}>
-              {spec.length}/{SESSION_GOAL_OBJECTIVE_CHAR_LIMIT}
+            <span
+              className={!ignoreLimit && spec.length > charLimit ? 'flex-shrink-0 typography-micro tabular-nums text-status-warning' : 'flex-shrink-0 typography-micro tabular-nums text-muted-foreground/70'}
+              aria-label={t('chat.goal.counter.aria')}
+            >
+              {ignoreLimit ? spec.length : `${spec.length}/${charLimit}`}
             </span>
           </div>
           <Textarea
             value={spec}
             onChange={(event) => setSpec(event.target.value)}
-            maxLength={SESSION_GOAL_OBJECTIVE_CHAR_LIMIT}
             rows={mobile ? 10 : 14}
+            fillContainer={!mobile}
+            outerClassName={mobile ? undefined : 'min-h-0 flex-1'}
             aria-label={t('chat.goal.writer.dialog.specAria')}
           />
           <p className="typography-meta text-muted-foreground">{t('chat.goal.writer.dialog.reviewHint')}</p>
@@ -166,14 +211,14 @@ function GoalSpecDialogBody({
                 variant="outline"
                 size="sm"
                 disabled={!trimmedSpec}
-                onClick={() => onSubmit({ kind: 'spec', spec: trimmedSpec, sendMode: secondaryMode })}
+                onClick={() => onSubmit({ kind: 'spec', spec: trimmedSpec, sendMode: secondaryMode, ignoreLimit })}
               >
                 {t(SEND_LABEL_KEYS[secondaryMode])}
               </Button>
               <Button
                 size="sm"
                 disabled={!trimmedSpec}
-                onClick={() => onSubmit({ kind: 'spec', spec: trimmedSpec, sendMode: request.defaultSendMode })}
+                onClick={() => onSubmit({ kind: 'spec', spec: trimmedSpec, sendMode: request.defaultSendMode, ignoreLimit })}
               >
                 {t(SEND_LABEL_KEYS[request.defaultSendMode])}
               </Button>

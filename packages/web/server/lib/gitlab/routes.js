@@ -3,7 +3,8 @@ import os from 'node:os';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { createSourceControlAuthStore } from './auth-storage.js';
+import { createSourceControlAuthStore, readGitLabVaultToken } from './auth-storage.js';
+import { isVaultReference } from '../environment/vault.js';
 import { exchangeGitLabDeviceCode, resolveGitLabClientId, probeGitLabAuth, startGitLabDeviceFlow } from './device-flow.js';
 import { getGlabToken } from './glab-credential.js';
 import { normalizeGitLabInstance } from './instance.js';
@@ -16,7 +17,13 @@ import { createOAuthFlowRegistry } from '../source-control/oauth-flow-registry.j
 import { digestMutationInput, mutationReceipt } from '../source-control/mutation-executor.js';
 import { createChangeRequestStatusCache } from '../source-control/status-cache.js';
 
-const accountView = (origin, account, current, accounts) => ({
+// Where the token is kept, not the token, for an account added from a vault.
+const withTokenReference = (account, view) => {
+  if (account.tokenReference) view.tokenReference = account.tokenReference;
+  return view;
+};
+
+const accountView = (origin, account, current, accounts) => withTokenReference(account, {
   id: account.id,
   credentialId: account.id,
   credentialRevision: account.credentialRevision,
@@ -228,6 +235,13 @@ export function registerGitLabRoutes(app, options = {}) {
       };
     }
 
+    // An account added from a vault: a token that cannot be read, or that
+    // GitLab refuses, is reported as it is. It is never written off, since the
+    // next read after the user fixes or rotates it in the vault picks it up.
+    if (active.tokenReference && !active.token) {
+      return { provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, tokenReadError: active.tokenReadError, message: `The token at ${active.tokenReference} could not be read (${active.tokenReadError})`, accounts };
+    }
+
     try {
       const user = await verify(origin, active.token);
       const status = {
@@ -239,6 +253,9 @@ export function registerGitLabRoutes(app, options = {}) {
       return status;
     } catch (error) {
       const kind = classifyGitLabFailure(error);
+      if (error?.kind === 'invalid-token' && active.tokenReference) {
+        return { provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, message: `GitLab refused the token at ${active.tokenReference}; update it there`, accounts };
+      }
       if (error?.kind === 'invalid-token') {
         // A renewed token gets one more try; refused again, the account is written off.
         const renewedNow = await invalidateAccount(origin, active.id, { renew: !renewed });
@@ -489,21 +506,27 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  // The account operations below answer like their routes (`{ status, body }`
+  // where a route can refuse), so the routes and the `openchamber` agent tool
+  // (../openchamber-control/integration-service-actions.js) share them.
+  // Lock and storage failures are thrown, as before.
+  const readAuthStatus = async (origin) => {
+    try {
+      return await buildStatus(origin);
+    } catch (error) {
+      if (error?.kind === 'unreachable' || error?.kind === 'temporarily-unavailable') {
+        return { provider: 'gitlab', instance: origin, status: error.kind, connected: false, message: error.message };
+      }
+      throw error;
+    }
+  };
+
   app.get('/api/source-control/gitlab/auth/status', async (req, res) => {
     try {
-      return res.json(await buildStatus(requestOrigin(req)));
+      return res.json(await readAuthStatus(requestOrigin(req)));
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
-      if (error?.kind === 'unreachable' || error?.kind === 'temporarily-unavailable') {
-        let origin;
-        try {
-          origin = requestOrigin(req);
-        } catch {
-          return res.status(400).json({ error: 'Invalid GitLab instance URL' });
-        }
-        return res.json({ provider: 'gitlab', instance: origin, status: error.kind, connected: false, message: error.message });
-      }
       return res.status(400).json({ error: error?.message || 'Failed to get GitLab auth status' });
     }
   });
@@ -591,11 +614,43 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  /**
+   * Adds an account whose token stays in a vault: `reference` (op://…) is read,
+   * the token is checked against the instance, and only the reference is
+   * stored. The token is read again whenever the account is used.
+   */
+  const addAccountFromVault = async (origin, reference) => {
+    const trimmed = isString(reference) ? reference.trim() : '';
+    if (!isVaultReference(trimmed)) {
+      return { status: 400, body: { error: 'reference must be a 1Password reference such as op://Vault/item/field', code: 'INVALID_REFERENCE' } };
+    }
+    const read = await readGitLabVaultToken(trimmed);
+    if (!read.ok) {
+      return { status: 400, body: { error: `The token could not be read from 1Password (${read.reason})`, code: 'VAULT_READ_FAILED', reason: read.reason } };
+    }
+    let user;
+    try {
+      user = await verify(origin, read.value);
+    } catch (error) {
+      if (error?.kind === 'invalid-token') return { status: 401, body: { error: 'GitLab refused the token from 1Password', code: 'INVALID_TOKEN' } };
+      throw error;
+    }
+    const credential = await store.setAccount(origin, { tokenReference: trimmed, user, source: 'pat' });
+    await announceConnectedAccount(origin, credential, user);
+    return { status: 200, body: { connected: true, user } };
+  };
+
   app.post('/api/source-control/gitlab/auth/token', async (req, res) => {
     try {
       const origin = requestOrigin(req);
       const token = isString(req.body?.token) ? req.body.token.trim() : '';
       if (!token) return res.status(400).json({ error: 'token is required' });
+      // A 1Password reference in the token field adds an account that keeps
+      // only the reference.
+      if (isVaultReference(token)) {
+        const { status, body } = await addAccountFromVault(origin, token);
+        return res.status(status).json(body);
+      }
       const user = await verify(origin, token);
       const credential = await store.setAccount(origin, { token, user, source: 'pat' });
       await announceConnectedAccount(origin, credential, user);
@@ -613,18 +668,21 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  const activateAccount = async (origin, accountId) => {
+    if (accountId.startsWith(`${origin}#cli:`)) {
+      const usable = await getUsableGlab(origin);
+      if (!usable || accountId !== `${origin}#cli:${usable.user.id}`) return { status: 404, body: { error: 'GitLab CLI account not found' } };
+      await store.setCliActive(origin, true);
+      return { status: 200, body: await buildStatus(origin) };
+    }
+    if (!accountId || !(await store.activate(origin, accountId))) return { status: 404, body: { error: 'GitLab account not found' } };
+    return { status: 200, body: await buildStatus(origin) };
+  };
+
   app.post('/api/source-control/gitlab/auth/activate', async (req, res) => {
     try {
-      const origin = requestOrigin(req);
-      const accountId = isString(req.body?.accountId) ? req.body.accountId : '';
-      if (accountId.startsWith(`${origin}#cli:`)) {
-        const usable = await getUsableGlab(origin);
-        if (!usable || accountId !== `${origin}#cli:${usable.user.id}`) return res.status(404).json({ error: 'GitLab CLI account not found' });
-        await store.setCliActive(origin, true);
-        return res.json(await buildStatus(origin));
-      }
-      if (!accountId || !(await store.activate(origin, accountId))) return res.status(404).json({ error: 'GitLab account not found' });
-      return res.json(await buildStatus(origin));
+      const { status, body } = await activateAccount(requestOrigin(req), isString(req.body?.accountId) ? req.body.accountId : '');
+      return status === 200 ? res.json(body) : res.status(status).json(body);
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
@@ -632,18 +690,37 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  const setCliDisabled = async (origin, requested) => {
+    const disabled = await store.setCliDisabled(origin, requested);
+    const usable = await getUsableGlab(origin);
+    return { available: Boolean(usable), disabled };
+  };
+
   app.post('/api/source-control/gitlab/auth/cli', async (req, res) => {
     try {
-      const origin = requestOrigin(req);
-      const disabled = await store.setCliDisabled(origin, Boolean(req.body?.disabled));
-      const usable = await getUsableGlab(origin);
-      return res.json({ available: Boolean(usable), disabled });
+      return res.json(await setCliDisabled(requestOrigin(req), Boolean(req.body?.disabled)));
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
       return res.status(400).json({ error: error?.message || 'Failed to inspect glab authentication' });
     }
   });
+
+  /** Removes exactly `requestedAccountId`; bindings on it are reconciled first. */
+  const removeAccount = async (origin, requestedAccountId) => {
+    const instance = await store.readInstance(origin);
+    if (requestedAccountId.startsWith(`${origin}#cli:`)) {
+      const cli = await getUsableGlab(origin);
+      if (!cli || `${origin}#cli:${cli.user.id}` !== requestedAccountId) {
+        return { status: 200, body: { removed: false } };
+      }
+      await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
+      return { status: 200, body: { removed: await store.setCliActive(origin, false) } };
+    }
+    if (!instance.accounts.some((account) => account.id === requestedAccountId)) return { status: 200, body: { removed: false } };
+    await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
+    return { status: 200, body: { removed: await store.removeAccount(origin, requestedAccountId) } };
+  };
 
   app.delete('/api/source-control/gitlab/auth', async (req, res) => {
     try {
@@ -653,18 +730,8 @@ export function registerGitLabRoutes(app, options = {}) {
       if (!requestedAccountId || requested !== requestedAccountId) {
         return res.status(400).json({ error: 'accountId is required' });
       }
-      const instance = await store.readInstance(origin);
-      if (requestedAccountId.startsWith(`${origin}#cli:`)) {
-        const cli = await getUsableGlab(origin);
-        if (!cli || `${origin}#cli:${cli.user.id}` !== requestedAccountId) {
-          return res.json({ removed: false });
-        }
-        await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
-        return res.json({ removed: await store.setCliActive(origin, false) });
-      }
-      if (!instance.accounts.some((account) => account.id === requestedAccountId)) return res.json({ removed: false });
-      await options.onAccountRemoved?.(identityFor(origin, requestedAccountId));
-      return res.json({ removed: await store.removeAccount(origin, requestedAccountId) });
+      const { status, body } = await removeAccount(origin, requestedAccountId);
+      return status === 200 ? res.json(body) : res.status(status).json(body);
     } catch (error) {
       const lockResponse = sendAuthStorageError(res, error);
       if (lockResponse) return lockResponse;
@@ -1232,6 +1299,15 @@ export function registerGitLabRoutes(app, options = {}) {
 
   return {
     listInstances: async () => store.listInstances?.() ?? [],
+    /** Account operations shared with the `openchamber` agent tool; each answers like its route. */
+    accounts: Object.freeze({
+      listInstances: async () => store.listInstances?.() ?? [],
+      status: readAuthStatus,
+      activate: activateAccount,
+      addFromVault: addAccountFromVault,
+      remove: removeAccount,
+      setCliDisabled,
+    }),
     /** Live state of known merge requests and issues, read with the instance's current account. */
     readLiveSummaries: async ({ instance, accountId = null, refs, issueRefs }) => {
       let service;

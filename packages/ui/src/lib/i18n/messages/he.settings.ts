@@ -618,6 +618,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': 'האפליקציה הזו: {version}',
   'settings.openchamber.about.toast.serverLatestVersion': 'בשרת פועלת הגרסה העדכנית של OpenChamber',
   'settings.openchamber.about.actions.checkForUpdates': 'בדוק אם יש עדכונים',
+  'settings.openchamber.about.actions.releaseAvailable': 'Release {version} available',
   'settings.openchamber.about.toast.latestVersion': 'הגרסה העדכנית כבר מותקנת',
   'settings.agents.sidebar.title': 'סוכנים',
   'settings.agents.sidebar.total': "סה\"כ {count}",

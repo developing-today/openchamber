@@ -74,6 +74,30 @@ describe('VS Code OpenCode upgrades', () => {
     });
   });
 
+  test('never claims an upgrade for a malformed version on either side', async () => {
+    const manager = createManager();
+    const statusFor = async (currentVersion: string, latestVersion: string) => {
+      // SAFETY: the stub answers only the two routes getOpenCodeUpgradeStatus
+      // fetches, with the same Response shapes the real endpoints return.
+      globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+        const url = String(input);
+        if (url.endsWith('/api/info')) return new Response(JSON.stringify({ version: currentVersion, pid: 1, urls: [], paths: { tmp: '/tmp' } }));
+        return new Response(JSON.stringify({ version: latestVersion }));
+      }) as typeof fetch;
+      return getOpenCodeUpgradeStatus(manager);
+    };
+
+    // Trailing junk: parseInt('1junk') is 1, so this read as 2.1 > 2.0.9.
+    assert.equal((await statusFor('2.0.9', '2.1junk')).available, false);
+    // Empty part: parseInt('') fell back to 0, so the installed '2..1' read as 2.0.1 < 2.0.2.
+    assert.equal((await statusFor('2..1', '2.0.2')).available, false);
+    // Non-numeric part: read as 0, so '2.0.x' silently equalled a real 2.0.0.
+    assert.equal((await statusFor('2.0.0', '2.0.x')).available, false);
+    // Parseable versions still compare normally, prerelease included.
+    assert.equal((await statusFor('2.0.1', '2.0.2')).available, true);
+    assert.equal((await statusFor('2.0.2', '2.0.2-beta.1')).available, false);
+  });
+
   test('still reports the running version for an externally managed OpenCode', async () => {
     const manager = createManager('external');
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {

@@ -586,6 +586,7 @@ export const settingsDict = {
   'settings.openchamber.about.native.appVersion': '이 앱: {version}',
   'settings.openchamber.about.toast.serverLatestVersion': '서버가 최신 OpenChamber를 사용 중입니다',
   'settings.openchamber.about.actions.checkForUpdates': '업데이트 확인',
+  'settings.openchamber.about.actions.releaseAvailable': 'Release {version} available',
   'settings.openchamber.about.toast.latestVersion': '최신 버전을 사용 중입니다',
   'settings.agents.sidebar.title': '에이전트',
   'settings.agents.sidebar.total': '총 {count}개',

@@ -827,6 +827,15 @@ describe('OpenChamber control service', () => {
     expect(result.messages.map((message) => message.id)).toEqual(['msg_mid_user', 'msg_new_user']);
   });
 
+  // OpenCode refuses a page over 200 ("Expected a value less than or equal to
+  // 200"), which surfaced as an error about the caller's own limit of 100.
+  it('keeps each page within what OpenCode accepts, for any requested limit', async () => {
+    const { service, client } = createService();
+    client.message.list.mockImplementation(async () => ({ data: [], cursor: {} }));
+    await service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', limit: 100 });
+    expect(client.message.list.mock.calls[0][0].limit).toBe(200);
+  });
+
   it('stops paging when the message cursor repeats or a page comes back empty', async () => {
     const { service, client } = createService();
     client.message.list.mockImplementation(async (input) => {

@@ -873,6 +873,7 @@ describe('settings registry gate', () => {
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
     sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     sessionGoalWriterEnabled: true, sessionGoalWriterModel: 'anthropic/claude', sessionGoalWriterReview: true, sessionGoalWriterSendMode: 'goal-as-message', sessionGoalRewriteAll: true, sessionGoalAutoCreate: 'review',
+    sessionGoalWriterVariant: 'low', sessionGoalWriterRememberChoice: true, sessionGoalObjectiveCharLimit: 12_000, sessionGoalCheckObjectiveCharLimit: 30_000,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,

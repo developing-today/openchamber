@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS, isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
+import { DEFAULT_SESSION_GOAL_CHECK_OBJECTIVE_CHAR_LIMIT, DEFAULT_SESSION_GOAL_OBJECTIVE_CHAR_LIMIT, isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
 import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
@@ -972,6 +973,12 @@ interface UIStore {
   /** Every goal objective, from any entry point, goes through the goal writer. */
   sessionGoalRewriteAll: boolean;
   sessionGoalAutoCreate: SessionGoalAutoCreate;
+  /** The most characters a goal objective keeps; a longer one is condensed when saved. */
+  sessionGoalObjectiveCharLimit: number;
+  /** The most of an objective the progress check reads. */
+  sessionGoalCheckObjectiveCharLimit: number;
+  /** A writer model or effort chosen in a goal window becomes the Settings default. */
+  sessionGoalWriterRememberChoice: boolean;
   collapsibleThinkingBlocks: boolean;
   /** A collapsible reasoning block opens while its model thinks. Off: it stays folded to its header. */
   expandReasoningWhileStreaming: boolean;
@@ -1259,6 +1266,9 @@ interface UIStore {
   setSessionGoalWriterSendMode: (value: SessionGoalWriterSendMode) => void;
   setSessionGoalRewriteAll: (value: boolean) => void;
   setSessionGoalAutoCreate: (value: SessionGoalAutoCreate) => void;
+  setSessionGoalObjectiveCharLimit: (value: number) => void;
+  setSessionGoalCheckObjectiveCharLimit: (value: number) => void;
+  setSessionGoalWriterRememberChoice: (value: boolean) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setExpandReasoningWhileStreaming: (value: boolean) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -1489,6 +1499,9 @@ export const useUIStore = create<UIStore>()(
         sessionGoalWriterSendMode: 'with-message',
         sessionGoalRewriteAll: false,
         sessionGoalAutoCreate: 'off',
+        sessionGoalObjectiveCharLimit: DEFAULT_SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
+        sessionGoalCheckObjectiveCharLimit: DEFAULT_SESSION_GOAL_CHECK_OBJECTIVE_CHAR_LIMIT,
+        sessionGoalWriterRememberChoice: false,
         collapsibleThinkingBlocks: true,
         expandReasoningWhileStreaming: false,
         activityRenderMode: 'summary',
@@ -2557,6 +2570,20 @@ export const useUIStore = create<UIStore>()(
           set({ sessionGoalAutoCreate: value });
         },
 
+        setSessionGoalObjectiveCharLimit: (value) => {
+          if (!isSessionGoalCharLimit(value)) return;
+          set({ sessionGoalObjectiveCharLimit: value });
+        },
+
+        setSessionGoalCheckObjectiveCharLimit: (value) => {
+          if (!isSessionGoalCharLimit(value)) return;
+          set({ sessionGoalCheckObjectiveCharLimit: value });
+        },
+
+        setSessionGoalWriterRememberChoice: (value) => {
+          set({ sessionGoalWriterRememberChoice: value });
+        },
+
         setCollapsibleThinkingBlocks: (value) => {
           set({ collapsibleThinkingBlocks: value });
         },
@@ -3614,6 +3641,9 @@ export const useUIStore = create<UIStore>()(
           sessionGoalWriterSendMode: state.sessionGoalWriterSendMode,
           sessionGoalRewriteAll: state.sessionGoalRewriteAll,
           sessionGoalAutoCreate: state.sessionGoalAutoCreate,
+          sessionGoalObjectiveCharLimit: state.sessionGoalObjectiveCharLimit,
+          sessionGoalCheckObjectiveCharLimit: state.sessionGoalCheckObjectiveCharLimit,
+          sessionGoalWriterRememberChoice: state.sessionGoalWriterRememberChoice,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           expandReasoningWhileStreaming: state.expandReasoningWhileStreaming,
           activityRenderMode: state.activityRenderMode,

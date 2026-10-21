@@ -19,11 +19,12 @@ import os from 'os';
 import path from 'path';
 
 import { assertPromptResponse } from '../opencode/prompt-response.js';
-import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
+import { GOAL_OBJECTIVE_HARD_CAP, goalObjectiveLimits, readObjective } from './objectives.js';
 import {
   buildJevAuditRequest,
   buildSmallModelAuditPrompt,
   decideProgress,
+  excerptObjective,
   readJevAnswers,
   readSmallModelAnswers,
 } from './audit.js';
@@ -47,6 +48,7 @@ const readGoalSettings = () => {
     // Without a usable classification provider the small model checks anyway.
     checker: settings.sessionGoalChecker === 'classifier' ? 'classifier' : 'small-model',
     maxAutoTurns: normalizeMaxAutoTurns(settings.sessionGoalMaxAutoTurns),
+    checkObjectiveLimit: goalObjectiveLimits(settings).check,
   };
 };
 
@@ -178,7 +180,7 @@ const parseGoalMetadata = (session) => {
   if (!id || !status || (!objective && !objectiveFile)) return null;
   return {
     id,
-    objective: objective.slice(0, GOAL_OBJECTIVE_CHAR_LIMIT),
+    objective: objective.slice(0, GOAL_OBJECTIVE_HARD_CAP),
     objectiveFile,
     status,
     tokenBudget: Number.isFinite(goal.tokenBudget) && goal.tokenBudget > 0 ? Math.floor(goal.tokenBudget) : null,
@@ -353,6 +355,7 @@ export const createSessionGoalRuntime = ({
   idleQuietMs = IDLE_QUIET_MS,
   kickoffQuietMs = KICKOFF_QUIET_MS,
   getMaxAutoTurns = () => readGoalSettings().maxAutoTurns,
+  getCheckObjectiveLimit = () => readGoalSettings().checkObjectiveLimit,
   persistSessionGoal = null,
   readSessionMetadata = null,
 }) => {
@@ -517,7 +520,9 @@ export const createSessionGoalRuntime = ({
    * could run.
    */
   const runAudit = async ({ goal, assistantText, directory, lastAssistantInfo }) => {
-    const input = { objective: goal.objective, answer: assistantText };
+    // The goal itself may be longer than the check can take whole; the check
+    // reads its opening and its close, where the acceptance criteria sit.
+    const input = { objective: excerptObjective(goal.objective, getCheckObjectiveLimit()), answer: assistantText };
     const sessionId = lastAssistantInfo?.sessionID ?? null;
     const checked = (getChecker() === 'classifier' ? await checkWithJev({ ...input, sessionId }) : null)
       ?? await checkWithSmallModel({ ...input, directory, lastAssistantInfo });
