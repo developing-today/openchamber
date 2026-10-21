@@ -167,6 +167,14 @@ export type InputState = {
    * finds a different draft open drops it.
    */
   pendingDraftSubmit: { draftId: number; text: string } | null
+  /**
+   * Text to send in one chat's session, asked for from its transcript (a
+   * question answered again from its tool row). `target` names the composer
+   * like `pendingInputTarget`: null for the main chat, the session id for a
+   * chat pinned in the side panel. That composer sends it only while it shows
+   * `sessionId`, and drops it otherwise; other composers leave it alone.
+   */
+  pendingSessionSubmit: { target: string | null; sessionId: string; text: string } | null
   /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
@@ -186,6 +194,9 @@ export type InputState = {
   requestDraftSubmit: (draftId: number, text: string) => void
   /** Takes the pending text when it belongs to this draft; any other pending request is dropped. */
   consumePendingDraftSubmit: (draftId: number | null) => string | null
+  requestSessionSubmit: (request: { target: string | null; sessionId: string; text: string }) => void
+  /** Takes the pending text when it is for this composer and session; a request for this composer and another session is dropped. */
+  consumePendingSessionSubmit: (target: string | null, sessionId: string | null) => string | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
@@ -219,6 +230,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pinnedSyntheticParts: new Map(),
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
+  pendingSessionSubmit: null,
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -285,6 +297,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (pendingDraftSubmit === null) return null
     set({ pendingDraftSubmit: null })
     return pendingDraftSubmit.draftId === draftId ? pendingDraftSubmit.text : null
+  },
+
+  requestSessionSubmit: (request) => set({ pendingSessionSubmit: request }),
+
+  consumePendingSessionSubmit: (target, sessionId) => {
+    const { pendingSessionSubmit } = get()
+    if (pendingSessionSubmit === null || pendingSessionSubmit.target !== target) return null
+    set({ pendingSessionSubmit: null })
+    return pendingSessionSubmit.sessionId === sessionId ? pendingSessionSubmit.text : null
   },
 
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),

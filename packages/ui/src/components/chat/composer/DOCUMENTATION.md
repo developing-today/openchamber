@@ -50,6 +50,17 @@ oldest pending form and counts the rest in its header. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
+For an agent's `question` call, both also record the answers in progress
+under the call (`questionAnswers.ts`, memory only, newest 50 calls), since a
+dismissal, a stopped turn or an error ends the form and drops the dock's own
+draft. The call's transcript row then offers to answer again starting from
+them. Its answers come back to the composer as a request in the input store
+(`requestSessionSubmit`, naming the composer like `pendingInputTarget` and the
+session): the composer showing that session sends the text like a typed
+message, so a busy session queues or steers it, waits while a BTW holds the
+composer, and appends the text without sending when the composer already
+holds something. A composer showing another session drops the request.
+
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,
 a `when` clause reads only the answers of active earlier fields (an

@@ -582,6 +582,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const pendingBtwComposerRequest = useInputStore((s) => s.pendingBtwComposerRequest);
     const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
     const pendingDraftSubmit = useInputStore((s) => s.pendingDraftSubmit);
+    const pendingSessionSubmit = useInputStore((s) => s.pendingSessionSubmit);
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
@@ -2604,6 +2605,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         messageRef.current = text;
         void handleSubmitRef.current({ presetText: text });
     }, [columnPinned, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, mailboxTarget, pendingDraftSubmit]);
+
+    // Text this chat's transcript asked to send (answers to an agent's
+    // question, given from its tool row) goes out like a typed message, so a
+    // busy session queues or steers it as usual. It waits while a BTW holds
+    // the composer, which would send it to the side question instead. A
+    // composer that already holds something gets the text appended and sends
+    // nothing, as with the Shortcuts draft above.
+    React.useEffect(() => {
+        if (pendingSessionSubmit == null || isBtwActive) return;
+        const text = useInputStore.getState().consumePendingSessionSubmit(mailboxTarget, currentSessionId);
+        if (!text) return;
+        const composerHolds = getCurrentInputSnapshot().hasContent
+            || (useInputStore.getState().getPendingSyntheticParts(mailboxTarget)?.length ?? 0) > 0;
+        if (composerHolds) {
+            setMessage((prev) => appendWithLineBreaks(prev, text));
+            toast.info(t('chat.questionAnswers.addedToDraft'));
+            return;
+        }
+        setMessage(text);
+        messageRef.current = text;
+        void handleSubmitRef.current({ presetText: text });
+    }, [currentSessionId, getCurrentInputSnapshot, isBtwActive, mailboxTarget, pendingSessionSubmit, t]);
 
     const handleKeyDown = (e: KeyboardEvent) => {
         // Early return during IME composition to prevent interference with autocomplete.
