@@ -244,10 +244,10 @@ describe('goal writer jobs', () => {
     await runtime.create(job());
     writer.calls[0].reject(new Error('No small model available'));
     await runtime.whenIdle();
-    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'failed', error: 'No small model available' });
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'failed', error: 'No small model available', failedStep: 'write' });
 
     const redone = await runtime.redo(runtime.snapshot().jobs[0].id);
-    expect(redone.job).toMatchObject({ status: 'writing', attempt: 2, error: null });
+    expect(redone.job).toMatchObject({ status: 'writing', attempt: 2, error: null, failedStep: null });
     writeAnswer(writer, 1);
     await runtime.whenIdle();
     expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', spec: SPEC, attempt: 2 });
@@ -450,8 +450,26 @@ describe('goal writer jobs', () => {
     await runtime.whenIdle();
     warn.mockRestore();
 
-    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, sending: false });
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, sending: false, failedStep: 'send' });
     expect(runtime.snapshot().jobs[0].error).toContain('failed with 500');
+  });
+
+  it('a failed Send original while the spec is written is a failed send, not a failed write', async () => {
+    const openCode = createOpenCode();
+    openCode.state.failPath = /\/prompt$/;
+    const { runtime, writer } = createRuntime({ openCode });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const created = await runtime.create(job());
+
+    await expect(runtime.send(created.job.id, { kind: 'original' })).rejects.toMatchObject({ status: 502 });
+    warn.mockRestore();
+
+    expect(writer.calls[0].input.signal.aborted).toBe(true);
+    // The send stopped the write, so the job has no spec and reads as failed;
+    // the step says it was the send.
+    const [failed] = runtime.snapshot().jobs;
+    expect(failed).toMatchObject({ status: 'failed', failedStep: 'send', spec: null, review: true, sending: false });
+    expect(failed.error).toContain('failed with 500');
   });
 
   it('a prompt OpenCode answers without a queued message is not taken as sent', async () => {
@@ -571,7 +589,7 @@ describe('goal writer jobs', () => {
     expect(writer.calls[0].input.signal.aborted).toBe(true);
 
     const released = await runtime.settle(created.job.id, { outcome: null, error: 'network down' });
-    expect(released.job).toMatchObject({ status: 'failed', error: 'network down', sending: false, review: true });
+    expect(released.job).toMatchObject({ status: 'failed', failedStep: 'send', error: 'network down', sending: false, review: true });
   });
 
   it('an abandoned claim expires and turns review on', async () => {
@@ -966,7 +984,7 @@ describe('goal writer jobs', () => {
 
     expect(second.writer.calls).toEqual([]);
     expect(second.openCode.state.calls).toEqual([]);
-    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'failed', review: true, sending: false, error: RESTART_REASON });
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'failed', failedStep: 'send', review: true, sending: false, error: RESTART_REASON });
     const settled = await second.runtime.settle(created.job.id, { outcome: { kind: 'original', withGoal: true } });
     expect(settled.job).toMatchObject({ status: 'sent', error: null, outcome: { kind: 'original', withGoal: true } });
   });

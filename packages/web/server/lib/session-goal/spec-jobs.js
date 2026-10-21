@@ -56,6 +56,8 @@ const storedStatusSchema = z.enum(['writing', 'ready', 'failed', 'sent']);
 const triggerSchema = z.enum(['armed', 'auto-create']);
 const sendModeSchema = z.enum(['with-message', 'goal-as-message']);
 const writerSourceSchema = z.enum(['settings', 'session', 'small-model']);
+/** The step `error` comes from: writing the spec, or sending the message. */
+const failedStepSchema = z.enum(['write', 'send']);
 
 const writerInputSchema = z.object({
   conversation: z.string().optional(),
@@ -121,7 +123,8 @@ const storedJobSchema = z.object({
   spec: z.string().nullable(),
   writer: writerSchema,
   error: z.string().nullable(),
-  // Files written before these two fields existed read as none.
+  // Files written before these fields existed read as none.
+  failedStep: failedStepSchema.nullable().default(null),
   warning: z.string().nullable().default(null),
   delivery: deliverySchema.nullable().default(null),
   outcome: outcomeSchema.nullable(),
@@ -442,6 +445,7 @@ export function createGoalSpecJobRuntime({
       writer: { ...job.writer },
       sendConfig: { ...job.sendConfig },
       error: job.error,
+      failedStep: job.failedStep,
       warning: job.warning,
       sending: job.delivery !== null,
       outcome: job.outcome,
@@ -571,6 +575,7 @@ export function createGoalSpecJobRuntime({
       if (failure) {
         current.status = 'failed';
         current.error = describeError(failure, 'the goal writer failed');
+        current.failedStep = 'write';
         touch(current);
         publish(current.sessionId, current);
         return;
@@ -579,6 +584,7 @@ export function createGoalSpecJobRuntime({
       current.spec = written.spec;
       current.writer = { ...current.writer, providerID: written.providerID, modelID: written.modelID };
       current.error = null;
+      current.failedStep = null;
       touch(current);
       publish(current.sessionId, current);
       if (sendsByItself(current)) {
@@ -696,10 +702,14 @@ export function createGoalSpecJobRuntime({
     ? { kind: 'spec', sendMode: choice.sendMode }
     : { kind: 'original', withGoal: job.trigger === 'armed' });
 
-  /** A write the send stopped cannot resume, so an unsent job without a spec has failed. */
+  /**
+   * A write the send stopped cannot resume, so an unsent job without a spec
+   * has failed; the reason is the send's, whatever the status reads.
+   */
   const settleOpenJob = (job, reason) => {
     if (job.status === 'writing' && !writers.has(job.id)) job.status = job.spec ? 'ready' : 'failed';
     job.error = reason;
+    job.failedStep = 'send';
     touch(job);
   };
 
@@ -731,6 +741,7 @@ export function createGoalSpecJobRuntime({
     job.outcome = outcome;
     if (spec) job.spec = spec;
     job.error = null;
+    job.failedStep = null;
     job.warning = warning;
     job.delivery = null;
     job.message = toSentMessage(job.message);
@@ -810,6 +821,7 @@ export function createGoalSpecJobRuntime({
       spec: null,
       writer: describeWriter(settings, sendConfig),
       error: null,
+      failedStep: null,
       warning: null,
       delivery: null,
       outcome: null,
@@ -846,6 +858,7 @@ export function createGoalSpecJobRuntime({
     job.attempt += 1;
     job.spec = null;
     job.error = null;
+    job.failedStep = null;
     job.writer = describeWriter(settings, job.sendConfig);
     touch(job);
     const result = publish(job.sessionId, job);

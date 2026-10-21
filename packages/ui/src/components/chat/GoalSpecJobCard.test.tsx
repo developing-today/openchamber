@@ -167,7 +167,7 @@ describe('GoalSpecJobCard', () => {
   });
 
   test('a failed write shows the reason, with redo and the message as typed', async () => {
-    const failed = job({ status: 'failed', trigger: 'auto-create', error: 'No small model available' });
+    const failed = job({ status: 'failed', trigger: 'auto-create', error: 'No small model available', failedStep: 'write' });
     show(failed);
     respond = () => Response.json({ revision: 2, job: failed });
     await render();
@@ -179,6 +179,16 @@ describe('GoalSpecJobCard', () => {
     await click('Send without a goal');
     expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/redo', '/api/goals/spec-jobs/job-1/send']);
     expect(calls[1]?.body).toEqual({ kind: 'original' });
+  });
+
+  test('a send of the message as typed that failed while the spec was written says the send failed', async () => {
+    // "Send original" stopped the write, so the job has no spec and reads as failed.
+    show(job({ status: 'failed', failedStep: 'send', error: 'OpenCode POST /api/session/ses_card/prompt failed with 500' }));
+    await render();
+
+    expect(text()).toContain('The message was not sent.');
+    expect(text()).toContain('failed with 500');
+    expect(text()).not.toContain('The goal writer could not write a spec.');
   });
 
   test('back to edit hands the whole message to the session\'s composer and arms the goal again', async () => {
@@ -268,7 +278,7 @@ describe('GoalSpecJobCard', () => {
     show(waiting);
     respond = (call) => (call.path.endsWith('/claim')
       ? Response.json({ revision: 2, job: { ...waiting, sending: true }, message: { content: 'x', text: 'x', attachments: [], context: [{ kind: 'synthetic', text: 'Resolve the conflict' }] } })
-      : Response.json({ revision: 3, job: { ...waiting, error: 'OpenCode is not reachable' } }));
+      : Response.json({ revision: 3, job: { ...waiting, error: 'OpenCode is not reachable', failedStep: 'send' } }));
     const sendMessage: SendMessage = async () => {
       throw new Error('OpenCode is not reachable');
     };

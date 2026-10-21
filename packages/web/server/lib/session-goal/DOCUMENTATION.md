@@ -148,21 +148,24 @@ persisted, revisioned, broadcast).
 
 - Job: `{ id, sessionId, directory, status, trigger, review, sendMode,
   tokenBudget, message, composerOnly, spec, writer, sendConfig, error,
-  warning, sending, outcome, attempt, createdAt, updatedAt }`. `status` is
-  `writing`, `ready`, `failed`, `sent` or `cancelled`; `trigger` is `armed` or
-  `auto-create`. `message` is the captured composer message in the queue
-  item's form (`content` as typed, `text` to deliver, `agentMention`,
-  `attachments`, `context`); `sendConfig` is the composer's model, agent and
-  effort when the job started, and `review`, `sendMode` and `tokenBudget` are
-  the settings of that moment. `writer` names who writes: `settings` (the
-  picked writer model and its effort), `session` (the session's model at its
-  default) or `small-model` (a session on Auto); after a write it names the
-  model that answered. `outcome` says how a sent job went out: `{ kind:
-  'spec', sendMode }` or `{ kind: 'original', withGoal }`. `warning` is set on
-  a sent job when a step after the prompt failed. `writerInput`
-  (conversation and open items for a goal from the next message) and the
-  attachment payloads stay on the server: projections carry attachment names
-  and a context count.
+  failedStep, warning, sending, outcome, attempt, createdAt, updatedAt }`.
+  `status` is `writing`, `ready`, `failed`, `sent` or `cancelled`; `trigger`
+  is `armed` or `auto-create`. `message` is the captured composer message in
+  the queue item's form (`content` as typed, `text` to deliver,
+  `agentMention`, `attachments`, `context`); `sendConfig` is the composer's
+  model, agent and effort when the job started, and `review`, `sendMode` and
+  `tokenBudget` are the settings of that moment. `writer` names who writes:
+  `settings` (the picked writer model and its effort), `session` (the
+  session's model at its default) or `small-model` (a session on Auto); after
+  a write it names the model that answered. `outcome` says how a sent job went
+  out: `{ kind: 'spec', sendMode }` or `{ kind: 'original', withGoal }`.
+  `error` is why an open job stopped and `failedStep` the step it came from,
+  `write` or `send`. A send of the message as typed that fails while the spec
+  is being written leaves a job without a spec, so its status is `failed`
+  although the write never failed. `warning` is set on a sent job when a step
+  after the prompt failed. `writerInput` (conversation and open items for a
+  goal from the next message) and the attachment payloads stay on the server:
+  projections carry attachment names and a context count.
 - One job per session. A new job replaces the session's job: an open one is
   cancelled and its write stopped, a sent card removed. While that job's
   message is being sent (by the server, or by a composer that claimed it) a
@@ -174,9 +177,10 @@ persisted, revisioned, broadcast).
   `409`.
 - Writing: `writeGoalSpec` on the writer settings read when the write starts,
   with the job's text, writer input, the session model and the job's current
-  directory. A failure is `failed` with the reason. Every redo, send of the
-  original, claim of the original, cancel and stop aborts the running write
-  first, so an answer arriving after that is dropped.
+  directory. A failure is `failed` with the reason and `failedStep: 'write'`.
+  Every redo, send of the original, claim of the original, cancel and stop
+  aborts the running write first, so an answer arriving after that is
+  dropped.
 - Sending by the server: with review off, a written spec goes out at once;
   `send` does the same for the user's choice on the card. Auto is resolved
   first (`resolveAutoSelection`, as the OpenChamber session service does; a
@@ -194,10 +198,10 @@ persisted, revisioned, broadcast).
   "Send original" stops a running write; an armed goal then keeps the message
   as its objective, a goal from the next message sends without one.
 - A failure before OpenCode queued the prompt leaves the job open with the
-  reason and review on, so nothing goes out again until the user picks; a
-  goal saved before the failure stays, as for any send that fails after its
-  goal. A failure after it (the goal reminder) leaves the job `sent` with the
-  reason in `warning`; a second send is `409`.
+  reason, `failedStep: 'send'` and review on, so nothing goes out again until
+  the user picks; a goal saved before the failure stays, as for any send that
+  fails after its goal. A failure after it (the goal reminder) leaves the job
+  `sent` with the reason in `warning`; a second send is `409`.
 - Sending through the composer: the server sends text, the agent mention and
   derived instructions only. A message with attachments or attached context
   (`composerOnly`) waits on the card even with review off; `claim` hands its
@@ -474,13 +478,15 @@ sees only that final turn, so the report is its evidence.
   session's model at its default effort, or the small model until the model
   that answered is known) and the state: writing (with "sent as soon as it is
   written" when review is off), ready with the spec in an editable field (edits
-  stay per write attempt in the store), failed with the reason, sending, or
-  sent with how it went and a dismiss button (`DELETE`). Actions on an open
-  job: send in the default send mode or the other one, send the message as
-  typed (also while writing, which stops the writer; an armed goal keeps the
-  message as its objective, an automatic one goes without a goal), write again
-  (ready or failed), and back to edit. A message the server cannot send
-  (`composerOnly`: attachments or attached context) says it waits for the user.
+  stay per write attempt in the store), failed with the reason under a title
+  that names the step that failed (the write, or the send of the message),
+  sending, or sent with how it went and a dismiss button (`DELETE`). Actions
+  on an open job: send in the default send mode or the other one, send the
+  message as typed (also while writing, which stops the writer; an armed goal
+  keeps the message as its objective, an automatic one goes without a goal),
+  write again (ready or failed), and back to edit. A message the server cannot
+  send (`composerOnly`: attachments or attached context) says it waits for the
+  user.
   `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
   `sendMessage` with the full message assembled as a taken queued message
   (`buildOutgoingMessage`) and the goal set on the arm store for that send

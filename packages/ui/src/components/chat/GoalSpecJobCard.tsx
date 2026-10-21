@@ -129,6 +129,10 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
   const preview = job.message.content.trim().split('\n', 1)[0] ?? '';
   const writing = job.status === 'writing';
   const ready = job.status === 'ready';
+  // A failed "Send original" stops the write, so a job without a spec can have
+  // failed at the send. A server that does not name the step failed a send
+  // only from a written spec.
+  const sendFailed = job.failedStep ? job.failedStep === 'send' : ready;
   const sendOriginalLabel = job.trigger === 'armed'
     ? t('chat.goal.writer.action.useMessage')
     : t('chat.goal.writer.action.sendWithoutGoal');
@@ -167,7 +171,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
       {job.error && !job.sending ? (
         <div className="mt-2 rounded-lg bg-[var(--status-error-background)] px-2.5 py-1.5" role="alert">
           <p className="typography-meta font-medium text-[var(--status-error-text)]">
-            {ready ? t('chat.goal.writer.card.sendFailed') : t('chat.goal.writer.card.failed')}
+            {sendFailed ? t('chat.goal.writer.card.sendFailed') : t('chat.goal.writer.card.failed')}
           </p>
           <p className="typography-meta break-words text-muted-foreground">{job.error}</p>
         </div>
