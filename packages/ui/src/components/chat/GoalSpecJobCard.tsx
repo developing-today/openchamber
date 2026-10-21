@@ -95,21 +95,28 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
         ? t(outcome.sendMode === 'with-message' ? 'chat.goal.writer.card.sentWithMessage' : 'chat.goal.writer.card.sentGoalAsMessage')
         : t(outcome.withGoal ? 'chat.goal.writer.card.sentAsGoal' : 'chat.goal.writer.card.sentWithoutGoal');
     return (
-      <section aria-label={title} className="oc-tile flex min-w-0 items-center gap-2 rounded-xl py-1 ps-3 pe-1">
-        <Icon name="check" className="size-3.5 shrink-0 text-[var(--status-success)]" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate typography-meta text-foreground" title={job.message.content}>{sentText}</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={dismiss}
-          disabled={busy}
-          aria-label={t('chat.goal.writer.card.dismissAria')}
-          title={t('chat.goal.writer.card.dismissAria')}
-          className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-        >
-          <Icon name="close" className="size-4" aria-hidden="true" />
-        </Button>
+      <section aria-label={title} className="oc-tile min-w-0 rounded-xl py-1 ps-3 pe-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon name="check" className="size-3.5 shrink-0 text-[var(--status-success)]" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate typography-meta text-foreground" title={job.message.content}>{sentText}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={dismiss}
+            disabled={busy}
+            aria-label={t('chat.goal.writer.card.dismissAria')}
+            title={t('chat.goal.writer.card.dismissAria')}
+            className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+          >
+            <Icon name="close" className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+        {job.warning ? (
+          <p className="typography-micro break-words pb-1 pe-2 text-[var(--status-warning-text)]">
+            {t('chat.goal.writer.card.sentWarning', { reason: job.warning })}
+          </p>
+        ) : null}
       </section>
     );
   }

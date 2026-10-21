@@ -293,6 +293,14 @@ describe('GoalSpecJobCard', () => {
     expect(calls).toEqual([{ method: 'DELETE', path: '/api/goals/spec-jobs/job-1', body: undefined }]);
   });
 
+  test('a sent job with a failed later step still says it was sent, and shows what failed', async () => {
+    show(job({ status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' }, warning: 'the goal reminder could not be sent: HTTP 500' }));
+    await render();
+
+    expect(text()).toContain('Sent your message as typed. The spec is its goal.');
+    expect(text()).toContain('the goal reminder could not be sent: HTTP 500');
+  });
+
   test('switching to another session and back cancels nothing', async () => {
     show(job({ status: 'ready', spec: 'Spec' }));
     await render();
