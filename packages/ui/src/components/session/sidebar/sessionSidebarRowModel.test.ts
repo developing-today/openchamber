@@ -214,6 +214,20 @@ describe('buildSessionSidebarRowModel', () => {
     expect(sessions).toEqual(['timeline-mixed:working', 'timeline:working', 'timeline:other']);
   });
 
+  test('timeline leaves a project hidden from all sessions out of the list, header and rows', () => {
+    const input = args([project([group([])]), { project: { id: 'project-b', normalizedPath: '/other' }, groups: [] }]);
+    input.viewMode = 'timeline';
+    input.timelineItems = [timelineItem('shown'), timelineItem('hidden', { projectId: 'project-b' })];
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const headers = rows.flatMap((row) => (row.kind === 'project-header' ? [row.section.project.id] : []));
+    const sessions = rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+    expect(headers).toEqual(['project-a']);
+    expect(sessions).toEqual(['shown']);
+  });
+
   test('timeline reveals seven sessions per project, seven more per Show more', () => {
     const input = args([project([group([])])]);
     input.viewMode = 'timeline';

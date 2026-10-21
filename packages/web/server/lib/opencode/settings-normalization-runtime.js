@@ -269,6 +269,14 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         project.sidebarCollapsed = candidate.sidebarCollapsed;
       }
 
+      if (candidate.hiddenFromWork === true) {
+        project.hiddenFromWork = true;
+      }
+
+      if (candidate.hiddenFromAllSessions === true) {
+        project.hiddenFromAllSessions = true;
+      }
+
       result.push(project);
     }
 

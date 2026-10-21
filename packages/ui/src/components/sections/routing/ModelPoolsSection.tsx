@@ -150,10 +150,10 @@ const PoolRow: React.FC<{
           aria-expanded={expanded}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1.5 text-start hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="typography-ui-label font-medium text-foreground truncate">
+          <span className="typography-ui-label min-w-0 break-all font-medium text-foreground" title={route.name || id}>
             {route.name || id}
           </span>
-          <span className="typography-meta text-muted-foreground truncate">
+          <span className="typography-meta shrink-0 text-muted-foreground">
             {t('settings.pools.targetCount', { count: targets.length })}
             {route.autonomy ? ` · ${route.autonomy}` : ''}
           </span>
@@ -196,21 +196,30 @@ const PoolRow: React.FC<{
               const until = targetUntil(target);
               const concrete = concreteTarget(target);
               const pool = routeReferenceID(target);
+              const label = pool !== null ? `${t('settings.pools.targetPool')}: ${pool}` : targetLabel(target);
               return (
               <div key={`${targetLabel(target)}-${index}`} className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="typography-ui-label min-w-0 flex-1 truncate">
-                    {pool !== null ? `${t('settings.pools.targetPool')}: ${pool}` : targetLabel(target)}
-                    {until !== undefined ? (
-                      <span className="typography-meta text-muted-foreground">
-                        {` · ${t('settings.pools.pattern.untilLabel', { time: new Date(until).toLocaleString() })}`}
-                      </span>
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    {/* Names wrap rather than cut off, and the title carries the whole name on hover. */}
+                    <span className="typography-ui-label block break-all text-foreground" title={label}>
+                      {label}
+                    </span>
+                    {until !== undefined || concrete ? (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                        {until !== undefined ? (
+                          <span className="typography-meta text-muted-foreground">
+                            {t('settings.pools.pattern.untilLabel', { time: new Date(until).toLocaleString() })}
+                          </span>
+                        ) : null}
+                        {concrete ? <TargetWait providerID={concrete.providerID} modelID={concrete.modelID} /> : null}
+                      </div>
                     ) : null}
-                  </span>
-                  {concrete ? <TargetWait providerID={concrete.providerID} modelID={concrete.modelID} /> : null}
+                  </div>
                   <Button
                     size="sm"
                     variant="ghost"
+                    className="shrink-0"
                     onClick={() => onChange({ ...route, targets: targets.filter((_, i) => i !== index) })}
                   >
                     {t('settings.pools.removeTarget')}

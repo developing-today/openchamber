@@ -52,6 +52,16 @@ export const findIntegrationForProvider = (
 ): IntegrationInfo | undefined => integrations.find((integration) => integration.id === providerId);
 
 /**
+ * OpenCode lists the model pools from `experimental.model_routes` as one
+ * provider. Its models are the pools, and it needs no sign-in, so the accounts
+ * and API key sections do not apply to it.
+ */
+const ROUTE_PROVIDER_ID = 'opencode-route';
+export const isRouteProvider = (providerId: string): boolean => providerId === ROUTE_PROVIDER_ID;
+/** The routes provider's name as shown: OpenCode's own is lowercase. */
+export const ROUTE_PROVIDER_NAME_KEY = 'settings.providers.routes.name' as const;
+
+/**
  * OpenCode Go bills through the OpenCode Console, so it signs in through the
  * Console's `opencode` integration; its own integration only accepts a
  * service-account key. OpenCode's own connect dialog makes the same mapping.

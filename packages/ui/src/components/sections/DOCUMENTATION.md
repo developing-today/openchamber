@@ -140,6 +140,29 @@ the list again on every visit and after every credential write, a read
 started earlier never replaces a later one, and a snapshot from another
 runtime is ignored.
 
+### Turning a provider off
+
+OpenChamber turns a provider off through OpenCode's `disabled_providers` list
+in the user config (`lib/disabledProviders.ts`, `api/provider/:id/disabled`).
+OpenCode can also turn one off through `policies` or `enabled_providers`; this
+page does not read those yet, so such a provider does not show as off here.
+OpenCode drops a turned-off provider from its catalog, so the page reads the list
+itself, and every control reads that one list: the detail page's header
+button (Disable, or Enable while off), the card's footer button, and the
+"Disabled providers" list at the bottom of the grid. A card shows a Disabled
+pill beside its status and reads muted. A turned-off provider OpenCode no
+longer lists still gets a card, named by its integration, so the grid never
+hides that it is off; its page carries only the header button and the
+notice. Turning a provider off keeps you on its page. Model show and hide
+stay editable while the provider is off; the notice says those choices apply
+again once it is back on.
+
+The routes provider (`opencode-route`, `isRouteProvider`) is OpenCode's list
+of model pools from `experimental.model_routes`. Its models are the pools, it
+needs no sign-in, and its card and page read "OpenCode Routes" (OpenCode's own
+name is lowercase). Its page has no Accounts or API key section and lists its
+pools as models; the pools themselves are edited on the Routing page.
+
 ### MCP OAuth
 
 A remote MCP server with OAuth enabled is registered by OpenCode as an
@@ -175,6 +198,21 @@ the MCP page also disables Connect and Test. A skill's id is its `SKILL.md`
 folder name, not its display name. Statements from a connected OpenCode
 Console workspace are not in `/api/config`, so a server blocked only there is
 not marked.
+
+## Routing page
+
+The Routing page keeps its five sections (Auto mode, Rules, Model pools, Plans
+and usage, Categories) in one of two shapes: a tab strip that shows one
+section, or every section on one page. The tabs jump to their section when
+everything is on one page. `routing/routingTabs.ts` owns the tab ids, the
+persisted all-on-one-page choice (`routing-page-view`), and the map from a
+Settings search result to its tab, which the Settings view applies before the
+result is highlighted. A result for a Routing item that is not in the map
+opens Auto. The tab itself is not saved; reopening the page starts on Auto.
+
+Pool targets never truncate: a target's full name wraps in the row, and the
+pool header carries its name as a hover title, so a long model id reads
+without a tooltip.
 
 ## Entity shapes: OpenCode 2 only
 
