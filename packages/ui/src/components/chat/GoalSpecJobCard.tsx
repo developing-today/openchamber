@@ -100,8 +100,11 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
     return (
       <section aria-label={title} className="oc-tile min-w-0 rounded-xl py-1 ps-3 pe-1">
         <div className="flex min-w-0 items-center gap-2">
-          <Icon name="check" className="size-3.5 shrink-0 text-[var(--status-success)]" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate typography-meta text-foreground" title={job.message.content}>{sentText}</span>
+          {/* The sentence wraps: it is the row's whole message, and a phone cut it off mid-sentence. */}
+          <p className="flex min-w-0 flex-1 items-start gap-2 typography-meta text-foreground">
+            <Icon name="check" className="mt-0.5 size-3.5 shrink-0 text-[var(--status-success)]" aria-hidden="true" />
+            <span className="min-w-0 break-words" title={job.message.content}>{sentText}</span>
+          </p>
           <Button
             type="button"
             variant="ghost"

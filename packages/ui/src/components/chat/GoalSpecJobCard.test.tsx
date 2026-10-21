@@ -416,6 +416,20 @@ describe('GoalSpecJobCard', () => {
     expect(calls).toEqual([{ method: 'DELETE', path: '/api/goals/spec-jobs/job-1', body: undefined }]);
   });
 
+  test('the sent line wraps on a narrow screen, so the whole sentence shows', async () => {
+    show(job({ status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } }));
+    await render();
+
+    const line = Array.from(document.querySelectorAll('span')).find((element) => (
+      element.textContent === 'Sent your message as typed. The spec is its goal.'
+    ));
+    if (!line) throw new Error(`No sent line in: ${text()}`);
+    // happy-dom lays nothing out, so the classes are what can be checked here.
+    const classes = Array.from(line.classList);
+    expect(classes.includes('truncate')).toBe(false);
+    expect(classes.includes('break-words')).toBe(true);
+  });
+
   test('a sent job whose goal reminder failed still says it was sent, and shows what failed', async () => {
     show(job({ status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' }, warning: 'the goal reminder was not sent: HTTP 500' }));
     await render();
