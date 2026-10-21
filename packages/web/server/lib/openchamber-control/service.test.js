@@ -449,6 +449,35 @@ describe('OpenChamber control service', () => {
     }));
   });
 
+  it('rejects malformed weekly weekdays instead of coercing them', async () => {
+    for (const weekly of ['1.9', '0x1', '1abc,2', '+3', '3e0', '7', '-1', '1,,2']) {
+      const { service, scheduledTaskService } = createService();
+      await expect(service.execute('schedule.create', {
+        directory: '/repo',
+        name: 'Weekly',
+        prompt: 'Run checks',
+        model: 'provider/model',
+        weekly,
+        time: '09:00',
+      }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+      expect(scheduledTaskService.upsert).not.toHaveBeenCalled();
+    }
+  });
+
+  it('accepts well-formed weekly weekdays, deduped and sorted', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
+    await service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Weekly',
+      prompt: 'Run checks',
+      model: 'provider/model',
+      weekly: '6, 0,6',
+      time: '09:00',
+    }, '/repo');
+    expect(scheduledTaskService.upsert.mock.calls[0][1].schedule).toEqual({ kind: 'weekly', weekdays: [0, 6], times: ['09:00'] });
+  });
+
   it('updates a scheduled task in place, changing only the named fields', async () => {
     const { service, scheduledTaskService } = createService();
     const existing = {

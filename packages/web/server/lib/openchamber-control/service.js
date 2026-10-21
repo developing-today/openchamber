@@ -90,8 +90,15 @@ const parseModel = (value) => {
 const parseWeekdays = (value) => {
   const raw = asNonEmptyString(value);
   if (!raw) throw new OpenChamberControlError('weekly is required', 400);
-  const weekdays = raw.split(',').map((entry) => Number.parseInt(entry.trim(), 10));
-  if (weekdays.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 6)) {
+  // Strict like versionParts in packages/ui mobileReleaseUpdate: parseInt
+  // stops at the first non-digit ('1.9' -> 1, '0x1' -> 0), so an entry that
+  // is not all digits is malformed, not a weekday to coerce.
+  const entries = raw.split(',').map((entry) => entry.trim());
+  if (entries.some((entry) => !/^\d+$/.test(entry))) {
+    throw new OpenChamberControlError('weekly must contain weekdays from 0 to 6', 400);
+  }
+  const weekdays = entries.map((entry) => Number(entry));
+  if (weekdays.some((entry) => entry < 0 || entry > 6)) {
     throw new OpenChamberControlError('weekly must contain weekdays from 0 to 6', 400);
   }
   return Array.from(new Set(weekdays)).sort((a, b) => a - b);
