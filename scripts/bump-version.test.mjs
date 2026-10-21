@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { RELEASE_PACKAGE_FILES } from './bump-version.mjs';
+import { isVersionOlder, RELEASE_PACKAGE_FILES } from './bump-version.mjs';
 
 const roots = [];
 afterEach(async () => {
@@ -51,4 +51,41 @@ test('a release bump packs workspace dependencies at the new version after a fro
     expect(packed.version).toBe('1.24.0');
     expect(packed.dependencies[`@openchamber/${dependency}`]).toBe('1.24.0');
   }
+}, 30_000);
+
+test('compares versions numerically, ignoring pre-release and build suffixes', () => {
+  expect(isVersionOlder('1.3.11', '1.4.3')).toBe(true);
+  expect(isVersionOlder('1.4.3', '1.4.3')).toBe(false);
+  expect(isVersionOlder('1.10.0', '1.9.9')).toBe(false);
+  expect(isVersionOlder('1.4', '1.4.1')).toBe(true);
+  expect(isVersionOlder('1.4.3-canary.1+abc', '1.4.3')).toBe(false);
+});
+
+// The shim is a shell script, which Windows cannot run as `bun`.
+test.skipIf(process.platform === 'win32')('refuses to bump with a bun older than the pinned one and changes nothing', async () => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'oc-release-old-bun-')));
+  roots.push(root);
+  await fs.mkdir(path.join(root, 'scripts'));
+  await fs.copyFile(new URL('./bump-version.mjs', import.meta.url), path.join(root, 'scripts/bump-version.mjs'));
+  const manifest = JSON.stringify({ name: 'release-fixture', version: '1.23.1', packageManager: 'bun@1.4.3' });
+  await fs.writeFile(path.join(root, 'package.json'), manifest);
+  // A `bun` first on PATH that reports an old version; the script asks the
+  // same `bun` it would run for the lockfile refresh.
+  const shims = path.join(root, 'shims');
+  await fs.mkdir(shims);
+  await fs.writeFile(path.join(shims, 'bun'), '#!/bin/sh\necho 1.3.11\n', { mode: 0o755 });
+  let failure;
+  try {
+    execFileSync(process.execPath, ['scripts/bump-version.mjs', '1.24.0'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      env: { ...process.env, PATH: `${shims}${path.delimiter}${process.env.PATH}` },
+    });
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure?.status).toBe(1);
+  expect(failure.stderr).toContain('bun 1.3.11 is older than the pinned bun@1.4.3');
+  expect(await fs.readFile(path.join(root, 'package.json'), 'utf8')).toBe(manifest);
 }, 30_000);
