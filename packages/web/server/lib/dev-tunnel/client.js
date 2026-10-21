@@ -76,7 +76,8 @@ export const createDevTunnelClient = ({
      * that connection, so one failed request cannot take the tunnel down.
      */
     async open({ baseUrl, port, headers = {}, spaceId = null }) {
-      const remotePort = Number.parseInt(String(port), 10);
+      const rawPort = String(port).trim();
+      const remotePort = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
       if (!Number.isInteger(remotePort) || remotePort <= 0 || remotePort > 65535) {
         throw new Error('A valid remote port is required');
       }
@@ -189,7 +190,9 @@ export const createDevTunnelClient = ({
     },
 
     close({ baseUrl, port, spaceId = null }) {
-      return closeTunnel(tunnelKey(String(baseUrl || '').trim(), Number.parseInt(String(port), 10), spaceId));
+      const rawPort = String(port).trim();
+      const remotePort = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
+      return closeTunnel(tunnelKey(String(baseUrl || '').trim(), remotePort, spaceId));
     },
 
     /** Closes every tunnel; used when the desktop switches runtime or quits. */

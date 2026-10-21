@@ -46,7 +46,8 @@ const parseRequestedPort = (url) => {
   try {
     const parsed = new URL(String(url || ''), 'http://localhost');
     if (parsed.pathname !== DEV_TUNNEL_WS_PATH) return null;
-    const port = Number.parseInt(parsed.searchParams.get('port') || '', 10);
+    const rawPort = (parsed.searchParams.get('port') || '').trim();
+    const port = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
     return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
   } catch {
     return null;
