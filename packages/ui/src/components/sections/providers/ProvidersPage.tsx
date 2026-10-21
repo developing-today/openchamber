@@ -1,4 +1,3 @@
-import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -8,15 +7,10 @@ import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigS
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import type { IconName } from "@/components/icon/icons";
 import { cn } from '@/lib/utils';
-import { useDeviceInfo } from '@/lib/device';
-import type { ModelMetadata } from '@/types';
 import { useI18n } from '@/lib/i18n';
-import { formatCompactNumber } from '@/lib/numberFormat';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -43,6 +37,7 @@ import {
   type CredentialConnection,
 } from './providerAuth';
 import { ProviderGrid } from './ProviderGrid';
+import { ProviderModelsSection } from './ProviderModelsSection';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
@@ -65,17 +60,6 @@ import {
   type ProviderConfigScope,
   type StoredProviderEntry,
 } from './custom-provider-form';
-
-const formatTokens = (value?: number | null) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return null;
-  }
-  if (value === 0) {
-    return '0';
-  }
-  const formatted = formatCompactNumber(value);
-  return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-};
 
 // OpenCode owns the credential and announces the catalog change itself
 // (`credential.updated` → catalog refresh); nothing to reload after it.
@@ -114,7 +98,6 @@ interface ProviderSources {
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
@@ -146,13 +129,8 @@ export const ProvidersPage: React.FC = () => {
     setSelectedProvider(openRequested);
     setOpenRequested(null);
   }, [openRequested, setOpenRequested]);
-  const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
-  const hiddenModels = useUIStore((state) => state.hiddenModels);
   const customProviderIcons = useUIStore((state) => state.customProviderIcons);
   const setCustomProviderIcon = useUIStore((state) => state.setCustomProviderIcon);
-  const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
-  const hideAllModels = useUIStore((state) => state.hideAllModels);
-  const showAllModels = useUIStore((state) => state.showAllModels);
 
   // The app only loads providers for the project it is on; Settings has to ask
   // for the one it is looking at. Without a project that is the app's own.
@@ -740,6 +718,12 @@ export const ProvidersPage: React.FC = () => {
       );
     }
     const unlistedName = findIntegrationForProvider(integrations ?? [], selectedProviderId)?.name || selectedProviderId;
+    // OpenCode drops a turned-off provider's models from its catalog with the
+    // provider, so the models its OpenCode config entry names are the ones whose
+    // show and hide choice can still be changed here. A provider whose entry
+    // names none shows the notice alone.
+    const configuredModels = Object.entries(storedProviderConfigs[selectedProviderId]?.models ?? {})
+      .map(([id, model]) => ({ id, name: model.name?.trim() || id }));
     return (
       <SettingsPageLayout
         title={unlistedName}
@@ -754,6 +738,15 @@ export const ProvidersPage: React.FC = () => {
         showSaveStatus={false}
       >
         <DisabledNotice />
+        {configuredModels.length > 0 ? (
+          <ProviderModelsSection
+            providerId={selectedProviderId}
+            models={configuredModels}
+            title={t('settings.providers.page.models.title')}
+            query={modelQuery}
+            onQueryChange={setModelQuery}
+          />
+        ) : null}
       </SettingsPageLayout>
     );
   }
@@ -817,11 +810,6 @@ export const ProvidersPage: React.FC = () => {
         : null}
     </span>
   );
-
-  const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
-    typeof model?.name === 'string' ? model.name : '',
-    typeof model?.id === 'string' ? model.id : '',
-  ]);
 
   if (isCustomEditMode && isEditableCustomProvider && editingCustomFormInitial) {
     return (
@@ -973,143 +961,14 @@ export const ProvidersPage: React.FC = () => {
       )}
 
       {showModelsSection ? (
-      <SettingsSection
-        title={routeProvider ? t('settings.providers.routes.poolsTitle') : t('settings.providers.page.models.title')}
-        info={routeProvider ? t('settings.providers.routes.poolsInfo') : undefined}
-        titleAccessory={
-          <span className="typography-micro text-muted-foreground font-normal">
-            ({providerModels.length})
-          </span>
-        }
-        headerAction={(
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={() => {
-                const allIds = providerModels
-                  .map((model) => (typeof model?.id === 'string' ? model.id : ''))
-                  .filter((id) => id.length > 0);
-                hideAllModels(selectedProvider.id, allIds);
-              }}
-            >
-              {t('settings.providers.page.actions.hideAll')}
-            </Button>
-            <Button
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={() => showAllModels(selectedProvider.id)}
-            >
-              {t('settings.providers.page.actions.showAll')}
-            </Button>
-          </div>
-        )}
-        settingsItem="providers.models"
-      >
-            <div className="relative mb-2">
-              <Icon name="search" className="absolute inset-s-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={modelQuery}
-                onChange={(event) => setModelQuery(event.target.value)}
-                placeholder={t('settings.providers.page.models.filterPlaceholder')}
-                className="h-7 ps-8 w-full"
-              />
-            </div>
-
-            {filteredModels.length === 0 ? (
-              <p className="typography-meta text-muted-foreground py-4 text-center">{t('settings.providers.page.models.noModelsMatchFilter')}</p>
-            ) : (
-              <div className="divide-y divide-[var(--surface-subtle)]">
-                {filteredModels.map((model) => {
-                  const modelId = typeof model?.id === 'string' ? model.id : '';
-                  const modelName = typeof model?.name === 'string' ? model.name : modelId;
-                  const metadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
-                  const isHidden = hiddenModels.some(
-                    (item) => item.providerID === selectedProvider.id && item.modelID === modelId
-                  );
-
-                  const contextTokens = formatTokens(metadata?.limit?.context);
-                  const outputTokens = formatTokens(metadata?.limit?.output);
-                  const tokenSummary = [
-                    contextTokens ? `${contextTokens} ${t('settings.providers.page.models.tokenBadge.context')}` : null,
-                    outputTokens ? `${outputTokens} ${t('settings.providers.page.models.tokenBadge.output')}` : null,
-                  ].filter(Boolean).join(' · ');
-
-                  const capabilityIcons: Array<{ key: string; icon: IconName; label: string }> = [];
-                  if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
-                  if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: "brain-ai-3", label: t('settings.providers.page.models.capability.reasoning') });
-                  if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: "file-image", label: t('settings.providers.page.models.capability.imageInput') });
-
-                  return (
-                    <div key={modelId} className="py-1.5">
-                      <div
-                        className={cn(
-                          "flex items-center gap-3",
-                          isHidden && 'opacity-50',
-                        )}
-                      >
-                      <span className="typography-meta font-medium text-foreground truncate flex-1 min-w-0">
-                        {modelName}
-                      </span>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {isMobile ? (
-                          // A phone row has room for the name only; the limits
-                          // and capabilities move behind a tap.
-                          (tokenSummary || capabilityIcons.length > 0) ? (
-                            <SettingsInfoHint className="h-6 w-6">
-                              <div className="space-y-1.5">
-                                {tokenSummary ? <div className="font-medium">{tokenSummary}</div> : null}
-                                {capabilityIcons.map(({ key, icon: iconName, label }) => (
-                                  <div key={key} className="flex items-center gap-1.5">
-                                    <Icon name={iconName} className="h-3.5 w-3.5" />
-                                    {label}
-                                  </div>
-                                ))}
-                              </div>
-                            </SettingsInfoHint>
-                          ) : null
-                        ) : (
-                          <>
-                        {tokenSummary ? (
-                          <span className="typography-micro text-muted-foreground flex-shrink-0 oc-tile-inset px-1.5 py-0.5 rounded">
-                            {tokenSummary}
-                          </span>
-                        ) : null}
-                        {capabilityIcons.length > 0 && (
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {capabilityIcons.map(({ key, icon: iconName, label }) => (
-                              <span
-                                key={key}
-                                className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground oc-tile-inset"
-                                title={label}
-                                aria-label={label}
-                              >
-                                <Icon name={iconName} className="h-3 w-3" />
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
-                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50"
-                          title={isHidden ? t('settings.providers.page.models.actions.showModelInSelectors') : t('settings.providers.page.models.actions.hideModelFromSelectors')}
-                          aria-label={isHidden ? t('settings.providers.page.models.actions.showModel') : t('settings.providers.page.models.actions.hideModel')}
-                        >
-                          {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-      </SettingsSection>
+        <ProviderModelsSection
+          providerId={selectedProvider.id}
+          models={providerModels}
+          title={routeProvider ? t('settings.providers.routes.poolsTitle') : t('settings.providers.page.models.title')}
+          info={routeProvider ? t('settings.providers.routes.poolsInfo') : undefined}
+          query={modelQuery}
+          onQueryChange={setModelQuery}
+        />
       ) : null}
     </SettingsPageLayout>
   );

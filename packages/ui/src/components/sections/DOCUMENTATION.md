@@ -154,10 +154,17 @@ button (Disable, or Enable while off), the card's footer button, and the
 "Disabled providers" list at the bottom of the grid. A card shows a Disabled
 pill beside its status and reads muted. A turned-off provider OpenCode no
 longer lists still gets a card, named by its integration, so the grid never
-hides that it is off; its page carries only the header button and the
-notice. Turning a provider off keeps you on its page. Model show and hide
-stay editable while the provider is off; the notice says those choices apply
-again once it is back on.
+hides that it is off. Turning a provider off keeps you on its page, and model
+show and hide stay editable there; the notice says those choices apply again
+once it is back on. OpenCode leaves a turned-off provider's models out along
+with the provider; measured on OpenCode 2.0.30, `GET /api/provider` and
+`GET /api/model` both drop them. Once the catalog is read again, the page
+therefore lists the models the provider's OpenCode config entry names,
+`config.models` from `/api/provider/:id/source`, each with its show and hide
+switch from `providers/ProviderModelsSection.tsx`, which a listed provider's
+page uses too. Such a page shows no accounts or sign-in. A provider whose
+config entry names no models, such as a built-in one left at its defaults,
+shows the header button and the notice alone.
 
 The routes provider (`opencode-route`, `isRouteProvider`) is OpenCode's list
 of model pools from `experimental.model_routes`. Its models are the pools, it
