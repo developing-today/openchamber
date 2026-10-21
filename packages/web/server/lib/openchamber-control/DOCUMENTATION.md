@@ -241,7 +241,8 @@ other.
   actions answer 503). A refusal keeps the route's status and message.
   Secrets: no action signs in or takes a token, password or client secret;
   an input object with a key ending in token, secret, password, passphrase or
-  key is refused with 400 before any operation runs; every answer has such keys
+  key, in singular or plural form, is refused with 400 before any operation
+  runs; every answer has such keys
   removed at any depth (`withoutSecrets`). `github.remove`, `gitlab.remove`,
   `linear.disconnect`, `extensions.disconnect` and every `binding.set` except
   `bindingOperation: provider` need `confirm: true`. GitLab actions accept
