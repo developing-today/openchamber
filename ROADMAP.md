@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19 and 2026-10-20.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20 and 2026-10-21.
 
 ## Areas
 
@@ -127,3 +127,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Malformed versions rejected in web package-manager check            | 2026-10-21 | #188, #189                 |
 | Malformed versions rejected in electron compareSemver               | 2026-10-21 | #185, #190                 |
 | Bare-key secret names masked and refused                            | 2026-10-21 | #208, #175, #211           |
+| Secret subtrees masked; plural secret names refused                 | 2026-10-21 | #214, #215, #219           |
+| Malformed weekly weekdays rejected instead of coerced               | 2026-10-21 | #209, #210                 |
