@@ -122,7 +122,9 @@ provider logos, so Settings and every model picker agree.
 
 The "Connect provider" page lists `GET /api/integration` minus the
 integrations that already have a connection, MCP OAuth registrations
-(`mcp_*`), web search providers, and providers OpenCode already lists (those
+(`mcp_*`), web search providers (the ones `websearch` lists, and integrations
+a plugin marks with `metadata.websearch`, which it lists for search only once
+connected), and providers OpenCode already lists (those
 connect from their own page); v2's `GET /api/provider` lists only what is
 configured or connected right now, so it cannot offer anything new
 (`providers/connectableProviders.ts`). Popular providers come first as cards,
@@ -256,6 +258,13 @@ it a tab strip splits the rest: General (new-chat defaults, the team file, trust
 plans folder), Actions (a card grid with an editor dialog), Worktrees (setup
 commands and a link to the worktrees page) and Environment (not in VS Code).
 Identity fields autosave through `useProjectIdentityAutoSave`, as before.
+
+The Settings page also carries Close project in its header. It calls the same
+`removeProject` as the sidebar's Close project, after a confirm dialog like the
+other removals in Settings: a header button is easier to hit by accident than a
+menu item. The edit dialog leaves it out, because the menu that opens the dialog
+already holds Close project. VS Code shows no Projects page in Settings: its
+projects are the workspace folders VS Code has open.
 
 A project's setup lives in two files: the team's `.openchamber/project.json` in
 the repo and the user's own config (`packages/web/server/lib/projects`). The page

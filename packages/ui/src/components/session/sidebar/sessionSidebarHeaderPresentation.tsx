@@ -26,8 +26,10 @@ const ACTIVITY_ICON = {
   'other-stopped': 'stop',
   'other-active': 'pulse',
   all: 'list-unordered',
+  // The list by time holds every project's sessions, so it is titled Projects;
+  // its clock icon says how it is ordered.
+  timeline: 'history',
 } satisfies Record<SessionSidebarActivityKey, IconName>;
-
 
 export const SessionSidebarActivityHeader: React.FC<{
   activityKey: SessionSidebarActivityKey;

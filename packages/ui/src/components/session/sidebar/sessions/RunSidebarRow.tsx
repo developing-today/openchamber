@@ -8,7 +8,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { MultiRunSummary } from '@/lib/multirun/runs';
 import type { SessionNode } from '../types';
-import { isTwoLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
+import { isMultiLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { formatSessionCompactDateLabel } from '../utils';
 import { CollapsedSessionActivityIndicator } from './collapsedActivityIndicator';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
@@ -67,13 +67,16 @@ function RunSidebarRowComponent({
   // slot for their state; List rows with one line per session stay flat.
   const isTreeOneLineRow = renderContext === 'mixed-compact';
   const isOneLineRow = isTreeOneLineRow || renderContext === 'mixed-flat' || renderContext === 'timeline-chat';
-  const isTimelineRow = isTwoLineTimelineContext(renderContext) || isOneLineRow;
-  // Only the zones and the combined list mix projects; under a project header the row needs no icon.
+  const isTimelineRow = isMultiLineTimelineContext(renderContext) || isOneLineRow;
+  // The list by time names the project on a first line of its own.
+  const hasProjectLine = renderContext === 'timeline-by-time';
+  // Only the zones, the combined list and the list by time mix projects;
+  // under a project header the row needs no icon.
   const timelineProject = useProjectsStore(React.useCallback((state) => (
-    (renderContext === 'timeline-mixed' || renderContext === 'mixed-flat') && projectId
+    (renderContext === 'timeline-mixed' || renderContext === 'mixed-flat' || hasProjectLine) && projectId
       ? state.projects.find((entry) => entry.id === projectId) ?? null
       : null
-  ), [renderContext, projectId]));
+  ), [hasProjectLine, renderContext, projectId]));
   const laneCount = run.lanes.length;
   const laneCountLabel = laneCount === 1
     ? t('sessions.sidebar.run.laneCountSingle', { count: laneCount })
@@ -108,6 +111,7 @@ function RunSidebarRowComponent({
           compact={isOneLineRow}
           project={timelineProject}
           projectLabel={projectLabel}
+          projectLine={hasProjectLine}
           title={run.title}
           titleClassName={titleClassName}
           branchLabel={null}

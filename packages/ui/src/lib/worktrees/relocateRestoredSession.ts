@@ -4,6 +4,7 @@ import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessio
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { opencodeClient } from '@/lib/opencode/client';
 import { normalizePath } from '@/lib/pathNormalization';
+import { createSessionLineage } from '@/stores/sessionLineage';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
@@ -51,36 +52,18 @@ const defaultDeps: RelocationDeps = {
 };
 
 // Subsessions working in the same directory move with their root, deepest
-// first, the way the sidebar's Move to worktree moves a tree.
+// first, the way the sidebar's Move to worktree moves a tree. A restored
+// session can carry a corrupted parent link (its own parent, or a member of a
+// parent cycle, the shapes #91 documents); the lineage walk's visited set,
+// seeded with the root, ends those instead of recursing forever.
 const collectDescendantsInDirectory = (
   root: Session,
   sessions: readonly Session[],
   directory: string,
-): Session[] => {
-  const childrenByParent = new Map<string, Session[]>();
-  for (const session of sessions) {
-    if (!session.parentID) continue;
-    const siblings = childrenByParent.get(session.parentID) ?? [];
-    siblings.push(session);
-    childrenByParent.set(session.parentID, siblings);
-  }
-  const descendants: Session[] = [];
-  // A restored session can carry a corrupted parent link (it can be its own
-  // parent, or a member of a parent cycle — the shapes #91 documents). The
-  // visited set, seeded with the root, keeps the walk from recursing forever
-  // on those links, the same guard getDescendantIds uses.
-  const visited = new Set<string>([root.id]);
-  const visit = (parentId: string) => {
-    for (const child of childrenByParent.get(parentId) ?? []) {
-      if (visited.has(child.id)) continue;
-      visited.add(child.id);
-      visit(child.id);
-      if (normalizePath(child.directory) === directory) descendants.push(child);
-    }
-  };
-  visit(root.id);
-  return descendants;
-};
+): Session[] => createSessionLineage(sessions)
+  .descendantsOf(root.id, 'active')
+  .filter((descendant) => normalizePath(descendant.directory) === directory)
+  .reverse();
 
 /**
  * A session restored from the archive may still point at a worktree that was

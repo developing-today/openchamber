@@ -8,10 +8,13 @@ type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 // and 'a-z' keep positions stable.
 type WorktreeSortOrder = 'recent' | 'manual' | 'a-z';
 
-// 'projects' is the grouped sidebar: project zones with worktree sub-headers,
-// optional Recent. 'timeline' is one recency-ordered list of root sessions
-// across every project, with three-line rows carrying project and branch.
+// 'projects' is the grouped sidebar, labelled Tree: project zones with
+// worktree sub-headers. 'timeline', labelled List, lists root sessions
+// without worktree groups or folders, laid out by `listSessionGrouping`.
 export type SidebarViewMode = 'projects' | 'timeline';
+// List only: 'project' puts each project's sessions under its header;
+// 'time' lists every project's sessions together, newest activity first.
+type ListSessionGrouping = 'project' | 'time';
 type ProjectDisplayMode = 'all' | 'single';
 
 type SessionDisplayStore = {
@@ -21,6 +24,8 @@ type SessionDisplayStore = {
   setSingleProjectId: (projectId: string) => void;
   sidebarViewMode: SidebarViewMode;
   setSidebarViewMode: (mode: SidebarViewMode) => void;
+  listSessionGrouping: ListSessionGrouping;
+  setListSessionGrouping: (grouping: ListSessionGrouping) => void;
   /** Local display preference; motion remains opt-in. */
   animatedActivityIndicators: boolean;
   setAnimatedActivityIndicators: (enabled: boolean) => void;
@@ -108,6 +113,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // choice, and VS Code always renders the grouped view.
       sidebarViewMode: 'timeline',
       setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
+      listSessionGrouping: 'project',
+      setListSessionGrouping: (grouping) => set({ listSessionGrouping: grouping }),
       showChatsSection: true,
       showWorkSection: true,
       showPinnedSection: false,

@@ -21,4 +21,5 @@ export const ACTIVITY_TITLE_KEY = {
   'other-stopped': 'sessions.sidebar.zone.otherStopped',
   'other-active': 'sessions.sidebar.zone.otherActive',
   all: 'sessions.sidebar.zone.all',
+  timeline: 'sessions.sidebar.activity.projectsTitle',
 } satisfies Record<SessionSidebarActivityKey, I18nKey>;

@@ -86,6 +86,8 @@ export type EventPipelineInput = {
   onSpaceProgress?: (details: SpaceProgress) => void
   /** Called when the setup commands of an isolated space moved on: began, the next one, or ended. */
   onSpaceSetup?: (spaceId: string) => void
+  /** Called when the host follows an isolated space's permission modes again, after a gap or at first. */
+  onSpacePermissionStream?: (spaceId: string) => void
   /**
    * Called whenever the stream receives anything: an event, a WebSocket frame, or a keepalive
    * that carries no event. Starting an attempt that has received nothing yet does not count.
@@ -173,6 +175,17 @@ const openchamberPageSettledSchema = z.object({
   properties: z.object({ sessionID: z.string().min(1), pageID: z.string().min(1) }),
 })
 
+// The server writes a session's recap and suggestion a while after its turn
+// ends, reading the session's directory; it announces both ends of the wait.
+const openchamberSessionAssistSchema = z.object({
+  type: z.literal("openchamber:session-assist"),
+  properties: z.object({
+    sessionID: z.string().min(1),
+    directory: z.string().min(1).nullable().catch(null),
+    pending: z.boolean(),
+  }),
+})
+
 // The host's announcement of an isolated space's event connection. It is not an event of any
 // session, so it never enters a directory queue; the pipeline hands it to its owner.
 const openchamberSpaceStreamSchema = z.object({
@@ -202,13 +215,21 @@ const openchamberSpaceSetupSchema = z.object({
   properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/) }),
 })
 
+// `spaceId` marks a policy the host forwarded from that isolated space, which keeps its own.
 const openchamberAutoAcceptSchema = z.object({
   type: z.literal("openchamber:permission-auto-accept.updated"),
   properties: z.object({
     sessions: z.record(z.string(), z.boolean()),
     modes: z.record(z.string(), z.enum(["ask", "safety", "auto"])).optional(),
     revision: z.number().optional(),
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/).optional(),
   }),
+})
+
+// The host follows an isolated space's permission modes again; what changed in a gap is read from the space.
+const openchamberSpacePermissionStreamSchema = z.object({
+  type: z.literal("openchamber:space-permission-stream"),
+  properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), status: z.literal("connected") }),
 })
 
 // The server's auto-answer in a `safety` or `auto` session held back or failed:
@@ -219,6 +240,7 @@ const openchamberLeftForUserSchema = z.object({
     permissionId: z.string().min(1),
     sessionId: z.string().min(1),
     directory: z.string().nullable(),
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/).optional(),
   }),
 })
 
@@ -289,6 +311,10 @@ function translateOpenchamberEvent(type: string, payload: unknown): SyncEvent | 
       const parsed = openchamberPageSettledSchema.safeParse(payload)
       return parsed.success ? { type: "openchamber.page-settled", properties: parsed.data.properties } : null
     }
+    case "openchamber:session-assist": {
+      const parsed = openchamberSessionAssistSchema.safeParse(payload)
+      return parsed.success ? { type: "openchamber.session-assist", properties: parsed.data.properties } : null
+    }
     case "openchamber:permission-auto-accept.left-for-user": {
       const parsed = openchamberLeftForUserSchema.safeParse(payload)
       return parsed.success ? { type: "openchamber.permission-left-for-user", properties: parsed.data.properties } : null
@@ -317,6 +343,7 @@ type ClassifiedStreamPayload =
   | { kind: "space-stream"; properties: z.infer<typeof openchamberSpaceStreamSchema>["properties"] }
   | { kind: "space-progress"; properties: SpaceProgress }
   | { kind: "space-setup"; spaceId: string }
+  | { kind: "space-permission-stream"; spaceId: string }
   | { kind: "events"; events: Array<{ directory: string; event: SyncEvent }> }
 
 const NO_EVENTS: ClassifiedStreamPayload = { kind: "events", events: [] }
@@ -352,6 +379,10 @@ export function classifyStreamPayload(payload: unknown, frameDirectory: string |
     case "openchamber:space-setup": {
       const parsed = openchamberSpaceSetupSchema.safeParse(payload)
       return parsed.success ? { kind: "space-setup", spaceId: parsed.data.properties.spaceId } : NO_EVENTS
+    }
+    case "openchamber:space-permission-stream": {
+      const parsed = openchamberSpacePermissionStreamSchema.safeParse(payload)
+      return parsed.success ? { kind: "space-permission-stream", spaceId: parsed.data.properties.spaceId } : NO_EVENTS
     }
   }
   const bridged = translateOpenchamberEvent(type, payload)
@@ -450,6 +481,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onSpaceStream,
     onSpaceProgress,
     onSpaceSetup,
+    onSpacePermissionStream,
     onStreamActivity,
     routeDirectory,
     transport = "auto",
@@ -746,6 +778,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     }
     if (classified.kind === "space-setup") {
       onSpaceSetup?.(classified.spaceId)
+      return
+    }
+    if (classified.kind === "space-permission-stream") {
+      onSpacePermissionStream?.(classified.spaceId)
       return
     }
     for (const { directory, event } of classified.events) {
