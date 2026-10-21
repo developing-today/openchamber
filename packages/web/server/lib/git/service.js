@@ -27,6 +27,11 @@ const remoteExistenceCache = new Map();
 const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
+// Patches this service reads, compares and applies use the a/ and b/ prefixes.
+// The user's diff.mnemonicPrefix (i/, w/, c/, 1/, 2/), diff.noprefix or
+// diff.srcPrefix/dstPrefix would otherwise change them, and a hunk would no
+// longer match its file. Explicit prefixes win over all of those settings.
+const DIFF_PREFIX_ARGS = ['--src-prefix=a/', '--dst-prefix=b/'];
 const gitIndexMutationQueues = new Map();
 const remoteProvisioningQueues = new Map();
 
@@ -1712,9 +1717,9 @@ export async function getIntegrateConflictDetails(tmpDir) {
   const [status, unmerged, diff, meta, patch] = await Promise.all([
     runGitCommand(target, ['status', '--porcelain']),
     runGitCommand(target, ['diff', '--name-only', '--diff-filter=U']),
-    runGitCommand(target, ['diff', '--no-ext-diff']),
+    runGitCommand(target, ['diff', '--no-ext-diff', ...DIFF_PREFIX_ARGS]),
     runGitCommand(target, ['show', '--no-patch', '--pretty=fuller', 'CHERRY_PICK_HEAD']),
-    runGitCommand(target, ['show', '--no-ext-diff', 'CHERRY_PICK_HEAD']),
+    runGitCommand(target, ['show', '--no-ext-diff', ...DIFF_PREFIX_ARGS, 'CHERRY_PICK_HEAD']),
   ]);
 
   return {
@@ -3275,7 +3280,7 @@ async function readStatus(normalizedDirectory, lightMode) {
 }
 
 const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
-  const args = ['diff', '--no-color', '--full-index', '--no-ext-diff'];
+  const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
   if (Number.isFinite(contextLines)) {
     args.push(`-U${Math.max(0, contextLines)}`);
   }
@@ -3312,7 +3317,7 @@ export async function getPathDiff(directory, { path: filePath, staged = false, c
 
 async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }) {
   try {
-    const args = ['diff', '--no-color', '--full-index', '--no-ext-diff'];
+    const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
 
     if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
       args.push(`-U${Math.max(0, contextLines)}`);
@@ -3500,7 +3505,7 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
 
   await assertRangeRefsResolve(git, [baseRef, headRef]);
 
-  const args = ['diff', '--no-color', '--no-ext-diff'];
+  const args = ['diff', '--no-color', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
   if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
     args.push(`-U${Math.max(0, contextLines)}`);
   }
@@ -6553,7 +6558,7 @@ async function resolveCommitHash(git, hash) {
   return (await git.raw(['rev-parse', '--verify', '--end-of-options', `${hash}^{commit}`])).trim();
 }
 
-const commitShowArgs = (hash) => ['show', '--format=', '--root', '--diff-merges=first-parent', '--find-renames', hash];
+const commitShowArgs = (hash) => ['show', '--format=', '--root', '--diff-merges=first-parent', '--find-renames', ...DIFF_PREFIX_ARGS, hash];
 
 export async function getCommitDiff(directory, { hash, path: filePath, previousPath, contextLines = 3 } = {}) {
   const { git } = await createRepositoryGitContext(directory);
@@ -6922,7 +6927,7 @@ export async function getConflictDetails(directory) {
       .filter(Boolean);
 
     // Get current diff
-    const diff = await git.raw(['diff', '--no-ext-diff']).catch(() => '');
+    const diff = await git.raw(['diff', '--no-ext-diff', ...DIFF_PREFIX_ARGS]).catch(() => '');
 
     // simple-git resolves a quiet `rev-parse --verify` miss with empty output instead of rejecting.
     let operation = 'merge';
