@@ -190,9 +190,10 @@ other.
   same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `integration-service-actions.js`,
-  `provider-actions.js`, `environment-actions.js`) are passed in as
-  `actionModules` and dispatched by action name before the built-in actions;
-  their definitions are part of `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
+  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`)
+  are passed in as `actionModules` and dispatched by action name before the
+  built-in actions; their definitions are part of
+  `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
 - `integration-service-actions.js` runs the connected-service actions:
   `integrations.list` (every section below at once; a section that fails
   carries `error` and the others stay), `github.status|activate|remove|cli`,
@@ -226,6 +227,12 @@ other.
   secret, so the whole call is refused and nothing is saved. A project change
   calls `invalidateProject`; the managed OpenCode reads a change when it
   restarts.
+- `projects.setup` returns a configured project's setup through
+  `projectConfigRuntime.readProjectSetup`, the same read as
+  `GET /api/projects/:projectId/config`; an unknown id is a 404. It is read
+  only: worktree setup commands and project actions run outside OpenCode's
+  permission rules, so an agent able to write them could run commands it was
+  never allowed to. Writing them stays with the user in Settings.
 - `projects.add`/`projects.remove` are the only destructive-adjacent actions
   wired: `projects.add` mirrors `POST /api/openchamber/directory` exactly
   (`validateDirectoryPath`, `createProjectIdFromPath`, `persistSettings`), so
