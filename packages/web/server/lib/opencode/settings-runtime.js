@@ -1197,10 +1197,12 @@ export const createSettingsRuntime = (deps) => {
 
   // Read-modify-write under the same lock as persistSettings, for a change
   // computed from the current value (a list edited by id). `compute` gets the
-  // settings as stored and returns the changes to write, or null to write
-  // nothing; an error it throws fails this call only.
+  // migrated settings — the same view every other reader (projects.list, the
+  // control service's unwired fallback) computes from, so an id a caller
+  // looked up there resolves here too — and returns the changes to write, or
+  // null to write nothing; an error it throws fails this call only.
   const updateSettings = (compute, { surface = null } = {}) => runExclusive(async () => {
-    const changes = await compute(await readSettingsFromDisk({ surface }));
+    const changes = await compute(await readSettingsFromDiskMigrated({ surface }));
     if (!changes) return null;
     return applySettingsChanges(changes, { surface });
   });
