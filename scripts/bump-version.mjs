@@ -18,6 +18,17 @@ export const RELEASE_PACKAGE_FILES = [
   'packages/vscode/package.json',
 ];
 
+// a < b for dotted numeric versions; anything after a "-" or "+" is ignored.
+export const isVersionOlder = (a, b) => {
+  const parts = (version) => version.split(/[-+]/)[0].split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const [left, right] = [parts(a), parts(b)];
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference < 0;
+  }
+  return false;
+};
+
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   const newVersion = process.argv[2];
@@ -25,6 +36,18 @@ if (isDirectRun) {
     console.error('Usage: node scripts/bump-version.mjs <version>');
     console.error('Example: node scripts/bump-version.mjs 0.2.0');
     console.error('Example: node scripts/bump-version.mjs 0.2.0-beta.1');
+    process.exit(1);
+  }
+
+  // Bun before the pinned version leaves workspace versions in bun.lock
+  // unchanged on the refresh below, so packed packages would depend on the
+  // previous release (openchamber/openchamber#3633). Refuse before touching
+  // anything.
+  const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).packageManager?.match(/^bun@(.+)$/)?.[1];
+  const installed = execFileSync('bun', ['--version'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  if (pinned && isVersionOlder(installed, pinned)) {
+    console.error(`bun ${installed} is older than the pinned bun@${pinned} (package.json packageManager).`);
+    console.error('Its lockfile refresh keeps the old workspace versions, so packed packages would depend on the previous release. Update bun and run this again.');
     process.exit(1);
   }
 
