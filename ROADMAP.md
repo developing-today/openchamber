@@ -136,3 +136,7 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | updateSettings feeds projects the migrated settings                 | 2026-10-21 | #199, #223                 |
 | Electron relay and space-preview ports reject malformed values      | 2026-10-21 | #226, #227                 |
 | Passphrase values masked in opencode.config answers                 | 2026-10-21 | #222, #232                 |
+| Web serve --port rejects malformed and out-of-range values          | 2026-10-21 | #228, #229                 |
+| ROADMAP Done records the #226 completion                            | 2026-10-21 | #230, #231                 |
+| Web dev-tunnel ports reject malformed values                        | 2026-10-21 | #233, #234                 |
+| Env-config ports reject malformed and out-of-range values           | 2026-10-21 | #235, #238                 |
