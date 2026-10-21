@@ -20,7 +20,7 @@ import { GoalSpecJobCard } from '@/components/chat/GoalSpecJobCard';
 import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
-import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
+import { isSameComposerEditTarget, prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type ComposerEditTarget, type SyntheticContextPart } from '@/sync/input-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 import { useParallelComposer } from './composer/parallel/useParallelComposer';
@@ -1612,17 +1612,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [restoreQueuedContext]);
 
     // A goal writer job taken back from its card ("Back to edit") returns its
-    // message to this session's composer: the text after anything typed
+    // message to this session's composer, or to the new-session draft that
+    // took the place of a new chat's session: the text after anything typed
     // since, the files and the attached chips. A `/btw` composer leaves it
     // waiting for the session's own.
+    const composerEditTarget = React.useMemo<ComposerEditTarget | null>(() => {
+        if (currentSessionId) return { kind: 'session', sessionId: currentSessionId };
+        return newSessionDraftOpen ? { kind: 'draft', draftId: newSessionDraft.draftId } : null;
+    }, [currentSessionId, newSessionDraft.draftId, newSessionDraftOpen]);
     const hasComposerEdit = useInputStore(React.useCallback((state) => (
-        Boolean(currentSessionId) && state.pendingComposerEdits.some((edit) => (
-            edit.sessionId === currentSessionId && edit.runtimeKey === activeRuntimeKey
+        composerEditTarget !== null && state.pendingComposerEdits.some((edit) => (
+            edit.runtimeKey === activeRuntimeKey && isSameComposerEditTarget(edit.target, composerEditTarget)
         ))
-    ), [activeRuntimeKey, currentSessionId]));
+    ), [activeRuntimeKey, composerEditTarget]));
     React.useEffect(() => {
-        if (!hasComposerEdit || !currentSessionId || isBtwActive) return;
-        const edit = useInputStore.getState().consumePendingComposerEdit(activeRuntimeKey, currentSessionId);
+        if (!hasComposerEdit || !composerEditTarget || isBtwActive) return;
+        const edit = useInputStore.getState().consumePendingComposerEdit(activeRuntimeKey, composerEditTarget);
         if (!edit) return;
         restoreDraft(chatDraftIdentity, edit.content, new Set());
         if (edit.attachments.length > 0) {
@@ -1632,7 +1637,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setTimeout(() => {
             composerRef.current?.focus();
         }, 0);
-    }, [activeRuntimeKey, chatDraftIdentity, currentSessionId, hasComposerEdit, isBtwActive, restoreDraft, restoreQueuedContext]);
+    }, [activeRuntimeKey, chatDraftIdentity, composerEditTarget, hasComposerEdit, isBtwActive, restoreDraft, restoreQueuedContext]);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
         // Force-sending from the queue during a busy session counts as steer
@@ -1964,6 +1969,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     sendMode: uiState.sessionGoalWriterSendMode,
                     tokenBudget: uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null,
                     writerInput,
+                    // The session was made here for this message: Back to edit can remove it and open a new draft.
+                    newSession: !capturedTarget,
                     message: taken.message,
                     sendConfig,
                 });

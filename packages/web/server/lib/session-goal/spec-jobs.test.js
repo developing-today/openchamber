@@ -687,6 +687,32 @@ describe('goal writer jobs', () => {
     expect(older.runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', messageId: null });
   });
 
+  it('remembers a job whose session the composer made from a new-session draft', async () => {
+    const dataDir = makeDataDir();
+    const { runtime } = createRuntime({ dataDir });
+    const fromDraft = await runtime.create(job({ newSession: true }));
+    const inSession = await runtime.create(job({ sessionId: 'ses_goal_job_2' }));
+    expect(fromDraft.job.newSession).toBe(true);
+    expect(inSession.job.newSession).toBe(false);
+    await expect(runtime.create(job({ sessionId: 'ses_goal_job_3', newSession: 'yes' }))).rejects.toThrow();
+
+    await runtime.flush();
+    const restarted = createRuntime({ dataDir });
+    await restarted.runtime.load();
+    expect(restarted.runtime.snapshot().jobs.map((entry) => [entry.sessionId, entry.newSession])).toEqual([
+      [SESSION, true],
+      ['ses_goal_job_2', false],
+    ]);
+
+    // A file written before the field existed reads as a session that was there already.
+    const olderDir = makeDataDir();
+    writeStoredFile(olderDir, { version: 1, revision: 3, jobs: [storedJob()] });
+    const older = createRuntime({ dataDir: olderDir });
+    await older.runtime.load();
+    expect(older.runtime.snapshot().jobs[0].newSession).toBe(false);
+    expect(backupsIn(olderDir)).toEqual([]);
+  });
+
   it('a composer that claimed the original and failed leaves a job that can be written again', async () => {
     const { runtime, writer } = createRuntime({ settings: {} });
     const created = await runtime.create(job({ message: composerOnlyMessage }));

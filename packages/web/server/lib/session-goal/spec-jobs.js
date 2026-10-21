@@ -98,6 +98,8 @@ const createInputSchema = z.object({
   sendMode: sendModeSchema,
   tokenBudget: tokenBudgetSchema.optional().transform((value) => value ?? null),
   writerInput: writerInputSchema.optional().transform((value) => value ?? {}),
+  // The composer made the session from a new-session draft for this job.
+  newSession: z.boolean().optional().transform((value) => value ?? false),
   message: z.unknown(),
   sendConfig: z.unknown(),
 });
@@ -172,6 +174,7 @@ const storedJobSchema = z.object({
   delivery: deliverySchema.nullable().default(null),
   waiting: waitingSchema.nullable().default(null),
   messageId: z.string().min(1).nullable().default(null),
+  newSession: z.boolean().default(false),
   outcome: outcomeSchema.nullable(),
   attempt: z.number().int().nonnegative(),
   createdAt: z.number(),
@@ -552,6 +555,8 @@ export function createGoalSpecJobRuntime({
       claimId: job.waiting?.claimId ?? job.delivery?.claimId ?? null,
       // The user message a sent job sent, when OpenCode or the composer named it.
       messageId: job.messageId,
+      // The session was made from a new-session draft for this job.
+      newSession: job.newSession,
       outcome: job.outcome,
       attempt: job.attempt,
       createdAt: job.createdAt,
@@ -1120,6 +1125,7 @@ export function createGoalSpecJobRuntime({
       delivery: null,
       waiting: null,
       messageId: null,
+      newSession: parsed.newSession,
       outcome: null,
       attempt: 1,
       createdAt,

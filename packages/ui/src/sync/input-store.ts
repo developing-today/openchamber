@@ -135,16 +135,28 @@ export type VSCodeActiveEditorFile = {
   selection: { startLine: number; endLine: number; text: string } | null
 }
 
-/** A message handed back to one session's composer to edit: a goal writer job taken back. */
+/**
+ * A message handed back to a composer to edit: a goal writer job taken back.
+ * It goes to one session's composer, or to one new-session draft's (a new
+ * chat's job whose session was removed), bound to that draft's id.
+ */
 type PendingComposerEdit = {
   runtimeKey: string
-  sessionId: string
+  target: ComposerEditTarget
   /** The text as typed. */
   content: string
   attachments: AttachedFile[]
   /** The chips it was sent with; the composer puts the attached ones back. */
   context: QueuedContextPart[]
 }
+
+export type ComposerEditTarget = { kind: "session"; sessionId: string } | { kind: "draft"; draftId: number }
+
+export const isSameComposerEditTarget = (left: ComposerEditTarget, right: ComposerEditTarget): boolean => (
+  left.kind === "session"
+    ? right.kind === "session" && left.sessionId === right.sessionId
+    : right.kind === "draft" && left.draftId === right.draftId
+)
 
 export type InputState = {
   pendingComposerRestore: {
@@ -154,14 +166,14 @@ export type InputState = {
   } | null
   consumePendingComposerRestore: (target: ChatDraftIdentity | null) => InputState["pendingComposerRestore"]
   /**
-   * Messages handed back to the composer of their session, oldest first. A
-   * composer takes only its own session's, and none replaces another, so
+   * Messages handed back to the composer of their session or draft, oldest
+   * first. A composer takes only its own, and none replaces another, so
    * nothing is lost while that composer is not on screen.
    */
   pendingComposerEdits: PendingComposerEdit[]
   requestComposerEdit: (edit: PendingComposerEdit) => void
-  /** Takes the oldest message waiting for this session's composer. */
-  consumePendingComposerEdit: (runtimeKey: string, sessionId: string) => PendingComposerEdit | null
+  /** Takes the oldest message waiting for this session's composer, or this draft's. */
+  consumePendingComposerEdit: (runtimeKey: string, target: ComposerEditTarget) => PendingComposerEdit | null
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
   /**
@@ -235,9 +247,9 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
   pendingComposerEdits: [],
   requestComposerEdit: (edit) => set((state) => ({ pendingComposerEdits: [...state.pendingComposerEdits, edit] })),
-  consumePendingComposerEdit: (runtimeKey, sessionId) => {
+  consumePendingComposerEdit: (runtimeKey, target) => {
     const edits = get().pendingComposerEdits
-    const index = edits.findIndex((edit) => edit.runtimeKey === runtimeKey && edit.sessionId === sessionId)
+    const index = edits.findIndex((edit) => edit.runtimeKey === runtimeKey && isSameComposerEditTarget(edit.target, target))
     if (index === -1) return null
     set({ pendingComposerEdits: edits.filter((_, position) => position !== index) })
     return edits[index]

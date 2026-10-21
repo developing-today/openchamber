@@ -4,12 +4,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
 import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import { useGoalSpecJobStore, type GoalSpecJob, type GoalSpecJobChoice } from '@/stores/goalSpecJobStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useInputStore } from '@/sync/input-store';
+import { takeGoalSpecJobBack } from './goalSpecJobEdit';
 import { sendGoalSpecJob } from './goalSpecJobSend';
 
 interface GoalSpecJobCardProps {
@@ -72,19 +70,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
   const send = (choice: GoalSpecJobChoice) => run(() => sendGoalSpecJob(job, choice), 'chat.goal.writer.toast.sendFailed');
   const redo = () => run(() => useGoalSpecJobStore.getState().redoJob(job), 'chat.goal.writer.toast.actionFailed');
   const dismiss = () => run(() => useGoalSpecJobStore.getState().dismissJob(job), 'chat.goal.writer.toast.actionFailed');
-  // The job ends and its message, files and chips included, goes back to
-  // this session's composer; an armed goal is armed again, as before the send.
-  const backToEdit = () => run(async () => {
-    const message = await useGoalSpecJobStore.getState().editJob(job);
-    useInputStore.getState().requestComposerEdit({
-      runtimeKey: getRuntimeKey(),
-      sessionId: job.sessionId,
-      content: message.content,
-      attachments: message.attachments,
-      context: message.context,
-    });
-    if (job.trigger === 'armed') useSessionGoalArmStore.getState().setArmed(true);
-  }, 'chat.goal.writer.toast.actionFailed');
+  const backToEdit = () => run(() => takeGoalSpecJobBack(job), 'chat.goal.writer.toast.actionFailed');
 
   const title = job.trigger === 'auto-create' && job.review
     ? t('chat.goal.writer.card.titleAutoCreate')

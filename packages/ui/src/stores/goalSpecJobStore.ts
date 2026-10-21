@@ -78,6 +78,8 @@ const jobSchema = z.object({
     claimId: z.string().nullable().optional(),
     /** The user message a sent job sent, when OpenCode or the sending window named it. Absent from servers before it existed. */
     messageId: z.string().nullable().optional(),
+    /** The composer made the session from a new-session draft for this job. Absent from servers before it existed. */
+    newSession: z.boolean().optional(),
     outcome: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('spec'), sendMode: sendModeSchema }),
         z.object({ kind: z.literal('original'), withGoal: z.boolean() }),
@@ -138,6 +140,8 @@ interface GoalSpecJobStart {
     tokenBudget: number | null;
     /** The conversation and open work, for a goal from the next message. */
     writerInput: { conversation?: string; openItems?: string } | null;
+    /** The session was just made from a new-session draft for this message. */
+    newSession: boolean;
     message: QueuedMessageInput;
     sendConfig: QueuedMessageSendConfig;
 }
@@ -179,6 +183,7 @@ interface StartJobBody {
     sendMode: GoalSpecJobSendMode;
     tokenBudget: number | null;
     writerInput?: { conversation?: string; openItems?: string };
+    newSession: boolean;
     message: ReturnType<typeof toServerItemInput>;
     sendConfig: QueuedMessageSendConfig;
 }
@@ -387,6 +392,7 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
                 review: input.review,
                 sendMode: input.sendMode,
                 tokenBudget: input.tokenBudget,
+                newSession: input.newSession,
                 message,
                 sendConfig: input.sendConfig,
             };

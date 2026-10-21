@@ -1,14 +1,18 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
+import { OpenCode } from '@opencode/client';
 import { I18nProvider } from '@/lib/i18n';
+import { opencodeClient, type MessagePage } from '@/lib/opencode/client';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGoalSpecJobStore, type GoalSpecJob } from '@/stores/goalSpecJobStore';
 import { useSessionGoalArmStore, type SessionGoalArm } from '@/stores/useSessionGoalArmStore';
+import { ChildStoreManager } from '@/sync/child-store';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { setSyncRefs } from '@/sync/sync-refs';
 import { GoalSpecJobCard } from './GoalSpecJobCard';
 
 // The stores above load without a DOM, as their own tests load them. React
@@ -214,17 +218,143 @@ describe('GoalSpecJobCard', () => {
         context: [{ kind: 'synthetic', text: 'Resolve the conflict' }],
       },
     });
+    const listed = spyOn(opencodeClient, 'getSessionMessages');
     await render();
     await click('Back to edit');
+    listed.mockRestore();
 
     const [edit] = useInputStore.getState().pendingComposerEdits;
-    expect(edit?.sessionId).toBe('ses_card');
+    expect(edit?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
     expect(edit?.content).toBe('Add dark mode\nto settings');
     expect(edit?.attachments.map((file) => file.filename)).toEqual(['mock.png']);
     expect(edit?.context).toEqual([{ kind: 'synthetic', text: 'Resolve the conflict' }]);
     expect(useSessionGoalArmStore.getState().armed).toBe(true);
+    // A job in a session that was there before never asks whether to remove it.
+    expect(listed.mock.calls.length).toBe(0);
     // The job is over: the card goes.
     expect(text()).toBe('');
+  });
+
+  describe('back to edit on a new chat, whose session was made for the message', () => {
+    const NEW_DRAFT_ID = 77;
+    const original = useSessionUIStore.getState();
+    let deleted: string[];
+    let opened: Array<string | null | undefined>;
+    let listed: ReturnType<typeof spyOn<typeof opencodeClient, 'getSessionMessages'>>;
+    const page = (items: MessagePage['items']): MessagePage => ({ items, cursor: {} });
+
+    beforeEach(() => {
+      deleted = [];
+      opened = [];
+      listed = spyOn(opencodeClient, 'getSessionMessages').mockResolvedValue(page([]));
+      respond = () => Response.json({
+        revision: 2,
+        job: job({ status: 'cancelled', newSession: true }),
+        message: { content: 'Add dark mode', text: 'Add dark mode', attachments: [], context: [] },
+      });
+      useSessionUIStore.setState({
+        currentSessionId: 'ses_card',
+        deleteSession: async (id) => {
+          deleted.push(id);
+          return true;
+        },
+        openNewSessionDraft: (options) => {
+          opened.push(options?.directoryOverride);
+          useSessionUIStore.setState({
+            currentSessionId: null,
+            newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: true, draftId: NEW_DRAFT_ID },
+          });
+        },
+      });
+    });
+
+    afterEach(() => {
+      listed.mockRestore();
+      useSessionUIStore.setState({
+        currentSessionId: original.currentSessionId,
+        newSessionDraft: original.newSessionDraft,
+        deleteSession: original.deleteSession,
+        openNewSessionDraft: original.openNewSessionDraft,
+      });
+    });
+
+    test('with nothing sent in it, the session goes and a new draft gets the message', async () => {
+      show(job({ newSession: true }));
+      await render();
+      await click('Back to edit');
+
+      expect(listed.mock.calls).toEqual([['ses_card', { limit: 1 }, '/repo']]);
+      expect(deleted).toEqual(['ses_card']);
+      expect(opened).toEqual(['/repo']);
+      const [edit] = useInputStore.getState().pendingComposerEdits;
+      expect(edit?.target).toEqual({ kind: 'draft', draftId: NEW_DRAFT_ID });
+      expect(edit?.content).toBe('Add dark mode');
+      expect(useSessionGoalArmStore.getState().armed).toBe(true);
+    });
+
+    test('a session with a message stays, and the message goes back to it', async () => {
+      listed.mockResolvedValue(page([{ info: { id: 'msg_1', sessionID: 'ses_card', role: 'user', time: { created: 1 } }, parts: [] }]));
+      show(job({ newSession: true }));
+      await render();
+      await click('Back to edit');
+
+      expect(deleted).toEqual([]);
+      expect(opened).toEqual([]);
+      expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
+    });
+
+    test('when OpenCode cannot say whether anything was sent, the session stays', async () => {
+      listed.mockRejectedValue(new Error('OpenCode is not reachable'));
+      const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+      show(job({ newSession: true }));
+      await render();
+      await click('Back to edit');
+      warn.mockRestore();
+
+      expect(deleted).toEqual([]);
+      expect(opened).toEqual([]);
+      expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
+    });
+
+    test('a session that could not be removed keeps the message', async () => {
+      useSessionUIStore.setState({ deleteSession: async () => false });
+      show(job({ newSession: true }));
+      await render();
+      await click('Back to edit');
+
+      expect(opened).toEqual([]);
+      expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
+    });
+
+    test('a message this window holds for the session keeps it, whatever OpenCode lists', async () => {
+      const sdk = OpenCode.make({ baseUrl: 'https://sync.test', fetch: async () => Response.json({ data: [] }) });
+      const childStores = new ChildStoreManager();
+      childStores.ensureChild('/repo', { bootstrap: false }).setState({
+        message: { ses_card: [{ id: 'msg_sending', sessionID: 'ses_card', role: 'user', time: { created: 1 } }] },
+      });
+      setSyncRefs(sdk, childStores, '/repo');
+      try {
+        show(job({ newSession: true }));
+        await render();
+        await click('Back to edit');
+      } finally {
+        setSyncRefs(sdk, new ChildStoreManager(), '');
+      }
+
+      expect(deleted).toEqual([]);
+      expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
+    });
+
+    test('a new chat\'s session in a side column stays; only the one on screen in the main chat makes way', async () => {
+      useSessionUIStore.setState({ currentSessionId: 'ses_main' });
+      show(job({ newSession: true }));
+      await render();
+      await click('Back to edit');
+
+      expect(listed.mock.calls.length).toBe(0);
+      expect(deleted).toEqual([]);
+      expect(useInputStore.getState().pendingComposerEdits[0]?.target).toEqual({ kind: 'session', sessionId: 'ses_card' });
+    });
   });
 
   test('a message with attachments says why it waits and is sent from this window, then settled', async () => {

@@ -179,6 +179,7 @@ describe('goal writer jobs in the client', () => {
       sendMode: 'goal-as-message',
       tokenBudget: 5000,
       writerInput: { conversation: 'User:\nEarlier' },
+      newSession: true,
       message: { content: '@build Add dark mode', text: 'Add dark mode', agentMention: 'build', context: [{ kind: 'instruction', text: 'Load the skill' }] },
       sendConfig: { providerID: 'p', modelID: 'm', agent: 'build', variant: 'high' },
     });
@@ -194,6 +195,7 @@ describe('goal writer jobs in the client', () => {
         sendMode: 'goal-as-message',
         tokenBudget: 5000,
         writerInput: { conversation: 'User:\nEarlier' },
+        newSession: true,
         message: {
           content: '@build Add dark mode',
           text: 'Add dark mode',

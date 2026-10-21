@@ -271,6 +271,7 @@ describe('the composer and the goal writer', () => {
           review: true,
           sendMode: 'with-message',
           tokenBudget: null,
+          newSession: false,
           message: {
             content: 'Add dark mode',
             text: 'Add dark mode',
@@ -367,8 +368,8 @@ describe('the composer and the goal writer', () => {
       await composer.send('Add dark mode', sentOrStarted);
 
       expect(createdIn).toEqual(['/workspace']);
-      expect(actions().map((call) => [call.method, call.path, call.body.sessionId, call.body.directory])).toEqual([
-        ['POST', '/api/goals/spec-jobs', 'ses_from_draft', '/workspace'],
+      expect(actions().map((call) => [call.method, call.path, call.body.sessionId, call.body.directory, call.body.newSession])).toEqual([
+        ['POST', '/api/goals/spec-jobs', 'ses_from_draft', '/workspace', true],
       ]);
       expect(actions()[0]?.body.message.context).toEqual([
         { kind: 'instruction', text: wrapSystemReminder(getResponseStylePresetInstructions('concise')) },
@@ -401,7 +402,7 @@ describe('the composer and the goal writer', () => {
       await act(async () => {
         useInputStore.getState().requestComposerEdit({
           runtimeKey: getRuntimeKey(),
-          sessionId: SESSION_ID,
+          target: { kind: 'session', sessionId: SESSION_ID },
           content: 'Add dark mode',
           attachments: [{
             id: 'a1',
@@ -422,6 +423,46 @@ describe('the composer and the goal writer', () => {
       // Attached chips come back; an instruction derived from the text is derived again on send.
       expect(useInputStore.getState().getPendingSyntheticParts(null)).toEqual([{ text: 'Resolve the conflict', synthetic: true }]);
       expect(useInputStore.getState().pendingComposerEdits).toEqual([]);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
+  test('a new chat\'s job taken back goes to the new-session draft that took its session\'s place, and only that draft', async () => {
+    const composer = await mountComposer('draft');
+    try {
+      const draftId = useSessionUIStore.getState().newSessionDraft.draftId;
+      await act(async () => {
+        useInputStore.getState().requestComposerEdit({
+          runtimeKey: getRuntimeKey(),
+          target: { kind: 'draft', draftId: draftId + 1 },
+          content: 'For another draft',
+          attachments: [],
+          context: [],
+        });
+        useInputStore.getState().requestComposerEdit({
+          runtimeKey: getRuntimeKey(),
+          target: { kind: 'draft', draftId },
+          content: 'Add dark mode',
+          attachments: [{
+            id: 'a1',
+            file: new File(['hi'], 'mock.png', { type: 'image/png' }),
+            dataUrl: 'data:image/png;base64,aGk=',
+            mimeType: 'image/png',
+            filename: 'mock.png',
+            size: 2,
+            source: 'local',
+          }],
+          context: [{ kind: 'synthetic', text: 'Resolve the conflict' }],
+        });
+      });
+      await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+
+      expect(composer.view.state.doc.toString()).toBe('Add dark mode');
+      expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(['mock.png']);
+      expect(useInputStore.getState().getPendingSyntheticParts(null)).toEqual([{ text: 'Resolve the conflict', synthetic: true }]);
+      // The message for another draft waits for that draft.
+      expect(useInputStore.getState().pendingComposerEdits.map((edit) => edit.content)).toEqual(['For another draft']);
     } finally {
       await composer.unmount();
     }

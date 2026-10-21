@@ -149,8 +149,8 @@ persisted, revisioned, broadcast).
 
 - Job: `{ id, sessionId, directory, status, trigger, review, sendMode,
   tokenBudget, message, composerOnly, spec, writer, sendConfig, error,
-  failedStep, warning, sending, waiting, claimId, messageId, outcome,
-  attempt, createdAt, updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
+  failedStep, warning, sending, waiting, claimId, messageId, newSession,
+  outcome, attempt, createdAt, updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
   `cancelled`; `trigger` is `armed` or `auto-create`. `message` is the
   captured composer message in the queue item's form (`content` as typed,
   `text` to deliver, `agentMention`, `attachments`, `context`); `sendConfig`
@@ -169,7 +169,8 @@ persisted, revisioned, broadcast).
   sent job sent: the id OpenCode answered the prompt with (it names the inbox
   item, and the message keeps it), or the one the composer reports in
   `settle`; null for a job sent before the field existed or a composer that
-  named none.
+  named none. `newSession` says the composer made the session from a
+  new-session draft for this job (false in a file from before the field).
   `sending` is a send under way, `waiting` a send held until the agent's
   turn ends (below), and `claimId` the claim of the composer sending it,
   while that claim waits or is under way. `writerInput` (conversation and
@@ -290,7 +291,7 @@ persisted, revisioned, broadcast).
 - Routes (`/api/goals/spec-jobs`, before the generic proxy, JSON through the
   `/api/goals` family): `GET` the snapshot `{ revision, jobs }`; `POST` start
   `{ sessionId, directory, trigger, review, sendMode, tokenBudget?,
-  writerInput?, message, sendConfig }`; `POST /:jobId/send` with `{ kind:
+  writerInput?, newSession?, message, sendConfig }`; `POST /:jobId/send` with `{ kind:
   'spec', sendMode, spec }` (the spec as edited) or `{ kind: 'original' }`;
   `POST /:jobId/redo`; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
   }`; `POST /:jobId/settle` with `{ outcome, spec?, messageId?, error? }`; `DELETE
@@ -501,7 +502,8 @@ sees only that final turn, so the report is its evidence.
   writer input and the composer's model, agent and effort. A new-session draft
   becomes a session first (`materializeOpenDraftSession`, with the automatic
   worktree when it is on, and the draft's synthetic context added to the
-  message), since a job belongs to a session. A session's first message also
+  message), since a job belongs to a session; the start then says so
+  (`newSession: true`). A session's first message also
   carries the response style as a derived instruction, as a direct send does.
   Once the job starts, an armed
   target is disarmed (the server writes the goal) and the prompt joins the
@@ -561,9 +563,18 @@ sees only that final turn, so the report is its evidence.
   two minutes and the job waits for the user again. The composer's arm store
   stays out of it: a send held while OpenCode starts waits behind any send
   made before it, and an armed goal there would go to whichever of them
-  consumes the store first. Back to edit ends the job
-  (`edit`), hands the full message to that session's composer through
-  `input-store.pendingComposerEdits`, and arms the goal again for an armed job.
+  consumes the store first. Back to edit (`components/chat/goalSpecJobEdit.ts`)
+  ends the job (`edit`), hands the full message to that session's composer
+  through `input-store.pendingComposerEdits`, and arms the goal again for an
+  armed job. A new chat's job (`newSession`) shown in the main chat goes back
+  to a new chat instead, while nothing was sent in its session: no message in
+  this window's store and none in OpenCode's list (`limit: 1`), so the
+  session is removed (`deleteSession`) and a new-session draft opens for the
+  session's directory (another chat for a chat), and the message goes to that
+  draft's composer by its draft id. A session with any message, a list
+  OpenCode does not answer, or a removal that fails keeps the session, and
+  the message goes to its composer. The new draft starts on the default model
+  and agent, as any new draft does.
   The job is the server's, so switching threads changes nothing.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by

@@ -108,7 +108,9 @@ queued message does (`takeComposerMessage`, which queueing shares) and starts
 the server's job; a new-session draft becomes a session for it first. The
 rules are in `packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Goal
 writer in the UI*. A goal writer job taken back for editing returns through
-`input-store.pendingComposerEdits`. The composer showing that session takes it
+`input-store.pendingComposerEdits`, addressed to a session's composer or, for
+a new chat whose empty session was removed, to one new-session draft by its
+id. The composer showing that session or draft takes it
 (a `/btw` composer leaves it waiting), appends its text after anything typed
 since (`restoreDraft`), restores its files and puts its attached chips back,
 as editing a queued message does.
