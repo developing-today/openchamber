@@ -59,7 +59,17 @@ them. Its answers come back to the composer as a request in the input store
 session): the composer showing that session sends the text like a typed
 message, so a busy session queues or steers it, waits while a BTW holds the
 composer, and appends the text without sending when the composer already
-holds something. A composer showing another session drops the request.
+holds something. A composer showing another session drops the request. The
+row offers this only in a chat that takes prompts, as ChatContainer decides
+(`ChatColumnTakesPromptsContext`), since a read-only chat mounts no composer.
+
+Text the composer did not get from its own editor (these answers, a preset
+chip, a Shortcuts first message) always goes out as a message
+(`SubmitOptions.inputMode`). Sent in shell mode it would run as a command, and
+an answer's text comes from options the agent wrote. An empty composer left in
+shell mode after a command returns to normal mode for it. While a shell command
+is being typed, the answers and the Shortcuts message wait until the command is
+sent or the composer leaves shell mode, so they never join the command.
 
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,

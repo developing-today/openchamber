@@ -11,6 +11,7 @@ import {
     ChatColumnActionsContext,
     ChatColumnExpandedInputContext,
     ChatColumnSessionContext,
+    ChatColumnTakesPromptsContext,
     useChatColumnActions,
     type ChatColumnActions,
     type ChatColumnExpandedInput,
@@ -1824,6 +1825,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 		>
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
 		<ChatColumnActionsContext.Provider value={columnActions}>
+		<ChatColumnTakesPromptsContext.Provider value={!promptReadOnly}>
 		<ChatColumnExpandedInputContext.Provider value={pinnedExpandedInputValue}>
 		{/* One mobile comment controller per column: selections in this column
 		    comment into this column's composer, never a sibling's. */}
@@ -2009,6 +2011,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </ChatQuoteHighlightContext.Provider>
         </MobileCommentComposerContext.Provider>
         </ChatColumnExpandedInputContext.Provider>
+        </ChatColumnTakesPromptsContext.Provider>
         </ChatColumnActionsContext.Provider>
         </ChatColumnSessionContext.Provider>
         {/* Kept mounted while it could ever show, so it can fade out and back

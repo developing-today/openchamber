@@ -1363,6 +1363,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         presetText?: string;
         /** Queue the message, with its armed goal, unless the goal writer takes it as it would take a send. */
         queue?: true;
+        /**
+         * Sends as a message whatever mode the composer is in. Text the composer
+         * did not get from its own editor (a preset, a shortcut, a question's
+         * answers) is never a shell command.
+         */
+        inputMode?: 'normal';
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1713,6 +1719,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         const submitRuntimeKey = getRuntimeKey();
+        const submitInputMode = options?.inputMode ?? inputMode;
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
@@ -1742,7 +1749,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // the prompt it produces. A command the composer cannot run here is not
         // a local command at all and goes out as typed.
         let commandPlan = !queuedOnly && inputSnapshot.hasContent
-            ? planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, Boolean(currentSessionId))
+            ? planLocalSlashCommand(inputSnapshot.message, submitInputMode, hasDrafts, Boolean(currentSessionId))
             : null;
         if (commandPlan?.kind === 'prompt') {
             const magicCommand = findMagicPromptCommand(commandPlan.command.name);
@@ -1798,7 +1805,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // `/name args` into a chip, which lands through the same pending slot
         // a guest panel's `attach` uses. Nothing else in the composer moves.
         const guestRoute = !queuedOnly && !isBtwActive && inputSnapshot.hasContent
-            ? routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)
+            ? routeGuestSlashCommand(inputSnapshot.message, submitInputMode, guestCommands)
             : null;
         if (guestRoute) {
             setMessage('');
@@ -2020,7 +2027,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const goalWriterPlan = planGoalWriter({
             eligible: !queuedOnly
                 && !isBtwActive
-                && inputMode === 'normal'
+                && submitInputMode === 'normal'
                 && !commandPlan
                 && inputSnapshot.message.trim().length > 0
                 && !inputSnapshot.message.trimStart().startsWith('/')
@@ -2256,7 +2263,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         const historySubmissions = buildChatInputHistorySubmissions({
-            inputMode,
+            inputMode: submitInputMode,
             // Server-owned items were recorded on acceptance. VS Code records
             // the full items actually taken, never the metadata projection.
             queuedMessages: isServerOwnedMessageQueue() ? [] : queuedMessagesToSend,
@@ -2398,7 +2405,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         agentMentionName,
                         [...additionalParts, { text: instructionsText, synthetic: true }],
                         variantToSend,
-                        inputMode,
+                        submitInputMode,
                         sendMessageOptions,
                     );
                 } catch (error) {
@@ -2524,7 +2531,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
             variantToSend,
-            inputMode,
+            submitInputMode,
             sendMessageOptions,
         );
         void sendPromise.then(() => {
@@ -2651,7 +2658,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // OpenCode recognizes slash commands only when their arguments follow
         // the command on the same line. Skills retain the multiline prompt form.
         const presetText = draft ? `${text}${type === 'command' ? ' ' : '\n'}${draft}` : text;
-        void handleSubmitRef.current({ presetText });
+        // A preset is a command or a skill, so it goes as a message even from shell mode.
+        setInputMode('normal');
+        void handleSubmitRef.current({ presetText, inputMode: 'normal' });
     }, []);
     const handlePresetChipSubmit = React.useCallback((starter: ResolvedStarter) => {
         submitPresetPrompt(starter.submitText, starter.ref.type);
@@ -2731,13 +2740,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // early (a stopped space, no model) leaves it there. A draft that already
     // holds something (text, files, comments, references, context) gets the
     // text appended and nothing is sent: the shortcut never sends or clears
-    // what the user put there.
+    // what the user put there. Either way the text is a message: a shell
+    // command being typed keeps the request waiting until it is sent or the
+    // composer leaves shell mode, and an empty composer left in shell mode
+    // goes back to normal mode for it.
     const draftSubmitDraftId = newSessionDraftOpen ? newSessionDraft.draftId : null;
     React.useEffect(() => {
         if (pendingDraftSubmit == null || columnPinned) return;
         if (draftSubmitDraftId === pendingDraftSubmit.draftId && (!configCatalogLoaded || !currentProviderId || !currentModelId)) return;
+        if (inputMode === 'shell' && message.trim().length > 0) return;
         const text = useInputStore.getState().consumePendingDraftSubmit(draftSubmitDraftId);
         if (!text) return;
+        setInputMode('normal');
         const composerHolds = getCurrentInputSnapshot().hasContent
             || (useInputStore.getState().getPendingSyntheticParts(mailboxTarget)?.length ?? 0) > 0;
         if (composerHolds) {
@@ -2746,19 +2760,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         setMessage(text);
         messageRef.current = text;
-        void handleSubmitRef.current({ presetText: text });
-    }, [columnPinned, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, mailboxTarget, pendingDraftSubmit]);
+        void handleSubmitRef.current({ presetText: text, inputMode: 'normal' });
+    }, [columnPinned, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, inputMode, mailboxTarget, message, pendingDraftSubmit]);
 
     // Text this chat's transcript asked to send (answers to an agent's
     // question, given from its tool row) goes out like a typed message, so a
     // busy session queues or steers it as usual. It waits while a BTW holds
     // the composer, which would send it to the side question instead. A
     // composer that already holds something gets the text appended and sends
-    // nothing, as with the Shortcuts draft above.
+    // nothing, and shell mode is handled as for the Shortcuts draft above:
+    // the answers are never sent as a shell command.
     React.useEffect(() => {
         if (pendingSessionSubmit == null || isBtwActive) return;
+        if (inputMode === 'shell' && message.trim().length > 0) return;
         const text = useInputStore.getState().consumePendingSessionSubmit(mailboxTarget, currentSessionId);
         if (!text) return;
+        setInputMode('normal');
         const composerHolds = getCurrentInputSnapshot().hasContent
             || (useInputStore.getState().getPendingSyntheticParts(mailboxTarget)?.length ?? 0) > 0;
         if (composerHolds) {
@@ -2768,8 +2785,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         setMessage(text);
         messageRef.current = text;
-        void handleSubmitRef.current({ presetText: text });
-    }, [currentSessionId, getCurrentInputSnapshot, isBtwActive, mailboxTarget, pendingSessionSubmit, t]);
+        void handleSubmitRef.current({ presetText: text, inputMode: 'normal' });
+    }, [currentSessionId, getCurrentInputSnapshot, inputMode, isBtwActive, mailboxTarget, message, pendingSessionSubmit, t]);
 
     const handleKeyDown = (e: KeyboardEvent) => {
         // Early return during IME composition to prevent interference with autocomplete.

@@ -3,10 +3,8 @@ import { useI18n } from '@/lib/i18n';
 import type { ToolPart, ToolState } from '@/lib/opencode/model';
 import { type QuestionAnswer, questionAnswers, questionCallKey, questionPrompts } from '@/lib/opencode/question';
 import { useInputStore } from '@/sync/input-store';
-import { useSessions } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
-import { useChatColumnActions, useChatSessionSelection } from '../../chatColumnSession';
-import { resolveChatPromptReadOnly } from '../../chatPromptReadOnly';
+import { useChatColumnActions, useChatColumnTakesPrompts, useChatSessionSelection } from '../../chatColumnSession';
 import { formatQuestionAnswers, recallQuestionAnswers, rememberQuestionAnswers } from '../../questionAnswers';
 import { QuestionToolDetailsView, type QuestionToolDetailsViewProps } from './QuestionToolDetailsView';
 
@@ -28,17 +26,13 @@ export function QuestionToolDetails({ part, state, renderScrollBox }: {
     const callKey = questionCallKey({ messageID: part.messageID, callID: part.callID });
 
     // Only the chat showing this call's session can send in it, and only when
-    // that chat takes prompts (a subagent's session is read-only by default).
-    const { sessionId, directory } = useChatSessionSelection();
+    // that chat takes prompts: its composer is the one that sends the answers.
+    const { sessionId } = useChatSessionSelection();
     const { pinned } = useChatColumnActions();
-    const sessions = useSessions(directory ?? undefined);
-    const allowPromptingSubagentSessions = useUIStore((store) => store.allowPromptingSubagentSessions);
+    const takesPrompts = useChatColumnTakesPrompts();
     const isMobile = useUIStore((store) => store.isMobile);
-    const session = sessions.find((candidate) => candidate.id === part.sessionID);
     const ended = state.status === 'completed' || state.status === 'error';
-    const canAnswer = ended
-        && part.sessionID === sessionId
-        && !resolveChatPromptReadOnly(session, allowPromptingSubagentSessions, false);
+    const canAnswer = ended && part.sessionID === sessionId && takesPrompts;
 
     const startingAnswers = React.useCallback(() => recallQuestionAnswers(callKey) ?? answers, [answers, callKey]);
     const handleKeep = React.useCallback((kept: QuestionAnswer[]) => rememberQuestionAnswers(callKey, kept), [callKey]);
