@@ -1732,7 +1732,12 @@ const openChamberSessionService = createOpenChamberSessionService({
   dataDir: OPENCHAMBER_DATA_DIR,
   sessionMetadataStore,
   persistSessionMetadata: persistSessionMetadataPatch,
-  broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
+  broadcastGlobalUiEvent: (event, options) => {
+    broadcastOpenChamberUiEvent(event, options);
+    // Archiving is OpenChamber's own state and this broadcast its only
+    // signal: an archived session's goal writer job ends with it.
+    goalSpecJobRuntime.processPayload(event);
+  },
   resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,
 });

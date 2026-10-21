@@ -12,6 +12,8 @@ import { createGoalSpecJobRuntime, registerGoalSpecJobRoutes } from './spec-jobs
 const SESSION = 'ses_goal_job_1';
 const DIRECTORY = '/repo';
 const SPEC = '## Objective\nShip dark mode';
+const JOBS_FILE = 'goal-spec-jobs.json';
+const RESTART_REASON = 'the server restarted while the message was being sent; check the session before sending it again';
 
 const tempDirs = [];
 const makeDataDir = () => {
@@ -31,25 +33,49 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** A fake OpenCode that records every session call in order. */
+/**
+ * A fake OpenCode that records every session call in order. `timeline` also
+ * gets the goal and the Auto resolution from the runtime's other doubles, so
+ * a test can assert the order across all of them.
+ */
 const createOpenCode = () => {
-  const state = { calls: [], failPath: null };
+  const state = { calls: [], timeline: [], failPath: null, down: false, hold: null, promptAnswer: null };
   const fetchImpl = vi.fn(async (url, init = {}) => {
+    if (state.down) throw new TypeError('fetch failed');
     const { pathname } = new URL(url);
+    if (state.hold?.pattern.test(pathname)) {
+      state.hold.reached.resolve();
+      await state.hold.released.promise;
+    }
     if (state.failPath && state.failPath.test(pathname)) {
       return new Response('upstream refused', { status: 500 });
     }
-    state.calls.push({ route: pathname.split('/').at(-1), body: JSON.parse(init.body) });
+    const route = pathname.split('/').at(-1);
+    state.calls.push({ route, body: JSON.parse(init.body) });
+    state.timeline.push(route);
+    if (route === 'prompt' && state.promptAnswer) return Response.json(state.promptAnswer);
     return Response.json({ data: { id: `msg_${state.calls.length}` } });
   });
   return { state, fetchImpl };
 };
 
-/** A writer whose answers the test hands out one call at a time. */
-const createWriter = () => {
+/** Holds the requests whose path matches until the test lets them through. */
+const holdRoute = (openCode, pattern) => {
+  const reached = Promise.withResolvers();
+  const released = Promise.withResolvers();
+  openCode.state.hold = { pattern, reached, released };
+  return { reached: reached.promise, release: () => released.resolve() };
+};
+
+/**
+ * A writer whose answers the test hands out one call at a time. It goes
+ * through OpenCode, so it fails at once while OpenCode is down.
+ */
+const createWriter = (openCode = null) => {
   const calls = [];
   const writeSpec = vi.fn((input) => new Promise((resolve, reject) => {
     calls.push({ input, resolve, reject });
+    if (openCode?.state.down) reject(new Error('OpenCode port is not available'));
   }));
   return { writeSpec, calls };
 };
@@ -67,17 +93,33 @@ const job = (overrides = {}) => ({
   ...overrides,
 });
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), writer = createWriter(), settings = {}, claimTtlMs } = {}) => {
+const composerOnlyMessage = { content: 'x', text: 'add dark mode', attachments: [], context: [{ kind: 'synthetic', text: 'notes' }] };
+
+const createRuntime = ({
+  dataDir = makeDataDir(),
+  openCode = createOpenCode(),
+  writer = createWriter(openCode),
+  settings = {},
+  claimTtlMs,
+  connected = true,
+  now,
+  resolveAutoSelection,
+  sessionKnowledgeRuntime,
+} = {}) => {
   const broadcasts = [];
   const goals = [];
   const promptSent = [];
-  let eventHandler = () => {};
+  const hub = { connected, onEvent: () => {}, onStatus: () => {} };
   const options = {
     globalEventHub: {
-      subscribeEvent(handler) { eventHandler = handler; return () => {}; },
-      subscribeStatus() { return () => {}; },
+      subscribeEvent(handler) { hub.onEvent = handler; return () => {}; },
+      subscribeStatus(handler) { hub.onStatus = handler; return () => {}; },
+      isConnected: () => hub.connected,
     },
-    buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+    buildOpenCodeUrl: (fetchPath) => {
+      if (openCode.state.down) throw new Error('OpenCode port is not available');
+      return `http://opencode.test${fetchPath}`;
+    },
     getOpenCodeAuthHeaders: () => ({}),
     broadcastGlobalUiEvent: (event) => broadcasts.push(event),
     persistSessionGoal: vi.fn(),
@@ -87,11 +129,15 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), w
     readWriterSettings: () => settings,
     createGoal: async (input) => {
       goals.push(input);
+      openCode.state.timeline.push('goal');
       return { goal: { id: 'goal-1' }, spec: null };
     },
     fetchImpl: openCode.fetchImpl,
   };
   if (claimTtlMs) options.claimTtlMs = claimTtlMs;
+  if (now) options.now = now;
+  if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
+  if (sessionKnowledgeRuntime) options.sessionKnowledgeRuntime = sessionKnowledgeRuntime;
   const runtime = createGoalSpecJobRuntime(options);
   runtimes.push(runtime);
   return {
@@ -102,8 +148,14 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), w
     goals,
     promptSent,
     dataDir,
-    emit: (payload) => eventHandler({ translated: () => [payload] }),
+    emit: (payload) => hub.onEvent({ translated: () => [payload] }),
+    /** The hub reaches OpenCode; the runtime hears `connect`. */
+    connect: () => {
+      hub.connected = true;
+      hub.onStatus({ type: 'connect', wasReady: false });
+    },
     statuses: () => broadcasts.map((event) => event.properties.job?.status ?? null),
+    prompts: () => openCode.state.calls.filter((call) => call.route === 'prompt'),
   };
 };
 
@@ -111,12 +163,47 @@ const writeAnswer = (writer, index = writer.calls.length - 1) => {
   writer.calls[index].resolve({ spec: SPEC, providerID: 'openai', modelID: 'gpt-writer' });
 };
 
+const jobsFilePath = (dataDir) => path.join(dataDir, JOBS_FILE);
+const readJobsFile = (dataDir) => JSON.parse(fs.readFileSync(jobsFilePath(dataDir), 'utf8'));
+const backupsIn = (dataDir) => fs.readdirSync(dataDir).filter((name) => name.startsWith(`${JOBS_FILE}.corrupt-`));
+
+/** A job as the file stores it. */
+const storedJob = (overrides = {}) => ({
+  id: 'goal-spec-stored-1',
+  sessionId: SESSION,
+  directory: DIRECTORY,
+  status: 'ready',
+  trigger: 'armed',
+  review: false,
+  sendMode: 'with-message',
+  tokenBudget: null,
+  message: { content: 'add dark mode', text: 'add dark mode', attachments: [], context: [] },
+  sendConfig: { providerID: 'anthropic', modelID: 'claude', agent: 'build', variant: 'high' },
+  writerInput: {},
+  spec: SPEC,
+  writer: { source: 'session', providerID: 'anthropic', modelID: 'claude', variant: null },
+  error: null,
+  warning: null,
+  delivery: null,
+  outcome: null,
+  attempt: 1,
+  createdAt: 1_000,
+  updatedAt: 1_000,
+  ...overrides,
+});
+
+const writeStoredFile = (dataDir, contents) => {
+  const raw = JSON.stringify(contents);
+  fs.writeFileSync(jobsFilePath(dataDir), raw);
+  return raw;
+};
+
 describe('goal writer jobs', () => {
   it('writes the spec and waits for the user while review is on', async () => {
     const { runtime, writer, broadcasts, openCode } = createRuntime({ settings: { model: 'openai/gpt-writer', variant: 'low' } });
 
     const created = await runtime.create(job());
-    expect(created.job).toMatchObject({ status: 'writing', attempt: 1, sending: false, composerOnly: false });
+    expect(created.job).toMatchObject({ status: 'writing', attempt: 1, sending: false, composerOnly: false, warning: null });
     expect(created.job.writer).toEqual({ source: 'settings', providerID: 'openai', modelID: 'gpt-writer', variant: 'low' });
     expect(writer.writeSpec).toHaveBeenCalledWith(expect.objectContaining({
       request: 'add dark mode',
@@ -178,6 +265,8 @@ describe('goal writer jobs', () => {
       directory: DIRECTORY,
       objective: SPEC,
       tokenBudget: 50_000,
+      providerID: 'anthropic',
+      modelID: 'claude',
       goalWriterSettings: { rewriteAll: false },
     })]);
     expect(openCode.state.calls).toEqual([
@@ -189,6 +278,92 @@ describe('goal writer jobs', () => {
     expect(promptSent).toEqual([SESSION]);
     expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } });
     expect(statuses()).toEqual(['writing', 'ready', 'ready', 'sent']);
+  });
+
+  it('switches model and agent before the goal, and sends knowledge and instructions before the prompt', async () => {
+    const knowledge = {
+      resolvePendingForSession: vi.fn(async () => ({ text: 'Project notes', signature: 'sig-1' })),
+      recordDelivered: vi.fn(async () => undefined),
+    };
+    const { runtime, writer, openCode } = createRuntime({ sessionKnowledgeRuntime: knowledge });
+    knowledge.recordDelivered.mockImplementation(async () => {
+      openCode.state.timeline.push('knowledge recorded');
+    });
+    await runtime.create(job({
+      review: false,
+      message: {
+        content: 'add dark mode',
+        text: 'add dark mode',
+        attachments: [],
+        context: [{ kind: 'instruction', text: '<system-reminder>Load the skill</system-reminder>' }],
+      },
+    }));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+
+    expect(openCode.state.timeline).toEqual(['model', 'agent', 'goal', 'synthetic', 'synthetic', 'prompt', 'synthetic', 'knowledge recorded']);
+    expect(openCode.state.calls.filter((call) => call.route === 'synthetic').map((call) => call.body.text)).toEqual([
+      '<system-reminder>Load the skill</system-reminder>',
+      'Project notes',
+      buildGoalIntroText(null, SPEC),
+    ]);
+    expect(knowledge.resolvePendingForSession).toHaveBeenCalledWith(SESSION, DIRECTORY);
+    expect(knowledge.recordDelivered).toHaveBeenCalledWith(SESSION, DIRECTORY, 'sig-1');
+  });
+
+  it('a failed model switch leaves no goal', async () => {
+    const openCode = createOpenCode();
+    openCode.state.failPath = /\/model$/;
+    const { runtime, writer, goals } = createRuntime({ openCode });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await runtime.create(job({ review: false }));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+    warn.mockRestore();
+
+    expect(goals).toEqual([]);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, sending: false });
+    expect(runtime.snapshot().jobs[0].error).toContain('failed with 500');
+  });
+
+  it('resolves Auto before anything else, and the session and the goal get the routed model', async () => {
+    const resolveAutoSelection = vi.fn();
+    const { runtime, writer, openCode, goals } = createRuntime({ resolveAutoSelection });
+    resolveAutoSelection.mockImplementation(async () => {
+      openCode.state.timeline.push('auto');
+      return { model: { providerID: 'anthropic', id: 'claude-routed', variant: 'max' }, agent: 'plan' };
+    });
+    await runtime.create(job({ review: false, sendConfig: { providerID: 'openchamber', modelID: 'auto', agent: 'build' } }));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+
+    expect(resolveAutoSelection).toHaveBeenCalledWith({
+      sessionId: SESSION,
+      directory: DIRECTORY,
+      model: { id: 'auto', providerID: 'openchamber' },
+      agent: 'build',
+      requestText: 'add dark mode',
+    });
+    expect(openCode.state.timeline).toEqual(['auto', 'model', 'agent', 'goal', 'prompt', 'synthetic']);
+    expect(openCode.state.calls.slice(0, 2)).toEqual([
+      { route: 'model', body: { model: { providerID: 'anthropic', id: 'claude-routed', variant: 'max' } } },
+      { route: 'agent', body: { agent: 'plan' } },
+    ]);
+    expect(goals[0]).toMatchObject({ providerID: 'anthropic', modelID: 'claude-routed' });
+    expect(runtime.snapshot().jobs[0].status).toBe('sent');
+  });
+
+  it('never sends the Auto sentinel when nothing can resolve it', async () => {
+    const { runtime, writer, openCode, goals } = createRuntime();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await runtime.create(job({ review: false, sendConfig: { providerID: 'openchamber', modelID: 'auto' } }));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+    warn.mockRestore();
+
+    expect(openCode.state.calls).toEqual([]);
+    expect(goals).toEqual([]);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, error: 'Auto routing is not available on this server' });
   });
 
   it('sends the spec itself as the message in goal-as-message mode', async () => {
@@ -279,6 +454,43 @@ describe('goal writer jobs', () => {
     expect(runtime.snapshot().jobs[0].error).toContain('failed with 500');
   });
 
+  it('a prompt OpenCode answers without a queued message is not taken as sent', async () => {
+    const openCode = createOpenCode();
+    openCode.state.promptAnswer = { data: {} };
+    const { runtime, writer } = createRuntime({ openCode });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await runtime.create(job({ review: false }));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+    warn.mockRestore();
+
+    expect(runtime.snapshot().jobs[0]).toMatchObject({
+      status: 'ready',
+      review: true,
+      error: 'OpenCode accepted the prompt but returned no queued message',
+    });
+  });
+
+  it('a failure after OpenCode queued the prompt leaves the job sent, with a warning', async () => {
+    const openCode = createOpenCode();
+    // The goal reminder is the only synthetic message of this send, and it comes after the prompt.
+    openCode.state.failPath = /\/synthetic$/;
+    const { runtime, writer, promptSent } = createRuntime({ openCode });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const created = await runtime.create(job({ review: false }));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+    warn.mockRestore();
+
+    const [sent] = runtime.snapshot().jobs;
+    expect(sent).toMatchObject({ status: 'sent', error: null, review: false, sending: false, outcome: { kind: 'spec', sendMode: 'with-message' } });
+    expect(sent.warning).toMatch(/^the goal reminder was not sent: OpenCode POST .*\/synthetic failed with 500/);
+    expect(openCode.state.calls.filter((call) => call.route === 'prompt')).toHaveLength(1);
+    expect(promptSent).toEqual([SESSION]);
+    await expect(runtime.send(created.job.id, { kind: 'original' })).rejects.toMatchObject({ status: 409 });
+    await expect(runtime.send(created.job.id, { kind: 'spec', sendMode: 'with-message', spec: SPEC })).rejects.toMatchObject({ status: 409 });
+  });
+
   it('a message with an attachment waits for the composer even with review off', async () => {
     const { runtime, writer, openCode } = createRuntime();
     const attachment = { id: 'a1', filename: 'shot.png', mimeType: 'image/png', size: 3, source: 'local', dataUrl: 'data:image/png;base64,AAA=' };
@@ -305,11 +517,56 @@ describe('goal writer jobs', () => {
     expect(settled.job).toMatchObject({ status: 'sent', sending: false, outcome: { kind: 'spec', sendMode: 'with-message' } });
   });
 
+  it('a sent job keeps the names and counts its card shows, and drops the payloads', async () => {
+    const dataDir = makeDataDir();
+    const { runtime, writer } = createRuntime({ dataDir });
+    const attachment = { id: 'a1', filename: 'shot.png', mimeType: 'image/png', size: 3, source: 'local', dataUrl: 'data:image/png;base64,AAA=' };
+    const created = await runtime.create(job({
+      writerInput: { conversation: 'User: a long history', openItems: '- [ ] todo' },
+      message: {
+        content: '@review add dark mode',
+        text: 'add dark mode',
+        agentMention: 'review',
+        attachments: [attachment],
+        context: [
+          { kind: 'context', text: 'diff --git a/x b/x', metadata: { openchamberContext: { text: 'PR #1' } } },
+          { kind: 'instruction', text: '<system-reminder>Load the skill</system-reminder>' },
+        ],
+      },
+    }));
+    writeAnswer(writer);
+    await runtime.whenIdle();
+    const before = runtime.snapshot().jobs[0];
+
+    await runtime.claim(created.job.id, { kind: 'spec' });
+    const settled = await runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC });
+    await runtime.flush();
+
+    expect(settled.job.message).toEqual(before.message);
+    expect(settled.job.composerOnly).toBe(true);
+    const [stored] = readJobsFile(dataDir).jobs;
+    expect(stored.writerInput).toEqual({});
+    expect(stored.message).toEqual({
+      content: '@review add dark mode',
+      text: 'add dark mode',
+      agentMention: 'review',
+      attachments: [{ id: 'a1', filename: 'shot.png', mimeType: 'image/png', size: 3 }],
+      context: [{ kind: 'instruction', text: '<system-reminder>Load the skill</system-reminder>' }],
+      contextCount: 1,
+    });
+    expect(JSON.stringify(stored)).not.toContain('data:image');
+    expect(JSON.stringify(stored)).not.toContain('diff --git');
+
+    // The stripped job reads back as it was written; the file is not set aside.
+    const restarted = createRuntime({ dataDir });
+    await restarted.runtime.load();
+    expect(restarted.runtime.snapshot().jobs).toEqual([settled.job]);
+    expect(backupsIn(dataDir)).toEqual([]);
+  });
+
   it('a composer that claimed the original and failed leaves a job that can be written again', async () => {
     const { runtime, writer } = createRuntime({ settings: {} });
-    const created = await runtime.create(job({
-      message: { content: 'x', text: 'add dark mode', attachments: [], context: [{ kind: 'synthetic', text: 'conflict notes' }] },
-    }));
+    const created = await runtime.create(job({ message: composerOnlyMessage }));
     await runtime.claim(created.job.id, { kind: 'original' });
     expect(writer.calls[0].input.signal.aborted).toBe(true);
 
@@ -317,18 +574,22 @@ describe('goal writer jobs', () => {
     expect(released.job).toMatchObject({ status: 'failed', error: 'network down', sending: false, review: true });
   });
 
-  it('an abandoned claim expires', async () => {
+  it('an abandoned claim expires and turns review on', async () => {
     vi.useFakeTimers();
     try {
       const { runtime, writer } = createRuntime({ claimTtlMs: 1_000 });
-      const created = await runtime.create(job({
-        message: { content: 'x', text: 'add dark mode', attachments: [], context: [{ kind: 'synthetic', text: 'notes' }] },
-      }));
+      const created = await runtime.create(job({ review: false, message: composerOnlyMessage }));
       writeAnswer(writer);
       await runtime.whenIdle();
       await runtime.claim(created.job.id, { kind: 'spec' });
       await vi.advanceTimersByTimeAsync(1_001);
-      expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', sending: false, error: 'the message was not sent' });
+      expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, sending: false, error: 'the message was not sent' });
+
+      // Only a send that went out is believed without the claim.
+      await expect(runtime.settle(created.job.id, { outcome: null, error: 'gone' })).rejects.toMatchObject({ status: 409 });
+      const late = await runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC });
+      expect(late.job).toMatchObject({ status: 'sent', sending: false, error: null, outcome: { kind: 'spec', sendMode: 'with-message' } });
+      await expect(runtime.settle(created.job.id, { outcome: { kind: 'spec', sendMode: 'with-message' } })).rejects.toMatchObject({ status: 409 });
     } finally {
       vi.useRealTimers();
     }
@@ -352,9 +613,7 @@ describe('goal writer jobs', () => {
 
   it('a write stopped by Send original does not come back while the composer sends', async () => {
     const { runtime, writer, broadcasts } = createRuntime();
-    const created = await runtime.create(job({
-      message: { content: 'x', text: 'add dark mode', attachments: [], context: [{ kind: 'synthetic', text: 'conflict notes' }] },
-    }));
+    const created = await runtime.create(job({ message: composerOnlyMessage }));
     await runtime.claim(created.job.id, { kind: 'original' });
 
     // The model answers after all, while the composer is still sending.
@@ -365,19 +624,115 @@ describe('goal writer jobs', () => {
     expect(broadcasts.some((event) => event.properties.job?.spec === 'stale')).toBe(false);
   });
 
-  it('keeps one open job per session and replaces a sent one', async () => {
-    const { runtime, writer } = createRuntime();
-    const first = await runtime.create(job());
-    await expect(runtime.create(job())).rejects.toMatchObject({ status: 409 });
+  it('a write stopped by a claim stays stopped when the hub reconnects', async () => {
+    const { runtime, writer, openCode, connect } = createRuntime();
+    runtime.start();
+    await runtime.load();
+    const created = await runtime.create(job({ review: false }));
+    await runtime.claim(created.job.id, { kind: 'original' });
 
-    await runtime.send(first.job.id, { kind: 'original' });
-    writeAnswer(writer, 0);
-    await expect(runtime.dismiss('missing')).rejects.toMatchObject({ status: 404 });
-    const second = await runtime.create(job());
-    expect(runtime.snapshot().jobs.map((entry) => entry.id)).toEqual([second.job.id]);
-    await expect(runtime.dismiss(second.job.id)).rejects.toMatchObject({ status: 409 });
-    writeAnswer(writer, 1);
+    connect();
+    await runtime.load();
+    expect(writer.calls).toHaveLength(1);
+    // The stopped write answers after all; nothing may come of it.
+    writer.calls[0].resolve({ spec: 'stale', providerID: 'p', modelID: 'm' });
     await runtime.whenIdle();
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'writing', spec: null, sending: true });
+
+    await runtime.settle(created.job.id, { outcome: { kind: 'original', withGoal: true } });
+    connect();
+    await runtime.load();
+    await runtime.whenIdle();
+    expect(writer.calls).toHaveLength(1);
+    expect(openCode.state.calls).toEqual([]);
+    expect(runtime.snapshot().jobs[0].status).toBe('sent');
+  });
+
+  it('Send original under way is not resumed or sent again by a reconnect', async () => {
+    const { runtime, writer, openCode, connect, prompts } = createRuntime();
+    runtime.start();
+    await runtime.load();
+    const created = await runtime.create(job({ review: false }));
+    const held = holdRoute(openCode, /\/model$/);
+    const sending = runtime.send(created.job.id, { kind: 'original' });
+    await held.reached;
+
+    connect();
+    await runtime.load();
+    expect(writer.calls).toHaveLength(1);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'writing', sending: true });
+
+    held.release();
+    await sending;
+    writer.calls[0].resolve({ spec: 'stale', providerID: 'p', modelID: 'm' });
+    await runtime.whenIdle();
+    expect(writer.calls).toHaveLength(1);
+    expect(prompts()).toHaveLength(1);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', spec: null });
+  });
+
+  it('a new job replaces the session\'s job, open or sent, but never one being sent', async () => {
+    const { runtime, writer, broadcasts } = createRuntime();
+    const first = await runtime.create(job());
+
+    const second = await runtime.create(job());
+    expect(writer.calls[0].input.signal.aborted).toBe(true);
+    expect(broadcasts.map((event) => [event.properties.job?.id, event.properties.job?.status])).toEqual([
+      [first.job.id, 'writing'],
+      [first.job.id, 'cancelled'],
+      [second.job.id, 'writing'],
+    ]);
+    expect(runtime.snapshot().jobs.map((entry) => entry.id)).toEqual([second.job.id]);
+
+    await runtime.send(second.job.id, { kind: 'original' });
+    await expect(runtime.dismiss('missing')).rejects.toMatchObject({ status: 404 });
+    const third = await runtime.create(job());
+    expect(runtime.snapshot().jobs.map((entry) => entry.id)).toEqual([third.job.id]);
+    await expect(runtime.dismiss(third.job.id)).rejects.toMatchObject({ status: 409 });
+
+    await runtime.claim(third.job.id, { kind: 'original' });
+    await expect(runtime.create(job())).rejects.toMatchObject({ status: 409 });
+    expect(runtime.snapshot().jobs.map((entry) => entry.id)).toEqual([third.job.id]);
+    for (const call of writer.calls) call.resolve({ spec: SPEC, providerID: 'p', modelID: 'm' });
+    await runtime.whenIdle();
+  });
+
+  it('at the cap a sent card makes room before any open job does', async () => {
+    let clock = 1_000_000;
+    const { runtime, writer } = createRuntime({ now: () => clock++ });
+    // 50 is the cap (MAX_JOBS in spec-jobs.js).
+    const created = [];
+    for (let index = 0; index < 50; index += 1) {
+      created.push(await runtime.create(job({ sessionId: `ses_cap_${index}` })));
+    }
+    await runtime.send(created[1].job.id, { kind: 'original' });
+
+    await runtime.create(job({ sessionId: 'ses_cap_new' }));
+
+    const ids = runtime.snapshot().jobs.map((entry) => entry.id);
+    expect(ids).toHaveLength(50);
+    expect(ids).toContain(created[0].job.id);
+    expect(ids).not.toContain(created[1].job.id);
+    expect(writer.calls[0].input.signal.aborted).toBe(false);
+  });
+
+  it('at the cap with every job open, the oldest open job is cancelled', async () => {
+    let clock = 1_000_000;
+    const { runtime, writer, broadcasts } = createRuntime({ now: () => clock++ });
+    const created = [];
+    for (let index = 0; index < 50; index += 1) {
+      created.push(await runtime.create(job({ sessionId: `ses_cap_${index}` })));
+    }
+
+    const added = await runtime.create(job({ sessionId: 'ses_cap_new' }));
+
+    expect(added.job.status).toBe('writing');
+    const ids = runtime.snapshot().jobs.map((entry) => entry.id);
+    expect(ids).toHaveLength(50);
+    expect(ids).not.toContain(created[0].job.id);
+    expect(ids).toContain(created[1].job.id);
+    expect(writer.calls[0].input.signal.aborted).toBe(true);
+    expect(broadcasts.some((event) => event.properties.job?.id === created[0].job.id && event.properties.job.status === 'cancelled')).toBe(true);
   });
 
   it('dismissing a sent card removes it', async () => {
@@ -391,6 +746,25 @@ describe('goal writer jobs', () => {
     expect(broadcasts.at(-1).properties).toMatchObject({ sessionId: SESSION, job: null });
   });
 
+  it('a sent card goes a day after it was sent, with no other job to sweep it', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runtime, broadcasts } = createRuntime();
+      runtime.start();
+      await runtime.load();
+      const created = await runtime.create(job());
+      await runtime.send(created.job.id, { kind: 'original' });
+
+      await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000);
+      expect(runtime.snapshot().jobs).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+      expect(runtime.snapshot().jobs).toEqual([]);
+      expect(broadcasts.at(-1).properties).toMatchObject({ sessionId: SESSION, job: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a deleted session cancels its job and stops the writer', async () => {
     const { runtime, writer, emit, broadcasts } = createRuntime();
     runtime.start();
@@ -402,6 +776,67 @@ describe('goal writer jobs', () => {
     expect(writer.calls[0].input.signal.aborted).toBe(true);
     expect(broadcasts.at(-1).properties.job.status).toBe('cancelled');
     expect(runtime.snapshot().jobs).toEqual([]);
+  });
+
+  it('an archived session ends its job; an unarchive ends nothing', async () => {
+    const { runtime, writer, broadcasts } = createRuntime();
+    await runtime.create(job());
+    const other = await runtime.create(job({ sessionId: 'ses_goal_job_2' }));
+    await runtime.send(other.job.id, { kind: 'original' });
+
+    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_goal_job_2', archivedAt: null } });
+    expect(runtime.snapshot().jobs).toHaveLength(2);
+
+    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: SESSION, archivedAt: 5 } });
+    expect(writer.calls[0].input.signal.aborted).toBe(true);
+    expect(broadcasts.at(-1).properties.job).toMatchObject({ sessionId: SESSION, status: 'cancelled' });
+
+    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_goal_job_2', archivedAt: 6 } });
+    expect(broadcasts.at(-1).properties).toMatchObject({ sessionId: 'ses_goal_job_2', job: null });
+    expect(runtime.snapshot().jobs).toEqual([]);
+  });
+
+  it('an open job follows its session to another directory', async () => {
+    const knowledge = {
+      resolvePendingForSession: vi.fn(async () => ({ text: '', signature: '' })),
+      recordDelivered: vi.fn(async () => undefined),
+    };
+    const resolveAutoSelection = vi.fn(async () => null);
+    const { runtime, writer, emit, goals, broadcasts } = createRuntime({ sessionKnowledgeRuntime: knowledge, resolveAutoSelection });
+    runtime.start();
+    await runtime.load();
+    const created = await runtime.create(job({ review: false }));
+    writer.calls[0].reject(new Error('writer down'));
+    await runtime.whenIdle();
+
+    emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/repo-moved' } } });
+    expect(broadcasts.at(-1).properties.job).toMatchObject({ id: created.job.id, directory: '/repo-moved' });
+
+    await runtime.redo(created.job.id);
+    expect(writer.calls[1].input.directory).toBe('/repo-moved');
+    writeAnswer(writer, 1);
+    await runtime.whenIdle();
+
+    expect(goals[0].directory).toBe('/repo-moved');
+    expect(resolveAutoSelection).toHaveBeenCalledWith(expect.objectContaining({ directory: '/repo-moved' }));
+    expect(knowledge.resolvePendingForSession).toHaveBeenCalledWith(SESSION, '/repo-moved');
+
+    // A sent job is done with its directory.
+    emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/elsewhere' } } });
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', directory: '/repo-moved' });
+  });
+
+  it('stop() aborts running writes', async () => {
+    const { runtime, writer, broadcasts } = createRuntime();
+    await runtime.create(job());
+
+    await runtime.stop();
+
+    expect(writer.calls[0].input.signal.aborted).toBe(true);
+    writeAnswer(writer);
+    await runtime.whenIdle();
+    expect(runtime.snapshot().jobs[0].status).toBe('writing');
+    expect(broadcasts).toHaveLength(1);
   });
 
   it('jobs survive a restart, and a write the restart cut off starts again', async () => {
@@ -421,6 +856,132 @@ describe('goal writer jobs', () => {
     expect(second.runtime.snapshot().jobs[0].status).toBe('ready');
   });
 
+  it('a write the restart cut off waits for OpenCode, then the job is written and sent once', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir });
+    await first.runtime.create(job({ review: false }));
+    await first.runtime.flush();
+    first.runtime.stop();
+
+    const openCode = createOpenCode();
+    openCode.state.down = true;
+    const second = createRuntime({ dataDir, openCode, connected: false });
+    second.runtime.start();
+    await second.runtime.load();
+    await second.runtime.whenIdle();
+    expect(second.writer.calls).toHaveLength(0);
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'writing', error: null });
+
+    openCode.state.down = false;
+    second.connect();
+    await vi.waitFor(() => expect(second.writer.calls).toHaveLength(1));
+    writeAnswer(second.writer);
+    await second.runtime.whenIdle();
+    second.connect();
+    await second.runtime.load();
+    await second.runtime.whenIdle();
+
+    expect(second.writer.calls).toHaveLength(1);
+    expect(second.prompts()).toHaveLength(1);
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', error: null });
+  });
+
+  it('a written spec a restart left unsent goes out once the hub connects, and only once', async () => {
+    const dataDir = makeDataDir();
+    writeStoredFile(dataDir, { version: 1, revision: 7, jobs: [storedJob()] });
+    const { runtime, writer, connect, prompts } = createRuntime({ dataDir, connected: false });
+    runtime.start();
+    await runtime.load();
+    await runtime.whenIdle();
+    expect(prompts()).toEqual([]);
+
+    connect();
+    connect();
+    await runtime.load();
+    await runtime.whenIdle();
+
+    expect(prompts()).toEqual([{ route: 'prompt', body: { text: 'add dark mode' } }]);
+    expect(writer.calls).toEqual([]);
+    expect(runtime.snapshot()).toMatchObject({ jobs: [{ status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } }] });
+    expect(runtime.snapshot().revision).toBeGreaterThan(7);
+  });
+
+  it('a connect during a resumed send does not send it again', async () => {
+    const dataDir = makeDataDir();
+    writeStoredFile(dataDir, { version: 1, revision: 7, jobs: [storedJob()] });
+    const openCode = createOpenCode();
+    const held = holdRoute(openCode, /\/model$/);
+    const { runtime, connect, prompts } = createRuntime({ dataDir, openCode });
+    runtime.start();
+    await runtime.load();
+    await held.reached;
+
+    connect();
+    await runtime.load();
+    held.release();
+    await runtime.whenIdle();
+
+    expect(prompts()).toHaveLength(1);
+    expect(runtime.snapshot().jobs[0].status).toBe('sent');
+  });
+
+  it('a send is on record before its first request, and a restart mid-send puts the job back to review', async () => {
+    const dataDir = makeDataDir();
+    const openCode = createOpenCode();
+    const first = createRuntime({ dataDir, openCode });
+    await first.runtime.create(job({ review: false }));
+    const held = holdRoute(openCode, /\/model$/);
+    writeAnswer(first.writer);
+    await held.reached;
+    expect(readJobsFile(dataDir).jobs[0]).toMatchObject({ status: 'ready', delivery: { by: 'server', startedAt: expect.any(Number) } });
+    // The process dies here: the held request never answers.
+
+    const second = createRuntime({ dataDir });
+    second.runtime.start();
+    await second.runtime.load();
+    second.connect();
+    await second.runtime.load();
+    await second.runtime.whenIdle();
+
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'ready', review: true, sending: false, error: RESTART_REASON });
+    expect(second.openCode.state.calls).toEqual([]);
+    await second.runtime.flush();
+    expect(readJobsFile(dataDir).jobs[0]).toMatchObject({ delivery: null, review: true, error: RESTART_REASON });
+  });
+
+  it('a claim is on record too: after a restart the job waits, and the composer\'s late report still lands', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir });
+    const created = await first.runtime.create(job({ review: false }));
+    await first.runtime.claim(created.job.id, { kind: 'original' });
+    expect(readJobsFile(dataDir).jobs[0].delivery).toMatchObject({ by: 'composer' });
+    first.runtime.stop();
+
+    const second = createRuntime({ dataDir });
+    second.runtime.start();
+    await second.runtime.load();
+    second.connect();
+    await second.runtime.load();
+    await second.runtime.whenIdle();
+
+    expect(second.writer.calls).toEqual([]);
+    expect(second.openCode.state.calls).toEqual([]);
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ status: 'failed', review: true, sending: false, error: RESTART_REASON });
+    const settled = await second.runtime.settle(created.job.id, { outcome: { kind: 'original', withGoal: true } });
+    expect(settled.job).toMatchObject({ status: 'sent', error: null, outcome: { kind: 'original', withGoal: true } });
+  });
+
+  it('writes the jobs file readable by its owner only, with no temp file left behind', async () => {
+    const dataDir = makeDataDir();
+    const { runtime } = createRuntime({ dataDir });
+    await runtime.create(job());
+    await runtime.flush();
+
+    expect(fs.readdirSync(dataDir)).toEqual([JOBS_FILE]);
+    if (process.platform !== 'win32') expect(fs.statSync(jobsFilePath(dataDir)).mode & 0o777).toBe(0o600);
+    expect(readJobsFile(dataDir)).toMatchObject({ version: 1, revision: 1, jobs: [{ sessionId: SESSION, status: 'writing' }] });
+  });
+
   it('moves a malformed jobs file aside instead of overwriting it', async () => {
     const dataDir = makeDataDir();
     fs.writeFileSync(path.join(dataDir, 'goal-spec-jobs.json'), '{not json');
@@ -433,10 +994,84 @@ describe('goal writer jobs', () => {
     expect(fs.readdirSync(dataDir).some((name) => name.startsWith('goal-spec-jobs.json.corrupt-'))).toBe(true);
   });
 
+  it.each([
+    ['jobs that are not a list', { version: 1, revision: 3, jobs: { first: storedJob() } }],
+    ['an unknown version', { version: 2, revision: 3, jobs: [storedJob()] }],
+    ['no version', { revision: 3, jobs: [storedJob()] }],
+  ])('moves a file with %s aside and never writes over it', async (_label, contents) => {
+    const dataDir = makeDataDir();
+    const raw = writeStoredFile(dataDir, contents);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { runtime } = createRuntime({ dataDir });
+    await runtime.load();
+    warn.mockRestore();
+    expect(runtime.snapshot().jobs).toEqual([]);
+
+    await runtime.create(job({ sessionId: 'ses_goal_job_new' }));
+    await runtime.flush();
+    const backups = backupsIn(dataDir);
+    expect(backups).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dataDir, backups[0]), 'utf8')).toBe(raw);
+    expect(readJobsFile(dataDir).jobs.map((entry) => entry.sessionId)).toEqual(['ses_goal_job_new']);
+  });
+
+  it('keeps the valid jobs of a file with a bad one, and keeps the original bytes beside it', async () => {
+    const dataDir = makeDataDir();
+    const raw = writeStoredFile(dataDir, {
+      version: 1,
+      revision: 3,
+      jobs: [storedJob({ review: true }), storedJob({ id: 'goal-spec-bad', sessionId: 'ses_goal_job_2', tokenBudget: 'lots' })],
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { runtime } = createRuntime({ dataDir });
+    await runtime.load();
+    await runtime.flush();
+    warn.mockRestore();
+
+    expect(runtime.snapshot().jobs.map((entry) => entry.id)).toEqual(['goal-spec-stored-1']);
+    const backups = backupsIn(dataDir);
+    expect(backups).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dataDir, backups[0]), 'utf8')).toBe(raw);
+    expect(readJobsFile(dataDir).jobs.map((entry) => entry.id)).toEqual(['goal-spec-stored-1']);
+  });
+
+  it('a jobs file that cannot be read fails the load, and every change is refused', async () => {
+    const dataDir = makeDataDir();
+    // A directory where the file should be: every read fails with EISDIR.
+    fs.mkdirSync(jobsFilePath(dataDir));
+    const { runtime } = createRuntime({ dataDir });
+    const app = express();
+    app.use(express.json());
+    registerGoalSpecJobRoutes(app, runtime);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(runtime.create(job())).rejects.toMatchObject({ code: 'EISDIR' });
+    await request(app).get('/api/goals/spec-jobs').expect(500);
+    error.mockRestore();
+    expect(runtime.snapshot().jobs).toEqual([]);
+    expect(fs.statSync(jobsFilePath(dataDir)).isDirectory()).toBe(true);
+  });
+
   it('refuses a job without text or without a model', async () => {
     const { runtime } = createRuntime();
     await expect(runtime.create(job({ message: { content: '', text: '  ', attachments: [], context: [] } }))).rejects.toThrow(TypeError);
     await expect(runtime.create(job({ sendConfig: {} }))).rejects.toThrow(TypeError);
+  });
+
+  it('refuses scheduled-task provenance, and a token budget or writer input it cannot use', async () => {
+    const { runtime, writer } = createRuntime();
+    await expect(runtime.create(job({
+      sendConfig: {},
+      message: { content: 'x', text: 'add dark mode', attachments: [], context: [], scheduledTask: { projectId: 'p1', taskId: 't1' } },
+    }))).rejects.toThrow('scheduledTask is server-owned');
+    for (const tokenBudget of ['lots', -5, 1.5, 0]) {
+      await expect(runtime.create(job({ tokenBudget }))).rejects.toThrow();
+    }
+    for (const writerInput of ['history', { conversation: 42 }, { openItems: ['a'] }]) {
+      await expect(runtime.create(job({ writerInput }))).rejects.toThrow();
+    }
+    expect(writer.calls).toEqual([]);
+    expect(runtime.snapshot().jobs).toEqual([]);
   });
 });
 
@@ -452,19 +1087,28 @@ describe('goal writer job routes', () => {
     const { runtime, writer } = createRuntime();
     const app = createApp(runtime);
 
-    const created = await request(app).post('/api/goals/spec-jobs').send(job()).expect(200);
-    expect(created.body.job).toMatchObject({ sessionId: SESSION, status: 'writing' });
+    const first = await request(app).post('/api/goals/spec-jobs').send(job()).expect(200);
+    expect(first.body.job).toMatchObject({ sessionId: SESSION, status: 'writing' });
 
     const snapshot = await request(app).get('/api/goals/spec-jobs').expect(200);
-    expect(snapshot.body).toMatchObject({ revision: 1, jobs: [{ id: created.body.job.id }] });
+    expect(snapshot.body).toMatchObject({ revision: 1, jobs: [{ id: first.body.job.id }] });
 
-    await request(app).post('/api/goals/spec-jobs').send(job()).expect(409);
+    const created = await request(app).post('/api/goals/spec-jobs').send(job()).expect(200);
+    expect(created.body.job.id).not.toBe(first.body.job.id);
     await request(app).post('/api/goals/spec-jobs').send({ sessionId: SESSION }).expect(400);
+    await request(app).post('/api/goals/spec-jobs').send(job({ tokenBudget: 'lots' })).expect(400);
+    await request(app).post('/api/goals/spec-jobs').send(job({ writerInput: { conversation: 42 } })).expect(400);
+    await request(app).post('/api/goals/spec-jobs')
+      .send(job({ message: { content: 'x', text: 'x', attachments: [], context: [], scheduledTask: { projectId: 'p', taskId: 't' } } }))
+      .expect(400);
     await request(app).post(`/api/goals/spec-jobs/${created.body.job.id}/send`).send({ kind: 'spec', sendMode: 'with-message', spec: SPEC }).expect(409);
     await request(app).post('/api/goals/spec-jobs/missing/redo').expect(404);
 
+    // The replaced job's write was stopped; its late answer is dropped.
+    writeAnswer(writer, 0);
     writeAnswer(writer);
     await runtime.whenIdle();
+    expect(runtime.snapshot().jobs.map((entry) => [entry.id, entry.status])).toEqual([[created.body.job.id, 'ready']]);
     const edited = await request(app).post(`/api/goals/spec-jobs/${created.body.job.id}/edit`).expect(200);
     expect(edited.body.message.text).toBe('add dark mode');
   });
