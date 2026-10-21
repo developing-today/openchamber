@@ -129,3 +129,8 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Bare-key secret names masked and refused                            | 2026-10-21 | #208, #175, #211           |
 | Secret subtrees masked; plural secret names refused                 | 2026-10-21 | #214, #215, #219           |
 | Malformed weekly weekdays rejected instead of coerced               | 2026-10-21 | #209, #210                 |
+| ROADMAP Done records the five version-parse completions             | 2026-10-21 | #191, #192                 |
+| Non-mac releases can finalize without macOS manifests               | 2026-10-21 | #186, #193                 |
+| Android launch targets the real MainActivity class                  | 2026-10-21 | #173, #200                 |
+| ROADMAP Done records the #209 and #214/#215 completions             | 2026-10-21 | #220, #221                 |
+| updateSettings feeds projects the migrated settings                 | 2026-10-21 | #199, #223                 |
