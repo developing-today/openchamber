@@ -256,6 +256,7 @@ describe('SyncProvider active-session watchdog status poll', () => {
   // Over the private relay a 5 s poll keeps the relay awake, so an open but
   // idle session must not be polled; live work still is.
   test('polls status for a busy session and not for an idle viewed one', async () => {
+    jest.useFakeTimers()
     const dom = installHookTestDomWithStorage()
     const sdk = OpenCode.make({ baseUrl: 'http://poll.test', fetch: () => hang<Response>() })
     try {
@@ -274,9 +275,9 @@ describe('SyncProvider active-session watchdog status poll', () => {
         session_status: { ...state.session_status, ses_idle: { type: 'idle' } },
       }))
 
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      await waitFor(() => false, 1000)
       const idleBaseline = activeStatusReads
-      await new Promise((resolve) => setTimeout(resolve, 6000))
+      await waitFor(() => false, 6000)
       expect(activeStatusReads).toBe(idleBaseline)
 
       store?.setState((state) => ({ session_status: { ...state.session_status, ses_idle: { type: 'busy' } } }))
@@ -286,6 +287,7 @@ describe('SyncProvider active-session watchdog status poll', () => {
     } finally {
       setActiveSession('', '')
       dom.restore()
+      jest.useRealTimers()
     }
-  }, 20000)
+  })
 })

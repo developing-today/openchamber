@@ -186,17 +186,21 @@ describe('requestGoalSpec', () => {
     }
   });
 
+  // The server routes a request into a space by the space folder in its
+  // directory header (openchamber/openchamber#5077), not by its path.
   test('a session in an isolated space asks the server inside the space', async () => {
-    const paths: string[] = [];
+    const requests: Array<{ path: string; directory: string | null }> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
-      paths.push(new URL(new Request(input, init).url).pathname);
+      const request = new Request(input, init);
+      const header = request.headers.get('x-opencode-directory');
+      requests.push({ path: new URL(request.url).pathname, directory: header === null ? null : decodeURIComponent(header) });
       return Response.json({ spec: 'spec', providerID: 'p', modelID: 'm' });
     };
     configureRuntimeUrlResolver({ apiBaseUrl: 'http://goal-writer.test' });
     try {
       await requestGoalSpec({ request: 'x', directory: '/spaces/a1b2c3d4e5f6/repo' });
-      expect(paths).toEqual(['/api/spaces/a1b2c3d4e5f6/goals/spec']);
+      expect(requests).toEqual([{ path: '/api/goals/spec', directory: '/spaces/a1b2c3d4e5f6/repo' }]);
     } finally {
       globalThis.fetch = originalFetch;
       configureRuntimeUrlResolver({ apiBaseUrl: '' });
