@@ -71,6 +71,11 @@ const jobSchema = z.object({
      * setting is queue and the agent was working. Absent from servers before it existed.
      */
     waiting: z.boolean().optional(),
+    /**
+     * The claim of the window sending it, while it waits or is being sent;
+     * only that window sends it. Absent from servers before it existed.
+     */
+    claimId: z.string().nullable().optional(),
     outcome: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('spec'), sendMode: sendModeSchema }),
         z.object({ kind: z.literal('original'), withGoal: z.boolean() }),
@@ -100,12 +105,23 @@ type GoalSpecJobOutcome = NonNullable<GoalSpecJob['outcome']>;
 type GoalSpecJobSettlement = { outcome: GoalSpecJobOutcome | null; spec?: string; error?: string };
 
 /** The captured message in full, as `claim` and `edit` hand it back. */
-interface GoalSpecJobMessage {
+export interface GoalSpecJobMessage {
     content: string;
     text: string;
     agentMention?: string;
     attachments: AttachedFile[];
     context: QueuedContextPart[];
+}
+
+/**
+ * A window's claim on a job: the full message, and the claim's id. While the
+ * agent works and the follow-up setting is queue, the server holds the claim
+ * (`waiting`) and hands it over once the turn is over.
+ */
+interface GoalSpecJobClaim {
+    message: GoalSpecJobMessage;
+    claimId: string | null;
+    waiting: boolean;
 }
 
 interface GoalSpecJobStart {
@@ -223,8 +239,8 @@ interface GoalSpecJobActions {
     redoJob: (job: GoalSpecJob) => Promise<void>;
     /** Back to edit: the job ends and its full message comes back. */
     editJob: (job: GoalSpecJob) => Promise<GoalSpecJobMessage>;
-    /** A window takes the full message to send it itself. */
-    claimJob: (job: GoalSpecJob, kind: GoalSpecJobChoice['kind']) => Promise<GoalSpecJobMessage>;
+    /** A window takes the full message to send it itself, now or once the agent's turn is over. */
+    claimJob: (job: GoalSpecJob, kind: GoalSpecJobChoice['kind']) => Promise<GoalSpecJobClaim>;
     settleJob: (job: GoalSpecJob, settlement: GoalSpecJobSettlement) => Promise<void>;
     /** Removes the card of a sent job. */
     dismissJob: (job: GoalSpecJob) => Promise<void>;
@@ -398,7 +414,11 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
 
         claimJob: async (job, kind) => {
             const result = await mutate(job, handBackResponseSchema, jobPath(job.id, 'claim'), jsonInit('POST', { kind }));
-            return toJobMessage(result.message);
+            return {
+                message: toJobMessage(result.message),
+                claimId: result.job?.claimId ?? null,
+                waiting: result.job?.waiting === true,
+            };
         },
 
         settleJob: async (job, settlement) => {

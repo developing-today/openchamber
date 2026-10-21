@@ -1127,20 +1127,20 @@ describe('goal writer jobs', () => {
   });
 });
 
-describe('a server send while the agent works', () => {
-  const statusEvent = (type, sessionID = SESSION) => ({ type: 'session.status', properties: { sessionID, status: { type } } });
-  // Long enough for the zero-delay looks and the 20 ms rechecks createRuntime sets.
-  const afterLooks = async (runtime) => {
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    await runtime.whenIdle();
-  };
-  const writtenJob = async (runtime, writer, overrides = {}) => {
-    const created = await runtime.create(job(overrides));
-    writeAnswer(writer);
-    await runtime.whenIdle();
-    return created.job;
-  };
+const statusEvent = (type, sessionID = SESSION) => ({ type: 'session.status', properties: { sessionID, status: { type } } });
+// Long enough for the zero-delay looks and the 20 ms rechecks createRuntime sets.
+const afterLooks = async (runtime) => {
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await runtime.whenIdle();
+};
+const writtenJob = async (runtime, writer, overrides = {}) => {
+  const created = await runtime.create(job(overrides));
+  writeAnswer(writer);
+  await runtime.whenIdle();
+  return created.job;
+};
 
+describe('a server send while the agent works', () => {
   it('with queue, the message waits for the turn to end, then goes out once', async () => {
     const openCode = createOpenCode();
     openCode.state.active = { [SESSION]: { type: 'running' } };
@@ -1351,6 +1351,127 @@ describe('a server send while the agent works', () => {
 
     openCode.state.readsFail = false;
     await vi.waitFor(() => expect(prompts()).toHaveLength(1));
+  });
+});
+
+// A message with attachments or attached context goes out from the window
+// that claimed it, after the same wait.
+describe('a composer\'s claim while the agent works', () => {
+  const attachment = { id: 'a1', filename: 'shot.png', mimeType: 'image/png', size: 3, source: 'local', dataUrl: 'data:image/png;base64,AAA=' };
+  const withAttachment = { content: 'add dark mode', text: 'add dark mode', attachments: [attachment], context: [] };
+  const busyOpenCode = () => {
+    const openCode = createOpenCode();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    return openCode;
+  };
+
+  it('with queue, the claim waits for the turn to end and is handed to its composer then, once', async () => {
+    const openCode = busyOpenCode();
+    const { runtime, writer, broadcasts, dataDir } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer, { message: withAttachment });
+
+    const claimed = await runtime.claim(written.id, { kind: 'spec' });
+
+    // The composer keeps the whole message; the job waits under the claim's id.
+    expect(claimed.message.attachments[0].dataUrl).toBe(attachment.dataUrl);
+    expect(claimed.job).toMatchObject({ status: 'ready', waiting: true, sending: false, claimId: expect.stringMatching(/^claim-/) });
+    const { claimId } = claimed.job;
+    await runtime.flush();
+    expect(readJobsFile(dataDir).jobs[0]).toMatchObject({ delivery: null, waiting: { claimId } });
+    // Nothing else sends it while it waits.
+    await expect(runtime.claim(written.id, { kind: 'original' })).rejects.toMatchObject({ status: 409 });
+    await expect(runtime.redo(written.id)).rejects.toMatchObject({ status: 409 });
+
+    runtime.processPayload(statusEvent('busy'));
+    await afterLooks(runtime);
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ waiting: true, sending: false });
+
+    openCode.state.active = {};
+    runtime.processPayload(statusEvent('idle'));
+    await vi.waitFor(() => expect(runtime.snapshot().jobs[0]).toMatchObject({ waiting: false, sending: true, claimId }));
+    // A later idle event finds nothing left to hand over.
+    const handedOver = broadcasts.length;
+    runtime.processPayload(statusEvent('idle'));
+    await afterLooks(runtime);
+    expect(broadcasts).toHaveLength(handedOver);
+    await runtime.flush();
+    expect(readJobsFile(dataDir).jobs[0]).toMatchObject({ waiting: null, delivery: { by: 'composer', claimId } });
+
+    // The server sends nothing itself; the composer reports its send.
+    expect(openCode.state.calls).toEqual([]);
+    const settled = await runtime.settle(written.id, { outcome: { kind: 'spec', sendMode: 'with-message' }, spec: SPEC });
+    expect(settled.job).toMatchObject({ status: 'sent', sending: false, waiting: false, claimId: null });
+  });
+
+  it('with steer, the claim is handed over at once', async () => {
+    const openCode = busyOpenCode();
+    const { runtime, writer } = createRuntime({ openCode, readFollowUpBehavior: () => 'steer' });
+    const written = await writtenJob(runtime, writer, { message: withAttachment });
+
+    const claimed = await runtime.claim(written.id, { kind: 'spec' });
+
+    expect(claimed.job).toMatchObject({ waiting: false, sending: true, claimId: expect.stringMatching(/^claim-/) });
+    // Steer never asks whether the agent is working.
+    expect(openCode.state.reads).toEqual([]);
+  });
+
+  it('a waiting claim does not expire; its time runs from the hand-over', async () => {
+    const openCode = busyOpenCode();
+    const { runtime, writer, broadcasts } = createRuntime({ openCode, claimTtlMs: 30 });
+    const written = await writtenJob(runtime, writer, { message: withAttachment });
+    await runtime.claim(written.id, { kind: 'spec' });
+
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    expect(runtime.snapshot().jobs[0]).toMatchObject({ waiting: true, sending: false, error: null });
+
+    openCode.state.active = {};
+    runtime.processPayload(statusEvent('idle'));
+    // Its composer never reports: the claim expires as any claim does.
+    await vi.waitFor(() => expect(runtime.snapshot().jobs[0]).toMatchObject({
+      sending: false, waiting: false, review: true, failedStep: 'send', error: 'the message was not sent', claimId: null,
+    }));
+    expect(broadcasts.slice(-3).map(({ properties: { job: state } }) => [state.waiting, state.sending, state.error])).toEqual([
+      [true, false, null],
+      [false, true, null],
+      [false, false, 'the message was not sent'],
+    ]);
+  });
+
+  it('Back to edit takes a waiting claim back, and the end of the turn hands nothing over', async () => {
+    const openCode = busyOpenCode();
+    const { runtime, writer, broadcasts } = createRuntime({ openCode });
+    const written = await writtenJob(runtime, writer, { message: withAttachment });
+    await runtime.claim(written.id, { kind: 'spec' });
+
+    const edited = await runtime.edit(written.id);
+
+    expect(edited.job).toMatchObject({ status: 'cancelled', waiting: false, claimId: null });
+    expect(edited.message.attachments[0].dataUrl).toBe(attachment.dataUrl);
+    const afterEdit = broadcasts.length;
+    openCode.state.active = {};
+    runtime.processPayload(statusEvent('idle'));
+    await afterLooks(runtime);
+    expect(broadcasts).toHaveLength(afterEdit);
+    expect(runtime.snapshot().jobs).toEqual([]);
+  });
+
+  it('a waiting claim survives a restart and is handed over once the turn is over', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir, openCode: busyOpenCode() });
+    const written = await writtenJob(first.runtime, first.writer, { message: withAttachment });
+    const claimed = await first.runtime.claim(written.id, { kind: 'spec' });
+    await first.runtime.flush();
+    first.runtime.stop();
+
+    const second = createRuntime({ dataDir, connected: false });
+    second.runtime.start();
+    await second.runtime.load();
+    // Nothing went out, so the claim waits on; it is not put back to review.
+    expect(second.runtime.snapshot().jobs[0]).toMatchObject({ waiting: true, sending: false, error: null, claimId: claimed.job.claimId });
+
+    second.connect();
+    await vi.waitFor(() => expect(second.runtime.snapshot().jobs[0]).toMatchObject({ waiting: false, sending: true, claimId: claimed.job.claimId }));
+    expect(second.openCode.state.calls).toEqual([]);
   });
 });
 

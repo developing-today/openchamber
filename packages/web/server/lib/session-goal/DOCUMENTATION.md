@@ -148,8 +148,8 @@ persisted, revisioned, broadcast).
 
 - Job: `{ id, sessionId, directory, status, trigger, review, sendMode,
   tokenBudget, message, composerOnly, spec, writer, sendConfig, error,
-  failedStep, warning, sending, waiting, outcome, attempt, createdAt,
-  updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
+  failedStep, warning, sending, waiting, claimId, outcome, attempt,
+  createdAt, updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
   `cancelled`; `trigger` is `armed` or `auto-create`. `message` is the
   captured composer message in the queue item's form (`content` as typed,
   `text` to deliver, `agentMention`, `attachments`, `context`); `sendConfig`
@@ -164,10 +164,12 @@ persisted, revisioned, broadcast).
   message as typed that fails while the spec is being written leaves a job
   without a spec, so its status is `failed` although the write never failed.
   `warning` is set on a sent job when a step after the prompt failed.
-  `sending` is a send under way, `waiting` a server send held until the
-  agent's turn ends (below). `writerInput` (conversation and open items for a
-  goal from the next message) and the attachment payloads stay on the server:
-  projections carry attachment names and a context count.
+  `sending` is a send under way, `waiting` a send held until the agent's
+  turn ends (below), and `claimId` the claim of the composer sending it,
+  while that claim waits or is under way. `writerInput` (conversation and
+  open items for a goal from the next message) and the attachment payloads
+  stay on the server: projections carry attachment names and a context
+  count.
 - One job per session. A new job replaces the session's job: an open one is
   cancelled (a waiting send with it) and its write stopped, a sent card
   removed. While that job's message is being sent (by the server, or by a
@@ -199,27 +201,25 @@ persisted, revisioned, broadcast).
   with the queued item's id.
   "Send original" stops a running write; an armed goal then keeps the message
   as its objective, a goal from the next message sends without one.
-- A server send into a session whose agent is still working follows the
-  user's follow-up setting (`followUpBehavior`, read from the settings file
-  when the send is decided), as a message from the composer does. `steer`
-  sends at once, and the message joins the running turn. `queue`, the
-  default, keeps the choice on the job (`waiting: { choice, since }`, written
-  to the file) and sends it once the turn is over; nothing reaches the
-  session before that, the goal included. The turn is over by the message
-  queue's test (`../message-queue/DOCUMENTATION.md`, *Delivery loop*):
-  OpenCode does not list the session as running, its newest record is not a
-  reply still streaming (one begun before this server started does not
-  count), and no subagent of it runs (`../opencode/session-activity.js`).
-  The answer is asked for when the send is decided, and again when the
-  session goes idle (after 500 ms), when a reply finishes with no look
-  pending, on every hub `connect`, after 5 s while a subagent works, and
-  after 2 s doubling to 60 s while OpenCode does not answer, which is never
-  taken as over. The wait ends in the record that starts the send
-  (`delivery`), so it goes out once; a composer's late report that the
-  message went out ends it too. While it waits, Back to edit takes the
-  message back; send, redo and claim are `409`. A `composerOnly` message,
-  which the card sends through `sendMessage` in the window, is not held this
-  way.
+- A send into a session whose agent is still working follows the user's
+  follow-up setting (`followUpBehavior`, read from the settings file when the
+  send is decided), as a message from the composer does. `steer` sends at
+  once, and the message joins the running turn. `queue`, the default, keeps
+  the choice on the job (`waiting: { choice, since }`, written to the file)
+  and sends it once the turn is over; nothing reaches the session before
+  that, the goal included. A composer's claim waits the same way (below). The
+  turn is over by the message queue's test (`../message-queue/DOCUMENTATION.md`,
+  *Delivery loop*): OpenCode does not list the session as running, its newest
+  record is not a reply still streaming (one begun before this server started
+  does not count), and no subagent of it runs
+  (`../opencode/session-activity.js`). The answer is asked for when the send
+  is decided, and again when the session goes idle (after 500 ms), when a
+  reply finishes with no look pending, on every hub `connect`, after 5 s
+  while a subagent works, and after 2 s doubling to 60 s while OpenCode does
+  not answer, which is never taken as over. The wait ends in the record that
+  starts the send (`delivery`), so it goes out once; a composer's late report
+  that the message went out ends it too. While it waits, Back to edit takes
+  the message back; send, redo and claim are `409`.
 - A failure before OpenCode queued the prompt leaves the job open with the
   reason, `failedStep: 'send'` and review on, so nothing goes out again until
   the user picks; a goal saved before the failure stays, as for any send that
@@ -228,12 +228,21 @@ persisted, revisioned, broadcast).
 - Sending through the composer: the server sends text, the agent mention and
   derived instructions only. A message with attachments or attached context
   (`composerOnly`) waits on the card even with review off; `claim` hands its
-  full message to the composer and shows the job as sending, and `settle`
+  full message to the composer with the claim's id (`claimId`), and `settle`
   records the outcome, or releases the job with the reason when the send
-  failed. A claim nobody settles expires after two minutes, and the job then
-  waits for the user with review on. A composer's report that the message
-  went out is taken for any open job no send is under way for, so a send
-  that finished after its claim expired, or after a restart, still lands.
+  failed. A claim follows the follow-up setting as a server send does: with
+  `steer`, or once the turn is over, it is handed over at once and the job
+  shows it is being sent (`delivery: { by: 'composer', claimId }`). With
+  `queue` and the agent working, the claim waits on the job (`waiting: {
+  claimId, since }`) and is handed over when the turn is over; the composer
+  keeps the message meanwhile and sends it when the job shows that claim
+  being sent. Only the claim the job names is sent, so a composer that missed
+  its hand-over never sends a later claim's message. A claim nobody settles
+  expires two minutes after it was handed over, never while it waits, and the
+  job then waits for the user with review on. A composer's report that the
+  message went out is taken for any open job no send is under way for, so a
+  send that finished after its claim expired, or after a restart, still
+  lands.
 - A sent job keeps what its card shows: the text, the attachment names, the
   context count (`contextCount` in the file) and the instructions derived
   from the text. The attachment bytes, the attached context and the writer
@@ -256,14 +265,15 @@ persisted, revisioned, broadcast).
   every change is refused until a load succeeds, so the file is never
   overwritten from an empty list.
 - A send in flight is written to the file (`delivery: { by: 'server' |
-  'composer', startedAt }`) before anything goes out; a claim whose record
-  cannot be written is refused. A job loaded with a `delivery` may have gone
-  out, so it goes back to review with the reason "the server restarted while
-  the message was being sent". Writes the restart cut off start again, a
-  written spec that sends itself goes out, and a send waiting for the turn to
-  end (nothing of it went out) looks at the session, once the event stream is
-  connected: at load when the hub already is, else on its next `connect`, and
-  on every later `connect`. A job being sent is never resumed or sent again.
+  'composer', startedAt, claimId? }`) before anything goes out; a claim
+  whose record cannot be written is refused. A job loaded with a `delivery`
+  may have gone out, so it goes back to review with the reason "the server
+  restarted while the message was being sent". Writes the restart cut off
+  start again, a written spec that sends itself goes out, and a send or claim
+  waiting for the turn to end (nothing of it went out) looks at the session,
+  once the event stream is connected: at load when the hub already is, else
+  on its next `connect`, and on every later `connect`. A job being sent is
+  never resumed or sent again.
   `stop` aborts running writes, ends the waits and the sweep, and answers once
   the last file write has finished; shutdown waits for it.
 - Routes (`/api/goals/spec-jobs`, before the generic proxy, JSON through the
@@ -274,12 +284,12 @@ persisted, revisioned, broadcast).
   `POST /:jobId/redo`; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
   }`; `POST /:jobId/settle` with `{ outcome, spec?, error? }`; `DELETE
   /:jobId` dismisses a sent job (an open one is `409`). Mutations answer `{
-  revision, job }`; a send held for the agent's turn answers the job with
-  `waiting: true`. Refusals are `400` (an invalid body, a `tokenBudget`
-  other than a positive integer or null, a `writerInput` other than `{
-  conversation?, openItems? }` strings, a `message.scheduledTask`, which
-  only the server's scheduled sends carry), `404` and `409`; a failed send is
-  `502`.
+  revision, job }`, and `edit` and `claim` add the full `message`; a send or
+  claim held for the agent's turn answers the job with `waiting: true`.
+  Refusals are `400` (an invalid body, a `tokenBudget` other than a positive
+  integer or null, a `writerInput` other than `{ conversation?, openItems? }`
+  strings, a `message.scheduledTask`, which only the server's scheduled sends
+  carry), `404` and `409`; a failed send is `502`.
 - Every change broadcasts `openchamber:goal-spec-job.updated` with `{
   revision, sessionId, job }` on the control stream (`job` is null once a sent
   job is removed). The revision is global and monotonic, as the queue's.
@@ -515,14 +525,22 @@ sees only that final turn, so the report is its evidence.
   writer; an armed goal keeps the message as its objective, an automatic one
   goes without a goal), write again (ready or failed), and back to edit. A
   message the server cannot send (`composerOnly`: attachments or attached
-  context) says it waits for the user.
+  context) says it waits for the user until it is queued or being sent.
   `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
   `sendMessage` with the full message assembled as a taken queued message
   (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`),
-  then `settle` with the outcome, or with the reason when the send failed. The
-  composer's arm store stays out of it: a send held while OpenCode starts
-  waits behind any send made before it, and an armed goal there would go to
-  whichever of them consumes the store first. Back to edit ends the job
+  then `settle` with the outcome, or with the reason when the send failed.
+  A claim the server holds for the agent's turn (queue, the agent working)
+  returns at once with the message, so the card shows it queued with Back to
+  edit open; the window keeps the message by claim id and sends it once the
+  job shows that claim being sent, and only then. A claim the job no longer
+  names (taken back, released, or another window's claim since) is dropped,
+  and so is every held claim on a runtime switch. A window that closes or
+  reloads while its claim waits sends nothing: the hand-over expires after
+  two minutes and the job waits for the user again. The composer's arm store
+  stays out of it: a send held while OpenCode starts waits behind any send
+  made before it, and an armed goal there would go to whichever of them
+  consumes the store first. Back to edit ends the job
   (`edit`), hands the full message to that session's composer through
   `input-store.pendingComposerEdits`, and arms the goal again for an armed job.
   The job is the server's, so switching threads changes nothing.

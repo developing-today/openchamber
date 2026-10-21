@@ -420,10 +420,12 @@ failed read keeps the jobs shown; a failed action reads the server again and
 reports the server's reason. A cancelled job and a dismissed one (`job: null`)
 leave the store. A started job records its prompt in the session's input
 history, as an accepted queued message does. `claimJob` and `editJob` return
-the full captured message with its files decoded (`toAttachedFile`). Spec text
-edited on a card stays in `specEdits` per job and write attempt, so a thread
-switch keeps it. A runtime switch clears the jobs and drops reads and answers
-started before it. VS Code never reads the route: it has no goal loop.
+the full captured message with its files decoded (`toAttachedFile`);
+`claimJob` also names the claim and says whether the server holds it until
+the agent's turn is over. Spec text edited on a card stays in `specEdits`
+per job and write attempt, so a thread switch keeps it. A runtime switch
+clears the jobs and drops reads and answers started before it. VS Code never
+reads the route: it has no goal loop.
 
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 

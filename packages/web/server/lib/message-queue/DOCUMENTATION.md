@@ -144,9 +144,9 @@ persisted "sending" flag would strand a message forever.
    links, including idle intermediate subagents; a deeper chain counts as
    unrelated, as in the UI. Unreadable lineage, cycles and the shared fetch
    deadline keep the queue held with the existing retry policy. It does not scan historical child pages.
-   A goal writer job holds a server send into a working session by the same
-   test (`../session-goal/spec-jobs.js`, `readTurn`); a change to one belongs
-   in the other.
+   A goal writer job holds a send into a working session, the server's own
+   or a composer's claim, by the same test (`../session-goal/spec-jobs.js`,
+   `readTurn`); a change to one belongs in the other.
 5. The head is marked in flight (broadcast), then sent. The captured model and
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a

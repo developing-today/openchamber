@@ -152,7 +152,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
         <p className="mt-0.5 truncate typography-meta text-muted-foreground" title={job.message.content}>{preview}</p>
       ) : null}
 
-      {job.composerOnly ? (
+      {job.composerOnly && !waiting && !job.sending ? (
         <p className="mt-2 flex items-start gap-1.5 typography-meta text-muted-foreground">
           <Icon name="attachment-2" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span>{t('chat.goal.writer.card.waitsForYou')}</span>

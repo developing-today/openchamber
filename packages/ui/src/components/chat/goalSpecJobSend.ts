@@ -1,5 +1,5 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { useGoalSpecJobStore, type GoalSpecJob, type GoalSpecJobChoice } from '@/stores/goalSpecJobStore';
+import { useGoalSpecJobStore, type GoalSpecJob, type GoalSpecJobChoice, type GoalSpecJobMessage } from '@/stores/goalSpecJobStore';
 import { createMessageQueueTarget } from '@/stores/messageQueueStore';
 import { createGoalArm } from '@/stores/useSessionGoalArmStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -14,6 +14,10 @@ import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
  * the way the composer sends a queued message it took back, and the server
  * hears how it went (`settle`). A failed send leaves the job open with the
  * reason, so nothing is lost.
+ *
+ * Into a working session the claim follows the user's follow-up setting, as a
+ * message from the composer does: with queue the server holds it until the
+ * agent's turn is over and then hands it to this window, which sends it then.
  */
 export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoice): Promise<void> {
     const jobs = useGoalSpecJobStore.getState();
@@ -22,7 +26,63 @@ export async function sendGoalSpecJob(job: GoalSpecJob, choice: GoalSpecJobChoic
         return;
     }
 
-    const message = await jobs.claimJob(job, choice.kind);
+    const claimed = await jobs.claimJob(job, choice.kind);
+    if (!claimed.waiting) {
+        await sendClaimed(job, choice, claimed.message);
+        return;
+    }
+    if (!claimed.claimId) throw new Error('The server queued the message without naming its claim');
+    holdUntilHandedOver({ claimId: claimed.claimId, jobId: job.id, sessionId: job.sessionId, choice, message: claimed.message, runtimeKey: getRuntimeKey() });
+}
+
+/** A claim the server holds until the agent's turn is over; this window sends it when it is handed over. */
+interface HeldClaim {
+    claimId: string;
+    jobId: string;
+    sessionId: string;
+    choice: GoalSpecJobChoice;
+    message: GoalSpecJobMessage;
+    runtimeKey: string;
+}
+
+/** Claims this window holds, by claim id. */
+const heldClaims = new Map<string, HeldClaim>();
+let stopWatchingJobs: (() => void) | null = null;
+
+/**
+ * Sends each held claim the server has handed over, once. A claim the job no
+ * longer names (taken back, released, or followed by another window's claim
+ * while this window was not listening) is dropped unsent.
+ */
+const sendHandedOver = () => {
+    const { jobs } = useGoalSpecJobStore.getState();
+    for (const held of Array.from(heldClaims.values())) {
+        const current = jobs[held.sessionId];
+        const named = current?.id === held.jobId && current.claimId === held.claimId;
+        if (named && current.waiting) continue;
+        heldClaims.delete(held.claimId);
+        if (!named || !current.sending || held.runtimeKey !== getRuntimeKey()) continue;
+        void sendClaimed(current, held.choice, held.message).catch((error) => {
+            // The job carries the reason: the failed send was reported with it.
+            console.warn('[goal-spec-jobs] the queued message was not sent:', error);
+        });
+    }
+    if (heldClaims.size === 0) {
+        stopWatchingJobs?.();
+        stopWatchingJobs = null;
+    }
+};
+
+const holdUntilHandedOver = (held: HeldClaim) => {
+    heldClaims.set(held.claimId, held);
+    stopWatchingJobs ??= useGoalSpecJobStore.subscribe(sendHandedOver);
+    // The hand-over can arrive before the claim's answer.
+    sendHandedOver();
+};
+
+/** Sends a claimed message through the session's send path and reports the outcome. */
+async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message: GoalSpecJobMessage): Promise<void> {
+    const jobs = useGoalSpecJobStore.getState();
     const target = createMessageQueueTarget(job.sessionId, job.directory, getRuntimeKey());
     const outgoing = buildOutgoingMessage({
         queued: [{

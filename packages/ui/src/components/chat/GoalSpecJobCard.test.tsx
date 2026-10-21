@@ -318,6 +318,84 @@ describe('GoalSpecJobCard', () => {
     expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/edit', body: undefined }]);
   });
 
+  test('a message with attachments sent while the agent works waits on the card, then goes out from this window once it is handed over', async () => {
+    const ready = job({
+      status: 'ready',
+      spec: 'Spec',
+      composerOnly: true,
+      message: { content: 'See the mock', text: 'See the mock', attachments: [{ id: 'a1', filename: 'mock.png', mimeType: 'image/png', size: 2 }], contextCount: 0 },
+    });
+    show(ready);
+    respond = (call) => (call.path.endsWith('/claim')
+      ? Response.json({
+        revision: 2,
+        job: { ...ready, waiting: true, claimId: 'claim-1' },
+        message: {
+          content: 'See the mock',
+          text: 'See the mock',
+          attachments: [{ id: 'a1', filename: 'mock.png', mimeType: 'image/png', size: 2, source: 'local', dataUrl: 'data:image/png;base64,aGk=' }],
+          context: [],
+        },
+      })
+      : Response.json({ revision: 4, job: { ...ready, status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } } }));
+    const sent: Array<{ text: string; files: string[]; goalArm: SessionGoalArm | undefined }> = [];
+    const sendMessage: SendMessage = async (content, _providerID, _modelID, _agent, attachments, _mention, _parts, _variant, _mode, options) => {
+      sent.push({ text: content, files: (attachments ?? []).map((file) => file.filename), goalArm: options?.goalArm });
+    };
+    useSessionUIStore.setState({ sendMessage });
+    await render();
+    await click('Send message with goal');
+
+    // Queued: nothing went out, and only Back to edit changes it.
+    expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim']);
+    expect(sent).toEqual([]);
+    expect(text()).toContain('Queued. It is sent when the agent finishes its turn.');
+    expect(text()).not.toContain('so it waits for you to send it');
+    expect(findButton('Back to edit')?.disabled).toBe(false);
+    expect(findButton('Send message with goal')?.disabled).toBe(true);
+
+    // The turn is over and the server hands the claim to this window. The
+    // same hand-over read twice (its event, then a resync) sends once.
+    const handedOver = { ...ready, sending: true, claimId: 'claim-1' };
+    await act(async () => {
+      useGoalSpecJobStore.getState().applyServerJob('ses_card', handedOver, 3, getRuntimeKey());
+      useGoalSpecJobStore.getState().applyServerJob('ses_card', handedOver, 3, getRuntimeKey());
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(sent).toEqual([{ text: 'See the mock', files: ['mock.png'], goalArm: { armed: true, objectiveOverride: 'Spec', settled: true, briefAgent: true } }]);
+    expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim', '/api/goals/spec-jobs/job-1/settle']);
+    expect(calls[1]?.body).toEqual({ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Spec' });
+    expect(text()).toContain('Sent your message as typed. The spec is its goal.');
+  });
+
+  test('a queued message is not sent from this window once its job names another claim', async () => {
+    // This window missed its hand-over and the claim expired; another window
+    // claimed the job since, and that window sends it.
+    const ready = job({ status: 'ready', spec: 'Spec', composerOnly: true });
+    show(ready);
+    respond = () => Response.json({
+      revision: 2,
+      job: { ...ready, waiting: true, claimId: 'claim-1' },
+      message: { content: 'x', text: 'x', attachments: [], context: [{ kind: 'synthetic', text: 'Resolve the conflict' }] },
+    });
+    const sent: string[] = [];
+    const sendMessage: SendMessage = async (content) => {
+      sent.push(content);
+    };
+    useSessionUIStore.setState({ sendMessage });
+    await render();
+    await click('Send message with goal');
+
+    await act(async () => {
+      useGoalSpecJobStore.getState().applyServerJob('ses_card', { ...ready, sending: true, claimId: 'claim-2' }, 6, getRuntimeKey());
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(sent).toEqual([]);
+    expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/claim']);
+  });
+
   test('a sent job says how it went and can be dismissed', async () => {
     show(job({ status: 'sent', trigger: 'auto-create', outcome: { kind: 'original', withGoal: false } }));
     await render();

@@ -16,11 +16,12 @@
 // before anything goes out (`delivery`). A restart cannot tell whether such a
 // message went out, so the job goes back to review and waits for the user.
 //
-// A server send into a session whose agent is still working follows the
-// user's follow-up setting, as a message sent from the composer does: steer
-// joins the running turn, queue (the default) waits on the job (`waiting`)
-// until the turn is over and then sends once. The wait is the message
-// queue's: idle events arm a look, and the look asks OpenCode.
+// A send into a session whose agent is still working follows the user's
+// follow-up setting, as a message sent from the composer does: steer joins
+// the running turn, queue (the default) waits on the job (`waiting`) until
+// the turn is over and then sends once. A composer's claim waits the same
+// way and is handed to that composer when the turn is over. The wait is the
+// message queue's: idle events arm a look, and the look asks OpenCode.
 
 import fs from 'fs';
 import path from 'path';
@@ -128,11 +129,25 @@ const writerSchema = z.object({
   variant: z.string().nullable(),
 });
 
-/** A send in flight: the server's own, or a composer's after `claim`. */
-const deliverySchema = z.object({ by: z.enum(['server', 'composer']), startedAt: z.number() });
+/**
+ * A send in flight: the server's own, or a composer's after `claim`. A
+ * composer's names its claim, so only the composer that claimed it sends it.
+ */
+const deliverySchema = z.object({
+  by: z.enum(['server', 'composer']),
+  startedAt: z.number(),
+  claimId: z.string().min(1).optional(),
+});
 
-/** A server send chosen while the agent was working, waiting for its turn to end. */
-const waitingSchema = z.object({ choice: choiceSchema, since: z.number() });
+/**
+ * A send chosen while the agent was working, waiting for its turn to end: the
+ * server's own (the choice it then sends), or a composer's claim (handed to
+ * that composer then).
+ */
+const waitingSchema = z.union([
+  z.object({ choice: choiceSchema, since: z.number() }),
+  z.object({ claimId: z.string().min(1), since: z.number() }),
+]);
 
 const storedJobSchema = z.object({
   id: z.string().min(1),
@@ -530,6 +545,8 @@ export function createGoalSpecJobRuntime({
       warning: job.warning,
       sending: job.delivery !== null,
       waiting: job.waiting !== null,
+      // A composer's claim, waiting or handed over: its composer sends it, no other.
+      claimId: job.waiting?.claimId ?? job.delivery?.claimId ?? null,
       outcome: job.outcome,
       attempt: job.attempt,
       createdAt: job.createdAt,
@@ -812,10 +829,11 @@ export function createGoalSpecJobRuntime({
    * Puts the send on record before anything goes out: a restart that finds
    * it cannot tell whether the message went out. Throws when the record
    * could not be written; the caller then releases the job. A send that
-   * waited for the turn to end stops waiting in the same record.
+   * waited for the turn to end stops waiting in the same record. `sender` is
+   * `{ by: 'server' }`, or a composer with its claim.
    */
-  const startDelivery = async (job, by) => {
-    job.delivery = { by, startedAt: now() };
+  const startDelivery = async (job, sender) => {
+    job.delivery = { ...sender, startedAt: now() };
     job.waiting = null;
     clearTurnTimer(job.id);
     turnFailures.delete(job.id);
@@ -864,7 +882,7 @@ export function createGoalSpecJobRuntime({
   const sendJob = async (job, choice) => {
     let warning = null;
     try {
-      await startDelivery(job, 'server');
+      await startDelivery(job, { by: 'server' });
       warning = await deliver(job, choice);
     } catch (error) {
       const reason = describeError(error, 'the message could not be sent');
@@ -973,7 +991,10 @@ export function createGoalSpecJobRuntime({
     if (turn === 'subagents') armTurnLook(job, subagentRecheckMs);
   };
 
-  /** One look for a waiting job; its message goes out once the turn is over. */
+  /**
+   * One look for a waiting job. Once the turn is over the server sends its
+   * own choice, and a composer's claim is handed to that composer.
+   */
   const lookAtTurn = async (job) => {
     const { waiting } = job;
     if (!waiting || !stillWaiting(job, waiting)) return;
@@ -987,8 +1008,9 @@ export function createGoalSpecJobRuntime({
     try {
       const turn = await readTurn(job);
       if (!stillWaiting(job, waiting)) return;
-      if (turn === 'over') await sendJob(job, waiting.choice).catch(() => undefined);
-      else waitOn(job, turn);
+      if (turn !== 'over') waitOn(job, turn);
+      else if (waiting.claimId) await handOver(job, waiting.claimId).catch(() => undefined);
+      else await sendJob(job, waiting.choice).catch(() => undefined);
     } finally {
       turnLooks.delete(job.id);
     }
@@ -1029,6 +1051,23 @@ export function createGoalSpecJobRuntime({
     }, claimTtlMs);
     timer.unref?.();
     claimTimers.set(job.id, timer);
+  };
+
+  /**
+   * The composer that claimed the job sends it now: the send goes on record
+   * with the claim's id, which the projection names, so no other composer
+   * takes it for its own. Its time to report starts here, so a claim that
+   * waited for the turn never expires while it waits.
+   */
+  const handOver = async (job, claimId) => {
+    holdClaim(job);
+    try {
+      await startDelivery(job, { by: 'composer', claimId });
+    } catch (error) {
+      const reason = describeError(error, 'the send could not be recorded');
+      if (jobs.get(job.id) === job && job.delivery?.by === 'composer') releaseDelivery(job, reason);
+      throw httpError(reason, 500);
+    }
   };
 
   // --- public operations ---------------------------------------------------
@@ -1119,7 +1158,15 @@ export function createGoalSpecJobRuntime({
     return { ...cancel(job), message: job.message };
   };
 
-  /** The composer takes the full message to send it; the job shows it is being sent. */
+  /**
+   * The composer takes the full message to send it, and sends it the way a
+   * message from the composer goes out: into an idle session at once, and
+   * into a working one as the user's follow-up setting says. Steer hands it
+   * over now. Queue, the default, keeps the claim on the job (`waiting`, so
+   * nothing else sends it meanwhile) and hands it over once the turn is over;
+   * the composer keeps the message until then. The answer names the claim
+   * (`claimId`) and says whether it waits.
+   */
   const claim = async (jobId, input) => {
     const { kind } = claimInputSchema.parse(input);
     await load();
@@ -1129,14 +1176,21 @@ export function createGoalSpecJobRuntime({
     requireOpen(job);
     if (kind === 'spec' && job.status !== 'ready') throw httpError('the goal spec is not ready', 409);
     if (kind === 'original') stopWriter(job.id);
-    holdClaim(job);
-    try {
-      await startDelivery(job, 'composer');
-    } catch (error) {
-      const reason = describeError(error, 'the send could not be recorded');
-      if (jobs.get(job.id) === job && job.delivery?.by === 'composer') releaseDelivery(job, reason);
-      throw httpError(reason, 500);
+    const claimId = `claim-${now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+    if (followUpBehavior() === 'queue') {
+      const waiting = { claimId, since: now() };
+      job.waiting = waiting;
+      const turn = await readTurn(job);
+      // Taken back, replaced or reported sent while OpenCode was asked.
+      if (!stillWaiting(job, waiting)) throw httpError('the message was taken back or sent meanwhile', 409);
+      if (turn !== 'over') {
+        touch(job);
+        const result = publish(job.sessionId, job);
+        waitOn(job, turn);
+        return { ...result, message: job.message };
+      }
     }
+    await handOver(job, claimId);
     // The session can be deleted while the record is written.
     if (jobs.get(job.id) !== job) throw httpError('goal writer job not found', 404);
     return { revision, job: toPublicJob(job), message: job.message };
