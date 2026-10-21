@@ -15,7 +15,8 @@ import { INTEGRATION_SERVICE_ACTION_DEFINITIONS } from './integration-service-ac
 import { ENVIRONMENT_ACTION_DEFINITIONS } from './environment-actions.js';
 
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'projects.list', title: 'List configured projects', description: 'List configured projects; no parameters' },
+  { action: 'projects.list', title: 'List configured projects', description: 'List configured projects with their per-project settings (label, icon, color, default model and agent, sidebar state); no parameters' },
+  { action: 'projects.update', title: 'Change project settings', description: 'Change projectId\'s per-project settings: projectSettings is an object of label, icon, color, iconBackground (#hex), sidebarCollapsed, defaultModel (provider/model), defaultAgent or defaultVariant; null removes one. A value OpenChamber would not keep is refused and nothing is saved' },
   { action: 'projects.add', title: 'Add a project', description: 'Add directory as a configured project; creates it first if create is true. Adding an already-configured directory returns that project unchanged rather than duplicating it. projectLabel sets its display name; defaults to the directory\'s own name' },
   { action: 'projects.remove', title: 'Remove a project', description: 'Remove projectId from configured projects. Only the configured entry is removed — the checkout, its sessions, and its worktrees are left on disk' },
   { action: 'models.list', title: 'Show model preferences', description: 'Show default, favorite, and recent model preferences; no parameters' },

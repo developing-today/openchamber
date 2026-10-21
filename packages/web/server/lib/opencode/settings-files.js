@@ -23,7 +23,7 @@ export const isDeviceSettingsKey = (key) => getSettingsScope(key) === 'device';
 /** Profile keys the owner chose to store per surface kind (a change on a phone stays on phones). */
 const isPerSurfaceSettingsKey = (key) => registry.fields[key]?.perSurface === true;
 
-const SETTINGS_SURFACES = Object.freeze(['web', 'desktop', 'vscode', 'mobile']);
+export const SETTINGS_SURFACES = Object.freeze(['web', 'desktop', 'vscode', 'mobile']);
 
 export const normalizeSettingsSurface = (value) => (
   typeof value === 'string' && SETTINGS_SURFACES.includes(value.trim()) ? value.trim() : null

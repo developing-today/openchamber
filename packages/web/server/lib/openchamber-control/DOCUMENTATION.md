@@ -236,6 +236,21 @@ other.
   wired `fsPromises`/`validateDirectoryPath`/`persistSettings`/
   `createProjectIdFromPath`. Worktree deletion is still not part of the
   action contract.
+- `projects.list` returns each project's per-project settings
+  (`EDITABLE_PROJECT_SETTINGS` in `service.js`: the fields `sanitizeProjects`
+  keeps that Project settings edits). `projects.update` changes them through
+  `persistSettings`; it runs the new list through `sanitizeProjects` first and
+  refuses the whole call when the sanitizer would drop or rewrite a value, so
+  a value it reports as saved is the value stored. Path, id and timestamps are
+  not editable.
+- `settings.get`/`settings.set` (`config-actions.js`) take an optional
+  `surface` (`web`, `desktop`, `vscode`, `mobile`) and pass it to
+  `readSettingsFromDiskMigrated`/`persistSettings`, the same surface rule as
+  `/api/config/settings`. Without one they read and write the base values;
+  `settings.get` then also returns `surfaces`, each surface kind's own values
+  for the registry's `perSurface` keys, because the sidebar layout, themes and
+  font sizes the user changes in the app are stored per surface and the base
+  read alone shows them as absent.
 - `session.archive` / `session.unarchive` move a session out of (and back
   into) the active list through the session service's `archive` /
   `unarchive`, so open windows hear the same broadcast as a UI archive; a

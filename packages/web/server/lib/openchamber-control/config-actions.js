@@ -33,15 +33,16 @@ import { createRequire } from 'node:module';
 import { asNonEmptyString, isPlainObject, isString } from '../shared/guards.js';
 import { readConfigLayers, getConfigForPath, writeConfig } from '../opencode/shared.js';
 import { isPersistableSettingsKey } from '../opencode/settings-helpers.js';
+import { SETTINGS_SURFACES } from '../opencode/settings-files.js';
 import { isSelfHandoffEnabled } from '../opencode/self-handoff.js';
 import { OpenChamberControlError } from './error.js';
 
 const settingsRegistry = createRequire(import.meta.url)('../opencode/settings-registry.json');
 
 export const CONFIG_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'settings.keys', title: 'List OpenChamber settings', description: 'List every OpenChamber setting key with its scope and whether settings.set may change it (and why not); no parameters' },
-  { action: 'settings.get', title: 'Read OpenChamber settings', description: 'Read OpenChamber settings: all of them, or one settingKey. Secrets (passwords, tokens) are never returned, only whether they are set' },
-  { action: 'settings.set', title: 'Change OpenChamber settings', description: 'Change OpenChamber settings: settingKey with settingValue (any JSON), or a settings object of several. Every key is checked before anything is saved: unknown, device-only, computed, desktop-owned, secret and security-sensitive keys (permissions, tunnels, LAN access, the OpenCode binary, projects) are refused, as is a value OpenChamber would not accept. Turning off agentControlToolEnabled removes this tool and needs confirm. Open OpenChamber windows may need a reload to show the change' },
+  { action: 'settings.keys', title: 'List OpenChamber settings', description: 'List every OpenChamber setting key with its scope, whether it is kept per surface kind (perSurface), and whether settings.set may change it (and why not); no parameters' },
+  { action: 'settings.get', title: 'Read OpenChamber settings', description: 'Read OpenChamber settings: all of them, or one settingKey. Some keys (perSurface in settings.keys, such as sidebarLayout, themeId or fontSize) hold a separate value for each surface kind: with surface, the values that surface uses are returned; without it, the base values plus a surfaces breakdown of each kind\'s own values. Secrets (passwords, tokens) are never returned, only whether they are set' },
+  { action: 'settings.set', title: 'Change OpenChamber settings', description: 'Change OpenChamber settings: settingKey with settingValue (any JSON), or a settings object of several. A perSurface key changed with surface (web, desktop, vscode or mobile) changes only that surface kind; without surface it changes the base value, which a surface with its own value ignores. Every key is checked before anything is saved: unknown, device-only, computed, desktop-owned, secret and security-sensitive keys (permissions, tunnels, LAN access, the OpenCode binary, projects) are refused, as is a value OpenChamber would not accept. Turning off agentControlToolEnabled removes this tool and needs confirm. Open OpenChamber windows may need a reload to show the change' },
   { action: 'opencode.config.get', title: 'Read OpenCode config', description: 'Read OpenCode configuration and the files it comes from. configScope merged (default), user, project or custom; configPath is a dot path into it, such as mcp.servers.github or providers.openai.models["gpt-4.1"]. Values that look like keys, tokens or passwords are masked' },
   { action: 'opencode.config.set', title: 'Change OpenCode config', description: 'Set configValue (any JSON) at configPath in the user (default) or project OpenCode config file; configValue null or configDelete removes it. Comments and formatting in the file are kept. OpenCode applies the change on its own within seconds; the result says if another config file overrides it. Use only when the user asks for the change' },
   { action: 'opencode.reload', title: 'Restart OpenCode', description: 'Restart the OpenCode server OpenChamber manages so it re-reads its configuration; running sessions are handed over and keep going. Rarely needed, since OpenCode applies config file changes by itself: use it when the user asks or a change did not take. A connected external OpenCode cannot be restarted from here; the result says so' },
@@ -52,6 +53,7 @@ export const CONFIG_PARAMETERS = {
   settingKey: { type: 'string', description: 'OpenChamber setting key for settings.get or settings.set; settings.keys lists them' },
   settingValue: { description: 'New value for settingKey in settings.set; any JSON value' },
   settings: { type: 'object', description: 'settings.set: several settings at once, key to value' },
+  surface: { type: 'string', enum: SETTINGS_SURFACES, description: 'settings.get and settings.set: the surface kind whose own values to read or change for perSurface keys; omit for the base values' },
   configScope: { type: 'string', enum: ['merged', 'user', 'project', 'custom'], description: 'Which OpenCode config file. opencode.config.get reads merged (default), user, project or custom. opencode.config.set, mcp.toggle, skills.toggle, tools.toggle, models.toggle, models.default, provider.models.add/remove and models.cost write user (default) or project (the project config of directory or projectId)' },
   configPath: { type: 'string', description: 'Dot path into the OpenCode config, such as model or mcp.servers.github.disabled; quote a key containing dots as ["gpt-4.1"]' },
   configValue: { description: 'Value for opencode.config.set; any JSON value, null removes the key' },
@@ -87,7 +89,7 @@ const AGENT_BLOCKED_SETTINGS = Object.freeze({
   githubScopes: 'it configures sign-in credentials',
   gitlabClientId: 'it configures sign-in credentials',
   securityScopedBookmarks: 'it holds macOS file-access grants',
-  projects: 'use projects.add or projects.remove',
+  projects: 'use projects.add, projects.update or projects.remove',
   activeProjectId: 'the user picks the active project',
 });
 
@@ -107,8 +109,21 @@ const settingRefusal = (key) => {
 const settingMetadata = (key) => {
   const refusal = settingRefusal(key);
   const metadata = { scope: settingsRegistry.fields[key]?.scope ?? null, editable: refusal === null };
+  if (settingsRegistry.fields[key]?.perSurface === true) metadata.perSurface = true;
   if (refusal) metadata.reason = refusal;
   return metadata;
+};
+
+const PER_SURFACE_KEYS = Object.entries(settingsRegistry.fields)
+  .filter(([, field]) => field.perSurface === true && field.secret !== true)
+  .map(([key]) => key);
+
+const resolveSurface = (input) => {
+  if (input.surface === undefined || input.surface === null) return null;
+  if (!SETTINGS_SURFACES.includes(input.surface)) {
+    throw new OpenChamberControlError(`surface must be ${SETTINGS_SURFACES.join(', ')}`, 400);
+  }
+  return input.surface;
 };
 
 const CONTROL_TOOL_SETTING_KEY = 'agentControlToolEnabled';
@@ -236,12 +251,38 @@ export const createConfigActions = (deps) => {
     }),
   });
 
+  // Each surface kind's own values for the perSurface keys: a surface read
+  // resolves its own value first and the base otherwise, so a value that
+  // differs from the base is that surface's own.
+  const surfaceValues = async (base, keys) => {
+    const result = {};
+    for (const surface of SETTINGS_SURFACES) {
+      const resolved = formatSettingsResponse(await readSettingsFromDiskMigrated({ surface }));
+      for (const key of keys) {
+        if (!Object.hasOwn(resolved, key) || jsonEqual(resolved[key], base[key])) continue;
+        (result[surface] ??= {})[key] = resolved[key];
+      }
+    }
+    return result;
+  };
+
   const settingsGet = async (input) => {
-    const stored = await readSettingsFromDiskMigrated();
+    const surface = resolveSurface(input);
+    const stored = await (surface ? readSettingsFromDiskMigrated({ surface }) : readSettingsFromDiskMigrated());
     const formatted = formatSettingsResponse(stored);
     const key = asNonEmptyString(input.settingKey);
     if (!key) {
-      return { settings: formatted, note: 'Secrets are left out; settings.keys lists every key and whether it can be changed' };
+      const result = { settings: formatted, note: 'Secrets are left out; settings.keys lists every key and whether it can be changed' };
+      if (surface) {
+        result.surface = surface;
+      } else {
+        const surfaces = await surfaceValues(formatted, PER_SURFACE_KEYS);
+        if (Object.keys(surfaces).length > 0) {
+          result.surfaces = surfaces;
+          result.note += '. settings holds the base values; surfaces holds the values a surface kind uses instead';
+        }
+      }
+      return result;
     }
     const field = settingsRegistry.fields[key];
     if (!field) throw new OpenChamberControlError(`Unknown setting: ${key}. settings.keys lists them`, 404);
@@ -252,10 +293,20 @@ export const createConfigActions = (deps) => {
       return { key, secret: true, isSet, ...metadata };
     }
     const present = Object.hasOwn(formatted, key);
-    return { key, value: present ? formatted[key] : null, present, ...metadata };
+    const result = { key, value: present ? formatted[key] : null, present, ...metadata };
+    if (surface) {
+      result.surface = surface;
+    } else if (field.perSurface === true) {
+      const surfaces = Object.fromEntries(
+        Object.entries(await surfaceValues(formatted, [key])).map(([kind, values]) => [kind, values[key]]),
+      );
+      if (Object.keys(surfaces).length > 0) result.surfaces = surfaces;
+    }
+    return result;
   };
 
   const settingsSet = async (input) => {
+    const surface = resolveSurface(input);
     const single = asNonEmptyString(input.settingKey);
     const hasMany = input.settings !== undefined;
     if (single && hasMany) throw new OpenChamberControlError('Provide settingKey with settingValue, or settings, not both', 400);
@@ -288,12 +339,24 @@ export const createConfigActions = (deps) => {
       throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${dropped.join(', ')}; check its type and allowed values with settings.get`, 400);
     }
 
-    const saved = await persistSettings(sanitized);
+    const saved = await (surface ? persistSettings(sanitized, { surface }) : persistSettings(sanitized));
     const updated = Object.fromEntries(keys.map((key) => [key, Object.hasOwn(saved ?? {}, key) ? saved[key] : null]));
-    return {
+    const result = {
       updated,
       note: 'Saved. Open OpenChamber windows may need a reload to show the change; OpenChamber tool switches reach OpenCode within a few seconds',
     };
+    if (surface) {
+      result.surface = surface;
+      const shared = keys.filter((key) => settingsRegistry.fields[key]?.perSurface !== true);
+      if (shared.length > 0) {
+        result.note += `. ${shared.join(', ')} ${shared.length === 1 ? 'is' : 'are'} not kept per surface kind, so every surface uses the new value`;
+      }
+    }
+    const baseOnly = surface ? [] : keys.filter((key) => settingsRegistry.fields[key]?.perSurface === true);
+    if (baseOnly.length > 0) {
+      result.note += `. ${baseOnly.join(', ')} ${baseOnly.length === 1 ? 'is' : 'are'} kept per surface kind and this changed the base value; a surface with its own value keeps it (settings.get shows them; pass surface to change one)`;
+    }
+    return result;
   };
 
   const resolveScope = (input, { allowRead }) => {
