@@ -164,7 +164,8 @@ persisted, revisioned, broadcast).
   `failedStep` the step it came from, `write` or `send`. A send of the
   message as typed that fails while the spec is being written leaves a job
   without a spec, so its status is `failed` although the write never failed.
-  `warning` is set on a sent job when a step after the prompt failed.
+  `warning` is set on a sent job whose goal reminder could not be sent; the
+  message went out without it.
   `sending` is a send under way, `waiting` a send held until the agent's
   turn ends (below), and `claimId` the claim of the composer sending it,
   while that claim waits or is under way. `writerInput` (conversation and
@@ -195,11 +196,14 @@ persisted, revisioned, broadcast).
   resolved model, `rewriteAll` off since the writer or the user settled the
   objective). The session service saves its goal before the switch; here a
   failed switch leaves no goal. Then come the instructions derived from the
-  text and the session's pending project knowledge as synthetic messages,
-  the prompt with the agent mention, and the goal reminder
+  text, the session's pending project knowledge and the goal reminder
   (`buildGoalIntroText`, carrying the spec only when the message went out as
-  typed next to it). The prompt counts as sent only when OpenCode answers
-  with the queued item's id.
+  typed next to it), each a synthetic message that starts no turn (`resume:
+  false`), and last the prompt with the agent mention. The prompt starts one
+  turn that reads them all, as a send from the composer does; a reminder sent
+  after the prompt reached the agent in the middle of that turn and got a
+  second reply. The prompt counts as sent only when OpenCode answers with the
+  queued item's id.
   "Send original" stops a running write; an armed goal then keeps the message
   as its objective, a goal from the next message sends without one.
 - A send into a session whose agent is still working follows the user's
@@ -224,8 +228,10 @@ persisted, revisioned, broadcast).
 - A failure before OpenCode queued the prompt leaves the job open with the
   reason, `failedStep: 'send'` and review on, so nothing goes out again until
   the user picks; a goal saved before the failure stays, as for any send that
-  fails after its goal. A failure after it (the goal reminder) leaves the job
-  `sent` with the reason in `warning`; a second send is `409`.
+  fails after its goal. A goal reminder that cannot be sent does not stop the
+  message: the prompt goes out without it, and the job is `sent` with the
+  reason in `warning`. Once OpenCode has queued the prompt the job is `sent`,
+  and a second send is `409`.
 - Sending through the composer: the server sends text, the agent mention and
   derived instructions only. A message with attachments or attached context
   (`composerOnly`) waits on the card even with review off; `claim` hands its

@@ -730,13 +730,17 @@ export function createGoalSpecJobRuntime({
    * OpenChamber session service does, and the session is switched onto the
    * model and agent before the goal is saved, so a send that cannot switch
    * leaves no goal behind. Then the goal (objective file and goal record, as
-   * every server-created goal), the instructions derived from the text and
-   * the project knowledge the session still owes, the prompt, and the goal
-   * reminder after it ("the user message above"). The directory is read at
-   * each step, since the session can move while the message goes out.
+   * every server-created goal), the instructions derived from the text, the
+   * project knowledge the session still owes and the goal reminder, and last
+   * the prompt. The ones before the prompt are synthetic messages that start
+   * no turn, as the composer sends them: the prompt starts one turn that
+   * reads them all. A reminder sent after the prompt reached the agent in
+   * the middle of that turn and was answered in a second one. The directory
+   * is read at each step, since the session can move while the message goes
+   * out.
    *
-   * Answers a warning, or null: once OpenCode has queued the prompt the
-   * message is out, and a later failure cannot make it unsent.
+   * Answers a warning, or null: a goal reminder that cannot be sent does not
+   * stop the message, which goes out without it.
    */
   const deliver = async (job, choice) => {
     const { sessionId, sendConfig } = job;
@@ -782,12 +786,6 @@ export function createGoalSpecJobRuntime({
     if (knowledge.text) preamble.push({ text: knowledge.text, resume: false });
     for (const synthetic of preamble) await postToSession(sessionId, 'synthetic', synthetic);
 
-    const prompt = { text };
-    if (job.message.agentMention) prompt.agents = [{ name: job.message.agentMention }];
-    const queued = queuedMessageSchema.safeParse(await postToSession(sessionId, 'prompt', prompt));
-    // No item means nothing is queued, so the send must not count as done.
-    if (!queued.success) throw new Error('OpenCode accepted the prompt but returned no queued message');
-
     let warning = null;
     if (withGoal) {
       // With the message sent as typed next to a spec, the reminder carries
@@ -798,6 +796,13 @@ export function createGoalSpecJobRuntime({
           warning = `the goal reminder was not sent: ${describeError(error, 'request failed')}`;
         });
     }
+
+    const prompt = { text };
+    if (job.message.agentMention) prompt.agents = [{ name: job.message.agentMention }];
+    const queued = queuedMessageSchema.safeParse(await postToSession(sessionId, 'prompt', prompt));
+    // No item means nothing is queued, so the send must not count as done.
+    if (!queued.success) throw new Error('OpenCode accepted the prompt but returned no queued message');
+
     if (knowledge.text && sessionKnowledgeRuntime) {
       // After the send is accepted, so a rejected send carries it again.
       await sessionKnowledgeRuntime.recordDelivered(sessionId, job.directory, knowledge.signature).catch(() => undefined);

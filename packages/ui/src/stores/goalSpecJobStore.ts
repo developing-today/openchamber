@@ -62,7 +62,7 @@ const jobSchema = z.object({
     error: z.string().nullable(),
     /** The step `error` comes from: writing the spec, or sending the message. Absent from servers before it existed. */
     failedStep: z.enum(['write', 'send']).nullable().optional(),
-    /** A step after the message went out failed, such as the goal reminder; the message was sent. */
+    /** The goal reminder could not be sent; the message went out without it. */
     warning: z.string().nullable().optional(),
     /** The server, or a window that claimed it, is sending the message now. */
     sending: z.boolean(),

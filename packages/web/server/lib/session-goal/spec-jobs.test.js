@@ -306,15 +306,56 @@ describe('goal writer jobs', () => {
     expect(openCode.state.calls).toEqual([
       { route: 'model', body: { model: { id: 'claude', providerID: 'anthropic', variant: 'high' } } },
       { route: 'agent', body: { agent: 'build' } },
-      { route: 'prompt', body: { text: 'add dark mode' } },
       { route: 'synthetic', body: { text: buildGoalIntroText(50_000, SPEC), resume: false } },
+      { route: 'prompt', body: { text: 'add dark mode' } },
     ]);
     expect(promptSent).toEqual([SESSION]);
     expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } });
     expect(statuses()).toEqual(['writing', 'ready', 'ready', 'sent']);
   });
 
-  it('switches model and agent before the goal, and sends knowledge and instructions before the prompt', async () => {
+  it('every server send puts the goal reminder in before the prompt, so the prompt starts the only turn', async () => {
+    // A reminder sent after the prompt reached the agent in the middle of the
+    // turn the prompt started, and the agent answered it in a second turn.
+    const sentToSession = (openCode) => openCode.state.calls.filter((call) => call.route !== 'model' && call.route !== 'agent');
+    const reminderThenPrompt = (briefing) => [
+      { route: 'synthetic', body: { text: buildGoalIntroText(null, briefing), resume: false } },
+      { route: 'prompt', body: { text: 'add dark mode' } },
+    ];
+
+    const onCard = createRuntime();
+    const reviewed = await onCard.runtime.create(job());
+    writeAnswer(onCard.writer);
+    await onCard.runtime.whenIdle();
+    await onCard.runtime.send(reviewed.job.id, { kind: 'spec', sendMode: 'with-message', spec: SPEC });
+    expect(sentToSession(onCard.openCode)).toEqual(reminderThenPrompt(SPEC));
+
+    const original = createRuntime();
+    const writing = await original.runtime.create(job({ trigger: 'armed' }));
+    await original.runtime.send(writing.job.id, { kind: 'original' });
+    expect(sentToSession(original.openCode)).toEqual(reminderThenPrompt(null));
+
+    const automatic = createRuntime();
+    await automatic.runtime.create(job({ trigger: 'auto-create', review: false }));
+    writeAnswer(automatic.writer);
+    await automatic.runtime.whenIdle();
+    expect(sentToSession(automatic.openCode)).toEqual(reminderThenPrompt(SPEC));
+
+    const working = createOpenCode();
+    working.state.active = { [SESSION]: { type: 'running' } };
+    const queued = createRuntime({ openCode: working });
+    const waiting = await queued.runtime.create(job());
+    writeAnswer(queued.writer);
+    await queued.runtime.whenIdle();
+    await queued.runtime.send(waiting.job.id, { kind: 'spec', sendMode: 'with-message', spec: SPEC });
+    expect(working.state.calls).toEqual([]);
+    working.state.active = {};
+    queued.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(queued.runtime.snapshot().jobs[0].status).toBe('sent'));
+    expect(sentToSession(working)).toEqual(reminderThenPrompt(SPEC));
+  });
+
+  it('switches model and agent before the goal, and sends instructions, knowledge and the goal reminder before the prompt', async () => {
     const knowledge = {
       resolvePendingForSession: vi.fn(async () => ({ text: 'Project notes', signature: 'sig-1' })),
       recordDelivered: vi.fn(async () => undefined),
@@ -335,7 +376,7 @@ describe('goal writer jobs', () => {
     writeAnswer(writer);
     await runtime.whenIdle();
 
-    expect(openCode.state.timeline).toEqual(['model', 'agent', 'goal', 'synthetic', 'synthetic', 'prompt', 'synthetic', 'knowledge recorded']);
+    expect(openCode.state.timeline).toEqual(['model', 'agent', 'goal', 'synthetic', 'synthetic', 'synthetic', 'prompt', 'knowledge recorded']);
     expect(openCode.state.calls.filter((call) => call.route === 'synthetic').map((call) => call.body.text)).toEqual([
       '<system-reminder>Load the skill</system-reminder>',
       'Project notes',
@@ -378,7 +419,7 @@ describe('goal writer jobs', () => {
       agent: 'build',
       requestText: 'add dark mode',
     });
-    expect(openCode.state.timeline).toEqual(['auto', 'model', 'agent', 'goal', 'prompt', 'synthetic']);
+    expect(openCode.state.timeline).toEqual(['auto', 'model', 'agent', 'goal', 'synthetic', 'prompt']);
     expect(openCode.state.calls.slice(0, 2)).toEqual([
       { route: 'model', body: { model: { providerID: 'anthropic', id: 'claude-routed', variant: 'max' } } },
       { route: 'agent', body: { agent: 'plan' } },
@@ -407,8 +448,8 @@ describe('goal writer jobs', () => {
     await runtime.whenIdle();
 
     expect(openCode.state.calls.filter((call) => call.route !== 'model' && call.route !== 'agent')).toEqual([
-      { route: 'prompt', body: { text: SPEC } },
       { route: 'synthetic', body: { text: buildGoalIntroText(null, null), resume: false } },
+      { route: 'prompt', body: { text: SPEC } },
     ]);
   });
 
@@ -427,9 +468,9 @@ describe('goal writer jobs', () => {
     writeAnswer(writer);
     await runtime.whenIdle();
 
-    expect(openCode.state.calls.map((call) => call.route)).toEqual(['model', 'agent', 'synthetic', 'prompt', 'synthetic']);
+    expect(openCode.state.calls.map((call) => call.route)).toEqual(['model', 'agent', 'synthetic', 'synthetic', 'prompt']);
     expect(openCode.state.calls[2].body).toEqual({ text: '<system-reminder>Load the skill</system-reminder>', resume: false });
-    expect(openCode.state.calls[3].body).toEqual({ text: 'add dark mode', agents: [{ name: 'review' }] });
+    expect(openCode.state.calls[4].body).toEqual({ text: 'add dark mode', agents: [{ name: 'review' }] });
   });
 
   it('Send original stops the writer; an armed goal keeps the message as its objective', async () => {
@@ -441,7 +482,7 @@ describe('goal writer jobs', () => {
     expect(writer.calls[0].input.signal.aborted).toBe(true);
     expect(sent.job).toMatchObject({ status: 'sent', outcome: { kind: 'original', withGoal: true } });
     expect(goals).toEqual([expect.objectContaining({ objective: 'add dark mode' })]);
-    expect(openCode.state.calls.map((call) => call.route)).toEqual(['model', 'agent', 'prompt', 'synthetic']);
+    expect(openCode.state.calls.map((call) => call.route)).toEqual(['model', 'agent', 'synthetic', 'prompt']);
 
     // A late answer from the stopped write changes nothing.
     writeAnswer(writer);
@@ -523,9 +564,9 @@ describe('goal writer jobs', () => {
     });
   });
 
-  it('a failure after OpenCode queued the prompt leaves the job sent, with a warning', async () => {
+  it('a goal reminder that cannot be sent does not stop the message: the job is sent, with a warning', async () => {
     const openCode = createOpenCode();
-    // The goal reminder is the only synthetic message of this send, and it comes after the prompt.
+    // The goal reminder is the only synthetic message of this send.
     openCode.state.failPath = /\/synthetic$/;
     const { runtime, writer, promptSent } = createRuntime({ openCode });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
