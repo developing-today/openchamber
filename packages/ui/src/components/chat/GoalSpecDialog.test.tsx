@@ -10,10 +10,12 @@ import type { GoalSpecDialogRequest } from './GoalSpecDialog';
 // one the dialog never mounts its popup. Give the probe a document, then
 // restore the caller's globals.
 const importWindow = new Window();
-const importGlobals = ['window', 'document'] as const;
+// The writer picker's model stores read localStorage when they load.
+const importGlobals = ['window', 'document', 'localStorage'] as const;
 const previousImportGlobals = importGlobals.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
 Object.defineProperty(globalThis, 'window', { value: importWindow, configurable: true, writable: true });
 Object.defineProperty(globalThis, 'document', { value: importWindow.document, configurable: true, writable: true });
+Object.defineProperty(globalThis, 'localStorage', { value: importWindow.localStorage, configurable: true, writable: true });
 const { createRoot } = await import('react-dom/client');
 const { GoalSpecDialog } = await import('./GoalSpecDialog');
 for (const [name, descriptor] of previousImportGlobals) {
@@ -41,7 +43,8 @@ const installDom = () => {
   } };
 };
 
-const written: GoalSpecResult = { ok: true, spec: '## Objective\nDark mode', providerID: 'p', modelID: 'm' };
+const written: GoalSpecResult = { ok: true, spec: '## Objective\nDark mode', providerID: 'p', modelID: 'm', variant: null };
+const base = { sessionModel: null, directory: null } as const;
 
 describe('GoalSpecDialog', () => {
   let root: Root;
@@ -78,7 +81,7 @@ describe('GoalSpecDialog', () => {
   });
 
   test('shows the written spec for approval and sends it either way', async () => {
-    await render({ trigger: 'armed', review: true, defaultSendMode: 'with-message', write: async () => written });
+    await render({ ...base, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: async () => written });
 
     expect(document.querySelector('textarea')?.value).toBe('## Objective\nDark mode');
     expect(document.body.textContent).toContain('Written by p/m');
@@ -86,20 +89,21 @@ describe('GoalSpecDialog', () => {
     await click('Send message with goal');
     await click('Send goal as message');
     expect(choices).toEqual([
-      { kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'with-message' },
-      { kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'goal-as-message' },
+      { kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'with-message', ignoreLimit: false },
+      { kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'goal-as-message', ignoreLimit: false },
     ]);
   });
 
   test('without review the spec goes out as soon as it is written, in the default mode', async () => {
-    await render({ trigger: 'auto-create', review: false, defaultSendMode: 'goal-as-message', write: async () => written });
+    await render({ ...base, trigger: 'auto-create', review: false, defaultSendMode: 'goal-as-message', write: async () => written });
 
-    expect(choices).toEqual([{ kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'goal-as-message' }]);
+    expect(choices).toEqual([{ kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'goal-as-message', ignoreLimit: false }]);
   });
 
   test('a failure waits for the user even without review, and can be retried', async () => {
     let attempts = 0;
     await render({
+      ...base,
       trigger: 'armed',
       review: false,
       defaultSendMode: 'with-message',
@@ -114,19 +118,44 @@ describe('GoalSpecDialog', () => {
 
     await click('Try again');
     expect(attempts).toBe(2);
-    expect(choices).toEqual([{ kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'with-message' }]);
+    expect(choices).toEqual([{ kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'with-message', ignoreLimit: false }]);
   });
 
   test('skipping keeps an armed goal as typed, and sends an automatic one without a goal', async () => {
     const pending = () => new Promise<GoalSpecResult>(() => undefined);
-    await render({ trigger: 'armed', review: true, defaultSendMode: 'with-message', write: pending });
+    await render({ ...base, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: pending });
     await click('Use my message as the goal');
     await click('Cancel');
 
-    await render({ trigger: 'auto-create', review: true, defaultSendMode: 'with-message', write: pending });
+    await render({ ...base, trigger: 'auto-create', review: true, defaultSendMode: 'with-message', write: pending });
     await click('Send without a goal');
 
     expect(choices).toEqual([{ kind: 'unchanged' }, { kind: 'none' }]);
     expect(cancels).toBe(1);
+  });
+
+  test('the length limit switch applies to the next writing run and to the goal sent', async () => {
+    const runs: boolean[] = [];
+    await render({
+      ...base,
+      trigger: 'armed',
+      review: true,
+      defaultSendMode: 'with-message',
+      write: async (_signal, options) => {
+        runs.push(options.ignoreLimit);
+        return written;
+      },
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="More goal options"]')?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    });
+    const item = Array.from(document.querySelectorAll('[role="menuitem"]')).find((element) => element.textContent?.includes('No length limit for this goal'));
+    if (!item) throw new Error(`No limit switch in: ${document.body.textContent}`);
+    await act(async () => { item.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+    await click('Write again');
+    await click('Send message with goal');
+
+    expect(runs).toEqual([false, true]);
+    expect(choices).toEqual([{ kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'with-message', ignoreLimit: true }]);
   });
 });

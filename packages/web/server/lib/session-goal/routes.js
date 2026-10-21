@@ -12,6 +12,11 @@ const GoalSpecBodySchema = z.object({
   directory: optionalText,
   providerID: optionalText,
   modelID: optionalText,
+  // A model and effort picked for this one spec; they win over Settings.
+  writerProviderID: optionalText,
+  writerModelID: optionalText,
+  writerVariant: optionalText,
+  ignoreLimit: z.boolean().optional().catch(undefined),
 }).catch({});
 const ErrorCodeSchema = z.object({ code: z.string() });
 
@@ -24,8 +29,9 @@ export function registerSessionGoalRoutes(app, { writeSpec = writeGoalSpec } = {
   app.put('/api/goals/objective/:sessionId', async (req, res) => {
     try {
       const { content } = req.body || {};
-      await writeObjective(req.params.sessionId, content);
-      res.json({ ok: true });
+      const saved = await writeObjective(req.params.sessionId, content);
+      // The saved length lets a client notice a server that cut the text.
+      res.json({ ok: true, length: saved.content.length });
     } catch (error) {
       const statusCode = Number(error?.statusCode) || 500;
       if (statusCode >= 500) {

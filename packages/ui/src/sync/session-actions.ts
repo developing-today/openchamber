@@ -618,7 +618,8 @@ function withArchivedAt(sessionId: string, archivedAt: number | null): Session |
 
 const toError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)))
 
-function getSessionDirectory(sessionId: string): string | undefined {
+/** The directory a session's mutations go to: where the server filed it. */
+export function getSessionDirectory(sessionId: string): string | undefined {
   // The global record carries the directory the server filed the session
   // under, so it wins. Directory stores come second: a project root's store
   // also indexes status, permissions and questions for sessions that live in
@@ -2756,7 +2757,7 @@ function inheritForkMetadata(sourceSessionId: string, forkedSession: Session, di
   return applyForkInheritance(sourceSessionId, forkedSession, {
     readGoalId: async (sessionId) => getSessionGoal(await opencodeClient.getSession(sessionId, directory))?.id ?? null,
     readObjective: fetchGoalObjectiveContent,
-    writeObjective: writeGoalObjectiveFile,
+    writeObjective: async (sessionId, content) => (await writeGoalObjectiveFile(sessionId, content)).saved,
     patchMetadata: async (sessionId, updater) => {
       await patchSessionMetadata(sessionId, directory, updater, expectedRuntimeKey)
     },

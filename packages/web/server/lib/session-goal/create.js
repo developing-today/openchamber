@@ -33,8 +33,8 @@ export const buildGoalIntroText = (tokenBudget, spec = null) => {
     + '\n</system-reminder>';
 };
 
-const fitObjective = async ({ objective, directory, sessionID, providerID, modelID, warn }) => {
-  if (objective.length <= GOAL_OBJECTIVE_CHAR_LIMIT) return objective;
+const fitObjective = async ({ objective, charLimit, directory, sessionID, providerID, modelID, warn }) => {
+  if (objective.length <= charLimit) return objective;
 
   let distilled = null;
   try {
@@ -46,7 +46,7 @@ const fitObjective = async ({ objective, directory, sessionID, providerID, model
         'Return ONLY the criteria text — no preamble, no headers, no markdown fences.',
         'Capture: the end goals, what must exist and work when the task is fully done, and how each major part is verified. Omit implementation steps.',
         'Preserve verbatim any file paths, commands, and identifiers that define the task.',
-        'Stay under 4000 characters.',
+        `Stay under ${Math.floor(charLimit * 0.8)} characters.`,
         'Write in the same language as the task text.',
       ].join('\n'),
       directory,
@@ -59,8 +59,8 @@ const fitObjective = async ({ objective, directory, sessionID, providerID, model
     warn('goal objective distillation failed', error);
   }
 
-  if (distilled) return distilled.slice(0, GOAL_OBJECTIVE_CHAR_LIMIT);
-  const half = Math.max(0, Math.floor((GOAL_OBJECTIVE_CHAR_LIMIT - TRIM_MARKER.length) / 2));
+  if (distilled) return distilled.slice(0, charLimit);
+  const half = Math.max(0, Math.floor((charLimit - TRIM_MARKER.length) / 2));
   return `${objective.slice(0, half)}${TRIM_MARKER}${objective.slice(-half)}`;
 };
 
@@ -96,8 +96,10 @@ export const createSessionGoal = async ({
       warn('goal spec rewrite failed, keeping the objective as written', error);
     }
   }
+  const charLimit = goalWriterSettings?.charLimit ?? GOAL_OBJECTIVE_CHAR_LIMIT;
   const objectiveText = await fitObjective({
     objective: spec ?? requested,
+    charLimit,
     directory,
     sessionID,
     providerID,
@@ -117,8 +119,11 @@ export const createSessionGoal = async ({
   const now = Date.now();
   const goal = {
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-    objective: objectiveFile ? '' : objectiveText.slice(0, GOAL_OBJECTIVE_CHAR_LIMIT),
+    objective: objectiveFile ? '' : objectiveText.slice(0, charLimit),
     objectiveFile,
+    // Stated outright: the store merges, so a flag left out would carry over
+    // from the goal this one replaces.
+    ignoreObjectiveLimit: false,
     status: 'active',
     tokenBudget: tokenBudget || null,
     tokensUsed: 0,

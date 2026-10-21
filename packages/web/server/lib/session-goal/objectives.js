@@ -10,6 +10,27 @@ import os from 'os';
 import path from 'path';
 
 export const GOAL_OBJECTIVE_CHAR_LIMIT = 5_000;
+// The Settings bounds for both limits below; the upper one also caps a goal
+// whose limit the user switched off, so one file stays readable.
+const MIN_CHAR_LIMIT = 1_000;
+export const GOAL_OBJECTIVE_HARD_CAP = 1_000_000;
+// How much of the objective the progress check reads. Above the goal limit by
+// default, so a goal within its limit reaches the check whole.
+const GOAL_CHECK_OBJECTIVE_CHAR_LIMIT = 20_000;
+
+const asCharLimit = (value, fallback) => (
+  Number.isInteger(value) && value >= MIN_CHAR_LIMIT && value <= GOAL_OBJECTIVE_HARD_CAP ? value : fallback
+);
+
+/**
+ * The objective limits from Settings: `objective` is the most a goal keeps
+ * (`sessionGoalObjectiveCharLimit`), `check` is the most of it the progress
+ * check reads (`sessionGoalCheckObjectiveCharLimit`).
+ */
+export const goalObjectiveLimits = (settings) => ({
+  objective: asCharLimit(settings?.sessionGoalObjectiveCharLimit, GOAL_OBJECTIVE_CHAR_LIMIT),
+  check: asCharLimit(settings?.sessionGoalCheckObjectiveCharLimit, GOAL_CHECK_OBJECTIVE_CHAR_LIMIT),
+});
 
 // OpenCode session ids are URL-safe tokens; anything else is rejected before
 // touching the filesystem.
@@ -27,7 +48,10 @@ const objectiveFilePath = (sessionId) => path.join(goalsDir(), `${sessionId}.md`
 const isValidObjectiveKey = (sessionId) =>
   typeof sessionId === 'string' && SESSION_ID_PATTERN.test(sessionId);
 
-const clampContent = (content) => String(content ?? '').trim().slice(0, GOAL_OBJECTIVE_CHAR_LIMIT);
+// The goal's own limit is applied before the text gets here (the UI and
+// `createSessionGoal` condense a longer one); the file only refuses runaway
+// sizes, so a goal whose limit was raised or switched off is kept whole.
+const clampContent = (content) => String(content ?? '').trim().slice(0, GOAL_OBJECTIVE_HARD_CAP);
 
 /** Write (or overwrite — a new goal replaces the old one) the session's objective. */
 export const writeObjective = async (sessionId, content) => {

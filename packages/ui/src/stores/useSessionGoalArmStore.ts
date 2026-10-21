@@ -19,19 +19,21 @@ interface SessionGoalArm {
    * original message), so the goal reminder carries the objective to the agent.
    */
   briefAgent: boolean;
+  /** The user switched the goal length limit off for this goal. */
+  ignoreLimit: boolean;
 }
 
 interface SessionGoalArmStore extends SessionGoalArm {
   setArmed: (
     armed: boolean,
     objectiveOverride?: string | null,
-    options?: { settled?: boolean; briefAgent?: boolean },
+    options?: { settled?: boolean; briefAgent?: boolean; ignoreLimit?: boolean },
   ) => void;
   /** Read-and-clear in one step at send time. */
   consume: () => SessionGoalArm;
 }
 
-const DISARMED: SessionGoalArm = { armed: false, objectiveOverride: null, settled: false, briefAgent: false };
+const DISARMED: SessionGoalArm = { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false };
 
 export const useSessionGoalArmStore = create<SessionGoalArmStore>((set, get) => ({
   ...DISARMED,
@@ -41,11 +43,12 @@ export const useSessionGoalArmStore = create<SessionGoalArmStore>((set, get) => 
         objectiveOverride,
         settled: options.settled === true,
         briefAgent: options.briefAgent === true && Boolean(objectiveOverride),
+        ignoreLimit: options.ignoreLimit === true,
       }
     : DISARMED),
   consume: () => {
-    const { armed, objectiveOverride, settled, briefAgent } = get();
+    const { armed, objectiveOverride, settled, briefAgent, ignoreLimit } = get();
     if (armed) set(DISARMED);
-    return { armed, objectiveOverride, settled, briefAgent };
+    return { armed, objectiveOverride, settled, briefAgent, ignoreLimit };
   },
 }));

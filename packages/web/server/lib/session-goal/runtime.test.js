@@ -168,6 +168,35 @@ describe('session goal tick on v2 messages', () => {
     runtime.stop();
   });
 
+  it('gives the check an excerpt of a goal longer than its limit, and the continuation the whole goal', async () => {
+    const objective = `Opening ${'m'.repeat(3_000)} Done when tests pass`;
+    const { calls } = v2OpenCode({
+      messages: [
+        { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Finish the task', time: { created: 1 } },
+        assistantRecord(),
+      ],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal({ objective }) } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }), providerID: 'anthropic', modelID: 'claude-haiku-5' }));
+    const { runtime } = makeRuntime({
+      ...seam,
+      getCheckObjectiveLimit: () => 1_000,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+    });
+
+    await runTick(runtime);
+
+    const prompt = generate.mock.calls[0][0].prompt;
+    const checked = prompt.slice(prompt.indexOf('<objective>\n') + 12, prompt.indexOf('\n</objective>'));
+    expect(checked.length).toBeLessThanOrEqual(1_000);
+    expect(checked.startsWith('Opening')).toBe(true);
+    expect(checked.endsWith('Done when tests pass')).toBe(true);
+    expect(prompt).toContain('Done with step one.');
+    const continuation = calls.find((call) => call.method === 'POST');
+    expect(continuation.body.text).toContain('m'.repeat(3_000));
+    runtime.stop();
+  });
+
   it('takes the turn cap from Settings for both the prompt and the stop', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const { calls } = v2OpenCode({

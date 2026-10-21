@@ -43,6 +43,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
 import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
+import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -587,6 +588,27 @@ export const SETTINGS_REGISTRY = {
   // `provider/model`; missing means the session's own model. Read by the server,
   // which writes every spec, so no store holds it.
   sessionGoalWriterModel: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseNonEmptyString }),
+  // The writer model's effort level; read by the server with the model above.
+  sessionGoalWriterVariant: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseNonEmptyString }),
+  sessionGoalWriterRememberChoice: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('sessionGoalWriterRememberChoice', (v) => useUIStore.getState().setSessionGoalWriterRememberChoice(v)),
+  }),
+  // Both limits are also read by the server, for the goals it creates and for the check.
+  sessionGoalObjectiveCharLimit: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(z.number().refine(isSessionGoalCharLimit)),
+    ui: uiStore('sessionGoalObjectiveCharLimit', (v) => useUIStore.getState().setSessionGoalObjectiveCharLimit(v)),
+  }),
+  sessionGoalCheckObjectiveCharLimit: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(z.number().refine(isSessionGoalCharLimit)),
+    ui: uiStore('sessionGoalCheckObjectiveCharLimit', (v) => useUIStore.getState().setSessionGoalCheckObjectiveCharLimit(v)),
+  }),
   sessionGoalWriterReview: field({
     scope: 'profile',
     surfaces: ['web', 'desktop', 'mobile'],

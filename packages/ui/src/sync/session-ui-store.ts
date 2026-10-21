@@ -1814,7 +1814,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       const goalArm = inputMode !== "shell" && content.trim().length > 0
         ? useSessionGoalArmStore.getState().consume()
-        : { armed: false, objectiveOverride: null, settled: false, briefAgent: false }
+        : { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }
       const goalArmed = goalArm.armed
       // Creates the armed goal and returns its goal-mode reminder, which
       // teaches the agent the goal protocol from turn one (without it the agent
@@ -1841,11 +1841,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           : null
         let rewrittenSpec: string | null
         try {
-          ({ rewrittenSpec } = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite }, null))
+          // A new goal (no `existing`) is always saved.
+          const saved = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite, ignoreLimit: goalArm.ignoreLimit }, null)
+          rewrittenSpec = saved.outcome === 'saved' ? saved.rewrittenSpec : null
         } catch (error) {
           useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
             settled: goalArm.settled,
             briefAgent: goalArm.briefAgent,
+            ignoreLimit: goalArm.ignoreLimit,
           })
           throw error
         }

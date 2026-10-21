@@ -571,9 +571,19 @@ export const createSettingsHelpers = (dependencies) => {
       result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
     }
     // The goal writer's settings, parsed rather than type-sniffed.
-    for (const key of ['sessionGoalWriterEnabled', 'sessionGoalWriterReview', 'sessionGoalRewriteAll']) {
+    for (const key of ['sessionGoalWriterEnabled', 'sessionGoalWriterReview', 'sessionGoalRewriteAll', 'sessionGoalWriterRememberChoice']) {
       const flag = z.boolean().safeParse(candidate[key]);
       if (flag.success) result[key] = flag.data;
+    }
+    // Same bounds as `goalObjectiveLimits` in session-goal/objectives.js.
+    for (const key of ['sessionGoalObjectiveCharLimit', 'sessionGoalCheckObjectiveCharLimit']) {
+      const limit = z.number().int().min(1_000).max(1_000_000).safeParse(candidate[key]);
+      if (limit.success) result[key] = limit.data;
+    }
+    const goalWriterVariant = z.string().trim().safeParse(candidate.sessionGoalWriterVariant);
+    if (goalWriterVariant.success) {
+      // Empty clears it: the writer model runs at its default effort.
+      result.sessionGoalWriterVariant = goalWriterVariant.data || undefined;
     }
     const goalWriterModel = z.string().trim().safeParse(candidate.sessionGoalWriterModel);
     if (goalWriterModel.success) {
