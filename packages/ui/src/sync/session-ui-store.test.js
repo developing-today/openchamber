@@ -2072,6 +2072,28 @@ describe('goal objective directory scoping', () => {
       // The composer's next message must not inherit the card's spec.
       expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: false, objectiveOverride: null });
     });
+
+    test('its settle names the user message the send created, so the sent card knows which one is its own', async () => {
+      const prompts = [];
+      opencodeClient.sendMessage = async (params) => {
+        prompts.push(params);
+        return params.messageId;
+      };
+      const settles = [];
+      const cardFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith('/api/goals/spec-jobs/job-card/settle')) settles.push(JSON.parse(init.body));
+        return cardFetch(input, init);
+      };
+      connect();
+
+      await sendGoalSpecJob(cardJob, specChoice);
+
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].messageId).toMatch(/^msg_/);
+      expect(settles).toEqual([{ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Card spec', messageId: prompts[0].messageId }]);
+    });
   });
 
   // Forking an answer "as a goal" used to put its goal on the composer's
