@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { selectInputHistoryEntries, useInputHistoryStore } from './useInputHistoryStore';
-import { useGoalSpecJobStore, type GoalSpecJob } from './goalSpecJobStore';
+import { goalSpecJobChoices, useGoalSpecJobStore, type GoalSpecJob } from './goalSpecJobStore';
 
 type Call = { method: string; path: string; body: ReturnType<typeof JSON.parse> };
 
@@ -124,6 +124,39 @@ describe('goal writer jobs in the client', () => {
     respond = () => Response.json({ revision: 7, jobs: [] });
     await useGoalSpecJobStore.getState().resync();
     expect(jobs().ses_one).toBeUndefined();
+  });
+
+  test('Write again sends the choices made on the card, and from then on the job holds them', async () => {
+    const written = job({ status: 'ready', spec: 'Spec' });
+    apply('ses_one', written, 1);
+    const choices = { writerChoice: { providerID: 'p', modelID: 'm', variant: 'low' }, ignoreLimit: true };
+    useGoalSpecJobStore.getState().setChoiceEdit(written, choices);
+    respond = () => Response.json({ revision: 2, job: { ...written, status: 'writing', spec: null, attempt: 2, ...choices } });
+
+    await useGoalSpecJobStore.getState().redoJob(written, choices);
+
+    expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/redo', body: choices }]);
+    // The server's job shows them now: an edit kept here would hide a change made in another window.
+    expect(useGoalSpecJobStore.getState().choiceEdits).toEqual({});
+    const current = jobs().ses_one;
+    if (!current) throw new Error('The job left the store');
+    expect(goalSpecJobChoices(current, undefined)).toEqual(choices);
+  });
+
+  test('choices made on a card leave with its job, replaced or gone from a snapshot', async () => {
+    const choices = { writerChoice: null, ignoreLimit: true };
+    const first = job();
+    apply('ses_one', first, 1);
+    useGoalSpecJobStore.getState().setChoiceEdit(first, choices);
+    apply('ses_one', job({ id: 'job-2' }), 2);
+    expect(useGoalSpecJobStore.getState().choiceEdits).toEqual({});
+
+    const second = job({ id: 'job-3', sessionId: 'ses_two' });
+    apply('ses_two', second, 3);
+    useGoalSpecJobStore.getState().setChoiceEdit(second, choices);
+    respond = () => Response.json({ revision: 7, jobs: [job({ id: 'job-2' })] });
+    await useGoalSpecJobStore.getState().resync();
+    expect(useGoalSpecJobStore.getState().choiceEdits).toEqual({});
   });
 
   test('a cancelled job and a dismissed one leave the chat', () => {

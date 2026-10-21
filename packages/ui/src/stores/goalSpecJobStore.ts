@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { GoalWriterChoice } from '@/lib/goalWriter';
 import type { AttachedFile } from './types/sessionTypes';
 import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
 import {
@@ -46,9 +47,12 @@ const jobSchema = z.object({
     /** Attachments or attached context: the server cannot send it, a window does. */
     composerOnly: z.boolean(),
     spec: z.string().nullable(),
-    /** Who writes: the model picked in Settings, the session's model, or the small model; the model that answered once written. */
+    /**
+     * Who writes: the model picked on the card, the model picked in Settings, the
+     * session's model, or the small model; the model that answered once written.
+     */
     writer: z.object({
-        source: z.enum(['settings', 'session', 'small-model']),
+        source: z.enum(['settings', 'session', 'small-model', 'picked']),
         providerID: z.string().nullable(),
         modelID: z.string().nullable(),
         variant: z.string().nullable(),
@@ -80,6 +84,10 @@ const jobSchema = z.object({
     messageId: z.string().nullable().optional(),
     /** The composer made the session from a new-session draft for this job. Absent from servers before it existed. */
     newSession: z.boolean().optional(),
+    /** The writer and effort picked on the card for the last write; null is the Settings default. Absent from servers before it existed. */
+    writerChoice: z.object({ providerID: z.string(), modelID: z.string(), variant: z.string().nullable() }).nullable().optional(),
+    /** The goal's length limit is switched off on the card. Absent from servers before it existed. */
+    ignoreLimit: z.boolean().optional(),
     outcome: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('spec'), sendMode: sendModeSchema }),
         z.object({ kind: z.literal('original'), withGoal: z.boolean() }),
@@ -97,11 +105,25 @@ export const isOpenGoalSpecJob = (job: GoalSpecJob): boolean => (
     job.status === 'writing' || job.status === 'ready' || job.status === 'failed'
 );
 
-/** What the user picked on the card. */
+/** What the user picked on the card; `ignoreLimit` is the card's length limit switch for the goal the send starts. */
 export type GoalSpecJobChoice =
-    | { kind: 'spec'; sendMode: GoalSpecJobSendMode; spec: string }
+    | { kind: 'spec'; sendMode: GoalSpecJobSendMode; spec: string; ignoreLimit?: boolean }
     /** The message as typed, without a spec. */
-    | { kind: 'original' };
+    | { kind: 'original'; ignoreLimit?: boolean };
+
+/** The card's choices for a job's next write and for the goal its send starts. */
+export interface GoalSpecJobChoices {
+    /** A writer model and effort picked for this spec; null is the Settings default. */
+    writerChoice: GoalWriterChoice | null;
+    /** The goal's length limit is switched off. */
+    ignoreLimit: boolean;
+}
+
+/** What a card shows and sends: the choices edited on it, else the job's own. */
+export const goalSpecJobChoices = (job: GoalSpecJob, edit: GoalSpecJobChoices | undefined): GoalSpecJobChoices => edit ?? {
+    writerChoice: job.writerChoice ?? null,
+    ignoreLimit: job.ignoreLimit === true,
+};
 
 type GoalSpecJobOutcome = NonNullable<GoalSpecJob['outcome']>;
 
@@ -188,7 +210,7 @@ interface StartJobBody {
     sendConfig: QueuedMessageSendConfig;
 }
 
-type JobRequestBody = StartJobBody | GoalSpecJobChoice | { kind: GoalSpecJobChoice['kind'] } | GoalSpecJobSettlement;
+type JobRequestBody = StartJobBody | GoalSpecJobChoice | GoalSpecJobChoices | { kind: GoalSpecJobChoice['kind'] } | GoalSpecJobSettlement;
 
 const jsonInit = (method: string, body?: JobRequestBody): RequestInit => (
     body === undefined
@@ -233,6 +255,8 @@ interface GoalSpecJobState {
     jobs: Record<string, GoalSpecJob>;
     /** Spec text edited on a card, by job id, for the write it was edited on. */
     specEdits: Record<string, { attempt: number; spec: string }>;
+    /** Writer and length limit choices made on a card, by job id, until Write again hands them to the server. */
+    choiceEdits: Record<string, GoalSpecJobChoices>;
 }
 
 interface GoalSpecJobActions {
@@ -246,7 +270,8 @@ interface GoalSpecJobActions {
     startJob: (input: GoalSpecJobStart) => Promise<GoalSpecJob>;
     /** The server sends the message; for a message without attachments or attached context. */
     sendJob: (job: GoalSpecJob, choice: GoalSpecJobChoice) => Promise<void>;
-    redoJob: (job: GoalSpecJob) => Promise<void>;
+    /** Writes the spec again with the card's choices. */
+    redoJob: (job: GoalSpecJob, choices: GoalSpecJobChoices) => Promise<void>;
     /** Back to edit: the job ends and its full message comes back. */
     editJob: (job: GoalSpecJob) => Promise<GoalSpecJobMessage>;
     /** A window takes the full message to send it itself, now or once the agent's turn is over. */
@@ -255,6 +280,7 @@ interface GoalSpecJobActions {
     /** Removes the card of a sent job. */
     dismissJob: (job: GoalSpecJob) => Promise<void>;
     setSpecEdit: (job: GoalSpecJob, spec: string) => void;
+    setChoiceEdit: (job: GoalSpecJob, choices: GoalSpecJobChoices) => void;
 }
 
 type GoalSpecJobStore = GoalSpecJobState & GoalSpecJobActions;
@@ -275,10 +301,11 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
             const current = state.jobs[sessionId];
             // A cancelled job is over: the server already forgot it.
             const next = job && job.status !== 'cancelled' ? job : null;
-            const specEdits = current && current.id !== next?.id ? withoutKey(state.specEdits, current.id) : state.specEdits;
+            const replaced = current && current.id !== next?.id;
             return {
                 jobs: next ? { ...state.jobs, [sessionId]: next } : withoutKey(state.jobs, sessionId),
-                specEdits,
+                specEdits: replaced ? withoutKey(state.specEdits, current.id) : state.specEdits,
+                choiceEdits: replaced ? withoutKey(state.choiceEdits, current.id) : state.choiceEdits,
             };
         });
     };
@@ -321,13 +348,18 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
             for (const [jobId, edit] of Object.entries(state.specEdits)) {
                 if (kept.has(jobId)) specEdits[jobId] = edit;
             }
-            return { jobs, specEdits };
+            const choiceEdits: GoalSpecJobState['choiceEdits'] = {};
+            for (const [jobId, edit] of Object.entries(state.choiceEdits)) {
+                if (kept.has(jobId)) choiceEdits[jobId] = edit;
+            }
+            return { jobs, specEdits, choiceEdits };
         });
     };
 
     return {
         jobs: {},
         specEdits: {},
+        choiceEdits: {},
 
         hydrate: () => {
             if (isVSCodeRuntime()) return Promise.resolve();
@@ -379,7 +411,7 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
             resyncRequested = false;
             appliedRevisions.clear();
             snapshotRevision = -1;
-            set({ jobs: {}, specEdits: {} });
+            set({ jobs: {}, specEdits: {}, choiceEdits: {} });
         },
 
         startJob: async (input) => {
@@ -414,8 +446,10 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
             await mutate(job, mutationResponseSchema, jobPath(job.id, 'send'), jsonInit('POST', choice));
         },
 
-        redoJob: async (job) => {
-            await mutate(job, mutationResponseSchema, jobPath(job.id, 'redo'), jsonInit('POST'));
+        redoJob: async (job, choices) => {
+            await mutate(job, mutationResponseSchema, jobPath(job.id, 'redo'), jsonInit('POST', choices));
+            // The server holds them now, and its job shows them.
+            set((state) => ({ choiceEdits: withoutKey(state.choiceEdits, job.id) }));
         },
 
         editJob: async (job) => {
@@ -442,6 +476,10 @@ export const useGoalSpecJobStore = create<GoalSpecJobStore>()((set, get) => {
 
         setSpecEdit: (job, spec) => {
             set((state) => ({ specEdits: { ...state.specEdits, [job.id]: { attempt: job.attempt, spec } } }));
+        },
+
+        setChoiceEdit: (job, choices) => {
+            set((state) => ({ choiceEdits: { ...state.choiceEdits, [job.id]: choices } }));
         },
     };
 });

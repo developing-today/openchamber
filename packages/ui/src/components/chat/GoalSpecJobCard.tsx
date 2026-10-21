@@ -1,11 +1,25 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { useGoalSpecJobStore, type GoalSpecJob, type GoalSpecJobChoice } from '@/stores/goalSpecJobStore';
+import { isAutoModel } from '@/lib/routing/autoModel';
+import {
+  goalSpecJobChoices,
+  useGoalSpecJobStore,
+  type GoalSpecJob,
+  type GoalSpecJobChoice,
+  type GoalSpecJobChoices,
+} from '@/stores/goalSpecJobStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { GoalWriterPicker } from './GoalWriterPicker';
 import { takeGoalSpecJobBack } from './goalSpecJobEdit';
 import { sendGoalSpecJob } from './goalSpecJobSend';
 
@@ -54,6 +68,15 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
   });
   const spec = editedSpec ?? job.spec ?? '';
   const trimmedSpec = spec.trim();
+  // The writer and the length limit for this spec: Write again uses them, and a
+  // send carries the limit to the goal it starts.
+  const choiceEdit = useGoalSpecJobStore((state) => state.choiceEdits[job.id]);
+  const choices = goalSpecJobChoices(job, choiceEdit);
+  const setChoices = (next: GoalSpecJobChoices) => useGoalSpecJobStore.getState().setChoiceEdit(job, next);
+  const overLimit = !choices.ignoreLimit && spec.length > charLimit;
+  const limitNote = overLimit
+    ? t('chat.goal.dialog.overLimit', { limit: charLimit })
+    : (choices.ignoreLimit ? t('chat.goal.dialog.limitIgnored') : '');
   const busy = acting || job.sending;
   // A send waiting for the agent's turn to end goes out by itself; only Back to edit changes it.
   const waiting = job.waiting === true && !job.sending;
@@ -68,8 +91,11 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
       })
       .finally(() => setActing(false));
   };
-  const send = (choice: GoalSpecJobChoice) => run(() => sendGoalSpecJob(job, choice), 'chat.goal.writer.toast.sendFailed');
-  const redo = () => run(() => useGoalSpecJobStore.getState().redoJob(job), 'chat.goal.writer.toast.actionFailed');
+  const send = (choice: GoalSpecJobChoice) => run(
+    () => sendGoalSpecJob(job, { ...choice, ignoreLimit: choices.ignoreLimit }),
+    'chat.goal.writer.toast.sendFailed',
+  );
+  const redo = () => run(() => useGoalSpecJobStore.getState().redoJob(job, choices), 'chat.goal.writer.toast.actionFailed');
   const dismiss = () => run(() => useGoalSpecJobStore.getState().dismissJob(job), 'chat.goal.writer.toast.actionFailed');
   const backToEdit = () => run(() => takeGoalSpecJobBack(job), 'chat.goal.writer.toast.actionFailed');
 
@@ -116,7 +142,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
 
   const writerText = !job.writer.providerID || !job.writer.modelID
     ? t('chat.goal.writer.card.writerSmallModel')
-    : job.writer.source === 'settings' && job.writer.variant
+    : (job.writer.source === 'settings' || job.writer.source === 'picked') && job.writer.variant
       ? t('chat.goal.writer.card.writerEffort', { model: `${job.writer.providerID}/${job.writer.modelID}`, effort: job.writer.variant })
       : t('chat.goal.writer.card.writerDefaultEffort', { model: `${job.writer.providerID}/${job.writer.modelID}` });
   const preview = job.message.content.trim().split('\n', 1)[0] ?? '';
@@ -132,6 +158,10 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
   const sendOriginalLabel = job.trigger === 'armed'
     ? t('chat.goal.writer.action.useMessage')
     : t('chat.goal.writer.action.sendWithoutGoal');
+  // Auto runs on no provider, so a session on Auto names no model the writer could start from.
+  const sessionModel = isAutoModel(job.sendConfig.providerID, job.sendConfig.modelID)
+    ? null
+    : { providerID: job.sendConfig.providerID, modelID: job.sendConfig.modelID };
 
   return (
     <section aria-label={title} className="oc-tile rounded-xl px-3 py-2.5">
@@ -144,6 +174,30 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
       {preview ? (
         <p className="mt-0.5 truncate typography-meta text-muted-foreground" title={job.message.content}>{preview}</p>
       ) : null}
+
+      {/* The same row in every state of an open job, so the card keeps its shape as the job moves on. */}
+      <div className="mt-2 flex items-start justify-between gap-2">
+        <GoalWriterPicker
+          directory={job.directory}
+          sessionModel={sessionModel}
+          value={choices.writerChoice}
+          onChange={(writerChoice) => setChoices({ ...choices, writerChoice })}
+          disabled={locked}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 shrink-0 px-0" aria-label={t('chat.goal.dialog.moreAria')} disabled={locked}>
+              <Icon name="more-2" className="size-3.5" aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setChoices({ ...choices, ignoreLimit: !choices.ignoreLimit })} className="flex items-center justify-between gap-4">
+              <span>{t('chat.goal.dialog.ignoreLimit')}</span>
+              {choices.ignoreLimit ? <Icon name="check" className="size-4 text-primary" aria-hidden="true" /> : null}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {job.composerOnly && !waiting && !job.sending ? (
         <p className="mt-2 flex items-start gap-1.5 typography-meta text-muted-foreground">
@@ -184,16 +238,20 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
           <Textarea
             value={spec}
             onChange={(event) => useGoalSpecJobStore.getState().setSpecEdit(job, event.target.value)}
-            maxLength={charLimit}
             rows={isMobile ? 5 : 8}
             disabled={locked}
             aria-label={t('chat.goal.writer.card.specAria')}
             endSlot={(
-              <span className="typography-micro tabular-nums text-muted-foreground/70" aria-label={t('chat.goal.counter.aria')}>
-                {spec.length}/{charLimit}
+              <span
+                className={overLimit ? 'typography-micro tabular-nums text-status-warning' : 'typography-micro tabular-nums text-muted-foreground/70'}
+                aria-label={t('chat.goal.counter.aria')}
+              >
+                {choices.ignoreLimit ? spec.length : `${spec.length}/${charLimit}`}
               </span>
             )}
           />
+          {/* One line kept for it, so the field does not jump as the text crosses the limit. */}
+          <p className="min-h-4 truncate typography-micro text-muted-foreground" title={limitNote || undefined}>{limitNote}</p>
           <p className="typography-meta text-muted-foreground">{t('chat.goal.writer.card.reviewHint')}</p>
         </div>
       ) : null}

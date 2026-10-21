@@ -115,6 +115,9 @@ describe('GoalSpecJobCard', () => {
       const request = new Request(input, init);
       const body = await request.text();
       const call: Call = { method: request.method, path: new URL(request.url).pathname, body: body ? JSON.parse(body) : undefined };
+      // The writer picker reads Settings and the small model; only the job's
+      // own requests are recorded here.
+      if (!call.path.startsWith('/api/goals/spec-jobs')) return Response.json({});
       calls.push(call);
       return respond(call);
     }, originalFetch);
@@ -143,7 +146,7 @@ describe('GoalSpecJobCard', () => {
     expect(findButton('Write again')).toBeNull();
 
     await click('Use my message as the goal');
-    expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'original' } }]);
+    expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'original', ignoreLimit: false } }]);
   });
 
   test('a written spec can be edited, sent either way, or written again', async () => {
@@ -164,9 +167,10 @@ describe('GoalSpecJobCard', () => {
     await click('Write again');
 
     expect(calls).toEqual([
-      { method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'spec', sendMode: 'with-message', spec: '## Objective\nDark mode everywhere' } },
-      { method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'spec', sendMode: 'goal-as-message', spec: '## Objective\nDark mode everywhere' } },
-      { method: 'POST', path: '/api/goals/spec-jobs/job-1/redo', body: undefined },
+      { method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'spec', sendMode: 'with-message', spec: '## Objective\nDark mode everywhere', ignoreLimit: false } },
+      { method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'spec', sendMode: 'goal-as-message', spec: '## Objective\nDark mode everywhere', ignoreLimit: false } },
+      // Write again carries the card's choices: here the defaults.
+      { method: 'POST', path: '/api/goals/spec-jobs/job-1/redo', body: { writerChoice: null, ignoreLimit: false } },
     ]);
   });
 
@@ -182,7 +186,7 @@ describe('GoalSpecJobCard', () => {
     await click('Try again');
     await click('Send without a goal');
     expect(calls.map((call) => call.path)).toEqual(['/api/goals/spec-jobs/job-1/redo', '/api/goals/spec-jobs/job-1/send']);
-    expect(calls[1]?.body).toEqual({ kind: 'original' });
+    expect(calls[1]?.body).toEqual({ kind: 'original', ignoreLimit: false });
   });
 
   test('a send of the message as typed that failed while the spec was written says the send failed', async () => {
@@ -203,7 +207,7 @@ describe('GoalSpecJobCard', () => {
 
     await click('Try again');
 
-    expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'original' } }]);
+    expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'original', ignoreLimit: false } }]);
   });
 
   test('back to edit hands the whole message to the session\'s composer and arms the goal again', async () => {

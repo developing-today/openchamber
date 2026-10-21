@@ -2073,6 +2073,14 @@ describe('goal objective directory scoping', () => {
       expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: false, objectiveOverride: null });
     });
 
+    test('a spec sent with its length limit switched off saves a goal without one', async () => {
+      connect();
+
+      await sendGoalSpecJob(cardJob, { ...specChoice, ignoreLimit: true });
+
+      expect(metadataWrites.map((write) => write.patch.openchamber.goal.ignoreObjectiveLimit)).toEqual([true]);
+    });
+
     test('its settle names the user message the send created, so the sent card knows which one is its own', async () => {
       const prompts = [];
       opencodeClient.sendMessage = async (params) => {

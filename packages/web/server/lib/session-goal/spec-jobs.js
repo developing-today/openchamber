@@ -79,7 +79,7 @@ const HANDLED_EVENT_TYPES = new Set([
 const storedStatusSchema = z.enum(['writing', 'ready', 'failed', 'sent']);
 const triggerSchema = z.enum(['armed', 'auto-create']);
 const sendModeSchema = z.enum(['with-message', 'goal-as-message']);
-const writerSourceSchema = z.enum(['settings', 'session', 'small-model']);
+const writerSourceSchema = z.enum(['settings', 'session', 'small-model', 'picked']);
 /** The step `error` comes from: writing the spec, or sending the message. */
 const failedStepSchema = z.enum(['write', 'send']);
 
@@ -104,11 +104,27 @@ const createInputSchema = z.object({
   sendConfig: z.unknown(),
 });
 
-/** What the user picked on the card. */
+/**
+ * What the user picked on the card. `ignoreLimit` is the card's length limit
+ * switch for the goal the send starts; absent keeps the job's.
+ */
 const choiceSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('spec'), sendMode: sendModeSchema, spec: z.string().trim().min(1) }),
-  z.object({ kind: z.literal('original') }),
+  z.object({ kind: z.literal('spec'), sendMode: sendModeSchema, spec: z.string().trim().min(1), ignoreLimit: z.boolean().optional() }),
+  z.object({ kind: z.literal('original'), ignoreLimit: z.boolean().optional() }),
 ]);
+
+/** A writer model and effort picked on the card for this spec; it wins over Settings. */
+const writerChoiceSchema = z.object({
+  providerID: z.string().trim().min(1),
+  modelID: z.string().trim().min(1),
+  variant: z.string().trim().min(1).nullable(),
+});
+
+/** Write again with the card's choices; a choice left out keeps the job's. */
+const redoInputSchema = z.object({
+  writerChoice: writerChoiceSchema.nullable().optional(),
+  ignoreLimit: z.boolean().optional(),
+});
 
 const claimInputSchema = z.object({ kind: z.enum(['spec', 'original']) });
 
@@ -175,6 +191,10 @@ const storedJobSchema = z.object({
   waiting: waitingSchema.nullable().default(null),
   messageId: z.string().min(1).nullable().default(null),
   newSession: z.boolean().default(false),
+  // The card's choices for the next write and the goal; files written before
+  // they existed read as the defaults.
+  writerChoice: writerChoiceSchema.nullable().default(null),
+  ignoreLimit: z.boolean().default(false),
   outcome: outcomeSchema.nullable(),
   attempt: z.number().int().nonnegative(),
   createdAt: z.number(),
@@ -328,12 +348,14 @@ const parseSentJobMessage = (message, sendConfig) => {
 const isComposerOnly = (job) => job.message.attachments.length > 0 || contextCountOf(job.message) > 0;
 
 /**
- * Which model writes the spec, as the writer resolves it: the model picked in
- * Settings with its effort, else the session's own model at its default,
- * else (a session on Auto) the small model. The writer reports the model
- * that answered, which replaces the model named here.
+ * Which model writes the spec, as the writer resolves it: the model and
+ * effort picked on the card, else the model picked in Settings with its
+ * effort, else the session's own model at its default, else (a session on
+ * Auto) the small model. The writer reports the model that answered, which
+ * replaces the model named here.
  */
-const describeWriter = (settings, sendConfig) => {
+const describeWriter = (settings, sendConfig, writerChoice) => {
+  if (writerChoice) return { source: 'picked', ...writerChoice };
   const picked = parseModelRef(settings?.model);
   if (picked) {
     return { source: 'settings', providerID: picked.providerID, modelID: picked.modelID, variant: settings?.variant ?? null };
@@ -557,6 +579,8 @@ export function createGoalSpecJobRuntime({
       messageId: job.messageId,
       // The session was made from a new-session draft for this job.
       newSession: job.newSession,
+      writerChoice: job.writerChoice ? { ...job.writerChoice } : null,
+      ignoreLimit: job.ignoreLimit,
       outcome: job.outcome,
       attempt: job.attempt,
       createdAt: job.createdAt,
@@ -683,6 +707,11 @@ export function createGoalSpecJobRuntime({
           directory: job.directory,
           providerID: job.sendConfig.providerID,
           modelID: job.sendConfig.modelID,
+          // The writer and effort picked on the card win over Settings.
+          writerProviderID: job.writerChoice?.providerID,
+          writerModelID: job.writerChoice?.modelID,
+          writerVariant: job.writerChoice?.variant ?? undefined,
+          ignoreLimit: job.ignoreLimit,
           signal: controller.signal,
           settings,
         });
@@ -786,6 +815,9 @@ export function createGoalSpecJobRuntime({
         providerID: model.providerID,
         modelID: model.id,
         persistSessionGoal,
+        // The card's switch: a goal without its length limit keeps its
+        // objective whole.
+        ignoreLimit: job.ignoreLimit,
         // The writer wrote this objective, or the user chose their own text
         // over it: "rewrite every goal" leaves it alone, as in the UI. The
         // goal keeps as much as the goal length limit in Settings allows,
@@ -1116,7 +1148,7 @@ export function createGoalSpecJobRuntime({
       sendConfig,
       writerInput: parsed.writerInput,
       spec: null,
-      writer: describeWriter(settings, sendConfig),
+      writer: describeWriter(settings, sendConfig, null),
       error: null,
       failedStep: null,
       warning: null,
@@ -1124,6 +1156,9 @@ export function createGoalSpecJobRuntime({
       waiting: null,
       messageId: null,
       newSession: parsed.newSession,
+      // A job starts on the defaults; the card changes them for Write again and a send.
+      writerChoice: null,
+      ignoreLimit: false,
       outcome: null,
       attempt: 1,
       createdAt,
@@ -1144,10 +1179,12 @@ export function createGoalSpecJobRuntime({
     requireOpen(job);
     if (isComposerOnly(job)) throw httpError('this message is sent from the session\'s composer', 409);
     if (choice.kind === 'spec' && job.status !== 'ready') throw httpError('the goal spec is not ready', 409);
+    if (choice.ignoreLimit !== undefined) job.ignoreLimit = choice.ignoreLimit;
     return sendWhenFree(job, choice);
   };
 
-  const redo = async (jobId) => {
+  const redo = async (jobId, input = {}) => {
+    const choices = redoInputSchema.parse(input ?? {});
     await load();
     const job = requireJob(jobId);
     requireNotSending(job);
@@ -1156,12 +1193,14 @@ export function createGoalSpecJobRuntime({
     if (job.status === 'writing') throw httpError('the goal spec is still being written', 409);
     // Settings may have changed since the last write.
     const settings = readSettings();
+    if (choices.writerChoice !== undefined) job.writerChoice = choices.writerChoice;
+    if (choices.ignoreLimit !== undefined) job.ignoreLimit = choices.ignoreLimit;
     job.status = 'writing';
     job.attempt += 1;
     job.spec = null;
     job.error = null;
     job.failedStep = null;
-    job.writer = describeWriter(settings, job.sendConfig);
+    job.writer = describeWriter(settings, job.sendConfig, job.writerChoice);
     touch(job);
     const result = publish(job.sessionId, job);
     runWriter(job, settings);
@@ -1411,7 +1450,7 @@ export function registerGoalSpecJobRoutes(app, runtime) {
   }));
   app.post('/api/goals/spec-jobs', handle('Failed to start the goal writer', (req) => runtime.create(req.body)));
   app.post('/api/goals/spec-jobs/:jobId/send', handle('Failed to send the message', (req) => runtime.send(req.params.jobId, req.body)));
-  app.post('/api/goals/spec-jobs/:jobId/redo', handle('Failed to write the goal spec again', (req) => runtime.redo(req.params.jobId)));
+  app.post('/api/goals/spec-jobs/:jobId/redo', handle('Failed to write the goal spec again', (req) => runtime.redo(req.params.jobId, req.body)));
   app.post('/api/goals/spec-jobs/:jobId/edit', handle('Failed to take the message back', (req) => runtime.edit(req.params.jobId)));
   app.post('/api/goals/spec-jobs/:jobId/claim', handle('Failed to take the message to send', (req) => runtime.claim(req.params.jobId, req.body)));
   app.post('/api/goals/spec-jobs/:jobId/settle', handle('Failed to record the send', (req) => runtime.settle(req.params.jobId, req.body)));

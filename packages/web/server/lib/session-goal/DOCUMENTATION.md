@@ -157,7 +157,10 @@ progress check judges against. `spec-writer.js` owns it.
 - Rewrite all: with `sessionGoalRewriteAll` on, `createSessionGoal` runs every
   server-created objective (scheduled tasks, CLI `--goal`, the agent tool's
   `goalAction: set`) through the writer before fitting it. A failed rewrite
-  logs a warning and keeps the objective as written. `createSessionGoal`
+  logs a warning and keeps the objective as written. With `ignoreLimit` (a
+  goal writer job whose card switched the limit off) the objective is kept
+  whole up to the hard cap instead of being condensed to the goal length
+  limit, and the record says `ignoreObjectiveLimit: true`. `createSessionGoal`
   returns `{ goal, spec }`; scheduled tasks and the sessions route pass the
   spec to `buildGoalIntroText(tokenBudget, spec)`, whose reminder then
   carries it in an escaped `<goal-spec>` block. A slash command normally gets
@@ -182,9 +185,15 @@ persisted, revisioned, broadcast).
   `text` to deliver, `agentMention`, `attachments`, `context`); `sendConfig`
   is the composer's model, agent and effort when the job started, and
   `review`, `sendMode` and `tokenBudget` are the settings of that moment.
-  `writer` names who writes: `settings` (the picked writer model and its
-  effort), `session` (the session's model at its default) or `small-model` (a
-  session on Auto); after a write it names the model that answered. `outcome`
+  `writer` names who writes: `picked` (the model and effort picked on the
+  card for this spec), `settings` (the writer model picked in Settings and
+  its effort), `session` (the session's model at its default) or
+  `small-model` (a session on Auto); after a write it names the model that
+  answered. `writerChoice` is the card's pick (`{ providerID, modelID,
+  variant }`, null for the Settings default) and `ignoreLimit` the card's
+  switch that turns the goal length limit off for this spec and its goal. A
+  job starts with neither, Write again and a send set them, and a file from
+  before the fields reads as the defaults. `outcome`
   says how a sent job went out: `{ kind: 'spec', sendMode }` or `{ kind:
   'original', withGoal }`. `error` is why an open job stopped and
   `failedStep` the step it came from, `write` or `send`. A send of the
@@ -214,7 +223,9 @@ persisted, revisioned, broadcast).
   new job is `409`.
 - Writing: `writeGoalSpec` on the writer settings read when the write starts,
   with the job's text, writer input, the session model and the job's current
-  directory. A failure is `failed` with the reason and `failedStep: 'write'`.
+  directory, and the card's choices: the picked writer and effort win over
+  Settings (`writerProviderID`, `writerModelID`, `writerVariant`), and
+  `ignoreLimit` drops the length rule. A failure is `failed` with the reason and `failedStep: 'write'`.
   Every redo, send of the original, claim of the original, cancel and stop
   aborts the running write first, so an answer arriving after that is
   dropped.
@@ -228,7 +239,7 @@ persisted, revisioned, broadcast).
   (objective file and the goal record through `persistSessionGoal`, on the
   resolved model, `rewriteAll` off since the writer or the user settled the
   objective, and the goal length limit in Settings, the one the writer wrote
-  within). The session service saves its goal before the switch; here a
+  within, unless the job's `ignoreLimit` keeps the objective whole). The session service saves its goal before the switch; here a
   failed switch leaves no goal. Then come the instructions derived from the
   text and the goal reminder
   (`buildGoalIntroText`, carrying the spec only when the message went out as
@@ -321,8 +332,11 @@ persisted, revisioned, broadcast).
   `/api/goals` family): `GET` the snapshot `{ revision, jobs }`; `POST` start
   `{ sessionId, directory, trigger, review, sendMode, tokenBudget?,
   writerInput?, newSession?, message, sendConfig }`; `POST /:jobId/send` with `{ kind:
-  'spec', sendMode, spec }` (the spec as edited) or `{ kind: 'original' }`;
-  `POST /:jobId/redo`; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
+  'spec', sendMode, spec, ignoreLimit? }` (the spec as edited) or `{ kind:
+  'original', ignoreLimit? }`, `ignoreLimit` setting the job's switch for the
+  goal the send starts; `POST /:jobId/redo` with `{ writerChoice?, ignoreLimit?
+  }`, the card's choices for this write and the goal, a choice left out
+  keeping the job's; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
   }`; `POST /:jobId/settle` with `{ outcome, spec?, messageId?, error? }`; `DELETE
   /:jobId` dismisses a sent job (an open one is `409`). Mutations answer `{
   revision, job }`, and `edit` and `claim` add the full `message`; a send or
@@ -330,7 +344,7 @@ persisted, revisioned, broadcast).
   Refusals are `400` (an invalid body, a `tokenBudget` other than a positive
   integer or null, a `writerInput` other than `{ conversation?, openItems? }`
   strings, a `message.scheduledTask`, which only the server's scheduled sends
-  carry), `404` and `409`; a failed send is `502`.
+  carry, a `writerChoice` without a provider and model), `404` and `409`; a failed send is `502`.
 - Every change broadcasts `openchamber:goal-spec-job.updated` with `{
   revision, sessionId, job }` on the control stream (`job` is null once a sent
   job is removed). The revision is global and monotonic, as the queue's.
@@ -516,8 +530,9 @@ sees only that final turn, so the report is its evidence.
   this goal" under its more-options menu). On desktop it resizes from its
   corner; the mobile sheet does not.
 - `components/chat/GoalWriterPicker.tsx` — the writer model and effort in a
-  goal window. A pick applies to that window; Remember, or
-  `sessionGoalWriterRememberChoice`, saves it as the Settings default.
+  goal window and on the goal writer card. A pick applies to that window or
+  that spec; Remember, or `sessionGoalWriterRememberChoice`, saves it as the
+  Settings default.
 - Sidebar glyph next to the date in `SessionNodeItem`.
 - `components/sections/openchamber/SessionGoalCheckerField.tsx` — Settings →
   Chat → Goal: Jev or the small model checks progress
@@ -602,7 +617,17 @@ sees only that final turn, so the report is its evidence.
   message after the job's own one, found by `messageId`; while that message is
   not in the loaded transcript, or the job names none, a user message newer
   than the send. Its own message can reach the session after the job is marked
-  sent, so time alone would hide the card at once. Actions on an open job:
+  sent, so time alone would hide the card at once. Every open job shows, in
+  the same place whatever its state, the writer row (`GoalWriterPicker`,
+  starting on the job's pick, else the Settings default, else the session's
+  model; a session on Auto names none) and a more-options menu with "No
+  length limit for this goal". Both apply to this spec only: the store keeps
+  them per job (`choiceEdits`) until Write again hands them to the server,
+  which writes with them and keeps them on the job, and every send carries
+  the switch. The spec field takes any length: past the goal length limit
+  its counter turns to the warning color and the line kept under it says
+  saving condenses the spec; with the limit off the counter shows the length
+  alone and the line says the goal is saved whole. Actions on an open job:
   send in the default send mode or the
   other one, send the message as typed (also while writing, which stops the
   writer; an armed goal keeps the message as its objective, an automatic one
@@ -613,7 +638,8 @@ sees only that final turn, so the report is its evidence.
   context) says it waits for the user until it is queued or being sent.
   `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
   `sendMessage` with the full message assembled as a taken queued message
-  (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`),
+  (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`, with
+  the card's length limit switch as `ignoreLimit`),
   then `settle` with the outcome and the id of the user message the send
   created (`onMessageID` on the send), or with the reason when the send failed.
   A claim the server holds for the agent's turn (queue, the agent working)

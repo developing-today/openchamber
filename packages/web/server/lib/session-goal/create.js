@@ -1,4 +1,4 @@
-import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
+import { GOAL_OBJECTIVE_CHAR_LIMIT, GOAL_OBJECTIVE_HARD_CAP, writeObjective } from './objectives.js';
 import { readGoalWriterSettings, writeGoalSpec } from './spec-writer.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
@@ -75,6 +75,9 @@ export const createSessionGoal = async ({
   modelID,
   onWarning,
   persistSessionGoal,
+  // The user switched this goal's length limit off: its objective is kept
+  // whole, up to the hard cap, as the goal editor keeps it.
+  ignoreLimit = false,
   goalWriterSettings = readGoalWriterSettings(),
   writeSpec = writeGoalSpec,
 }) => {
@@ -89,14 +92,14 @@ export const createSessionGoal = async ({
   let spec = null;
   if (goalWriterSettings?.rewriteAll && requested) {
     try {
-      ({ spec } = await writeSpec({ request: requested, directory, providerID, modelID, settings: goalWriterSettings }));
+      ({ spec } = await writeSpec({ request: requested, directory, providerID, modelID, ignoreLimit, settings: goalWriterSettings }));
     } catch (error) {
       // The goal still runs on what the user wrote; a missing writer model
       // must not cost them the goal.
       warn('goal spec rewrite failed, keeping the objective as written', error);
     }
   }
-  const charLimit = goalWriterSettings?.charLimit ?? GOAL_OBJECTIVE_CHAR_LIMIT;
+  const charLimit = ignoreLimit ? GOAL_OBJECTIVE_HARD_CAP : (goalWriterSettings?.charLimit ?? GOAL_OBJECTIVE_CHAR_LIMIT);
   const objectiveText = await fitObjective({
     objective: spec ?? requested,
     charLimit,
@@ -123,7 +126,7 @@ export const createSessionGoal = async ({
     objectiveFile,
     // Stated outright: the store merges, so a flag left out would carry over
     // from the goal this one replaces.
-    ignoreObjectiveLimit: false,
+    ignoreObjectiveLimit: ignoreLimit,
     status: 'active',
     tokenBudget: tokenBudget || null,
     tokensUsed: 0,

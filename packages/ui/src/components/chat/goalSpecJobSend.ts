@@ -108,10 +108,12 @@ async function sendClaimed(job: GoalSpecJob, choice: GoalSpecJobChoice, message:
 
     // This send carries its goal. On the composer's shared arm it would go to
     // whichever held send consumes the arm first while OpenCode starts, and
-    // arming or disarming the target meanwhile would replace it.
+    // arming or disarming the target meanwhile would replace it. The card's
+    // length limit switch goes with it.
+    const ignoreLimit = choice.ignoreLimit === true;
     const goalArm = choice.kind === 'spec'
-        ? createGoalArm(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message' })
-        : createGoalArm(job.trigger === 'armed', null, { settled: true });
+        ? createGoalArm(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message', ignoreLimit })
+        : createGoalArm(job.trigger === 'armed', null, { settled: true, ignoreLimit });
     // The user message this send creates: a sent card hides once a user message follows it.
     let messageId: string | undefined;
     try {

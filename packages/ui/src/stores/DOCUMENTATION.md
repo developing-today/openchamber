@@ -463,7 +463,11 @@ history, as an accepted queued message does. `claimJob` and `editJob` return
 the full captured message with its files decoded (`toAttachedFile`);
 `claimJob` also names the claim and says whether the server holds it until
 the agent's turn is over. Spec text edited on a card stays in `specEdits`
-per job and write attempt, so a thread switch keeps it. A runtime switch
+per job and write attempt, so a thread switch keeps it. The writer and length
+limit chosen on a card stay in `choiceEdits` per job until `redoJob` sends
+them; the job the server answers holds them from then on
+(`goalSpecJobChoices` reads an edit, else the job's). Both leave with their
+job. A runtime switch
 clears the jobs and drops reads and answers started before it. VS Code never
 reads the route: it has no goal loop.
 

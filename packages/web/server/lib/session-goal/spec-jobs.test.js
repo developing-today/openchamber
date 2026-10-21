@@ -314,6 +314,68 @@ describe('goal writer jobs', () => {
     expect(statuses()).toEqual(['writing', 'ready', 'ready', 'sent']);
   });
 
+  // The card's choices for one spec: the writer model and effort, and the
+  // length limit switched off. They travel with Write again and with a send.
+  describe('choices made on the card', () => {
+    const PICKED = { providerID: 'google', modelID: 'gemini', variant: 'low' };
+
+    it('Write again writes with the picked writer and effort, without the limit when it is off, and names that writer', async () => {
+      const { runtime, writer } = createRuntime({ settings: { model: 'anthropic/claude', variant: 'high' } });
+      const created = await runtime.create(job());
+      writeAnswer(writer);
+      await runtime.whenIdle();
+      // A job starts on the defaults: the Settings writer and the limit on.
+      expect(created.job).toMatchObject({ writerChoice: null, ignoreLimit: false, writer: { source: 'settings', providerID: 'anthropic', modelID: 'claude', variant: 'high' } });
+      expect(writer.calls[0].input).toMatchObject({ ignoreLimit: false });
+      expect(writer.calls[0].input.writerProviderID).toBeUndefined();
+
+      const redone = await runtime.redo(created.job.id, { writerChoice: PICKED, ignoreLimit: true });
+
+      expect(redone.job).toMatchObject({ writerChoice: PICKED, ignoreLimit: true, writer: { source: 'picked', ...PICKED } });
+      expect(writer.calls[1].input).toMatchObject({ writerProviderID: 'google', writerModelID: 'gemini', writerVariant: 'low', ignoreLimit: true });
+    });
+
+    it('a send with the limit off saves the goal without it', async () => {
+      const { runtime, writer, goals } = createRuntime({ settings: { charLimit: 5_000 } });
+      const created = await runtime.create(job());
+      writeAnswer(writer);
+      await runtime.whenIdle();
+
+      await runtime.send(created.job.id, { kind: 'spec', sendMode: 'with-message', spec: SPEC, ignoreLimit: true });
+      await runtime.whenIdle();
+
+      expect(goals).toEqual([expect.objectContaining({ objective: SPEC, ignoreLimit: true })]);
+      expect(runtime.snapshot().jobs[0]).toMatchObject({ status: 'sent', ignoreLimit: true });
+    });
+
+    it('with review off, the spec Write again wrote goes out with the limit the card chose', async () => {
+      const { runtime, writer, goals } = createRuntime();
+      const created = await runtime.create(job({ review: false }));
+      writer.calls[0].reject(new Error('writer down'));
+      await runtime.whenIdle();
+
+      await runtime.redo(created.job.id, { writerChoice: null, ignoreLimit: true });
+      writeAnswer(writer, 1);
+      await runtime.whenIdle();
+
+      expect(goals).toEqual([expect.objectContaining({ objective: SPEC, ignoreLimit: true })]);
+    });
+
+    it('the redo route carries the choices, and refuses a writer it cannot read', async () => {
+      const { runtime, writer } = createRuntime();
+      const app = express();
+      app.use(express.json());
+      registerGoalSpecJobRoutes(app, runtime);
+      const created = await runtime.create(job());
+      writeAnswer(writer);
+      await runtime.whenIdle();
+
+      await request(app).post(`/api/goals/spec-jobs/${created.job.id}/redo`).send({ writerChoice: { providerID: 'google' } }).expect(400);
+      const redone = await request(app).post(`/api/goals/spec-jobs/${created.job.id}/redo`).send({ writerChoice: PICKED, ignoreLimit: true }).expect(200);
+      expect(redone.body.job).toMatchObject({ writerChoice: PICKED, ignoreLimit: true, writer: { source: 'picked' } });
+    });
+  });
+
   it('keeps as much of the goal as the goal length limit in Settings allows', async () => {
     // The writer writes within that limit; a goal saved at the default 5000
     // would be condensed again by the small model.
