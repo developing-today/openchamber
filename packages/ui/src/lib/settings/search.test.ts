@@ -188,4 +188,17 @@ describe('settings search', () => {
     });
     expect(results.some((result) => result.id === 'integrations.guests')).toBe(false);
   });
+
+  test('finds the project visibility switches everywhere but VS Code, whose project page has none', () => {
+    for (const isVSCode of [false, true]) {
+      const results = buildSettingsSearchResults({
+        query: 'visibility',
+        runtimeCtx: { ...runtimeCtx, isVSCode },
+        t,
+        getPageTitle: (page) => page,
+      });
+      const found = results.filter((result) => result.id.startsWith('projects.sidebar.')).map((result) => result.id).sort();
+      expect({ isVSCode, found }).toEqual({ isVSCode, found: isVSCode ? [] : ['projects.sidebar.all', 'projects.sidebar.work'] });
+    }
+  });
 });
