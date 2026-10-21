@@ -523,7 +523,9 @@ sees only that final turn, so the report is its evidence.
   (`DELETE`). Actions on an open job: send in the default send mode or the
   other one, send the message as typed (also while writing, which stops the
   writer; an armed goal keeps the message as its objective, an automatic one
-  goes without a goal), write again (ready or failed), and back to edit. A
+  goes without a goal), write again (ready, or after a failed write), try
+  again after a failed send of a job without a spec (the message as typed,
+  the only send such a job can have made), and back to edit. A
   message the server cannot send (`composerOnly`: attachments or attached
   context) says it waits for the user until it is queued or being sent.
   `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then

@@ -191,6 +191,17 @@ describe('GoalSpecJobCard', () => {
     expect(text()).not.toContain('The goal writer could not write a spec.');
   });
 
+  test('Try again after a failed send of the message as typed sends it again and writes no spec', async () => {
+    const failed = job({ status: 'failed', failedStep: 'send', error: 'OpenCode is not reachable' });
+    show(failed);
+    respond = () => Response.json({ revision: 2, job: failed });
+    await render();
+
+    await click('Try again');
+
+    expect(calls).toEqual([{ method: 'POST', path: '/api/goals/spec-jobs/job-1/send', body: { kind: 'original' } }]);
+  });
+
   test('back to edit hands the whole message to the session\'s composer and arms the goal again', async () => {
     show(job());
     respond = () => Response.json({

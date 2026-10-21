@@ -136,6 +136,9 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
   // failed at the send. A server that does not name the step failed a send
   // only from a written spec.
   const sendFailed = job.failedStep ? job.failedStep === 'send' : ready;
+  // Without a spec, the send that failed was of the message as typed, so Try
+  // again sends it again; after a failed write it writes again.
+  const retry = !ready && sendFailed ? () => send({ kind: 'original' }) : redo;
   const sendOriginalLabel = job.trigger === 'armed'
     ? t('chat.goal.writer.action.useMessage')
     : t('chat.goal.writer.action.sendWithoutGoal');
@@ -211,7 +214,7 @@ function GoalSpecJobCardBody({ job }: { job: GoalSpecJob }) {
           {t('chat.goal.writer.action.backToEdit')}
         </Button>
         {!writing ? (
-          <Button type="button" variant="ghost" size="sm" onClick={redo} disabled={locked}>
+          <Button type="button" variant="ghost" size="sm" onClick={retry} disabled={locked}>
             <Icon name="restart" className="size-3.5" aria-hidden="true" />
             {ready ? t('chat.goal.writer.action.rewrite') : t('chat.goal.writer.action.retry')}
           </Button>
