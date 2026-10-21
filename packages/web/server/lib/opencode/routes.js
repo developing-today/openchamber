@@ -56,16 +56,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     const normalized = String(value || '').replace(/^v/, '').split('+')[0];
     const prereleaseIndex = normalized.indexOf('-');
     const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
-    const parts = core.split('.').map((part) => {
-      const parsed = Number.parseInt(part || '0', 10);
-      return Number.isFinite(parsed) ? parsed : 0;
-    });
-    return { parts, prerelease: prereleaseIndex >= 0 };
+    const rawParts = core.split('.');
+    // Strict like versionParts in packages/ui mobileReleaseUpdate: parseInt
+    // alone accepts '1junk' as 1 and '' as 0, so a malformed version would
+    // compare as a real one and could claim an upgrade that is not there.
+    if (!core || rawParts.some((part) => !/^\d+$/.test(part))) return null;
+    return { parts: rawParts.map((part) => Number(part)), prerelease: prereleaseIndex >= 0 };
   };
 
   const compareVersions = (left, right) => {
     const a = parseVersionForComparison(left);
     const b = parseVersionForComparison(right);
+    // An unparseable version never claims an update.
+    if (!a || !b) return 0;
     const length = Math.max(a.parts.length, b.parts.length);
     for (let index = 0; index < length; index += 1) {
       const diff = (a.parts[index] || 0) - (b.parts[index] || 0);

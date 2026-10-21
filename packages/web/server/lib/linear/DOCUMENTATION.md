@@ -9,7 +9,7 @@ VS Code omits Linear (`RuntimeAPIs.linear` is optional). Hide Linear UI when the
 ## Entrypoints and structure
 
 - `packages/web/server/lib/linear/index.js`: public server entrypoint. `routes.js` loads it lazily with `await import('./index.js')`.
-- `packages/web/server/lib/linear/routes.js`: Express registration for the public callback, `/api/linear/auth/*`, `/api/linear/issues/*`, `/api/linear/mapping`, and `/api/linear/session-status`.
+- `packages/web/server/lib/linear/routes.js`: Express registration for the public callback, `/api/linear/auth/*`, `/api/linear/issues/*`, `/api/linear/mapping`, and `/api/linear/session-status`. It returns the operations behind the status, workspace, disconnect, mapping and preference routes, which the `openchamber` agent tool's `linear.*` actions run (`../openchamber-control/integration-service-actions.js`).
 - `packages/web/server/lib/linear/auth.js`: auth file, client id, scopes, redirect URI.
 - `packages/web/server/lib/linear/oauth.js`: authorization-code + PKCE S256, public callback broker handoff, refresh, revoke.
 - `packages/web/server/lib/linear/client.js`: GraphQL helper, viewer/organization lookup, and access-token refresh. GraphQL errors prefer `extensions.userPresentableMessage` / validation constraints over the generic `Argument Validation Error` label. User-facing Linear errors set `LinearApiError.userError`. Requests send `public-file-urls-expire-in: 3600` so file URLs in issue descriptions and comments are temporarily readable in the panel.

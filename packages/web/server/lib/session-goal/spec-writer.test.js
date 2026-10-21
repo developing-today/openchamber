@@ -53,15 +53,18 @@ describe('normalizeGoalSpec', () => {
 });
 
 describe('resolveGoalWriterModel', () => {
-  it('prefers the configured writer model, then the session model', () => {
-    expect(resolveGoalWriterModel({ configured: 'anthropic/claude', providerID: 'openai', modelID: 'gpt-5.5' })).toBe('anthropic/claude');
-    expect(resolveGoalWriterModel({ configured: undefined, providerID: 'openai', modelID: 'gpt-5.5' })).toBe('openai/gpt-5.5');
-    expect(resolveGoalWriterModel({ configured: 'no-slash', providerID: 'openai', modelID: 'gpt-5.5' })).toBe('openai/gpt-5.5');
+  it('prefers a model picked for this spec, then the configured writer model, then the session model', () => {
+    expect(resolveGoalWriterModel({ picked: { providerID: 'google', modelID: 'gemini', variant: 'low' }, configured: 'anthropic/claude', configuredVariant: 'high', providerID: 'openai', modelID: 'gpt-5.5' }))
+      .toEqual({ model: 'google/gemini', variant: 'low' });
+    expect(resolveGoalWriterModel({ configured: 'anthropic/claude', configuredVariant: 'high', providerID: 'openai', modelID: 'gpt-5.5' }))
+      .toEqual({ model: 'anthropic/claude', variant: 'high' });
+    expect(resolveGoalWriterModel({ configured: undefined, providerID: 'openai', modelID: 'gpt-5.5' })).toEqual({ model: 'openai/gpt-5.5', variant: undefined });
+    expect(resolveGoalWriterModel({ configured: 'no-slash', providerID: 'openai', modelID: 'gpt-5.5' })).toEqual({ model: 'openai/gpt-5.5', variant: undefined });
   });
 
   it('leaves the choice to the small-model chain when nothing is known', () => {
-    expect(resolveGoalWriterModel({ configured: '', providerID: 'openai', modelID: '' })).toBeUndefined();
-    expect(resolveGoalWriterModel({})).toBeUndefined();
+    expect(resolveGoalWriterModel({ configured: '', providerID: 'openai', modelID: '' })).toEqual({ model: undefined, variant: undefined });
+    expect(resolveGoalWriterModel({})).toEqual({ model: undefined, variant: undefined });
   });
 });
 
@@ -77,7 +80,7 @@ describe('writeGoalSpec', () => {
       generate,
     });
 
-    expect(result).toEqual({ spec: '## Objective\nShip it.', providerID: 'anthropic', modelID: 'claude' });
+    expect(result).toEqual({ spec: '## Objective\nShip it.', providerID: 'anthropic', modelID: 'claude', variant: null });
     expect(generate).toHaveBeenCalledWith(expect.objectContaining({
       prompt: '<request>\nShip it\n</request>',
       system: GOAL_SPEC_SYSTEM_PROMPT,
@@ -88,6 +91,34 @@ describe('writeGoalSpec', () => {
       maxOutputTokens: 4000,
       timeoutMs: 120_000,
     }));
+  });
+
+  it('writes on the model and effort picked for this spec, over the Settings writer model', async () => {
+    const generate = vi.fn(async () => ({ text: 'spec', providerID: 'google', modelID: 'gemini' }));
+    const result = await writeGoalSpec({
+      request: 'Ship it',
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+      writerProviderID: 'google',
+      writerModelID: 'gemini',
+      writerVariant: 'low',
+      settings: { model: 'anthropic/claude', variant: 'high', rewriteAll: false },
+      generate,
+    });
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ model: 'google/gemini', variant: 'low' }));
+    expect(result.variant).toBe('low');
+  });
+
+  it('sizes the spec to the limit from Settings, and drops the length line when the limit is ignored', async () => {
+    const generate = vi.fn(async () => ({ text: 'z'.repeat(30_000), providerID: 'openai', modelID: 'gpt-5.5' }));
+    const limited = await writeGoalSpec({ request: 'Ship it', settings: { charLimit: 20_000 }, generate });
+    expect(generate.mock.calls[0][0].system).toContain('Stay under 18000 characters.');
+    expect(generate.mock.calls[0][0].maxOutputTokens).toBe(6667);
+    expect(limited.spec).toHaveLength(20_000);
+
+    const unlimited = await writeGoalSpec({ request: 'Ship it', ignoreLimit: true, settings: { charLimit: 20_000 }, generate });
+    expect(generate.mock.calls[1][0].system).not.toContain('Stay under');
+    expect(unlimited.spec).toHaveLength(30_000);
   });
 
   it('answers 502 when the model returns nothing usable', async () => {

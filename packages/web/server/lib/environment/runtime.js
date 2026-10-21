@@ -4,6 +4,7 @@ import path from 'node:path';
 import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
 import { isUserAction } from './refresh-scope.js';
 import { overlayEnvironment, parseEnvironmentOutput } from './variables.js';
+import { createVaultResolver } from './vault.js';
 
 /**
  * Which environment variables each process OpenChamber starts receives on top
@@ -34,6 +35,11 @@ import { overlayEnvironment, parseEnvironmentOutput } from './variables.js';
  * background. A failed run applies nothing from the command and is reported
  * through `projectStatus`, never as a silent success. Command output and its error
  * text are never logged or returned: they may hold secrets.
+ *
+ * A value that is a vault reference (`op://…`, see `vault.js`) is read when a
+ * process needs it: the managed OpenCode reads it at every launch, and a
+ * directory's processes read it on a user action and otherwise use the last
+ * value read. A reference that cannot be read leaves its variable out.
  */
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
@@ -101,6 +107,7 @@ export const createEnvironmentRuntime = ({
   commandTimeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
   commandTtlMs = DEFAULT_COMMAND_TTL_MS,
   projectLookupTtlMs = DEFAULT_PROJECT_LOOKUP_TTL_MS,
+  vault = createVaultResolver({ env: commandBaseEnv, logger }),
 }) => {
   // directory -> { at, target }
   const targetCache = new Map();
@@ -258,7 +265,7 @@ export const createEnvironmentRuntime = ({
       // The user's variables still apply when the project part cannot be resolved.
       warnOnce(`[environment] project variables not applied: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
-    const variables = { ...userVariables, ...projectVariables };
+    const variables = await vault.resolve({ ...userVariables, ...projectVariables }, { refresh });
     return Object.keys(variables).length > 0 ? variables : null;
   };
 
@@ -273,6 +280,13 @@ export const createEnvironmentRuntime = ({
     }
     return { ...serviceVariables, ...readUserVariables() };
   };
+
+  /**
+   * `forOpenCode` with vault references read, for the launch itself. The
+   * unresolved form stays the launch fingerprint, so no secret is hashed or
+   * stored, and a changed reference still restarts OpenCode.
+   */
+  const forOpenCodeResolved = () => vault.resolve(forOpenCode(), { refresh: true });
 
   /** The last outcome of the project's environment command, or null before any run. */
   const projectStatus = (projectId) => statuses.get(projectId) ?? null;
@@ -304,5 +318,5 @@ export const createEnvironmentRuntime = ({
     return variables ? overlayEnvironment(env, variables) : env;
   };
 
-  return { forDirectory, applyToDirectory, forOpenCode, projectStatus, invalidateProject, reloadProject };
+  return { forDirectory, applyToDirectory, forOpenCode, forOpenCodeResolved, vaultStatus: vault.status, projectStatus, invalidateProject, reloadProject };
 };

@@ -1,11 +1,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
 import { IntegrationCatalogCard } from '@/components/sections/integrations/IntegrationCatalogCard';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
+import { VAULT_ACCOUNT_SOURCE_LABEL } from '@/lib/source-control/identity';
 import { getManagedCredentialSourceLabelKey } from '@/lib/source-control/identity';
 import type {
   SourceControlCapabilities,
@@ -198,6 +200,8 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
       // The server says whether the token itself was refused; anything else is
       // a failure the person cannot fix by editing what they pasted.
       if (error instanceof Error && 'code' in error && error.code === 'INVALID_TOKEN') setTokenRejected(true);
+      // A 1Password reference that could not be read is fixed in 1Password or the reference.
+      else if (error instanceof Error && 'code' in error && error.code === 'VAULT_READ_FAILED') toast.error(t('settings.vault.error.readFailed'));
       else setOperationFailed(true);
     } finally {
       if (isCurrentRuntime()) setBusy(false);
@@ -310,7 +314,7 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
             accounts={accounts}
             avatarAlt={(username) => username}
             currentLabel={t('settings.sourceControl.accounts.inUse')}
-            sourceLabel={(account) => t(account.source === 'cli' ? 'settings.gitlab.cli.label' : getManagedCredentialSourceLabelKey(account.source))}
+            sourceLabel={(account) => (account.tokenReference ? VAULT_ACCOUNT_SOURCE_LABEL : t(account.source === 'cli' ? 'settings.gitlab.cli.label' : getManagedCredentialSourceLabelKey(account.source)))}
             statusLabel={(account) => account.status === 'valid'
               ? null
               : t('settings.sourceControl.accounts.needsAuthentication')}
@@ -366,7 +370,7 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
             />
           )}
           {capabilities?.authenticationMethods.pat.available && (
-            <SettingsFieldRow label={t('settings.gitlab.token.label')} info={t('settings.gitlab.token.info')}>
+            <SettingsFieldRow label={t('settings.gitlab.token.label')} info={t('settings.vault.gitlab.tokenInfo')}>
               <div className={`${SETTINGS_CONTROL_CLUSTER_CLASS} flex flex-col gap-2 @xl:flex-row @xl:items-center`}>
                 <Input
                   className="h-8 w-full min-w-0 rounded-md"

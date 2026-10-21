@@ -1,15 +1,18 @@
 import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-actions';
+import { opencodeClient } from '@/lib/opencode/client';
 import type { Metadata } from '@/lib/opencode/model';
 import { distillGoalObjective } from '@/lib/smallModel';
-import { requestGoalSpec } from '@/lib/goalWriter';
+import { requestGoalSpec, type GoalWriterChoice } from '@/lib/goalWriter';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { deleteGoalObjectiveFile, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
+import { SESSION_GOAL_CHAR_LIMIT_MAX } from '@/lib/sessionGoalLimits';
 import {
-  SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
+  getSessionGoal,
   type SessionGoalPayload,
   type SessionGoalStatus,
 } from '@/lib/sessionGoalMetadata';
+import { useUIStore } from '@/stores/useUIStore';
 
 const isRecord = (value: unknown): value is Metadata =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -40,16 +43,29 @@ export interface SetSessionGoalInput {
   tokenBudget: number | null;
   /**
    * Run the objective through the goal writer first ("rewrite every goal").
-   * The model is the session's, which the writer uses unless Settings names
-   * one; null keeps the objective as written.
+   * `writer` is a model and effort picked for this goal and wins over
+   * Settings; otherwise the writer uses the Settings model, else the
+   * session's (`providerID`/`modelID`). Null keeps the objective as written.
    */
-  rewrite?: { providerID?: string | null; modelID?: string | null } | null;
+  rewrite?: { providerID?: string | null; modelID?: string | null; writer?: GoalWriterChoice | null } | null;
+  /** Keep an objective longer than the limit whole instead of condensing it. */
+  ignoreLimit?: boolean;
+  /**
+   * Start an idle session's next turn right away (`statusReason: 'resumed'`).
+   * False when a message sent with the change starts that turn, so the check
+   * does not first judge the last reply against the new objective.
+   */
+  kickoff?: boolean;
+  /** Cancels the save up to the moment anything is written. */
+  signal?: AbortSignal;
 }
 
-/**
- * Create a new goal (fresh id resets accounting) or edit the existing one
- * (id and usage counters preserved).
- */
+export type SetSessionGoalResult =
+  /** `rewrittenSpec` is the spec the goal writer made the objective, or null when it is the text as given. */
+  | { outcome: 'saved'; rewrittenSpec: string | null }
+  /** The goal changed elsewhere after this edit began (completed, paused, replaced); nothing was saved. */
+  | { outcome: 'changed' };
+
 // Any goal source can exceed the objective limit (huge plans, pasted specs,
 // long composer prompts). The working agent received the full text in chat;
 // only the AUDITOR is bound by the limit — so oversized objectives are
@@ -58,15 +74,17 @@ export interface SetSessionGoalInput {
 // acceptance criteria (bottom), sacrificing the middle.
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full text was delivered in the chat message …]\n\n';
 
-const fitObjective = async (raw: string): Promise<string> => {
-  if (raw.length <= SESSION_GOAL_OBJECTIVE_CHAR_LIMIT) {
+const fitObjective = async (raw: string, ignoreLimit: boolean): Promise<string> => {
+  const limit = ignoreLimit ? SESSION_GOAL_CHAR_LIMIT_MAX : useUIStore.getState().sessionGoalObjectiveCharLimit;
+  if (raw.length <= limit) {
     return raw;
   }
-  const distilled = await distillGoalObjective(raw);
+  if (ignoreLimit) return raw.slice(0, limit);
+  const distilled = await distillGoalObjective(raw, limit);
   if (distilled) {
-    return distilled.slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT);
+    return distilled.slice(0, limit);
   }
-  const half = Math.max(0, Math.floor((SESSION_GOAL_OBJECTIVE_CHAR_LIMIT - TRIM_MARKER.length) / 2));
+  const half = Math.max(0, Math.floor((limit - TRIM_MARKER.length) / 2));
   const dictionary = useI18nStore.getState().dictionary;
   toast.error(formatMessage(dictionary, 'chat.goal.toast.distillFallback'));
   return `${raw.slice(0, half)}${TRIM_MARKER}${raw.slice(-half)}`;
@@ -76,9 +94,20 @@ const rewriteObjective = async (
   raw: string,
   directory: string | undefined,
   model: NonNullable<SetSessionGoalInput['rewrite']>,
+  ignoreLimit: boolean,
+  signal: AbortSignal | undefined,
 ): Promise<string | null> => {
-  const written = await requestGoalSpec({ request: raw, directory, providerID: model.providerID, modelID: model.modelID });
+  const written = await requestGoalSpec({
+    request: raw,
+    directory,
+    providerID: model.providerID,
+    modelID: model.modelID,
+    writer: model.writer ?? null,
+    ignoreLimit,
+    signal,
+  });
   if (written.ok) return written.spec;
+  signal?.throwIfAborted();
   // The goal still starts: the user's own text is a valid objective, and the
   // toast says it was not rewritten.
   const dictionary = useI18nStore.getState().dictionary;
@@ -86,47 +115,60 @@ const rewriteObjective = async (
   return null;
 };
 
+/** Whether the stored goal is still the one an edit started from. */
+const isSameGoal = (current: { id?: unknown; status?: unknown; updatedAt?: unknown } | null, existing: SessionGoalPayload): boolean => (
+  current !== null
+  && current.id === existing.id
+  && current.status === existing.status
+  && current.updatedAt === existing.updatedAt
+);
+
 /**
- * `rewrittenSpec` is the spec the goal writer made the objective, or null
- * when the objective is the text as given.
+ * The goal record a save writes: the edited goal in place (id and usage kept,
+ * reactivated, stale audit state cleared), a new goal, or `changed` when the
+ * stored goal is no longer the one an edit started from.
  */
-export async function setSessionGoal(
-  sessionId: string,
-  directory: string | undefined,
-  input: SetSessionGoalInput,
-  existing: SessionGoalPayload | null,
-): Promise<{ rewrittenSpec: string | null }> {
-  const rawObjective = input.objective.trim();
-  if (!rawObjective) {
-    throw new Error('Goal objective must not be empty');
-  }
-  const rewrittenSpec = input.rewrite ? await rewriteObjective(rawObjective, directory, input.rewrite) : null;
-  const objective = await fitObjective(rewrittenSpec ?? rawObjective);
-  const tokenBudget = typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0
-    ? Math.floor(input.tokenBudget)
-    : null;
-  const objectiveFile = await writeGoalObjectiveFile(sessionId, objective);
-  const now = Date.now();
-  await writeGoal(sessionId, directory, (currentGoal): Metadata => {
-    if (existing && currentGoal && currentGoal.id === existing.id && existing.status !== 'complete') {
-      // Edit in place: keep accounting, reactivate, clear stale audit state.
-      return {
+export const nextGoalRecord = (input: {
+  currentGoal: Metadata | null;
+  /** The goal an edit started from; null, or a completed goal, creates a new one. */
+  existing: SessionGoalPayload | null;
+  objective: string;
+  objectiveFile: boolean;
+  ignoreLimit: boolean;
+  tokenBudget: number | null;
+  /** `resumed` starts an idle session's next turn at once. */
+  kickoff: boolean;
+  now: number;
+  newId: string;
+}): { changed: true } | { changed: false; record: Metadata } => {
+  const { currentGoal, existing, now } = input;
+  if (existing && existing.status !== 'complete') {
+    if (!isSameGoal(currentGoal, existing)) return { changed: true };
+    return {
+      changed: false,
+      record: {
         ...currentGoal,
-        objective: objectiveFile ? '' : objective,
-        objectiveFile,
-        tokenBudget,
+        objective: input.objective,
+        objectiveFile: input.objectiveFile,
+        ignoreObjectiveLimit: input.ignoreLimit,
+        tokenBudget: input.tokenBudget,
         status: 'active',
-        statusReason: 'resumed',
+        statusReason: input.kickoff ? 'resumed' : '',
         blockedStreak: 0,
         updatedAt: now,
-      };
-    }
-    return {
-      id: createGoalId(),
-      objective: objectiveFile ? '' : objective,
-      objectiveFile,
+      },
+    };
+  }
+  return {
+    changed: false,
+    record: {
+      id: input.newId,
+      objective: input.objective,
+      objectiveFile: input.objectiveFile,
+      // Stated outright: a field left out would carry over from the goal this one replaces.
+      ignoreObjectiveLimit: input.ignoreLimit,
       status: 'active',
-      tokenBudget,
+      tokenBudget: input.tokenBudget,
       tokensUsed: 0,
       turnsUsed: 0,
       blockedStreak: 0,
@@ -135,9 +177,77 @@ export async function setSessionGoal(
       lastAccountedMessageID: '',
       createdAt: now,
       updatedAt: now,
-    };
+    },
+  };
+};
+
+/**
+ * Create a new goal (fresh id resets accounting) or edit the existing one
+ * (id and usage counters preserved).
+ *
+ * An edit is saved only over the goal it started from: a rewrite can take
+ * minutes, and in that time the check may complete the goal, the user may
+ * pause it, or another window may replace it. Then nothing is written and the
+ * result says so. The stored goal is read before the objective file is
+ * written and again inside the metadata write; between those two a change
+ * made elsewhere can still lose its objective file to this one, a window of
+ * one request.
+ */
+export async function setSessionGoal(
+  sessionId: string,
+  directory: string | undefined,
+  input: SetSessionGoalInput,
+  existing: SessionGoalPayload | null,
+): Promise<SetSessionGoalResult> {
+  const rawObjective = input.objective.trim();
+  if (!rawObjective) {
+    throw new Error('Goal objective must not be empty');
+  }
+  const ignoreLimit = input.ignoreLimit === true;
+  const { signal } = input;
+  const rewrittenSpec = input.rewrite ? await rewriteObjective(rawObjective, directory, input.rewrite, ignoreLimit, signal) : null;
+  signal?.throwIfAborted();
+  const objective = await fitObjective(rewrittenSpec ?? rawObjective, ignoreLimit);
+  signal?.throwIfAborted();
+  const tokenBudget = typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0
+    ? Math.floor(input.tokenBudget)
+    : null;
+  const editing = existing !== null && existing.status !== 'complete';
+  if (editing && !isSameGoal(getSessionGoal(await opencodeClient.getSession(sessionId, directory)), existing)) {
+    return { outcome: 'changed' };
+  }
+  signal?.throwIfAborted();
+  const fileWrite = await writeGoalObjectiveFile(sessionId, objective);
+  if (fileWrite.saved && fileWrite.truncated) {
+    const dictionary = useI18nStore.getState().dictionary;
+    toast.error(formatMessage(dictionary, 'chat.goal.toast.serverTruncated'));
+  }
+  const objectiveFile = fileWrite.saved;
+  // Inline (the objective file failed) the text rides every session event,
+  // so it stays within the limit even when the goal ignores it.
+  const inline = objectiveFile ? '' : objective.slice(0, useUIStore.getState().sessionGoalObjectiveCharLimit);
+  const now = Date.now();
+  const newId = createGoalId();
+  let changed = false;
+  await writeGoal(sessionId, directory, (currentGoal) => {
+    const next = nextGoalRecord({
+      currentGoal,
+      existing,
+      objective: inline,
+      objectiveFile,
+      ignoreLimit,
+      tokenBudget,
+      kickoff: input.kickoff !== false,
+      now,
+      newId,
+    });
+    if (next.changed) {
+      changed = true;
+      return currentGoal;
+    }
+    return next.record;
   });
-  return { rewrittenSpec };
+  return changed ? { outcome: 'changed' } : { outcome: 'saved', rewrittenSpec };
 }
 
 export async function setSessionGoalStatus(

@@ -190,22 +190,7 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       return sendBindingError(res, error);
     }
   });
-  app.get('/api/source-control/binding', async (req, res) => {
-    try {
-      res.set('Cache-Control', 'no-store');
-      return res.json(await bindingService.get(resolveDirectoryQuery(req.query?.directory)));
-    } catch (error) {
-      return sendBindingError(res, error);
-    }
-  });
-  app.post('/api/source-control/binding/provider', async (req, res) => {
-    try {
-      const result = await bindingService.mutateProvider(req.body ?? {});
-      return res.json(bindingService.present ? await bindingService.present(result) : result);
-    } catch (error) {
-      return sendBindingError(res, error);
-    }
-  });
+  const presentBinding = async (result) => (bindingService.present ? bindingService.present(result) : result);
   // A remote grant decides how the repository's own `.git/config` pushes
   // and pulls, so every change to one is followed there.
   // The binding is already committed when `.git/config` is written, so a
@@ -221,46 +206,57 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       return false;
     }
   };
-  const sendTransportConfigPartial = (res) => res.status(500).json({
-    error: 'The repository binding was saved, but its Git configuration could not be updated. Git in a terminal still uses the previous credentials; retry to apply it.',
+  const transportConfigPartial = () => Object.assign(new Error('The repository binding was saved, but its Git configuration could not be updated. Git in a terminal still uses the previous credentials; retry to apply it.'), {
     code: 'SOURCE_CONTROL_TRANSPORT_CONFIG_PARTIAL',
+    status: 500,
     committed: true,
   });
-  app.post('/api/source-control/binding/transport', async (req, res) => {
+  const withTransportSync = (operation, { present = true } = {}) => async (intent) => {
+    const result = await operation(intent);
+    if (!await afterTransportChange(intent?.directory, result)) throw transportConfigPartial();
+    return present ? presentBinding(result) : result;
+  };
+  /**
+   * The repository binding reads and narrow mutations, shared by the routes
+   * below and the `openchamber` agent tool
+   * (../openchamber-control/integration-service-actions.js). Each takes the
+   * same intent body its route takes.
+   */
+  const bindingOperations = Object.freeze({
+    read: (directory) => bindingService.get(directory),
+    setProvider: async (intent) => presentBinding(await bindingService.mutateProvider(intent)),
+    setTransport: withTransportSync((intent) => bindingService.configureTransportBinding(intent)),
+    removeTransport: withTransportSync((intent) => bindingService.removeTransportBinding(intent)),
+    reset: withTransportSync((intent) => bindingService.resetRepositoryBinding(intent), { present: false }),
+    setAuxiliary: async (intent) => presentBinding(await bindingService.configureAuxiliaryBinding(intent)),
+  });
+  const sendBindingOperationError = (res, error) => (error?.code === 'SOURCE_CONTROL_TRANSPORT_CONFIG_PARTIAL'
+    ? res.status(500).json({ error: error.message, code: error.code, committed: true })
+    : sendBindingError(res, error));
+  app.get('/api/source-control/binding', async (req, res) => {
     try {
-      const result = await bindingService.configureTransportBinding(req.body ?? {});
-      if (!await afterTransportChange(req.body?.directory, result)) return sendTransportConfigPartial(res);
-      return res.json(bindingService.present ? await bindingService.present(result) : result);
+      res.set('Cache-Control', 'no-store');
+      return res.json(await bindingOperations.read(resolveDirectoryQuery(req.query?.directory)));
     } catch (error) {
       return sendBindingError(res, error);
     }
   });
-  app.post('/api/source-control/binding/transport/remove', async (req, res) => {
-    try {
-      const result = await bindingService.removeTransportBinding(req.body ?? {});
-      if (!await afterTransportChange(req.body?.directory, result)) return sendTransportConfigPartial(res);
-      return res.json(bindingService.present ? await bindingService.present(result) : result);
-    } catch (error) {
-      return sendBindingError(res, error);
-    }
-  });
-  app.post('/api/source-control/binding/reset', async (req, res) => {
-    try {
-      const result = await bindingService.resetRepositoryBinding(req.body ?? {});
-      if (!await afterTransportChange(req.body?.directory, result)) return sendTransportConfigPartial(res);
-      return res.json(result);
-    } catch (error) {
-      return sendBindingError(res, error);
-    }
-  });
-  app.post('/api/source-control/binding/auxiliary', async (req, res) => {
-    try {
-      const result = await bindingService.configureAuxiliaryBinding(req.body ?? {});
-      return res.json(bindingService.present ? await bindingService.present(result) : result);
-    } catch (error) {
-      return sendBindingError(res, error);
-    }
-  });
+  const bindingRoutes = [
+    ['/api/source-control/binding/provider', bindingOperations.setProvider],
+    ['/api/source-control/binding/transport', bindingOperations.setTransport],
+    ['/api/source-control/binding/transport/remove', bindingOperations.removeTransport],
+    ['/api/source-control/binding/reset', bindingOperations.reset],
+    ['/api/source-control/binding/auxiliary', bindingOperations.setAuxiliary],
+  ];
+  for (const [routePath, operation] of bindingRoutes) {
+    app.post(routePath, async (req, res) => {
+      try {
+        return res.json(await operation(req.body ?? {}));
+      } catch (error) {
+        return sendBindingOperationError(res, error);
+      }
+    });
+  }
   // Bindings left on a gone account before connected accounts took them over
   // are repaired once at start; repeating it changes nothing.
   void (async () => {
@@ -278,6 +274,9 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
 
   return Object.freeze({
     ...bindingService,
+    bindingOperations,
+    /** Account operations of each provider, shared with the `openchamber` agent tool. */
+    accountOperations: Object.freeze({ github: github.accounts, gitlab: gitlab.accounts }),
     backfillConnectedIdentities,
     // GitLab merge request reads for the comparison view and walkthroughs; the
     // caller passes a read context it has already validated.

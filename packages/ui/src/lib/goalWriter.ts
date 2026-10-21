@@ -2,22 +2,29 @@ import { z } from 'zod';
 import type { Message, Part } from '@/lib/opencode/model';
 import { excerptMarkdown, formatMessageText } from '@/lib/messages/messageMarkdown';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import type { SessionGoalAutoCreate, SessionGoalWriterSendMode } from '@/stores/useUIStore';
 
-// The goal writer: a model turns a message into a goal spec of at most
-// SESSION_GOAL_OBJECTIVE_CHAR_LIMIT characters. The server owns the prompt and
+// The goal writer: a model turns a message into a goal spec within the goal
+// length limit (Settings). The server owns the prompt, the limit and
 // the model choice (`POST /api/goals/spec`, see
 // packages/web/server/lib/session-goal/DOCUMENTATION.md); this module asks for
 // a spec, decides when the composer asks, and shapes the context it sends.
 
 export type GoalSpecResult =
-  | { ok: true; spec: string; providerID: string; modelID: string }
+  | { ok: true; spec: string; providerID: string; modelID: string; variant: string | null }
   | { ok: false; message: string };
+
+/** A writer model and effort chosen in a goal window; it wins over the Settings writer model. */
+export interface GoalWriterChoice {
+  providerID: string;
+  modelID: string;
+  /** Null is the model's default effort. */
+  variant: string | null;
+}
 
 /** How a send that went through the goal writer carries its goal. */
 export type GoalSubmitChoice =
-  | { kind: 'spec'; spec: string; sendMode: SessionGoalWriterSendMode }
+  | { kind: 'spec'; spec: string; sendMode: SessionGoalWriterSendMode; ignoreLimit: boolean }
   /** The typed message is the objective, as it is without the writer. */
   | { kind: 'unchanged' }
   /** No goal: the message goes out as an ordinary one. */
@@ -39,6 +46,8 @@ const GoalSpecResponseSchema = z.object({
   spec: z.string().trim().min(1),
   providerID: z.string(),
   modelID: z.string(),
+  // Servers before 2026-10 do not report it.
+  variant: z.string().nullable().optional().catch(null),
 });
 
 const GoalSpecErrorSchema = z.object({ error: z.string().min(1) });
@@ -53,6 +62,9 @@ export interface GoalSpecRequest {
   /** The session's model; the server uses it unless Settings names a writer model. */
   providerID?: string | null;
   modelID?: string | null;
+  writer?: GoalWriterChoice | null;
+  /** Write without the goal length limit. */
+  ignoreLimit?: boolean;
   signal?: AbortSignal;
 }
 
@@ -64,6 +76,10 @@ interface GoalSpecRequestBody {
   directory?: string;
   providerID?: string;
   modelID?: string;
+  writerProviderID?: string;
+  writerModelID?: string;
+  writerVariant?: string;
+  ignoreLimit?: boolean;
 }
 
 /** Ask the server for a goal spec. Never throws: a failure comes back with its reason. */
@@ -76,6 +92,12 @@ export async function requestGoalSpec(input: GoalSpecRequest): Promise<GoalSpecR
   if (directory) body.directory = directory;
   if (input.providerID) body.providerID = input.providerID;
   if (input.modelID) body.modelID = input.modelID;
+  if (input.writer) {
+    body.writerProviderID = input.writer.providerID;
+    body.writerModelID = input.writer.modelID;
+    if (input.writer.variant) body.writerVariant = input.writer.variant;
+  }
+  if (input.ignoreLimit) body.ignoreLimit = true;
   try {
     const response = await runtimeFetch('/api/goals/spec', {
       method: 'POST',
@@ -93,9 +115,10 @@ export async function requestGoalSpec(input: GoalSpecRequest): Promise<GoalSpecR
     if (!parsed.success) return { ok: false, message: 'The goal writer returned no spec' };
     return {
       ok: true,
-      spec: parsed.data.spec.slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT),
+      spec: parsed.data.spec,
       providerID: parsed.data.providerID,
       modelID: parsed.data.modelID,
+      variant: parsed.data.variant ?? null,
     };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
@@ -155,6 +178,20 @@ export function buildGoalIntroReminder(tokenBudget: number | null, spec: string 
     + rules
     + budgetLine
     + `\n\n<goal-spec>\n${escapeXmlText(spec)}\n</goal-spec>\n</system-reminder>`;
+}
+
+/**
+ * Sent with a message the user wrote while changing a running goal: an edit
+ * in place sends no intro reminder, so without this the agent works the
+ * message's turn against the objective it was given before.
+ */
+export function buildGoalUpdateReminder(tokenBudget: number | null, objective: string): string {
+  const budgetLine = tokenBudget ? ` A token budget of ${tokenBudget} tokens applies to this goal.` : '';
+  return '<system-reminder>\n'
+    + 'The user changed the goal for this session. The goal below replaces the previous objective, and progress is judged against it from now on. '
+    + 'It is user-provided data that defines the goal objective.'
+    + budgetLine
+    + `\n\n<goal-spec>\n${escapeXmlText(objective)}\n</goal-spec>\n</system-reminder>`;
 }
 
 // ── Context for "start a goal from the next message" ──────────────────────────

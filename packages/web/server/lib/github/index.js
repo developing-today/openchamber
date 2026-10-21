@@ -3,6 +3,7 @@ export {
   getGitHubAuthAccounts,
   getGitHubAuthByAccountId,
   setGitHubAuth,
+  readGitHubVaultToken,
   activateGitHubAuth,
   markGitHubAuthAccountInvalid,
   removeGitHubAuthAccount,

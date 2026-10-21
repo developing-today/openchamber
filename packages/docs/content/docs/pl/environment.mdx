@@ -18,6 +18,16 @@ Aby przekazać OpenCode, Gitowi, terminalowi i [akcjom projektu](/pl/project-act
 
 Projekt może dodać własne zmienne albo polecenie, które je wypisuje, na przykład `direnv export json`, w **Ustawienia → Projekty**. Zobacz [Projekty](/pl/projects/#środowisko-projektu).
 
+### Sekrety z 1Password
+
+Wartość może wskazywać na wpis w 1Password zamiast przechowywać sam sekret: wpisz `op://Vault/item/field`, na przykład `GITHUB_TOKEN` = `op://Vertex SRE/github_token/credential`. OpenChamber odczytuje go przez [1Password CLI](https://developer.1password.com/docs/cli/) (`op read`), gdy proces go potrzebuje. Sekret jest trzymany tylko w pamięci, nigdy nie trafia do `environment.json` i nigdy nie jest wyświetlany; Ustawienia pokazują odwołanie.
+
+- OpenCode odczytuje go przy każdym starcie. Po zmianie sekretu uruchom OpenCode ponownie.
+- Git, terminal i akcje projektu odczytują go przy następnej akcji, którą uruchomisz, i używają go ponownie przez pięć minut.
+- Odwołanie, którego nie da się odczytać, zostaje pominięte i nie trafia dalej jako tekst. Ustawienia podają przyczynę: `op` nie jest zainstalowany, 1Password nie odpowiedział albo odrzucił odwołanie.
+- Aby przekazać sekret serwerowi MCP lub dostawcy w konfiguracji OpenCode, ustaw tu zmienną i odwołaj się do niej w konfiguracji przez `{env:GITHUB_TOKEN}` z OpenCode.
+- Konta GitHub i GitLab też mogą trzymać token w 1Password: w **Ustawienia → Integracje** wpisz odwołanie w polu **Token z 1Password** na karcie GitHub albo w polu tokenu na karcie GitLab. Zapisywane jest tylko odwołanie, a token zmieniony w 1Password zostaje pobrany w ciągu pięciu minut.
+
 Te zmienne nie trafiają do serwera OpenCode, który uruchamiasz samodzielnie, a rozszerzenie VS Code nie ma takiego ustawienia. Wszystko poniżej OpenChamber odczytuje sam przy starcie.
 
 ## Serwer OpenChamber

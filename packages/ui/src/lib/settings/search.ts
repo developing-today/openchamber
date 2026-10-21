@@ -312,6 +312,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'chat.session-goal-length',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.lengthLabel',
+    descriptionKey: 'settings.openchamber.visual.goal.lengthInfo',
+    keywords: ['goal', 'length', 'characters', 'limit', '5000', 'objective', 'spec'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.session-goal-check-length',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.checkLengthLabel',
+    descriptionKey: 'settings.openchamber.visual.goal.checkLengthInfo',
+    keywords: ['goal', 'progress', 'check', 'auditor', 'characters', 'limit'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.session-goal-budget',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.goal.budgetLabel',
@@ -330,7 +346,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'chat.session-goal-writer-model',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.goal.writer.modelLabel',
-    keywords: ['goal', 'spec', 'writer', 'model'],
+    keywords: ['goal', 'spec', 'writer', 'model', 'effort', 'thinking'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.session-goal-writer-remember',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.writer.rememberLabel',
+    descriptionKey: 'settings.openchamber.visual.goal.writer.rememberInfo',
+    keywords: ['goal', 'spec', 'writer', 'model', 'effort', 'remember', 'default'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -932,7 +956,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'git.gitlab-connect',
     page: 'integrations',
     titleKey: 'settings.gitlab.actions.connect',
-    keywords: ['gitlab', 'connect', 'add account', 'oauth', 'pat', 'token', 'instance'],
+    keywords: ['gitlab', 'connect', 'add account', 'oauth', 'pat', 'token', 'instance', '1password', 'op://', 'vault'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -1620,6 +1644,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'integrations',
     titleKey: 'settings.github.page.actions.connect',
     keywords: ['github', 'connect', 'add account', 'oauth', 'device flow'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'git.github-vault',
+    page: 'integrations',
+    titleKey: 'settings.vault.github.label',
+    descriptionKey: 'settings.vault.github.info',
+    keywords: ['github', '1password', 'op://', 'vault', 'token', 'pat', 'secret'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

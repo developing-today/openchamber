@@ -8,7 +8,7 @@ Repository bindings intentionally keep provider accounts, parent Git transport c
 
 ## Registration
 
-- `routes.js` registers GitHub and GitLab before the generic OpenCode proxy.
+- `routes.js` registers GitHub and GitLab before the generic OpenCode proxy. It returns `bindingOperations` (`read`, `setProvider`, `setTransport`, `removeTransport`, `setAuxiliary`, `reset`, each taking its route's body, the transport ones including the `.git/config` follow-up) and `accountOperations` (each provider's `accounts`), which the `openchamber` agent tool's `binding.*`, `github.*` and `gitlab.*` actions run.
 - GitHub resources use canonical `/api/source-control/github/*` routes. Auth and user aliases remain under `/api/github/*`; retired PR, repository, issue, and pull-context aliases return `410` before authority or provider work.
 - GitLab uses `/api/source-control/gitlab/*` only.
 - `GET /api/source-control/instances` returns the default identities plus self-managed GitLab origins already present in the server credential store. It never exposes accounts or tokens.
