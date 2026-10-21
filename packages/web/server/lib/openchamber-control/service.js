@@ -254,6 +254,10 @@ export const createOpenChamberControlService = (dependencies) => {
     validateDirectoryPath = null,
     persistSettings = null,
     createProjectIdFromPath = null,
+    // The settings runtime's updateSettings: read, change and write the
+    // project list under the save lock, so two changes close together cannot
+    // write over each other. Unwired, projects.* read and then persist.
+    updateSettings = null,
     // session.create makes a worktree by default (see resolveAutoWorktree).
     // Injectable for tests; the defaults load the git service lazily so a
     // server that never creates a session never pays for the import.
@@ -320,6 +324,13 @@ export const createOpenChamberControlService = (dependencies) => {
     EDITABLE_PROJECT_SETTINGS.filter((key) => project[key] !== undefined).map((key) => [key, project[key]]),
   );
 
+  // Runs compute(current settings) and writes the changes it returns, under
+  // the settings lock when the server wired updateSettings.
+  const modifySettings = updateSettings ?? (async (compute) => {
+    const changes = await compute(await readSettingsFromDiskMigrated());
+    if (changes) await persistSettings(changes);
+  });
+
   // Same writer and sanitizer as Project settings: a value the sanitizer
   // drops or rewrites is refused rather than reported as saved.
   const updateProject = async (input) => {
@@ -336,30 +347,33 @@ export const createOpenChamberControlService = (dependencies) => {
     if (unknown.length > 0) {
       throw new OpenChamberControlError(`Nothing was saved. Not a project setting: ${unknown.join(', ')}. Editable: ${EDITABLE_PROJECT_SETTINGS.join(', ')}`, 400);
     }
-    const settings = await readSettingsFromDiskMigrated();
-    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
-    const target = existingProjects.find((project) => project.id === projectID) || null;
-    if (!target) throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
-
-    const next = { ...target };
-    for (const [key, value] of Object.entries(changes)) {
-      if (value === null) delete next[key];
-      else next[key] = value;
-    }
-    const nextProjects = existingProjects.map((project) => (project.id === projectID ? next : project));
-    const accepted = sanitizeProjects(nextProjects).find((project) => project.id === projectID);
     // The sanitizer trims text and lowercases a hex colour; either is the value kept, not a refusal.
     const kept = (key, value) => {
       if (!isString(value)) return value;
       return key === 'iconBackground' ? value.trim().toLowerCase() : value.trim();
     };
-    const rejected = Object.entries(changes)
-      .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(kept(key, value)))
-      .map(([key]) => key);
-    if (rejected.length > 0) {
-      throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${rejected.join(', ')} (defaultModel is provider/model, defaultVariant needs a defaultModel, iconBackground is a #hex color, sidebarCollapsed is a boolean)`, 400);
-    }
-    await persistSettings({ projects: nextProjects });
+    let target = null;
+    let accepted = null;
+    await modifySettings((settings) => {
+      const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+      target = existingProjects.find((project) => project.id === projectID) || null;
+      if (!target) throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
+
+      const next = { ...target };
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === null) delete next[key];
+        else next[key] = value;
+      }
+      const nextProjects = existingProjects.map((project) => (project.id === projectID ? next : project));
+      accepted = sanitizeProjects(nextProjects).find((project) => project.id === projectID);
+      const rejected = Object.entries(changes)
+        .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(kept(key, value)))
+        .map(([key]) => key);
+      if (rejected.length > 0) {
+        throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${rejected.join(', ')} (defaultModel is provider/model, defaultVariant needs a defaultModel, iconBackground is a #hex color, sidebarCollapsed is a boolean)`, 400);
+      }
+      return { projects: nextProjects };
+    });
     // A setting can depend on another: clearing defaultModel drops defaultVariant with it.
     const alsoCleared = EDITABLE_PROJECT_SETTINGS.filter((key) => (
       target[key] !== undefined && accepted?.[key] === undefined && !Object.hasOwn(changes, key)
@@ -396,29 +410,30 @@ export const createOpenChamberControlService = (dependencies) => {
       throw new OpenChamberControlError(validated.error, 400);
     }
     const resolvedPath = validated.directory;
-    const settings = await readSettingsFromDiskMigrated();
-    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
-    const existing = existingProjects.find((project) => project.path === resolvedPath) || null;
     const label = asNonEmptyString(input.projectLabel);
-
-    const nextProjects = existing
-      ? existingProjects
-      : [
-          ...existingProjects,
-          {
-            id: createProjectIdFromPath(resolvedPath),
-            path: resolvedPath,
-            ...(label ? { label } : {}),
-            addedAt: now(),
-            lastOpenedAt: now(),
-          },
-        ];
-
-    const entry = existing ?? nextProjects[nextProjects.length - 1];
-    await persistSettings({
-      projects: nextProjects,
-      activeProjectId: entry.id,
-      lastDirectory: resolvedPath,
+    let existing = null;
+    let entry = null;
+    await modifySettings((settings) => {
+      const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+      existing = existingProjects.find((project) => project.path === resolvedPath) || null;
+      const nextProjects = existing
+        ? existingProjects
+        : [
+            ...existingProjects,
+            {
+              id: createProjectIdFromPath(resolvedPath),
+              path: resolvedPath,
+              ...(label ? { label } : {}),
+              addedAt: now(),
+              lastOpenedAt: now(),
+            },
+          ];
+      entry = existing ?? nextProjects[nextProjects.length - 1];
+      return {
+        projects: nextProjects,
+        activeProjectId: entry.id,
+        lastDirectory: resolvedPath,
+      };
     });
 
     return {
@@ -445,14 +460,15 @@ export const createOpenChamberControlService = (dependencies) => {
     if (!projectID) {
       throw new OpenChamberControlError('projectId is required', 400);
     }
-    const settings = await readSettingsFromDiskMigrated();
-    const existingProjects = sanitizeProjects(settings?.projects || []) || [];
-    const target = existingProjects.find((project) => project.id === projectID) || null;
-    if (!target) {
-      throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
-    }
-    const nextProjects = existingProjects.filter((project) => project.id !== projectID);
-    await persistSettings({ projects: nextProjects });
+    let target = null;
+    await modifySettings((settings) => {
+      const existingProjects = sanitizeProjects(settings?.projects || []) || [];
+      target = existingProjects.find((project) => project.id === projectID) || null;
+      if (!target) {
+        throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
+      }
+      return { projects: existingProjects.filter((project) => project.id !== projectID) };
+    });
 
     return {
       removed: {

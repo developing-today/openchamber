@@ -243,6 +243,13 @@ other.
   wired `fsPromises`/`validateDirectoryPath`/`persistSettings`/
   `createProjectIdFromPath`. Worktree deletion is still not part of the
   action contract.
+- `projects.add`, `projects.update` and `projects.remove` read the project
+  list and write the changed list inside one call to the settings runtime's
+  `updateSettings`, which holds the save lock `persistSettings` uses. Two
+  project changes close together, or one beside a UI save, therefore cannot
+  write over each other. A refusal (unknown id, a value the sanitizer drops)
+  is thrown inside that call and writes nothing. A server that has not wired
+  `updateSettings` reads, then persists, as before.
 - `projects.list` returns each project's per-project settings
   (`EDITABLE_PROJECT_SETTINGS` in `service.js`: the fields `sanitizeProjects`
   keeps that Project settings edits). `projects.update` changes them through
