@@ -70,7 +70,7 @@ describe('buildGoalIntroReminder', () => {
 
   test('without a spec the message is the objective, as before the writer existed', () => {
     expect(buildGoalIntroReminder(null, null)).toBe(
-      `<system-reminder>\nGoal mode is active for this session. The user message above defines the goal objective. ${rules}\n</system-reminder>`,
+      `<system-reminder>\nGoal mode is active for this session. The user message that follows defines the goal objective. ${rules}\n</system-reminder>`,
     );
     expect(buildGoalIntroReminder(200_000, null)).toContain(`${rules} A token budget of 200000 tokens applies to this goal.\n</system-reminder>`);
   });
@@ -78,7 +78,7 @@ describe('buildGoalIntroReminder', () => {
   test('with a spec it carries the escaped spec, byte for byte what the server sends', () => {
     expect(buildGoalIntroReminder(5_000, '## Objective\nShip <it> & test')).toBe(
       '<system-reminder>\n'
-      + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+      + 'Goal mode is active for this session. The goal spec below was written from the user message that follows. '
       + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
       + rules
       + ' A token budget of 5000 tokens applies to this goal.'

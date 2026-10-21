@@ -218,13 +218,13 @@ export function buildGoalIntroReminder(tokenBudget: number | null, spec: string 
     + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.';
   if (!spec) {
     return '<system-reminder>\n'
-      + 'Goal mode is active for this session. The user message above defines the goal objective. '
+      + 'Goal mode is active for this session. The user message that follows defines the goal objective. '
       + rules
       + budgetLine
       + '\n</system-reminder>';
   }
   return '<system-reminder>\n'
-    + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+    + 'Goal mode is active for this session. The goal spec below was written from the user message that follows. '
     + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
     + rules
     + budgetLine

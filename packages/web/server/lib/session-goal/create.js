@@ -16,7 +16,7 @@ export const buildGoalIntroText = (tokenBudget, spec = null) => {
     : '';
   if (spec) {
     return '<system-reminder>\n'
-      + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+      + 'Goal mode is active for this session. The goal spec below was written from the user message that follows. '
       + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
       + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
       + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
@@ -26,7 +26,7 @@ export const buildGoalIntroText = (tokenBudget, spec = null) => {
       + '\n</goal-spec>\n</system-reminder>';
   }
   return '<system-reminder>\n'
-    + 'Goal mode is active for this session. The user message above defines the goal objective. '
+    + 'Goal mode is active for this session. The user message that follows defines the goal objective. '
     + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
     + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
     + budgetLine
