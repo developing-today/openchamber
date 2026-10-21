@@ -166,6 +166,8 @@ const findByAriaLabel = (container: HTMLElement, selector: string, label: string
 };
 const findInput = (container: HTMLElement, label: string) => findByAriaLabel(container, 'input', label) as HTMLInputElement;
 const findSwitch = (container: HTMLElement, label: string) => findByAriaLabel(container, '[role="switch"]', label);
+// The classes an element lacks, so a failure names them.
+const missingClasses = (element: Element, classes: string[]) => classes.filter((name) => !element.classList.contains(name));
 
 // Fields commit when the user leaves them; happy-dom does not route synthetic input events to React.
 const typeInto = async (input: HTMLInputElement, value: string) => {
@@ -619,6 +621,58 @@ describe('ModelPoolsSection', () => {
       expect(routeSaves).toEqual([]);
       await applyJson('{"include":["*luna*"],"exclude":["*-mini"]}');
       expect(routeSaves).toEqual([{ fresh: { include: ['*luna*'], exclude: ['*-mini'] } }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // happy-dom lays nothing out, so the three tests below pin the classes that decide what gives way on a narrow pane.
+  test('a pool row keeps its name whole and truncates the rule summary first', async () => {
+    serverRoutes = { small: { name: 'Luna and Haiku', include: ['*luna*', '*haiku*'], exclude: ['*-5'] } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      const row = [...dom.container.querySelectorAll('button[aria-expanded]')].find((el) => el.textContent?.startsWith('Luna and Haiku'));
+      if (!row) throw new Error('no row for the pool');
+      const [name, summary] = [...row.children];
+      expect(name.textContent).toBe('Luna and Haiku');
+      expect(summary.textContent).toBe('Includes *luna*, *haiku* · Excludes *-5');
+      // The name does not shrink, and is capped at the row so a name too long for it still truncates.
+      expect(missingClasses(name, ['shrink-0', 'max-w-full', 'truncate'])).toEqual([]);
+      expect(summary.classList.contains('shrink-0')).toBe(false);
+      expect(summary.classList.contains('truncate')).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a target name wraps on a line of its own below the @xl width, so targets of one provider read apart', async () => {
+    serverRoutes = { kept: { targets: ['fake/fake-model', 'fake/fake-model-2'] } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container);
+      const names = [...dom.container.querySelectorAll('span')].filter((el) => el.textContent?.startsWith('fake/'));
+      expect(names.map((el) => el.textContent)).toEqual(['fake/fake-model', 'fake/fake-model-2']);
+      for (const name of names) {
+        expect(name.classList.contains('truncate')).toBe(false);
+        expect(missingClasses(name, ['break-words', 'basis-full', '@xl:basis-0'])).toEqual([]);
+        // The wait estimate and Remove target move to the next line instead of narrowing the name.
+        expect(name.parentElement?.classList.contains('flex-wrap')).toBe(true);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('the pattern field takes a line of its own below the @xl width, so the date field cannot squeeze it', async () => {
+    serverRoutes = { kept: { targets: ['p/cheap'] } };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container);
+      const pattern = findInput(dom.container, 'Add by pattern');
+      const until = findInput(dom.container, 'Expires');
+      expect(until.parentElement).toBe(pattern.parentElement);
+      expect(pattern.parentElement?.classList.contains('flex-wrap')).toBe(true);
+      expect(missingClasses(pattern, ['grow', 'basis-full', '@xl:basis-0'])).toEqual([]);
     } finally {
       await cleanup();
     }

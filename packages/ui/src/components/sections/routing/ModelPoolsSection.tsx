@@ -165,8 +165,9 @@ const PoolFields: React.FC<{
           const pool = routeReferenceID(target);
           return (
           <div key={`${targetLabel(target)}-${index}`} className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="typography-ui-label min-w-0 flex-1 truncate">
+            {/* Below the @xl width the name takes a line of its own and wraps, so the model part always shows. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="typography-ui-label min-w-0 grow basis-full break-words @xl:basis-0">
                 {pool !== null ? `${t('settings.pools.targetPool')}: ${pool}` : targetLabel(target)}
                 {until !== undefined ? (
                   <span className="typography-meta text-muted-foreground">
@@ -178,6 +179,7 @@ const PoolFields: React.FC<{
               <Button
                 size="sm"
                 variant="ghost"
+                className="ms-auto"
                 onClick={() => onChange({ ...route, targets: targets.filter((_, i) => i !== index) })}
               >
                 {t('settings.pools.removeTarget')}
@@ -212,12 +214,13 @@ const PoolFields: React.FC<{
       ) : null}
       <SettingsStackedField label={t('settings.pools.pattern.label')} info={t('settings.pools.pattern.info')} controlClassName="max-w-none">
         <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+          {/* Below the @xl width the pattern takes a line of its own, so the date field cannot squeeze it to a few characters. */}
           <Input
             value={pattern}
             onChange={(event) => setPattern(event.target.value)}
             placeholder={t('settings.pools.pattern.placeholder')}
             aria-label={t('settings.pools.pattern.label')}
-            className="h-8 min-w-0 flex-1 rounded-md px-3"
+            className="h-8 min-w-0 grow basis-full rounded-md px-3 @xl:basis-0"
             maxLength={200}
           />
           <Input
@@ -404,7 +407,8 @@ const PoolRow: React.FC<{
           aria-expanded={expanded}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1.5 text-start hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="typography-ui-label font-medium text-foreground truncate">
+          {/* The name keeps its width and the summary truncates first; the name truncates only when it alone fills the row. */}
+          <span className="typography-ui-label font-medium text-foreground max-w-full shrink-0 truncate">
             {route?.name || id}
           </span>
           <span className="typography-meta text-muted-foreground truncate" title={summary}>
