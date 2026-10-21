@@ -16,7 +16,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentCard } from './WebSearchConsent';
-import { answersFromFormValues, rememberQuestionAnswers } from './questionAnswers';
+import { answersFromFormValues, rememberPendingQuestionAnswers } from './questionAnswers';
 import { questionCallKey, questionFormCall } from '@/lib/opencode/question';
 import {
     type FormValues,
@@ -78,7 +78,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     const questionCall = React.useMemo(() => questionFormCall(form), [form]);
     React.useEffect(() => {
         if (!questionCall) return;
-        rememberQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
+        rememberPendingQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
     }, [fields, questionCall, values]);
 
     const shown = React.useMemo(() => visibleFields(fields, values), [fields, values]);

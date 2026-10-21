@@ -5,7 +5,7 @@ import { type QuestionAnswer, questionAnswers, questionCallKey, questionPrompts 
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatColumnActions, useChatColumnTakesPrompts, useChatSessionSelection } from '../../chatColumnSession';
-import { formatQuestionAnswers, recallQuestionAnswers, rememberQuestionAnswers } from '../../questionAnswers';
+import { formatQuestionAnswers, rememberQuestionAnswers, startingQuestionAnswers } from '../../questionAnswers';
 import { QuestionToolDetailsView, type QuestionToolDetailsViewProps } from './QuestionToolDetailsView';
 
 /**
@@ -34,7 +34,7 @@ export function QuestionToolDetails({ part, state, renderScrollBox }: {
     const ended = state.status === 'completed' || state.status === 'error';
     const canAnswer = ended && part.sessionID === sessionId && takesPrompts;
 
-    const startingAnswers = React.useCallback(() => recallQuestionAnswers(callKey) ?? answers, [answers, callKey]);
+    const startingAnswers = React.useCallback(() => startingQuestionAnswers(callKey, answers), [answers, callKey]);
     const handleKeep = React.useCallback((kept: QuestionAnswer[]) => rememberQuestionAnswers(callKey, kept), [callKey]);
     const handleSend = React.useCallback((sent: QuestionAnswer[]) => {
         rememberQuestionAnswers(callKey, sent);

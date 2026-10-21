@@ -21,7 +21,7 @@ import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
 import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
-import { answersFromFormValues, rememberQuestionAnswers } from './questionAnswers';
+import { answersFromFormValues, rememberPendingQuestionAnswers } from './questionAnswers';
 import { questionCallKey, questionFormCall } from '@/lib/opencode/question';
 import {
     type FormValues,
@@ -149,7 +149,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
     const questionCall = React.useMemo(() => questionFormCall(form), [form]);
     React.useEffect(() => {
         if (!questionCall || appliedSignatureRef.current !== fieldsSignature) return;
-        rememberQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
+        rememberPendingQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
     }, [fields, fieldsSignature, questionCall, values]);
 
     const isFromSubagent = React.useMemo(() => {

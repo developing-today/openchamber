@@ -6,21 +6,44 @@ import { type FormValues, buildFormAnswer, initialFormValues, isAnswerableField,
  * Answers to an agent's `question` call that outlive the call: the dock
  * records them as the user picks, so a question dismissed, stopped or failed
  * can be answered again from its transcript row starting where the user was.
+ * The row records what the user keeps or sends from it after the call ended.
  * Keyed by `questionCallKey`; memory only, like the dock's own drafts.
  */
-const rememberedAnswers = new Map<string, QuestionAnswer[]>();
+type KeptAnswers = { answers: QuestionAnswer[]; afterEnd: boolean };
+const rememberedAnswers = new Map<string, KeptAnswers>();
 const MAX_REMEMBERED_ANSWERS = 50;
 
-export const rememberQuestionAnswers = (callKey: string, answers: QuestionAnswer[]): void => {
+const keepAnswers = (callKey: string, kept: KeptAnswers): void => {
     rememberedAnswers.delete(callKey);
-    rememberedAnswers.set(callKey, answers);
+    rememberedAnswers.set(callKey, kept);
     if (rememberedAnswers.size > MAX_REMEMBERED_ANSWERS) {
         const oldest = rememberedAnswers.keys().next().value;
         if (oldest !== undefined) rememberedAnswers.delete(oldest);
     }
 };
 
-export const recallQuestionAnswers = (callKey: string): QuestionAnswer[] | null => rememberedAnswers.get(callKey) ?? null;
+/** What the user picks in the question dock or the inline form card while the call waits. */
+export const rememberPendingQuestionAnswers = (callKey: string, answers: QuestionAnswer[]): void => {
+    keepAnswers(callKey, { answers, afterEnd: false });
+};
+
+/** What the user keeps (Cancel) or sends from the call's row after the call ended. */
+export const rememberQuestionAnswers = (callKey: string, answers: QuestionAnswer[]): void => {
+    keepAnswers(callKey, { answers, afterEnd: true });
+};
+
+/**
+ * The answers a form opened from the call's row starts from: what the user
+ * kept or sent from the row, else the answers the call returned, else the
+ * picks made while it waited. Those picks never win over returned answers:
+ * the dock records its starting values before anyone picks, and the call may
+ * have been answered in another window.
+ */
+export const startingQuestionAnswers = (callKey: string, returned: QuestionAnswer[] | null): QuestionAnswer[] | null => {
+    const kept = rememberedAnswers.get(callKey);
+    if (kept?.afterEnd) return kept.answers;
+    return returned ?? kept?.answers ?? null;
+};
 
 /** Each question's answer as OpenCode's tool would report it, from the form's current values. */
 export function answersFromFormValues(fields: readonly FormField[], values: FormValues): QuestionAnswer[] {

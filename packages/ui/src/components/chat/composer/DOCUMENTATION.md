@@ -54,7 +54,9 @@ For an agent's `question` call, both also record the answers in progress
 under the call (`questionAnswers.ts`, memory only, newest 50 calls), since a
 dismissal, a stopped turn or an error ends the form and drops the dock's own
 draft. The call's transcript row then offers to answer again starting from
-them. Its answers come back to the composer as a request in the input store
+them when the call returned no answers; answers the call did return come
+first, since the call may have been answered in another window while this
+dock still held its untouched starting values. Its answers come back to the composer as a request in the input store
 (`requestSessionSubmit`, naming the composer like `pendingInputTarget` and the
 session): the composer showing that session sends the text like a typed
 message, so a busy session queues or steers it, waits while a BTW holds the

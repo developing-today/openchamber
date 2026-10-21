@@ -4,8 +4,9 @@ import {
     answersFromFormValues,
     formValuesFromAnswers,
     formatQuestionAnswers,
-    recallQuestionAnswers,
+    rememberPendingQuestionAnswers,
     rememberQuestionAnswers,
+    startingQuestionAnswers,
 } from './questionAnswers';
 
 const prompts = questionPrompts({
@@ -47,12 +48,30 @@ describe('question answers', () => {
     test('remembered answers are found by their call, the newest kept when the list is full', () => {
         rememberQuestionAnswers('msg_0:call_0', [['Fast']]);
         rememberQuestionAnswers('msg_0:call_0', [['Careful']]);
-        expect(recallQuestionAnswers('msg_0:call_0')).toEqual([['Careful']]);
-        expect(recallQuestionAnswers('msg_0:unknown')).toBeNull();
+        expect(startingQuestionAnswers('msg_0:call_0', null)).toEqual([['Careful']]);
+        expect(startingQuestionAnswers('msg_0:unknown', null)).toBeNull();
 
         for (let index = 1; index <= 50; index += 1) rememberQuestionAnswers(`msg_${index}:call`, [[String(index)]]);
-        expect(recallQuestionAnswers('msg_0:call_0')).toBeNull();
-        expect(recallQuestionAnswers('msg_50:call')).toEqual([['50']]);
-        expect(recallQuestionAnswers('msg_1:call')).toEqual([['1']]);
+        expect(startingQuestionAnswers('msg_0:call_0', null)).toBeNull();
+        expect(startingQuestionAnswers('msg_50:call', null)).toEqual([['50']]);
+        expect(startingQuestionAnswers('msg_1:call', null)).toEqual([['1']]);
+    });
+
+    test('a call that ended without answers starts from the picks made while it waited', () => {
+        rememberPendingQuestionAnswers('msg_d:call', [['Careful'], ['Lint']]);
+        expect(startingQuestionAnswers('msg_d:call', null)).toEqual([['Careful'], ['Lint']]);
+    });
+
+    test('answers the call returned win over a draft kept while it waited, even an untouched one', () => {
+        // The dock records its starting values before anyone picks; the
+        // question was then answered in another window.
+        rememberPendingQuestionAnswers('msg_a:call', [[], []]);
+        expect(startingQuestionAnswers('msg_a:call', [['Fast'], ['Types']])).toEqual([['Fast'], ['Types']]);
+    });
+
+    test('what the user kept or sent from the row after the call ended wins over the returned answers', () => {
+        rememberPendingQuestionAnswers('msg_r:call', [['Fast'], []]);
+        rememberQuestionAnswers('msg_r:call', [['Careful'], ['Lint']]);
+        expect(startingQuestionAnswers('msg_r:call', [['Fast'], ['Types']])).toEqual([['Careful'], ['Lint']]);
     });
 });
