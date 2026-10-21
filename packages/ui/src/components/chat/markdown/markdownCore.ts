@@ -29,6 +29,7 @@ import {
   MARKDOWN_FORBIDDEN_TAGS,
 } from './markdownSecurity';
 import { isBareVideoUrl, isVideoSource, renderMarkdownVideo } from './markdownVideo';
+import { pinMarkedAnchoredRules } from './markedAnchoredRules';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -714,6 +715,9 @@ const boundedLinkify = (): MarkedExtension => ({
     };
   }),
 });
+
+// Before any parser lexes: see markedAnchoredRules.ts.
+pinMarkedAnchoredRules();
 
 const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
   const renderMath = rawHtml === 'sanitize' ? renderMathPlaceholder : renderKatex;

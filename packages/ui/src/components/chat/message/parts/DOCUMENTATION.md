@@ -234,6 +234,14 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   nothing is written for a token that leads nowhere, so code full of
   `console.log` and `this.state` stays plain text with no DOM change; a real
   file's token gets its span and link a moment after the message shows.
+- A long message lexes in time proportional to its length in every engine.
+  marked runs its `^`-anchored block rules on the rest of the message at each
+  block; JavaScriptCore (Safari, the iOS app's WebView, Bun tests) retried a
+  failed `^` match at every later position, so 16,000 short paragraphs cost
+  about a minute there and milliseconds in V8. `markedAnchoredRules.ts` makes
+  those rules sticky once at module load, with `exec` resetting `lastIndex`, so
+  matches are unchanged; `markedAnchoredRules.test.ts` checks the tokens and
+  that four times the paragraphs takes under eight times as long.
 - Assistant images appear where the text puts them. The Markdown renderer
   draws assistant image syntax as a label, the shared image icon and the file
   name, and never loads an image itself (`label` mode in `markdownCore.ts`);
