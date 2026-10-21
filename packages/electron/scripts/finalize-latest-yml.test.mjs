@@ -21,15 +21,24 @@ const writeManifest = (artifacts, target, filename, content) => {
   fs.writeFileSync(path.join(artifacts, `latest-yml-${target}`, filename), content);
 };
 
-const createFixture = ({ includeWindowsArm64 = true, includeMacArm64 = true } = {}) => {
+const createFixture = ({
+  includeWindowsX64 = true,
+  includeWindowsArm64 = true,
+  includeMacX64 = true,
+  includeMacArm64 = true,
+} = {}) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-latest-yml-'));
   const artifacts = path.join(root, 'artifacts');
   const output = path.join(root, 'output');
-  writeManifest(artifacts, 'x86_64-pc-windows-msvc', 'latest.yml', manifest('win', 'x64', 'exe'));
+  if (includeWindowsX64) {
+    writeManifest(artifacts, 'x86_64-pc-windows-msvc', 'latest.yml', manifest('win', 'x64', 'exe'));
+  }
   if (includeWindowsArm64) {
     writeManifest(artifacts, 'aarch64-pc-windows-msvc', 'latest.yml', manifest('win', 'arm64', 'exe'));
   }
-  writeManifest(artifacts, 'x86_64-apple-darwin', 'latest-mac.yml', manifest('mac', 'x64', 'zip'));
+  if (includeMacX64) {
+    writeManifest(artifacts, 'x86_64-apple-darwin', 'latest-mac.yml', manifest('mac', 'x64', 'zip'));
+  }
   if (includeMacArm64) {
     writeManifest(artifacts, 'aarch64-apple-darwin', 'latest-mac.yml', manifest('mac', 'arm64', 'zip'));
   }
@@ -37,12 +46,13 @@ const createFixture = ({ includeWindowsArm64 = true, includeMacArm64 = true } = 
   return { root, artifacts, output };
 };
 
-const environment = ({ artifacts, output }) => ({
+const environment = ({ artifacts, output }, { macOnly = false } = {}) => ({
   ...process.env,
   LATEST_YML_DIR: artifacts,
   RUNNER_TEMP: output,
   GH_REPO: 'openchamber/openchamber',
   OPENCHAMBER_VERSION: '1.2.3',
+  MAC_ONLY: macOnly ? '1' : '',
 });
 
 test('writes separate x64 and ARM64 Windows update channels', (context) => {
@@ -78,6 +88,44 @@ test('lists both Mac architectures in one manifest', (context) => {
   const mac = fs.readFileSync(path.join(fixture.output, 'latest-mac.yml'), 'utf8');
   assert.match(mac, /mac-arm64\.zip/);
   assert.match(mac, /mac-x64\.zip/);
+});
+
+test('publishes the Windows channels when no Mac build was chosen', (context) => {
+  const fixture = createFixture({ includeMacX64: false, includeMacArm64: false });
+  context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+
+  execFileSync(process.execPath, [script], { env: environment(fixture) });
+
+  assert.match(fs.readFileSync(path.join(fixture.output, 'latest.yml'), 'utf8'), /win-x64\.exe/);
+  assert.match(fs.readFileSync(path.join(fixture.output, 'latest-arm64.yml'), 'utf8'), /win-arm64\.exe/);
+  assert.equal(fs.existsSync(path.join(fixture.output, 'latest-mac.yml')), false);
+});
+
+test('succeeds with no manifests when no desktop platform was built', (context) => {
+  const fixture = createFixture({
+    includeWindowsX64: false,
+    includeWindowsArm64: false,
+    includeMacX64: false,
+    includeMacArm64: false,
+  });
+  context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+
+  execFileSync(process.execPath, [script], { env: environment(fixture) });
+
+  assert.deepEqual(fs.readdirSync(fixture.output), []);
+});
+
+test('fails in MAC_ONLY mode when both Mac manifests are missing', (context) => {
+  const fixture = createFixture({ includeMacX64: false, includeMacArm64: false });
+  context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+
+  const result = spawnSync(process.execPath, [script], {
+    env: environment(fixture, { macOnly: true }),
+    encoding: 'utf8',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Both x64 and arm64 macOS update manifests are required/);
 });
 
 test('fails instead of publishing a Mac manifest without the arm64 build', (context) => {
