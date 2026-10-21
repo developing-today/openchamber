@@ -253,8 +253,9 @@ Separate from Jev/Auto above: read-only views over OpenCode's own
 `{ available: false, reason }` instead of an empty result when the database,
 its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
 
-`model-routes.js` checks each new or changed pool, `schedules` included,
-against OpenCode's schema and its own stricter rules before saving it.
+`model-routes.js` checks each new or changed pool, `schedules` and the keys
+that pick models by pattern included, against OpenCode's schema and its own
+stricter rules before saving it.
 
 - `model-route-stats.js` — `GET /api/model-routes/stats`: aggregate counts,
   latencies, grouped errors and hedge win rates per target over a trailing
@@ -287,23 +288,40 @@ file, `opencode.json` when it exists, else `opencode.jsonc`, else a new
 written and OpenCode reads it at its next reload. In enterprise mode every PUT
 answers 403; GET still answers.
 
-- **Schema lists.** `ROUTE_KEYS`, `TARGET_KEYS`, `HEALTH_KEYS`, `BUDGET_KEYS`,
-  `SCHEDULE_KEYS`, `WINDOW_KEYS` and `TUNING_KEYS` copy the keys OpenCode's
-  schema defines (`packages/schema/src/config/model-routes.ts` in the OpenCode
-  fork). A key OpenCode adds and these lists lack is reported on every pool
-  that uses it, and a save that changes such a pool is refused until forced,
-  so the lists move with that file.
+- **Schema lists.** `ROUTE_KEYS`, `TARGET_KEYS`, `VARIANT_RULE_KEYS`,
+  `HEALTH_KEYS`, `BUDGET_KEYS`, `SCHEDULE_KEYS`, `WINDOW_KEYS` and `TUNING_KEYS`
+  copy the keys OpenCode's schema defines
+  (`packages/schema/src/config/model-routes.ts` in the OpenCode fork). A key
+  OpenCode adds and these lists lack is reported on every pool that uses it,
+  and a save that changes such a pool is refused until forced, so the lists
+  move with that file.
 - **Problems.** `modelRouteProblems` reports every problem in one pool, each
-  with `skipsPool`. It is true where OpenCode's own schema refuses the value:
-  OpenCode decodes each pool on its own and leaves out one that fails
-  (`packages/core/src/config/normalize.ts`, `decodeMap`). Examples are
-  `Infinity` as a weight or as `minOutputTokensPerSecond`, and a target `until`
-  above `Number.MAX_SAFE_INTEGER` (OpenCode's `PositiveInt` is a safe
-  integer). It is false for OpenChamber's stricter checks of what OpenCode
-  loads anyway: an unknown key, which OpenCode drops; `slowThreshold` above
-  `sampleWindow`, which it clamps; a weight for a target the pool lacks and a
-  fixed pool's `selection`, which it ignores; an empty target list; and a target
-  written as `{ providerID, model }`, which OpenChamber does not check.
+  with `skipsPool`. It is true where OpenCode refuses the value too: OpenCode
+  decodes each pool on its own and leaves out one that fails its schema
+  (`packages/core/src/config/normalize.ts`, `decodeMap`) or whose matching keys
+  are malformed (`decodeRoute`). Examples are `Infinity` as a weight or as
+  `minOutputTokensPerSecond`, a target `until` above `Number.MAX_SAFE_INTEGER`
+  (OpenCode's `PositiveInt` is a safe integer), an empty pattern, a `re:`
+  pattern that does not compile, a `match` that does not parse, and a pool with
+  none of `targets`, `include`, `contains` and `match`. It is false for
+  OpenChamber's stricter checks of what OpenCode loads anyway: an unknown key,
+  which OpenCode drops; `slowThreshold` above `sampleWindow`, which it clamps; a
+  weight for a target the pool lacks and a fixed pool's `selection`, which it
+  ignores; a pool whose `targets`, `include` and `contains` are all empty and
+  that has no `match`, which it offers with no models; and a target written as
+  `{ providerID, model }`, which OpenChamber does not check.
+- **Matching keys.** `include`, `exclude`, `contains`, `notContains`, `match`,
+  `levels` and `variantRules` are checked the way OpenCode checks them: their
+  types as its schema defines them, then what they say as
+  `ModelRouteMatch.problems` reads it (`packages/core/src/model-route-match.ts`).
+  `patternProblem`, `substringProblem` and `expressionProblem` port that file's
+  `pattern`, `substring` and `parse` with the same tokens, keywords, precedence
+  and messages, so a change there is ported here. A `re:` pattern is compiled
+  by this server's JavaScript engine and OpenCode's by Bun's, so a regular
+  expression feature only one of them supports gets two answers; 115 sample
+  expressions run through both on 2026-10-20 found none. A pool that takes
+  models by pattern may weigh any model a pattern picks, which only OpenCode
+  knows, so its `weights` are not checked against its targets.
 - **GET** returns `routes`, `tuning`, `path` and `problems`, the problems of
   each pool that has any, keyed by pool id. A read never refuses.
 - **PUT** compares each pool sent with the one the merged config holds, as JSON:
@@ -470,7 +488,8 @@ paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send
 ahead of a stand-in proxy, the routes), `model-routes.test.js` (every
 validator rule, which problems skip a pool, problems on a read, unchanged pools
-written as stored, a refused save and its forced retry),
+written as stored, a refused save and its forced retry, and the fork's verdicts
+on sample `match` expressions, its own test cases among them),
 `route-interpreter.test.js` (the keyword stage, its question and learned
 answers, stage order and toggles, grounding, override records),
 `route-rules-routes.test.js` (interpret, answer, undo, settings, wait and the

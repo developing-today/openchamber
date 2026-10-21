@@ -102,7 +102,7 @@ describe('validateModelRoute target options and display name', () => {
     ).toMatch(/variants must map/);
     expect(
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: 3 } }] }),
-    ).toMatch(/remap "low" must be a string/);
+    ).toMatch(/remap "low" must be a variant name or false/);
   });
 });
 
@@ -303,6 +303,32 @@ describe('registerModelRouteRoutes', () => {
     expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json');
   });
 
+  it('PUT saves a changed pool that picks its models by pattern without force, and reports no problem for it', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const pools = {
+      old: { targets: ['a/b'], variantRules: [{ match: 'claude and not *haiku*', map: { max: false } }] },
+      small: {
+        include: ['*luna*', '*haiku*'],
+        exclude: ['*-5', 're:-mini$'],
+        contains: ['flash'],
+        notContains: ['preview'],
+        match: "(*luna* or 're:haiku-(5|6)') and not *old*",
+        levels: ['low', 'medium', 'high'],
+        variantRules: [{ match: '*argon*', map: { xhigh: 'high', max: false } }],
+        selection: 'weighted',
+        weights: { 'openai/gpt-6-luna': 3 },
+      },
+    };
+    const response = res();
+    await handler({ body: { routes: pools } }, response);
+    expect(response.out.status).toBeUndefined();
+    expect(targetConfig.experimental.model_routes).toEqual(pools);
+    expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json');
+    expect(response.out.body.problems).toEqual({});
+  });
+
   it('GET returns every pool and the problems of each one that has any, without refusing', async () => {
     targetConfig.experimental.model_routes = {
       good: { targets: ['a/b'] },
@@ -318,7 +344,7 @@ describe('registerModelRouteRoutes', () => {
     expect(Object.keys(response.out.body.routes)).toEqual(['good', 'infinite', 'empty']);
     expect(response.out.body.problems).toEqual({
       infinite: [{ message: 'route "infinite" weight for "a/b" must be a positive number', skipsPool: true }],
-      empty: [{ message: 'route "empty" needs at least one target', skipsPool: false }],
+      empty: [{ message: 'route "empty" needs at least one target, include or contains entry, or a match', skipsPool: false }],
     });
   });
 
@@ -393,7 +419,7 @@ describe('reviewModelRoutesSave', () => {
     expect(review.routes.kept).toBe(stored.kept);
     expect(Object.keys(review.problems)).toEqual(['added']);
     const changed = reviewModelRoutesSave({ kept: { targets: [], name: 'renamed' } }, stored);
-    expect(changed.problems.kept).toEqual([{ message: 'route "kept" needs at least one target', skipsPool: false }]);
+    expect(changed.problems.kept).toEqual([{ message: 'route "kept" needs at least one target, include or contains entry, or a match', skipsPool: false }]);
   });
 });
 
@@ -601,6 +627,184 @@ describe('validateModelRoute schedules', () => {
     const problems = modelRoutesProblems({ plain: { targets: ['a/b'] }, peak: scheduled({ ...peak, factor: 0 }) });
     expect(Object.keys(problems)).toEqual(['peak']);
     expect(problems.peak).toEqual([{ message: expect.stringMatching(/^route "peak" schedule 1 factor/), skipsPool: true }]);
+  });
+});
+
+describe('modelRouteProblems for the keys that pick models by pattern', () => {
+  it('accepts each key OpenCode accepts, with or without targets', () => {
+    expect(
+      modelRoutesProblems({
+        include: { include: ['*luna*', 'anthropic/*haiku*', 'small', 'opencode-route/small', 're:^openai/'] },
+        contains: { contains: ['haiku', 'anthropic/', ' '] },
+        match: { match: "(*luna* or *haiku*) and not 're:-(5|6)$' and not *mini*" },
+        mixed: { targets: ['openai/argon'], include: ['*luna*'], exclude: ['*-5', 'frontier-direct'], notContains: ['old'] },
+        emptyTargets: { targets: [], match: '*luna*' },
+        levels: { targets: ['a/b'], levels: ['low', 'medium', 'high'] },
+        rules: {
+          targets: ['a/b'],
+          variantRules: [{ match: '*', map: { max: 'high' } }, { match: 'claude and not *haiku*', map: { max: false } }],
+        },
+        sitOut: { targets: [{ model: 'openai/argon', variants: { xhigh: 'high', max: false } }, 'anthropic/claude-opus-5'] },
+      }),
+    ).toEqual({});
+  });
+
+  it('skips a pool with none of targets, include, contains and match, as OpenCode does', () => {
+    const skipped = [{ message: 'route "x" has no targets, include, contains or match', skipsPool: true }];
+    expect(modelRouteProblems('x', {})).toEqual(skipped);
+    expect(modelRouteProblems('x', { exclude: ['*-mini'], levels: ['low'] })).toEqual(skipped);
+  });
+
+  it('flags a pool whose lists are all empty, which OpenCode loads with no models', () => {
+    const flagged = [{ message: 'route "x" needs at least one target, include or contains entry, or a match', skipsPool: false }];
+    expect(modelRouteProblems('x', { targets: [] })).toEqual(flagged);
+    expect(modelRouteProblems('x', { include: [] })).toEqual(flagged);
+    expect(modelRouteProblems('x', { targets: [], include: [], contains: [] })).toEqual(flagged);
+    expect(modelRouteProblems('x', { targets: [], contains: ['haiku'] })).toEqual([]);
+  });
+
+  it('skips the pool for a malformed entry, regular expression or expression, and names where it is', () => {
+    // The skipped pools of the fork's normalization test (packages/core/test/config/normalization.test.ts).
+    expect(modelRouteProblems('regex', { include: ['*luna*'], exclude: ['re:luna-(5'] })).toEqual([
+      { message: expect.stringMatching(/^route "regex" exclude entry 1 "re:luna-\(5": Invalid regular expression/), skipsPool: true },
+    ]);
+    expect(modelRouteProblems('expression', { match: '*luna* xor *haiku*' })).toEqual([
+      { message: 'route "expression" match "*luna* xor *haiku*": xor is not supported: write (a or b) and not (a and b)', skipsPool: true },
+    ]);
+    expect(modelRouteProblems('rule', { targets: ['openai/argon'], variantRules: [{ match: '(*argon*', map: { max: false } }] })).toEqual([
+      { message: 'route "rule" variant rule 1 match "(*argon*": missing ")" before the end', skipsPool: true },
+    ]);
+    expect(modelRouteProblems('empty', { include: ['*luna*'], contains: [''] })).toEqual([
+      { message: 'route "empty" contains entry 1 "": empty text, which would match every model', skipsPool: true },
+    ]);
+    expect(modelRouteProblems('x', { targets: ['a/b'], include: ['*luna*', 're:'], exclude: [''], notContains: [''] })).toEqual([
+      { message: 'route "x" include entry 2 "re:": empty pattern', skipsPool: true },
+      { message: 'route "x" exclude entry 1 "": empty pattern', skipsPool: true },
+      { message: 'route "x" notContains entry 1 "": empty text, which would match every model', skipsPool: true },
+    ]);
+  });
+
+  it('skips the pool for a value of a type OpenCode\'s schema refuses', () => {
+    const problemsWith = (keys) => modelRouteProblems('x', { targets: ['a/b'], ...keys });
+    const skipped = (message) => [{ message, skipsPool: true }];
+    expect(problemsWith({ include: 'x' })).toEqual(skipped('route "x" include must be a list of strings'));
+    expect(problemsWith({ exclude: { a: 1 } })).toEqual(skipped('route "x" exclude must be a list of strings'));
+    expect(problemsWith({ contains: [1] })).toEqual(skipped('route "x" contains must be a list of strings'));
+    expect(problemsWith({ notContains: null })).toEqual(skipped('route "x" notContains must be a list of strings'));
+    expect(problemsWith({ match: 5 })).toEqual(skipped('route "x" match must be a string'));
+    expect(problemsWith({ levels: 'low' })).toEqual(skipped('route "x" levels must be a list of strings'));
+    expect(problemsWith({ levels: [1] })).toEqual(skipped('route "x" levels must be a list of strings'));
+    expect(problemsWith({ variantRules: {} })).toEqual(skipped('route "x" variantRules must be a list'));
+    expect(problemsWith({ variantRules: [null] })).toEqual(skipped('route "x" variant rule 1 must be an object'));
+    expect(problemsWith({ variantRules: [{ map: { max: false } }] })).toEqual(skipped('route "x" variant rule 1 needs a match'));
+    expect(problemsWith({ variantRules: [{ match: '*' }] })).toEqual(skipped('route "x" variant rule 1 needs a map'));
+    expect(problemsWith({ variantRules: [{ match: 5, map: {} }] })).toEqual(skipped('route "x" variant rule 1 match must be a string'));
+    expect(problemsWith({ variantRules: [{ match: '*', map: [] }] })).toEqual(skipped('route "x" variant rule 1 map must map levels to a variant name or false'));
+    expect(problemsWith({ variantRules: [{ match: '*', map: { max: true } }] })).toEqual(skipped('route "x" variant rule 1 map "max" must be a variant name or false'));
+    expect(modelRouteProblems('x', { targets: [{ model: 'a/b', variants: { max: true } }] })).toEqual(
+      skipped('route "x" has a bad target: its variant remap "max" must be a variant name or false'),
+    );
+    expect(modelRouteProblems('x', { targets: 'a/b' })).toEqual(skipped('route "x" targets must be a list'));
+  });
+
+  it('flags an unknown key on a variant rule, which OpenCode drops', () => {
+    expect(modelRouteProblems('x', { targets: ['a/b'], variantRules: [{ match: '*', map: {}, extra: 1 }] })).toEqual([
+      { message: 'route "x" variant rule 1 has unknown key "extra" (expected match, map)', skipsPool: false },
+    ]);
+  });
+
+  it('does not check the weights of a pool that takes models by pattern against its targets', () => {
+    expect(modelRouteProblems('x', { include: ['*luna*'], selection: 'weighted', weights: { 'openai/gpt-6-luna': 3 } })).toEqual([]);
+    expect(modelRouteProblems('x', { targets: ['a/b'], contains: ['luna'], weights: { 'openai/gpt-6-luna': 3 } })).toEqual([]);
+    expect(modelRouteProblems('x', { targets: ['a/b'], match: '*luna*', weights: { 'openai/gpt-6-luna': Infinity } })).toEqual([
+      { message: 'route "x" weight for "openai/gpt-6-luna" must be a positive number', skipsPool: true },
+    ]);
+  });
+});
+
+// What the fork's own `ModelRouteMatch.problems({ match })` answers for each expression
+// (packages/core/src/model-route-match.ts on routing-docs-and-diagnostics at 353bb23676, run with
+// bun 1.4.2): null where it accepts the expression, else its message. A regular expression's
+// message comes from the JavaScript engine, Bun's there and Node's here, so for those only the
+// start both engines share is pinned.
+const INVALID_REGEX = 'Invalid regular expression';
+const FORK_EXPRESSION_VERDICTS = [
+  // The fork's own cases (packages/core/test/model-route-match.test.ts).
+  ['a or b and not c', null],
+  ["(A OR b) AND NOT 'and'", null],
+  [`'re:gpt-(5|6)$' or "* 6"`, null],
+  ['', 'empty expression'],
+  ['   ', 'empty expression'],
+  ['a and', 'expected a pattern or pool name, found the end'],
+  ['and a', 'expected a pattern or pool name, found "and"'],
+  ['not', 'expected a pattern or pool name, found the end'],
+  ['(a or b', 'missing ")" before the end'],
+  ['a or b)', 'unmatched ")"'],
+  ['a b', 'expected "and" or "or" before "b"'],
+  ['a xor b', 'xor is not supported: write (a or b) and not (a and b)'],
+  ["'re:gpt-(5", "unclosed quote in 're:gpt-"],
+  ["(*luna* or *haiku*) and not 're:-(5|6)$'", null],
+  ["*luna* or 're:luna-(5'", INVALID_REGEX],
+  ['*sonnet* and not *-old', null],
+  // More cases, answered by the same function.
+  ['()', 'expected a pattern or pool name, found ")"'],
+  [')', 'expected a pattern or pool name, found ")"'],
+  ['a and (b c)', 'missing ")" before "c"'],
+  ['(a xor b)', 'missing ")" before "xor"'],
+  ['(a))', 'unmatched ")"'],
+  ['xor', null],
+  ['a or xor', null],
+  ['a XoR b', 'xor is not supported: write (a or b) and not (a and b)'],
+  ['NOT a', null],
+  ['not not a', null],
+  ['a AND b OR c', null],
+  ['not (a or b) and c', null],
+  ['a or (b and (c or not d))', null],
+  ['a and or b', 'expected a pattern or pool name, found "or"'],
+  ['a not b', 'expected "and" or "or" before "not"'],
+  ['a\tor\nb', null],
+  ["'and'", null],
+  [`'(' or ")"`, null],
+  ["'", "unclosed quote in '"],
+  ['"abc', 'unclosed quote in "abc'],
+  ["a and 'b", "unclosed quote in 'b"],
+  ["abc'def'", null],
+  ["'abc'def", 'expected "and" or "or" before "def"'],
+  ["''", 'empty pattern'],
+  ['a or ""', 'empty pattern'],
+  ["'re:'", 'empty pattern'],
+  ['re:', 'empty pattern'],
+  ['opencode-route/claude and not *haiku*', null],
+  ['re:^q/', null],
+  ['re:luna-(5|6)$', 'expected "and" or "or" before "("'],
+  ['re:(', 'expected "and" or "or" before "("'],
+  ["'re:('", INVALID_REGEX],
+  ['re:a{2,1}', INVALID_REGEX],
+  ['re:a**', INVALID_REGEX],
+  ['re:[z-a]', INVALID_REGEX],
+  ["x and 're:a{2,1}'", INVALID_REGEX],
+  ["'re:(?<a>x)(?<a>y)'", INVALID_REGEX],
+  ["'re:(?i:a)'", null],
+  ["'re:(?<=a)b'", null],
+  ['re:\\p{L}', null],
+];
+
+describe('match expressions', () => {
+  it('reads each sample expression as the fork does', () => {
+    for (const [source, verdict] of FORK_EXPRESSION_VERDICTS) {
+      const problems = modelRouteProblems('x', { targets: ['a/b'], match: source });
+      const message = `route "x" match "${source}": ${verdict}`;
+      if (verdict === null) expect(problems, source).toEqual([]);
+      else if (verdict === INVALID_REGEX) expect(problems, source).toEqual([{ message: expect.stringContaining(message), skipsPool: true }]);
+      else expect(problems, source).toEqual([{ message, skipsPool: true }]);
+    }
+  });
+
+  it('reads a variant rule\'s match the same way', () => {
+    expect(modelRouteProblems('x', { targets: ['a/b'], variantRules: [{ match: "claude and not 're:haiku-(5|6)'", map: { max: false } }] })).toEqual([]);
+    expect(modelRouteProblems('x', { targets: ['a/b'], variantRules: [{ match: 'x and', map: {} }] })).toEqual([
+      { message: 'route "x" variant rule 1 match "x and": expected a pattern or pool name, found the end', skipsPool: true },
+    ]);
   });
 });
 
