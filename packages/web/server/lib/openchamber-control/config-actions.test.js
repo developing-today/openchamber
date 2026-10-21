@@ -268,6 +268,22 @@ describe('maskConfigSecrets', () => {
       mcp: { servers: { gh: { headers: { Authorization: '{env:GH_TOKEN}' }, environment: { GITHUB_TOKEN: '********' } } } },
     });
   });
+
+  it('masks values under bare-key names, nested and as a direct leaf', () => {
+    expect(maskConfigSecrets({
+      privateKey: '-----BEGIN', accessKey: 'AKIA123', sshKey: 'ssh-secret', encryptionKey: 'abc',
+      licenseKey: 'LIC-1', signingKey: 'sig', sessionKey: 'sess', private_key: 'pk', key: 'bare',
+      keybinds: 'ctrl+c', baseURL: 'https://x',
+      nested: { access_key: '{env:AK}' },
+    })).toEqual({
+      privateKey: '********', accessKey: '********', sshKey: '********', encryptionKey: '********',
+      licenseKey: '********', signingKey: '********', sessionKey: '********', private_key: '********', key: '********',
+      keybinds: 'ctrl+c', baseURL: 'https://x',
+      nested: { access_key: '{env:AK}' },
+    });
+    expect(maskConfigSecrets('-----BEGIN', 'privateKey')).toBe('********');
+    expect(maskConfigSecrets('{file:/keys/id}', 'sshKey')).toBe('{file:/keys/id}');
+  });
 });
 
 describe('opencode.config.get', () => {

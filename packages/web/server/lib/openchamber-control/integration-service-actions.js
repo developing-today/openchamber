@@ -87,10 +87,13 @@ const GITLAB_DEFAULT_INSTANCE = 'https://gitlab.com';
 
 /**
  * accessToken, refreshToken, clientSecret, password, apiKey, cookie and the
- * like. Anchored at the end so tokenType, scope and the binding's credential
- * references (which name a stored account, not a secret) stay.
+ * like. The bare `key` alternative is the rule config-actions.js applies to
+ * config masking too: a name that ends in `key` (privateKey, access_key, a
+ * key literally named `key`) holds a secret. Anchored at the end so
+ * tokenType, scope and the binding's credential references (which name a
+ * stored account, not a secret) stay.
  */
-const SECRET_KEY = /(?:token|secret|password|passwd|passphrase|api[-_]?key|cookie|authorization)$/i;
+const SECRET_KEY = /(?:token|secret|password|passwd|passphrase|api[-_]?key|key|cookie|authorization)$/i;
 
 const badRequest = (message) => new OpenChamberControlError(message, 400);
 

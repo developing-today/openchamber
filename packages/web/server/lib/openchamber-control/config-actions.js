@@ -201,6 +201,11 @@ const readAtPath = (root, segments) => {
 };
 
 const SECRET_KEY_PATTERN = /(api[-_]?key|apikey|token|secret|password|passwd|authorization|credential|cookie)/i;
+// The bare-key rule, shared with integration-service-actions.js: a name that
+// ends in `key` (privateKey, access_key, a key literally named `key`) holds a
+// secret. Suffix-only, so keybinds and other names that merely start with or
+// contain `key` stay readable.
+const SECRET_KEY_SUFFIX = /key$/i;
 // `{env:NAME}` and `{file:path}` are references, not the secret itself.
 const isConfigReference = (value) => /^\{(env|file):[^}]+\}$/.test(value.trim());
 
@@ -210,7 +215,7 @@ export const maskConfigSecrets = (value, key = '') => {
   if (isPlainObject(value)) {
     return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [entryKey, maskConfigSecrets(entry, entryKey)]));
   }
-  if (isString(value) && value && SECRET_KEY_PATTERN.test(key) && !isConfigReference(value)) return '********';
+  if (isString(value) && value && (SECRET_KEY_PATTERN.test(key) || SECRET_KEY_SUFFIX.test(key)) && !isConfigReference(value)) return '********';
   return value;
 };
 
