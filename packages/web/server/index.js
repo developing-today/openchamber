@@ -158,6 +158,7 @@ import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
+import { readManagedOpenCodeState, resolveManagedOpenCodePaths } from './lib/opencode/managed-opencode-state.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
 import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
@@ -360,6 +361,8 @@ const deleteImportedTheme = (...args) => themeRuntime.deleteImportedTheme(...arg
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let managedConfigRuntime = null;
+// Set in main() by prepareInstanceDir; the lifecycle saves it with the managed OpenCode state.
+let instanceDir = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -1606,6 +1609,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     }
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
+  getInstanceDir: () => instanceDir,
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
   resolveUserEnvironment: () => environmentRuntime.forOpenCodeResolved(),
 });
@@ -2079,7 +2083,16 @@ async function main(options = {}) {
     || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
       ? process.env.OPENCHAMBER_HOST.trim()
       : '127.0.0.1');
-  const instanceDir = await prepareInstanceDir({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR });
+  // A managed OpenCode this server adopts keeps reading the folder it was
+  // started with, so the saved state's folder is claimed when its owner is gone
+  // or is the predecessor handing off to this server (instance-dir.js).
+  instanceDir = await prepareInstanceDir({
+    fsPromises,
+    path,
+    dataDir: OPENCHAMBER_DATA_DIR,
+    claimDir: readManagedOpenCodeState(resolveManagedOpenCodePaths(OPENCHAMBER_DATA_DIR).statePath)?.instanceDir ?? null,
+    handoffFrom: Number.isInteger(options.handoffPredecessor) ? options.handoffPredecessor : null,
+  });
   agentToolRuntime = createAgentToolRuntime({
     crypto,
     fsPromises,

@@ -58,3 +58,65 @@ describe('prepareInstanceDir', () => {
     expect(await fs.readFile(path.join(ownDir, 'file'), 'utf8')).toBe('kept');
   });
 });
+
+// A managed OpenCode outlives its server, and the server that adopts it must
+// keep the folder that OpenCode reads its config from.
+describe('prepareInstanceDir with a folder to claim', () => {
+  const seedFolder = async (dataDir, name) => {
+    const dir = path.join(instancesDirOf(dataDir), name);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'opencode.managed.json'), name);
+    return dir;
+  };
+
+  it('takes over the folder of a server that is gone, and records itself as owner', async () => {
+    const dataDir = await createDataDir();
+    const saved = await seedFolder(dataDir, '111');
+
+    const dir = await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 222, isPidAlive: (pid) => pid === 222, claimDir: saved });
+
+    expect(dir).toBe(saved);
+    expect(await fs.readFile(path.join(saved, 'opencode.managed.json'), 'utf8')).toBe('111');
+    expect((await fs.readFile(path.join(saved, 'owner'), 'utf8')).trim()).toBe('222');
+    expect(await fs.readdir(instancesDirOf(dataDir))).toEqual(['111']);
+  });
+
+  it('takes over the folder of the live predecessor handing off to it', async () => {
+    const dataDir = await createDataDir();
+    const saved = await seedFolder(dataDir, '111');
+
+    const dir = await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 222, isPidAlive: () => true, claimDir: saved, handoffFrom: 111 });
+
+    expect(dir).toBe(saved);
+  });
+
+  it('leaves a live server that is not its predecessor its folder, and makes its own', async () => {
+    const dataDir = await createDataDir();
+    const saved = await seedFolder(dataDir, '111');
+
+    const dir = await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 222, isPidAlive: () => true, claimDir: saved, handoffFrom: 999 });
+
+    expect(dir).toBe(path.join(instancesDirOf(dataDir), '222'));
+    await expect(fs.access(path.join(saved, 'owner'))).rejects.toThrow();
+  });
+
+  it('never claims a folder outside run/instances', async () => {
+    const dataDir = await createDataDir();
+    const outside = path.join(dataDir, '111');
+    await fs.mkdir(outside, { recursive: true });
+
+    const dir = await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 222, isPidAlive: () => false, claimDir: outside });
+
+    expect(dir).toBe(path.join(instancesDirOf(dataDir), '222'));
+  });
+
+  it('keeps a claimed folder while its new owner lives, even though the server it is named after is gone', async () => {
+    const dataDir = await createDataDir();
+    const saved = await seedFolder(dataDir, '111');
+    await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 222, isPidAlive: () => false, claimDir: saved });
+
+    await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 333, isPidAlive: (pid) => pid === 222 || pid === 333 });
+
+    expect((await fs.readdir(instancesDirOf(dataDir))).sort()).toEqual(['111', '333']);
+  });
+});

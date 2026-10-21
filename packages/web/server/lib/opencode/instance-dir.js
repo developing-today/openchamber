@@ -11,7 +11,17 @@
  * stays the same across OpenCode child restarts, so the files live as long as
  * the server that wrote them.
  *
- * On start, folders whose server is gone are removed. A live server's folder is
+ * A managed OpenCode can outlive its server: a self-handoff successor or a
+ * restarted server adopts it (`managed-opencode-state.js`). That OpenCode reads
+ * its config from the folder it was started with, so the adopting server takes
+ * that folder over (`claimDir`, from the saved managed state) instead of
+ * starting a new one: otherwise its launch fingerprint changes and it starts a
+ * second OpenCode, and the old folder is removed while the adopted OpenCode
+ * still reads it. The folder is claimed only when its owner is gone or is the
+ * predecessor handing off to this server (`handoffFrom`); a second live server
+ * keeps its own folder. The owner is written to `owner` inside the folder.
+ *
+ * On start, folders whose owner is gone are removed. A live server's folder is
  * never touched, so two servers starting together cannot remove each other's.
  * Liveness is a pid check, so this holds only for servers in one PID namespace:
  * containers sharing a data dir see each other's pids as gone.
@@ -22,7 +32,9 @@
  * @param {string} dependencies.dataDir OpenChamber data directory
  * @param {number} [dependencies.pid] this server's process id
  * @param {(pid: number) => boolean} [dependencies.isPidAlive]
- * @returns {Promise<string>} this server's own directory, created
+ * @param {string|null} [dependencies.claimDir] the folder the saved managed OpenCode was started with
+ * @param {number|null} [dependencies.handoffFrom] the pid of the server handing off to this one
+ * @returns {Promise<string>} this server's directory, created or claimed
  */
 export const prepareInstanceDir = async ({
   fsPromises,
@@ -30,14 +42,44 @@ export const prepareInstanceDir = async ({
   dataDir,
   pid = process.pid,
   isPidAlive = isProcessAlive,
+  claimDir = null,
+  handoffFrom = null,
 }) => {
   const instancesDir = path.join(dataDir, 'run', 'instances');
-  const ownDir = path.join(instancesDir, String(pid));
   const entries = await fsPromises.readdir(instancesDir).catch(() => []);
-  const abandoned = entries.filter((name) => /^\d+$/.test(name) && Number(name) !== pid && !isPidAlive(Number(name)));
+  const folders = entries.filter((name) => /^\d+$/.test(name));
+  const owners = new Map(await Promise.all(folders.map(async (name) => [name, await readOwner(fsPromises, path.join(instancesDir, name, OWNER_FILE), Number(name))])));
+
+  // Only a folder directly under instancesDir is claimed, never a path the state file names elsewhere.
+  const claimName = typeof claimDir === 'string' && path.dirname(claimDir) === instancesDir ? path.basename(claimDir) : null;
+  const claimOwner = claimName === null ? null : owners.get(claimName);
+  const claimed = claimOwner !== undefined && claimOwner !== null
+    && (claimOwner === pid || claimOwner === handoffFrom || !isPidAlive(claimOwner));
+
+  const abandoned = folders.filter((name) => {
+    if (claimed && name === claimName) return false;
+    const owner = owners.get(name);
+    return owner !== pid && !isPidAlive(owner);
+  });
   await Promise.all(abandoned.map((name) => fsPromises.rm(path.join(instancesDir, name), { recursive: true, force: true }).catch(() => {})));
+
+  if (claimed) {
+    const dir = path.join(instancesDir, claimName);
+    await fsPromises.writeFile(path.join(dir, OWNER_FILE), `${pid}\n`, { mode: 0o600 });
+    return dir;
+  }
+  const ownDir = path.join(instancesDir, String(pid));
   await fsPromises.mkdir(ownDir, { recursive: true, mode: 0o700 });
   return ownDir;
+};
+
+const OWNER_FILE = 'owner';
+
+// The pid in `owner` when a server claimed the folder, otherwise the pid it is named after.
+const readOwner = async (fsPromises, ownerPath, fallback) => {
+  const text = await fsPromises.readFile(ownerPath, 'utf8').catch(() => '');
+  const owner = Number.parseInt(text.trim(), 10);
+  return Number.isInteger(owner) && owner > 0 ? owner : fallback;
 };
 
 const isProcessAlive = (pid) => {

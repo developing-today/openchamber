@@ -172,6 +172,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
     getManagedOpenCodeEnv = async () => ({}),
+    // The folder holding the managed config OpenCode reads (instance-dir.js), saved with the
+    // managed state so a server that adopts this OpenCode takes the same folder over.
+    getInstanceDir = () => null,
     // Variables from Settings and `opencode service set env` (lib/environment).
     getUserEnvironment = () => ({}),
     // The same variables with vault references read; only the launch sees them.
@@ -959,6 +962,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           fingerprint: launchFingerprint,
           password: openCodePassword,
           agentToolToken: managedOpenCodeEnv.OPENCHAMBER_AGENT_TOOL_TOKEN ?? null,
+          instanceDir: getInstanceDir(),
           startedAt: new Date().toISOString(),
         });
         handoffPredecessor = savedState;
@@ -992,6 +996,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           fingerprint: launchFingerprint,
           password: openCodePassword,
           agentToolToken: managedOpenCodeEnv.OPENCHAMBER_AGENT_TOOL_TOKEN ?? null,
+          instanceDir: getInstanceDir(),
           startedAt: new Date().toISOString(),
         });
       }

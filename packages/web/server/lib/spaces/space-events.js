@@ -20,7 +20,8 @@ import { Readable } from 'node:stream';
 
 import { z } from 'zod';
 
-import { UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS, createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS } from '../event-stream/timeouts.js';
 import { parseGlobalBlock } from '../event-stream/global-hub.js';
 
 const EVENT_PATH = '/api/event';

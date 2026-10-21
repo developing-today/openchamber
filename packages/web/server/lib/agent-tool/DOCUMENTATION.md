@@ -123,7 +123,7 @@ all tools are on, and the flattened calls already work through
    `<instance-dir>/agent-tool/` and returns its directory; the managed
    config layer lists that directory in `<instance-dir>/opencode.managed.json` and
    rewrites the file whenever a tool setting changes. `<instance-dir>` is
-   `<data-dir>/run/instances/<server-pid>/` (`../opencode/instance-dir.js`):
+   `<data-dir>/run/instances/<server-pid>/`, or the folder of the managed OpenCode this server adopted (`../opencode/instance-dir.js`):
    the plugin carries this server's tool declarations, so a second server on
    the same data dir must not overwrite it (#4470). The plugin source is
    written as `index.js`, with a `package.json` whose `exports` resolves the
