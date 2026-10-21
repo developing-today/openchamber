@@ -581,9 +581,51 @@ printf '4321\\n'`);
     );
 
     expect(port).toBe(4321);
-    expect(started).toContain("'/home/pi/.openchamber/npm-global/bin/openchamber' serve");
+    expect(started).toContain("'/home/pi/.openchamber/npm-global/bin/openchamber' serve --quiet");
     expect(started).toContain("OPENCODE_BINARY='/home/pi/.opencode/bin/opencode'");
     expect(started).toContain('$HOME/.opencode/bin:');
+  });
+
+  test('ignores numbers in login-shell banner output before the served port line', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    // The remote command runs through a login shell (`sh -lc`): a distro
+    // banner precedes the serve output and its version number is not a port.
+    manager.runRemoteCommand = async () => 'Welcome to Ubuntu 24.04.3 LTS\n4321\n';
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      '/home/pi/.bun/bin/openchamber',
+    );
+
+    expect(port).toBe(4321);
+  });
+
+  test('never accepts an out-of-range number as the served port', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    manager.runRemoteCommand = async () => '99999\n';
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      '/home/pi/.bun/bin/openchamber',
+    );
+
+    expect(port).toBe(4321);
   });
 
   test('refuses to start when the remote machine has no opencode CLI', async () => {
@@ -721,7 +763,7 @@ printf '4321\\n'`);
           host.servers = host.servers.filter((entry) => entry.port !== Number(stoppedPort[1]));
           return '';
         }
-        const servedPort = script.match(/ serve --hostname (\S+) --port (\d+)$/);
+        const servedPort = script.match(/ serve --quiet --hostname (\S+) --port (\d+)$/);
         if (servedPort) {
           host.started.push(Number(servedPort[2]));
           const servedPassword = script.match(/OPENCHAMBER_UI_PASSWORD='([^']*)'/);
