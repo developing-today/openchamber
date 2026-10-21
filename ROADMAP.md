@@ -121,3 +121,8 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Electron `build` bundles the main process (was a no-op stub)      | 2026-10-20 | #142, #159                 |
 | Jules action pinned to commit SHA (opencode#184 set)              | 2026-10-20 | #162                       |
 | Tracked `.create-pr-proof` screenshots removed + gitignored         | 2026-10-20 | #165, #166                 |
+| Malformed versions rejected in mobile release update check          | 2026-10-20 | #180, #181                 |
+| Malformed versions rejected in vscode upgrade check                 | 2026-10-21 | #182, #183                 |
+| Malformed versions rejected in web upgrade check                    | 2026-10-21 | #184, #187                 |
+| Malformed versions rejected in web package-manager check            | 2026-10-21 | #188, #189                 |
+| Malformed versions rejected in electron compareSemver               | 2026-10-21 | #185, #190                 |
