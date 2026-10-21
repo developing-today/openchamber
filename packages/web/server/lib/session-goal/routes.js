@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { deleteObjective, readObjective, writeObjective } from './objectives.js';
 import {
   GOAL_SPEC_DEFAULT_PROMPT,
-  GOAL_SPEC_RULES,
+  goalSpecRules,
+  readGoalWriterSettings,
   rewriteGoalWriterPrompt,
   writeGoalSpec,
 } from './spec-writer.js';
@@ -65,6 +66,7 @@ const respondWithGeneration = async (res, generate, failureMessage) => {
 export function registerSessionGoalRoutes(app, {
   writeSpec = writeGoalSpec,
   rewritePrompt = rewriteGoalWriterPrompt,
+  readWriterSettings = readGoalWriterSettings,
 } = {}) {
   app.put('/api/goals/objective/:sessionId', async (req, res) => {
     try {
@@ -102,10 +104,11 @@ export function registerSessionGoalRoutes(app, {
     return respondWithGeneration(res, (signal) => writeSpec({ ...body, signal }), 'Failed to write goal spec');
   });
 
-  // Settings shows the built-in prompt and the rules every prompt gets; the
-  // server owns both texts, so the UI never carries a copy.
+  // Settings shows the built-in prompt and the rules every prompt gets, with
+  // the length rule for the goal length limit in Settings, as the writer gets
+  // it; the server owns both texts, so the UI never carries a copy.
   app.get('/api/goals/spec/prompt', (_req, res) => {
-    res.json({ prompt: GOAL_SPEC_DEFAULT_PROMPT, rules: GOAL_SPEC_RULES });
+    res.json({ prompt: GOAL_SPEC_DEFAULT_PROMPT, rules: goalSpecRules(readWriterSettings().charLimit) });
   });
 
   // "Describe a change": the goal writer's model rewrites the prompt shown in

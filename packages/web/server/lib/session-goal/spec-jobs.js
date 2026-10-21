@@ -782,8 +782,10 @@ export function createGoalSpecJobRuntime({
         modelID: model.id,
         persistSessionGoal,
         // The writer wrote this objective, or the user chose their own text
-        // over it: "rewrite every goal" leaves it alone, as in the UI.
-        goalWriterSettings: { rewriteAll: false },
+        // over it: "rewrite every goal" leaves it alone, as in the UI. The
+        // goal keeps as much as the goal length limit in Settings allows,
+        // the limit the writer wrote within.
+        goalWriterSettings: { rewriteAll: false, charLimit: readSettings().charLimit },
       });
     }
 

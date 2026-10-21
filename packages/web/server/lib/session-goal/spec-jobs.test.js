@@ -314,6 +314,18 @@ describe('goal writer jobs', () => {
     expect(statuses()).toEqual(['writing', 'ready', 'ready', 'sent']);
   });
 
+  it('keeps as much of the goal as the goal length limit in Settings allows', async () => {
+    // The writer writes within that limit; a goal saved at the default 5000
+    // would be condensed again by the small model.
+    const { runtime, writer, goals } = createRuntime({ settings: { charLimit: 12_000 } });
+    await runtime.create(job({ review: false }));
+
+    writeAnswer(writer);
+    await runtime.whenIdle();
+
+    expect(goals).toEqual([expect.objectContaining({ objective: SPEC, goalWriterSettings: { rewriteAll: false, charLimit: 12_000 } })]);
+  });
+
   it('every server send puts the goal reminder in before the prompt, so the prompt starts the only turn', async () => {
     // A reminder sent after the prompt reached the agent in the middle of the
     // turn the prompt started, and the agent answered it in a second turn.

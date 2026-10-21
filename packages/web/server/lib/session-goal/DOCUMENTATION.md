@@ -134,8 +134,10 @@ progress check judges against. `spec-writer.js` owns it.
   budget scales with it; `ignoreLimit` drops the length rule and clamps only
   at the hard cap.
 - Built-in prompt for Settings: `GET /api/goals/spec/prompt` answers
-  `{ prompt, rules }` with `GOAL_SPEC_DEFAULT_PROMPT` and `GOAL_SPEC_RULES`,
-  so the UI never carries a copy of either.
+  `{ prompt, rules }` with `GOAL_SPEC_DEFAULT_PROMPT` and the rules for the
+  goal length limit in Settings (`goalSpecRules`), the rules the writer gets,
+  so the UI never carries a copy of either. Settings reads them when it opens,
+  so a limit changed on the same page shows in the rules on the next visit.
 - Describe a change: `POST /api/goals/spec/prompt/rewrite`, body `{ prompt?,
   instruction, directory?, providerID?, modelID? }`, answer `{ prompt,
   providerID, modelID }` (`rewriteGoalWriterPrompt`). One call on the writer's
@@ -220,7 +222,8 @@ persisted, revisioned, broadcast).
   switched onto the model and agent, and only then is the goal saved
   (objective file and the goal record through `persistSessionGoal`, on the
   resolved model, `rewriteAll` off since the writer or the user settled the
-  objective). The session service saves its goal before the switch; here a
+  objective, and the goal length limit in Settings, the one the writer wrote
+  within). The session service saves its goal before the switch; here a
   failed switch leaves no goal. Then come the instructions derived from the
   text, the session's pending project knowledge and the goal reminder
   (`buildGoalIntroText`, carrying the spec only when the message went out as
