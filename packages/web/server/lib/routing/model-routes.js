@@ -63,10 +63,24 @@ const readModelRouteTuning = (config) => {
   return isRecord(tuning) ? tuning : null;
 };
 
-const readModelRouteSchedules = (config) => {
-  const schedules = config?.experimental?.model_route_schedules;
-  return Array.isArray(schedules) ? schedules : null;
-};
+// OpenCode adds up `model_route_schedules` from every config file
+// (`configuredSchedules` in packages/core/src/config/plugin/model-routes.ts),
+// while the merged config keeps only the last file's list. So the editable
+// list is the one in the file OpenChamber writes, read as stored so a value
+// the editor cannot read still reaches it, and the other files' lists are
+// reported separately, read-only.
+const readModelRouteSchedules = (config) => config?.experimental?.model_route_schedules ?? null;
+
+const readOtherModelRouteSchedules = (layers, targetPath) =>
+  [
+    [layers.paths.userOverridePath, layers.userOverrideConfig],
+    [layers.paths.customPath, layers.customConfig],
+    [layers.paths.projectPath, layers.projectConfig],
+  ].flatMap(([path, config]) => {
+    if (!path || path === targetPath) return [];
+    const schedules = config?.experimental?.model_route_schedules;
+    return Array.isArray(schedules) && schedules.length > 0 ? [{ path, schedules }] : [];
+  });
 
 const HEALTH_LIMITS = {
   firstTokenTimeoutMs: MAX_MS,
@@ -135,13 +149,19 @@ const isTimezone = (value) => {
 // Only a string is equal to its own String(), so this is a plain value check.
 const isString = (value) => String(value) === value;
 
-const isStringList = (value) => Array.isArray(value) && value.every((item) => isString(item) && item.trim() !== "");
+// OpenCode trims each entry and drops the blank ones, so a blank entry is
+// harmless next to a real one; a list of only blanks would match nothing.
+const isStringList = (value) =>
+  Array.isArray(value) &&
+  value.every(isString) &&
+  (value.length === 0 || value.some((item) => item.trim() !== ""));
 
 /**
  * A schedule's `when` window. OpenCode's schema accepts more than its window
  * parser reads, and the parser drops the whole rule when it cannot read one
  * field, so a typo would leave a schedule saved and never applied. Everything
- * the parser would drop is refused here instead.
+ * the parser would drop is refused here instead, and so is a start equal to its
+ * end, which OpenCode keeps but which is never active.
  */
 const validateWindow = (label, when) => {
   if (!isRecord(when)) return `${label} needs a when window object`;
@@ -187,7 +207,7 @@ const validateSchedule = (label, schedule, allowed) => {
     if (schedule[key] !== undefined && !isString(schedule[key])) return `${label} ${key} must be a string`;
   for (const key of ["targets", "providers", "models", "routes"])
     if (schedule[key] !== undefined && !isStringList(schedule[key]))
-      return `${label} ${key} must be a list of non-empty strings`;
+      return `${label} ${key} must be a list of strings with at least one that is not blank`;
   const problem = validateWindow(label, schedule.when);
   if (problem) return problem;
   for (const key of ["factor", "weight"])
@@ -352,11 +372,13 @@ export const registerModelRouteRoutes = (app, dependencies) => {
   app.get("/api/model-routes", async (req, res) => {
     try {
       const layers = readConfigLayers(null);
+      const targetPath = layers.paths.userPath ?? CONFIG_FILE;
       res.json({
         routes: readModelRoutes(layers.mergedConfig),
         tuning: readModelRouteTuning(layers.mergedConfig),
-        schedules: readModelRouteSchedules(layers.mergedConfig),
-        path: layers.paths.userPath ?? CONFIG_FILE,
+        schedules: readModelRouteSchedules(getConfigForPath(layers, targetPath)),
+        otherSchedules: readOtherModelRouteSchedules(layers, targetPath),
+        path: targetPath,
       });
     } catch (error) {
       res.status(500).json({ error: error?.message ?? "Failed to read model pools" });
@@ -400,7 +422,8 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       res.json({
         routes: routes ?? readModelRoutes(layers.mergedConfig),
         tuning: tuning === undefined ? readModelRouteTuning(layers.mergedConfig) : tuning,
-        schedules: schedules === undefined ? readModelRouteSchedules(layers.mergedConfig) : schedules,
+        schedules: readModelRouteSchedules(targetConfig),
+        otherSchedules: readOtherModelRouteSchedules(layers, targetPath),
         path: targetPath,
       });
     } catch (error) {

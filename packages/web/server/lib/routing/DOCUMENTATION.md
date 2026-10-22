@@ -260,11 +260,19 @@ the user's global `opencode.json(c)` and refused in enterprise mode. A `PUT`
 carries any of `routes`, `tuning` and `schedules`; `null` removes `tuning` or
 `schedules`. Every key is checked against OpenCode's schema
 (`packages/schema/src/config/model-routes.ts`) before anything is written, and
-one bad pool refuses the whole map. A schedule window is also refused where
-OpenCode's window parser (`packages/core/src/model-route-schedule.ts`) would
-drop the rule without saying so: an empty day list, an unreadable time or
-timezone, a start equal to its end, and a schedule with neither or both of
-`factor` and `weight`.
+one bad pool refuses the whole map. A schedule is also refused where OpenCode
+would quietly drop it (`packages/core/src/model-route-schedule.ts`,
+`routeWeightRules` in `packages/core/src/config/plugin/model-routes.ts`): an
+empty day list, an unreadable time or timezone, or neither `factor` nor
+`weight`. Two cases OpenCode keeps are refused too, because they do not do what
+they say: a start equal to its end (the rule stays and is never active) and
+both `factor` and `weight` (the weight applies and the factor is ignored).
+
+OpenCode adds up `model_route_schedules` from every config file, while
+`mergeConfigs` keeps only the last file's list. So `schedules` in a response
+is the list in the user file, as stored, and the only one a `PUT` writes;
+`otherSchedules` lists the non-empty lists in the other files
+(`{ path, schedules }`), which Settings shows read-only.
 
 ## Model pool telemetry
 

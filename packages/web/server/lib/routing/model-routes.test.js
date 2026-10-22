@@ -170,7 +170,7 @@ describe('registerModelRouteRoutes', () => {
     registerModelRouteRoutes(app, deps);
     const response = res();
     await routes.get[0][1]({}, response);
-    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, schedules: null, path: '/u/opencode.json' });
+    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, schedules: null, otherSchedules: [], path: '/u/opencode.json' });
   });
 
   it('GET returns the cross-pool schedules', async () => {
@@ -217,6 +217,72 @@ describe('registerModelRouteRoutes', () => {
     await handler({ body: { schedules: null } }, removed);
     expect(targetConfig.experimental.model_route_schedules).toBeUndefined();
     expect(removed.out.body.schedules).toBeNull();
+  });
+
+  // OpenCode adds up model_route_schedules from every config file, while the
+  // merged config keeps only the last file's list. Editing the merged list and
+  // writing it to the user file made schedules apply twice.
+  describe('with schedules in two config files', () => {
+    const userSchedules = [{ providers: ['deepseek'], when: {}, factor: 0.5 }];
+    const projectSchedules = [{ models: ['*flash*'], when: { daysOfWeek: ['sat'] }, weight: 2 }];
+    let userConfig;
+    let projectConfig;
+    let layered;
+
+    beforeEach(() => {
+      userConfig = { experimental: { model_routes: { old: { targets: ['a/b'] } }, model_route_schedules: userSchedules } };
+      projectConfig = { experimental: { model_route_schedules: projectSchedules } };
+      const layers = {
+        userConfig,
+        userOverrideConfig: {},
+        customConfig: {},
+        projectConfig,
+        // What shared.js mergeConfigs produces: the later file's list replaces the earlier one.
+        mergedConfig: { experimental: { ...userConfig.experimental, model_route_schedules: projectSchedules } },
+        paths: { userPath: '/u/opencode.json', userOverridePath: null, customPath: null, projectPath: '/p/opencode.json' },
+      };
+      layered = {
+        ...deps,
+        readConfigLayers: vi.fn(() => layers),
+        getConfigForPath: vi.fn((given, path) => (path === '/p/opencode.json' ? given.projectConfig : given.userConfig)),
+      };
+    });
+
+    it('GET returns the user file\'s list to edit and the other file\'s list apart', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({}, response);
+      expect(response.out.body.schedules).toEqual(userSchedules);
+      expect(response.out.body.otherSchedules).toEqual([{ path: '/p/opencode.json', schedules: projectSchedules }]);
+    });
+
+    it('PUT writes only the user file\'s list, and a save of routes alone leaves it as it was', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const [, , , handler] = routes.put[0];
+      const edited = [{ ...userSchedules[0], factor: 0.25 }];
+      const saved = res();
+      await handler({ body: { schedules: edited } }, saved);
+      expect(userConfig.experimental.model_route_schedules).toEqual(edited);
+      expect(projectConfig.experimental.model_route_schedules).toEqual(projectSchedules);
+      expect(saved.out.body.schedules).toEqual(edited);
+      expect(saved.out.body.otherSchedules).toEqual([{ path: '/p/opencode.json', schedules: projectSchedules }]);
+
+      const routesOnly = res();
+      await handler({ body: { routes: { old: { targets: ['a/c'] } } } }, routesOnly);
+      expect(userConfig.experimental.model_route_schedules).toEqual(edited);
+      expect(routesOnly.out.body.schedules).toEqual(edited);
+    });
+  });
+
+  it('GET returns a stored list it cannot read as stored, so the editor can show it', async () => {
+    targetConfig.experimental.model_route_schedules = { start: 900 };
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const response = res();
+    await routes.get[0][1]({}, response);
+    expect(response.out.body.schedules).toEqual({ start: 900 });
   });
 
   it('PUT rejects a bad cross-pool schedule and writes nothing', async () => {
@@ -431,8 +497,17 @@ describe('validateModelRoute schedules', () => {
     expect(validateModelRoute('x', route({ when: {} }))).toMatch(/needs a factor or a weight/);
     expect(validateModelRoute('x', route({ when: {}, factor: 2, weight: 3 }))).toMatch(/both factor and weight/);
     expect(validateModelRoute('x', route({ when: {}, factor: 0 }))).toMatch(/factor must be a positive number/);
-    expect(validateModelRoute('x', route({ ...peak, targets: ['a/b', ''] }))).toMatch(/targets must be a list of non-empty strings/);
+    expect(validateModelRoute('x', route({ ...peak, targets: ['', '  '] }))).toMatch(/targets must be a list of strings with at least one that is not blank/);
+    expect(validateModelRoute('x', route({ ...peak, targets: ['a/b', 3] }))).toMatch(/targets must be a list of strings/);
     expect(validateModelRoute('x', route({ ...peak, id: 3 }))).toMatch(/id must be a string/);
+  });
+
+  // OpenCode trims each entry and drops the blank ones (routeWeightRules), so a
+  // stray blank next to a real entry is harmless and must not block a save.
+  it('accepts a blank entry next to a real one, and an empty list', () => {
+    expect(validateModelRoute('x', route({ ...peak, targets: ['a/b', ''] }))).toBeNull();
+    expect(validateModelRoute('x', route({ ...peak, targets: [' ', 'a/*'] }))).toBeNull();
+    expect(validateModelRoute('x', route({ ...peak, targets: [] }))).toBeNull();
   });
 
   it('refuses a window OpenCode could not read', () => {
