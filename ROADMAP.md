@@ -151,4 +151,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | SSH remote answers read past login-shell banner output            | 2026-10-22 | #253, #254                 |
 | Remote tool resolution no longer returns a banner line            | 2026-10-22 | #255, #257                 |
 | ROADMAP Done records the #247, #250 and #253 completions          | 2026-10-22 | #252, #256, #258           |
-| ROADMAP Done records the #259 completion                          | 2026-10-22 | #262                       |
+| ROADMAP Done records the #259 completion                          | 2026-10-22 | #262, #263                 |
