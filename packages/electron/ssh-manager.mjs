@@ -1170,10 +1170,17 @@ export class ElectronSshManager {
     const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
     const output = await this.runRemoteCommand(parsed, controlPath, script);
     const lines = output.split(/\r?\n/);
-    const infoStatus = parseProbeStatusLine(lines[0], 'INFO_STATUS=') || 0;
-    const authStatus = parseProbeStatusLine(lines[1], 'AUTH_STATUS=') || 0;
-    const healthStatus = parseProbeStatusLine(lines[2], 'HEALTH_STATUS=') || 0;
-    const body = lines.slice(3).join('\n');
+    // The probe runs through a login shell, whose banner/profile output can
+    // precede the status lines, so each status is found by its prefix — never
+    // by position — and the body starts after the last status line.
+    const statusLineIndex = (prefix) => lines.findIndex((line) => line.startsWith(prefix));
+    const infoIndex = statusLineIndex('INFO_STATUS=');
+    const authIndex = statusLineIndex('AUTH_STATUS=');
+    const healthIndex = statusLineIndex('HEALTH_STATUS=');
+    const infoStatus = (infoIndex >= 0 ? parseProbeStatusLine(lines[infoIndex], 'INFO_STATUS=') : null) || 0;
+    const authStatus = (authIndex >= 0 ? parseProbeStatusLine(lines[authIndex], 'AUTH_STATUS=') : null) || 0;
+    const healthStatus = (healthIndex >= 0 ? parseProbeStatusLine(lines[healthIndex], 'HEALTH_STATUS=') : null) || 0;
+    const body = lines.slice(Math.max(infoIndex, authIndex, healthIndex) + 1).join('\n');
     const passwordAccepted = authStatus === 200;
 
     if (isLivenessHttpStatus(infoStatus)) {
