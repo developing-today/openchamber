@@ -103,11 +103,21 @@ let mounted: { root: Root; restore: () => void } | null = null;
 
 /**
  * Opens the page on one provider over a server whose list of turned-off
- * providers is `disabled`. The catalog is what OpenCode lists.
+ * providers is `disabled`. The catalog is what OpenCode lists. `server`
+ * answers any other request first; `activeDirectory` is the directory the
+ * app works in, whose catalog the composer's picker reads.
  */
-const openProviderPage = async (providerId: string, { disabled, catalog }: { disabled: string[]; catalog: Array<Provider & { models: Model[] }> }) => {
-  spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-    const { pathname } = new URL(input instanceof Request ? input.url : String(input));
+const openProviderPage = async (providerId: string, { disabled, catalog, server, activeDirectory }: {
+  disabled: string[];
+  catalog: Array<Provider & { models: Model[] }>;
+  server?: (request: Request) => Promise<Response | null>;
+  activeDirectory?: string;
+}) => {
+  spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = input instanceof Request ? input : new Request(String(input), init);
+    const answer = await server?.(request);
+    if (answer) return answer;
+    const { pathname } = new URL(request.url);
     if (pathname === '/api/provider/disabled') return Response.json({ providers: disabled });
     if (pathname === '/api/provider/lab/source') return Response.json(labSource);
     if (pathname === '/api/provider/groq/source') return Response.json({ providerId: 'groq', sources: noSources, config: null });
@@ -122,10 +132,18 @@ const openProviderPage = async (providerId: string, { disabled, catalog }: { dis
   const { useConfigStore } = await import('@/stores/useConfigStore');
   const { useUIStore } = await import('@/stores/useUIStore');
   configureRuntimeUrlResolver({ apiBaseUrl: 'http://providers-page.test' });
-  useConfigStore.setState({ providers: catalog });
+  const appDirectory = useConfigStore.getState().activeDirectoryKey;
+  useConfigStore.setState({ providers: catalog, disabledProviderIds: null, activeDirectoryKey: activeDirectory ?? appDirectory });
   useUIStore.setState({ hiddenModels: [], settingsProvidersOpenRequested: providerId });
   const root = createRoot(dom.container);
-  mounted = { root, restore: () => { configureRuntimeUrlResolver({ apiBaseUrl: '' }); dom.restore(); } };
+  mounted = {
+    root,
+    restore: () => {
+      configureRuntimeUrlResolver({ apiBaseUrl: '' });
+      useConfigStore.setState({ providers: [], disabledProviderIds: null, activeDirectoryKey: appDirectory });
+      dom.restore();
+    },
+  };
 
   await act(async () => {
     root.render(
@@ -141,7 +159,14 @@ const openProviderPage = async (providerId: string, { disabled, catalog }: { dis
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   }
   const hideButtons = () => Array.from(dom.container.querySelectorAll('button')).filter((button) => button.getAttribute('aria-label') === 'Hide model');
-  return { text: () => dom.container.textContent ?? '', hideButtons, hiddenModels: () => useUIStore.getState().hiddenModels };
+  const click = (label: string) => act(async () => {
+    const button = Array.from(dom.container.querySelectorAll('button')).find((element) => element.textContent?.trim() === label);
+    if (!button) throw new Error(`No button "${label}" in: ${dom.container.textContent}`);
+    button.click();
+  });
+  /** The providers the composer's model picker offers: the store's catalog of the app's directory. */
+  const offered = () => useConfigStore.getState().providers.map((provider) => provider.id);
+  return { text: () => dom.container.textContent ?? '', hideButtons, hiddenModels: () => useUIStore.getState().hiddenModels, click, offered };
 };
 
 describe('ProvidersPage models', () => {
@@ -189,5 +214,59 @@ describe('ProvidersPage models', () => {
     expect(page.text()).toContain('Turn it back on to see and choose its models.');
     expect(page.text()).not.toContain('model choices can still be changed');
     expect(page.hideButtons()).toHaveLength(0);
+  });
+
+  // OpenCode keeps listing a provider written into `disabled_providers` until
+  // its location reloads, and a turn on one of its models then fails. Disable
+  // takes it out of every catalog the store holds at once, a catalog read in
+  // between leaves it out too, and the location of the directory the app
+  // works in reloads, after which OpenCode drops it itself.
+  test('Disable takes a provider out of every picker at once and has OpenCode reload the location', async () => {
+    let reloaded = false;
+    let finishReload: () => void = () => undefined;
+    const reloads: string[] = [];
+    const puts: string[] = [];
+    const server = async (request: Request): Promise<Response | null> => {
+      const { pathname } = new URL(request.url);
+      if (pathname === '/api/provider/groq/disabled' && request.method === 'PUT') {
+        puts.push(await request.text());
+        return Response.json({ providers: ['groq'] });
+      }
+      if (pathname === '/api/location/reload' && request.method === 'POST') {
+        reloads.push(decodeURIComponent(request.headers.get('x-opencode-directory') ?? ''));
+        await new Promise<void>((resolve) => { finishReload = resolve; });
+        reloaded = true;
+        return new Response(null, { status: 204 });
+      }
+      if (pathname === '/api/provider') {
+        return Response.json({ location: {}, data: reloaded ? [] : [{ id: 'groq', name: 'Groq', activation: 'auto', package: groq.package }] });
+      }
+      if (pathname === '/api/model') {
+        return Response.json({ location: {}, data: reloaded ? [] : [llamaFast] });
+      }
+      return null;
+    };
+    const page = await openProviderPage('groq', { disabled: [], catalog: [groq], server, activeDirectory: '/repo' });
+    const { useConfigStore } = await import('@/stores/useConfigStore');
+    expect(page.offered()).toEqual(['groq']);
+
+    await page.click('Disable');
+    for (let turn = 0; turn < 3; turn += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    }
+    expect(puts).toEqual([JSON.stringify({ disabled: true })]);
+    expect(page.offered()).toEqual([]);
+    expect(page.text()).toContain('Turned off.');
+    expect(reloads).toEqual(['/repo']);
+
+    // OpenCode still lists it until the reload answers.
+    await act(async () => { await useConfigStore.getState().loadProviders({ directory: '/repo', fresh: true }); });
+    expect(page.offered()).toEqual([]);
+
+    await act(async () => {
+      finishReload();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(page.offered()).toEqual([]);
   });
 });

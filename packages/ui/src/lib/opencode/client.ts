@@ -835,6 +835,18 @@ class OpencodeService {
   }
 
   /**
+   * Has OpenCode rebuild the location it keeps for a directory from its
+   * config. A config change it does not watch, such as the
+   * `disabled_providers` list, applies there from then on. Asked without a
+   * directory it would rebuild its own working directory, so one is required.
+   */
+  async reloadLocation(directory: string): Promise<void> {
+    const normalized = this.normalizeCandidatePath(directory)
+    if (!normalized) throw new Error("reloadLocation needs a directory")
+    await call("location.reload", () => this.getScopedSdkClient(normalized).location.reload())
+  }
+
+  /**
    * The list is global, but v2 serves it through a location: asked without a
    * directory, OpenCode starts its own working directory (MCP servers
    * included) to answer. The current directory is already running.

@@ -149,16 +149,34 @@ in the user config (`lib/disabledProviders.ts`, `api/provider/:id/disabled`).
 OpenCode can also turn one off through `policies` or `enabled_providers`; this
 page does not read those yet, so such a provider does not show as off here.
 OpenCode drops a turned-off provider from its catalog, so the page reads the list
-itself, and every control reads that one list: the detail page's header
+itself, on every visit, into the config store (`disabledProviderIds`), and
+every control reads that one list: the detail page's header
 button (Disable, or Enable while off), the card's footer button, and the
 "Disabled providers" list at the bottom of the grid. A card shows a Disabled
 pill beside its status and reads muted. A turned-off provider OpenCode no
 longer lists still gets a card, named by its integration, so the grid never
-hides that it is off. Turning a provider off keeps you on its page, and model
+hides that it is off.
+
+OpenCode does not watch `disabled_providers`: in a live run it still listed a
+provider 5 s after the write, offered its models in every picker, and a turn
+on one failed with `provider.no-route`, until `POST /api/location/reload`
+dropped it. So `setProviderDisabled` in the config store takes the server's
+answer as the list and takes the provider out of every catalog the store
+holds at once. A provider read leaves out every provider on the list, and so
+does the catalog a failed read keeps. It then has OpenCode reload the
+locations of the Settings project and of the app's directory and reads their
+catalogs again.
+Only those reload, since a read of any other location starts it with its MCP
+servers; the store's list keeps their pickers clean until OpenCode starts them
+again. VS Code has no list (`null`) and offers none of this.
+
+Turning a provider off keeps you on its page, and model
 show and hide stay editable there; the notice says those choices apply again
-once it is back on. OpenCode leaves a turned-off provider's models out along
+once it is back on. A turned-off provider is in no catalog of the store, so
+its page is always the one for a provider OpenCode does not list: OpenCode
+leaves a turned-off provider's models out along
 with the provider; measured on OpenCode 2.0.30, `GET /api/provider` and
-`GET /api/model` both drop them. Once the catalog is read again, the page
+`GET /api/model` both drop them. The page
 therefore lists the models the provider's OpenCode config entry names,
 `config.models` from `/api/provider/:id/source`, each with its show and hide
 switch from `providers/ProviderModelsSection.tsx`, which a listed provider's

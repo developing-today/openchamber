@@ -15,7 +15,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
 import { loadIntegrationCatalog, peekIntegrationCatalog, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
-import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { requiresProviderAuth } from './providerAvailability';
 import { listConnectableProviders } from './connectableProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
@@ -148,26 +147,24 @@ export const ProvidersPage: React.FC = () => {
   const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog());
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
-  // Null until read, and where the runtime has no OpenChamber server (VS Code).
-  const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(null);
+  // The store's list, read again on every visit: null until read, and where
+  // the runtime has no OpenChamber server (VS Code).
+  const disabledProviders = useConfigStore((state) => state.disabledProviderIds);
+  const loadDisabledProviders = useConfigStore((state) => state.loadDisabledProviders);
+  const setProviderDisabled = useConfigStore((state) => state.setProviderDisabled);
   React.useEffect(() => {
-    let active = true;
-    fetchDisabledProviders()
-      .then((list) => { if (active) setDisabledProviders(list); })
-      .catch((error) => { console.warn('[providers] could not read disabled providers:', error); });
-    return () => { active = false; };
-  }, []);
+    void loadDisabledProviders();
+  }, [loadDisabledProviders]);
   const handleProviderDisabled = React.useCallback(async (providerId: string, disabled: boolean) => {
     try {
-      setDisabledProviders(await setProviderDisabledRequest(providerId, disabled));
+      await setProviderDisabled(providerId, disabled, [settingsDirectory]);
       toast.success(disabled
         ? t('settings.providers.disabled.toast.disabled', { provider: providerId })
         : t('settings.providers.disabled.toast.enabled', { provider: providerId }));
-      void loadProviders({ directory: settingsDirectory, source: 'settings:providers', fresh: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [loadProviders, settingsDirectory, t]);
+  }, [setProviderDisabled, settingsDirectory, t]);
   // Only the first read blocks the credential forms; a re-read keeps showing
   // the methods already known.
   const authLoading = catalog === null && !integrationsLoadFailed;
@@ -705,8 +702,9 @@ export const ProvidersPage: React.FC = () => {
   ) : null;
 
   if (!selectedProvider) {
-    // A turned-off provider OpenCode no longer lists still has its own page, so
-    // its card and the list at the bottom lead somewhere that says it is off.
+    // A turned-off provider is in no catalog, since the store leaves it out
+    // while OpenCode still lists it, yet it keeps its own page, so its card and
+    // the list at the bottom lead somewhere that says it is off.
     if (!selectedDisabled) {
       return (
         <ProviderGrid
@@ -824,7 +822,6 @@ export const ProvidersPage: React.FC = () => {
         headerEnd={disableToggle}
         showSaveStatus={false}
       >
-        {selectedDisabled ? <DisabledNotice hasModels /> : null}
         <CustomProviderForm
           mode="edit"
           existingProviderIDs={connectedProviderIds}
@@ -854,7 +851,6 @@ export const ProvidersPage: React.FC = () => {
       headerEnd={disableToggle}
       showSaveStatus={false}
     >
-      {selectedDisabled ? <DisabledNotice hasModels={showModelsSection} /> : null}
       {routeProvider ? null : (
       <SettingsSection
         title={t('settings.providers.accounts.title')}

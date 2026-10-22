@@ -26,6 +26,7 @@ import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier
 import type { ModelRef } from "@/lib/settings/parsers";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { fetchDisabledProviders, setProviderDisabled as requestProviderDisabled } from "@/lib/disabledProviders";
 import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
@@ -1107,6 +1108,16 @@ const CATALOG_CACHE_RECHECK_SOURCE = 'catalogCacheRecheck';
 const countCatalogModels = (providers: readonly ProviderWithModelList[]): number =>
     providers.reduce((count, provider) => count + provider.models.length, 0);
 
+/** A catalog without the providers turned off in the user's config; the same array when it lists none of them. */
+const withoutDisabledProviders = (
+    providers: ProviderWithModelList[],
+    disabled: readonly string[] | null,
+): ProviderWithModelList[] => (
+    disabled && providers.some((provider) => disabled.includes(provider.id))
+        ? providers.filter((provider) => !disabled.includes(provider.id))
+        : providers
+);
+
 /**
  * True when a first live catalog for a directory shown from the cache is
  * smaller than the cache. The caller keeps the cached catalog on screen and
@@ -1166,7 +1177,9 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
             || (isActive && (state.providersLoaded || state.providers.length > 0));
         const agentsLive = snapshot.agentsLoaded === true || snapshot.agents.length > 0
             || (isActive && (state.agentsLoaded || state.agents.length > 0));
-        const providers = !providersLive && cached.providers?.length ? cached.providers : null;
+        const providers = !providersLive && cached.providers?.length
+            ? withoutDisabledProviders(cached.providers, state.disabledProviderIds)
+            : null;
         const agents = !agentsLive && cached.agents?.length ? cached.agents : null;
         if (!providers && !agents) return state;
         if (providers) _providersShownFromCache.set(loadKey, countCatalogModels(providers));
@@ -1183,6 +1196,24 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
             ...(isActive && providers ? { providers, defaultProviders } : {}),
             ...(isActive && agents ? { agents } : {}),
         };
+    });
+};
+
+/**
+ * Takes the server's list of turned-off providers, and those providers out
+ * of every catalog the store holds at once, so no picker offers one while
+ * OpenCode still lists it.
+ */
+const applyDisabledProviders = (ids: string[] | null): void => {
+    useConfigStore.setState((state) => {
+        let directoryScoped = state.directoryScoped;
+        for (const [directoryKey, snapshot] of Object.entries(state.directoryScoped)) {
+            const providers = withoutDisabledProviders(snapshot.providers, ids);
+            if (providers === snapshot.providers) continue;
+            if (directoryScoped === state.directoryScoped) directoryScoped = { ...state.directoryScoped };
+            directoryScoped[directoryKey] = { ...snapshot, providers };
+        }
+        return { disabledProviderIds: ids, providers: withoutDisabledProviders(state.providers, ids), directoryScoped };
     });
 };
 
@@ -1223,6 +1254,8 @@ subscribeRuntimeEndpointChanged((detail) => {
         agents: [],
         providersLoaded: false,
         agentsLoaded: false,
+        // Another runtime turns off its own providers.
+        disabledProviderIds: null,
         currentProviderId: '',
         currentModelId: '',
         currentAgentName: undefined,
@@ -1475,6 +1508,14 @@ interface ConfigStore {
     agents: Agent[];
     providersLoaded: boolean;
     agentsLoaded: boolean;
+    /**
+     * Providers turned off in the user's OpenCode config, as the server last
+     * named them; null until read, and where the runtime has no OpenChamber
+     * server to ask (VS Code). No catalog the store holds lists them: OpenCode
+     * keeps listing a provider it was told to turn off until its location
+     * reloads.
+     */
+    disabledProviderIds: string[] | null;
     currentProviderId: string;
     currentModelId: string;
     currentVariant: string | undefined;
@@ -1588,6 +1629,17 @@ interface ConfigStore {
 
     /** `fresh`: a request already in flight started before the caller's reason to reload, so it cannot answer it. */
     loadProviders: (options?: { directory?: string | null; source?: string; fresh?: boolean }) => Promise<void>;
+    /** Reads the turned-off providers again; a failed read keeps the list already known. */
+    loadDisabledProviders: () => Promise<void>;
+    /**
+     * Turns a provider off or back on in the user's OpenCode config; rejects
+     * with the server's reason. Every catalog drops a provider turned off at
+     * once. OpenCode then reloads the locations of `directories` and of the
+     * active directory, so it drops the provider there too, or lists one
+     * turned back on, and their catalogs are read again; the answer does not
+     * wait for that.
+     */
+    setProviderDisabled: (providerId: string, disabled: boolean, directories: ReadonlyArray<string | null>) => Promise<void>;
     loadSessionDefaults: () => Promise<boolean>;
     /** `fresh`: a request already in flight started before the caller's reason to reload, so it cannot answer it. */
     loadAgents: (options?: { directory?: string | null; source?: string; fresh?: boolean }) => Promise<boolean>;
@@ -1788,6 +1840,7 @@ export const useConfigStore = create<ConfigStore>()(
                 agents: [],
                 providersLoaded: false,
                 agentsLoaded: false,
+                disabledProviderIds: null,
                 currentProviderId: "",
                 currentModelId: "",
                 currentVariant: undefined,
@@ -2295,13 +2348,15 @@ export const useConfigStore = create<ConfigStore>()(
                             }
                             // A provider the user switched off, or one with no usable
                             // model, is not offerable — v2 replaced the `connected` list
-                            // with these two facts.
-                            const processedProviders: ProviderWithModelList[] = providers
+                            // with these two facts. One turned off in the user's config
+                            // is still listed until its location reloads, so the list
+                            // the server names (`disabledProviderIds`) leaves it out.
+                            const processedProviders: ProviderWithModelList[] = withoutDisabledProviders(providers
                                 .filter((provider) => provider.activation !== "disabled" && modelsByProvider.has(provider.id))
                                 .map((provider) => ({
                                     ...provider,
                                     models: modelsByProvider.get(provider.id) ?? [],
-                                }));
+                                })), get().disabledProviderIds);
 
                             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                             if (holdFirstLoadAgainstCache(_providersShownFromCache, inFlightKey, countCatalogModels(processedProviders))) {
@@ -2484,9 +2539,11 @@ export const useConfigStore = create<ConfigStore>()(
                             defaultProviders: {},
                         };
 
+                        // The catalog from before the load, less a provider turned off meanwhile.
+                        const keptProviders = withoutDisabledProviders(previousProviders, state.disabledProviderIds);
                         const nextSnapshot: DirectoryScopedConfig = {
                             ...baseSnapshot,
-                            providers: previousProviders,
+                            providers: keptProviders,
                             defaultProviders: previousDefaults,
                         };
 
@@ -2498,13 +2555,13 @@ export const useConfigStore = create<ConfigStore>()(
                         };
 
                         if (state.activeDirectoryKey === directoryKey) {
-                            nextState.providers = previousProviders;
+                            nextState.providers = keptProviders;
                             nextState.defaultProviders = previousDefaults;
 
                             if (!state.currentProviderId && !state.currentModelId && state.settingsDefaultModel) {
                                 const parsed = parseModelString(state.settingsDefaultModel);
                                 if (parsed) {
-                                    const settingsProvider = previousProviders.find((p) => p.id === parsed.providerId);
+                                    const settingsProvider = keptProviders.find((p) => p.id === parsed.providerId);
                                     const model = findCatalogModel(settingsProvider?.models, parsed.modelId);
                                     if (model) {
                                         const currentVariant = modelHasVariant(model, state.settingsDefaultVariant)
@@ -2795,6 +2852,43 @@ export const useConfigStore = create<ConfigStore>()(
                 getAgentModelSelection: (agentName: string) => {
                     const { agentModelSelections } = get();
                     return agentModelSelections[agentName] || null;
+                },
+
+                loadDisabledProviders: async () => {
+                    const runtimeContext = captureConfigRuntimeContext();
+                    try {
+                        const ids = await fetchDisabledProviders();
+                        if (isConfigRuntimeContextCurrent(runtimeContext)) applyDisabledProviders(ids);
+                    } catch (error) {
+                        console.warn('[providers] could not read disabled providers:', error);
+                    }
+                },
+
+                setProviderDisabled: async (providerId, disabled, directories) => {
+                    const runtimeContext = captureConfigRuntimeContext();
+                    const ids = await requestProviderDisabled(providerId, disabled);
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                    applyDisabledProviders(ids);
+                    // OpenCode keeps listing a provider written into `disabled_providers`
+                    // until the location reloads: in a live run of #216 it was still listed
+                    // 5 s after the write, and gone once `POST /api/location/reload`
+                    // answered. Only the locations this window shows reload, since a read of
+                    // any other one would start it with its MCP servers; the list above keeps
+                    // their pickers clean until they start again.
+                    const reloaded = new Set<string>();
+                    for (const directory of [...directories, fromDirectoryKey(get().activeDirectoryKey)]) {
+                        const configDirectory = resolveConfigDirectory(directory);
+                        if (configDirectory) reloaded.add(configDirectory);
+                    }
+                    void Promise.all(Array.from(reloaded, async (directory) => {
+                        try {
+                            await opencodeClient.reloadLocation(directory);
+                        } catch (error) {
+                            console.warn(`[providers] OpenCode did not reload ${directory}:`, error);
+                        }
+                        if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                        await get().loadProviders({ directory, source: 'providerDisabled', fresh: true });
+                    }));
                 },
 
                 loadSessionDefaults: async () => {

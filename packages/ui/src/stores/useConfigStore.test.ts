@@ -1969,6 +1969,66 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers.map((entry) => entry.id)).toEqual(['live']);
   }, 8000);
 
+  // OpenCode lists a provider turned off in the user's config until its
+  // location reloads, so the store leaves out every provider the server names
+  // as turned off: in what a read answers, and in the catalog a read that
+  // failed keeps.
+  test('a provider read leaves out a provider the server names as turned off', async () => {
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('live'), providerInfo('off')],
+      models: [model('live', 'live-model'), model('off', 'off-model')],
+      default: { providerID: 'live', id: 'live-model' },
+    });
+    useConfigStore.setState({ disabledProviderIds: ['off'] });
+    try {
+      await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+
+      expect(useConfigStore.getState().providers.map((entry) => entry.id)).toEqual(['live']);
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['live']);
+    } finally {
+      useConfigStore.setState({ disabledProviderIds: null });
+    }
+  });
+
+  test('a provider read that fails keeps its catalog without a provider turned off meanwhile', async () => {
+    const catalog = [provider('live'), provider('off')];
+    useConfigStore.setState({
+      providers: catalog,
+      directoryScoped: {
+        [DIRECTORY]: {
+          providers: catalog,
+          agents: [],
+          currentProviderId: '',
+          currentModelId: '',
+          currentAgentName: undefined,
+          selectedProviderId: '',
+          agentModelSelections: {},
+          defaultProviders: {},
+          // Loaded once already, so the failed read schedules no retry of its own.
+          providersLoaded: true,
+        },
+      },
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    getProvidersForConfigImpl = async () => {
+      await held;
+      throw new Error('OpenCode is down');
+    };
+    try {
+      const load = useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+      // Turned off while the read is out, as Settings does it.
+      useConfigStore.setState({ disabledProviderIds: ['off'], providers: [provider('live')] });
+      release();
+      await load;
+
+      expect(useConfigStore.getState().providers.map((entry) => entry.id)).toEqual(['live']);
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['live']);
+    } finally {
+      useConfigStore.setState({ disabledProviderIds: null });
+    }
+  }, 8000);
+
   // OpenCode answers a directory it is still starting with the providers it has
   // so far; a plugin provider registers later and is announced by an event.
   // When that event lands while another directory is active, only that one is
