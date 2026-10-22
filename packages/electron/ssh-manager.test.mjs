@@ -620,6 +620,65 @@ printf '4321\\n'`);
     expect(resolved).toBeNull();
   });
 
+  test('resolves no remote tool when the last banner line starts with a slash', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    // No candidate is executable, so the resolve script prints nothing and
+    // the output is banner-only. The last banner line starts with '/' and
+    // reads as a path with spaces; it is a sentence, not the tool path.
+    manager.runRemoteCommand = async () => 'Welcome to Ubuntu\n/home/user/bin is on your PATH\n';
+
+    const resolved = await manager.resolveRemoteTool(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      'opencode',
+      ['"$HOME/.opencode/bin/opencode"'],
+    );
+
+    expect(resolved).toBeNull();
+  });
+
+  test('resolves no remote tool when a slash-led banner line has no trailing newline', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => 'Welcome to Ubuntu\n/home/user/bin is on your PATH';
+
+    const resolved = await manager.resolveRemoteTool(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      'opencode',
+      ['"$HOME/.opencode/bin/opencode"'],
+    );
+
+    expect(resolved).toBeNull();
+  });
+
+  test('resolves a remote tool whose path contains spaces when banner output precedes it', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    // The script prints its answer with no trailing newline after the
+    // banner, and a remote path under a directory with spaces is genuine.
+    manager.runRemoteCommand = async () => 'Welcome to Ubuntu\n/home/user/my tools/opencode';
+
+    const resolved = await manager.resolveRemoteTool(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      'opencode',
+      ['"$HOME/my tools/opencode"'],
+    );
+
+    expect(resolved).toBe('/home/user/my tools/opencode');
+  });
+
   test('reads the remote OS from its own line when login-shell banner output precedes it', async () => {
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),

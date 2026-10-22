@@ -441,7 +441,9 @@ const parseRemoteOs = (output) => {
 // expanded from the probed candidates. A genuine path is absolute; a banner
 // line is not, so an absolute first field is what separates a script answer
 // from login-shell output. (Remote paths may contain spaces, so whitespace
-// alone proves nothing.)
+// alone proves nothing.) For the resolved tool that shape is not enough on
+// its own: a banner sentence can start with '/' and read as a path with
+// spaces, so resolveRemoteTool adds position and ending checks there.
 const isRemotePathLine = (value) => value.startsWith('/');
 
 const isAuthHttpStatus = (status) => status === 401 || status === 403;
@@ -1101,12 +1103,18 @@ export class ElectronSshManager {
     try {
       const output = await this.runRemoteCommand(parsed, controlPath, script);
       // The script prints its one answer last, with no trailing newline, and
-      // login-shell banner output can only precede it — so the answer is the
-      // last non-empty line, and only when it is an absolute path. Returning
-      // the whole stdout would hand the banner to callers as the tool path.
-      const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      const last = lines[lines.length - 1] || '';
-      return isRemotePathLine(last) ? last : null;
+      // login-shell banner output can only precede it. Banner lines are
+      // newline-terminated, so banner-only output is empty or ends with a
+      // newline and its final segment is empty. Take the final segment
+      // as-is: the answer is that segment, and only when it is an absolute
+      // path to the named tool. The script only ever prints one of the
+      // probed candidates, and every candidate is a path ending in the
+      // tool's name. Skipping empty segments instead would promote the
+      // last banner line, which can itself start with '/' and read as a
+      // path with spaces.
+      const lines = output.split(/\r?\n/);
+      const last = (lines[lines.length - 1] || '').trim();
+      return isRemotePathLine(last) && last.endsWith(`/${commandName}`) ? last : null;
     } catch {
       return null;
     }
