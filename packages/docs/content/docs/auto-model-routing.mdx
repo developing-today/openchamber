@@ -94,7 +94,9 @@ its advanced options in **Settings → Routing → Model pools**, and
 every pool, or only in the pools you list. Each schedule takes weekdays, days of
 the month, a start and end time, a timezone, and either a factor that multiplies
 the weight or a weight that replaces it. Outside its window the configured
-weights apply.
+weights apply. OpenCode also applies schedules from its other config files,
+such as a project's `opencode.json`. Settings lists those read-only, under the
+name of the file to edit them in.
 
 Jev sorts prompts by reading the category names and descriptions, so the descriptions work as instructions. Say what belongs in the category and what doesn't. You can edit, turn off, remove or add categories, and restore a built-in one if you change your mind. Auto needs at least two categories turned on.
 

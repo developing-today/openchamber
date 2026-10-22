@@ -223,7 +223,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
 
       <RouteScheduleFields
         scope="pool"
-        schedules={route.schedules ?? []}
+        schedules={route.schedules}
         onChange={(next) => onChange(setRouteField(route, 'schedules', next.length > 0 ? next : undefined))}
       />
     </div>

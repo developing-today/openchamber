@@ -22,7 +22,6 @@ import {
   saveModelRouteSchedules,
   saveModelRouteTuning,
   saveModelRoutes,
-  type GlobalSchedule,
   type HedgeAccuracy,
   type ModelRoute,
   type ModelRouteTuning,
@@ -32,6 +31,7 @@ import {
 import { PoolAdvancedFields } from '@/components/sections/routing/PoolAdvancedFields';
 import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/PoolTargetOptions';
 import { RouteScheduleFields } from '@/components/sections/routing/RouteScheduleFields';
+import type { ScheduleList, ScheduleListValue, StoredSchedules } from '@/lib/routing/scheduleSchema';
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
 import { PRESET_ROUTE_IDS, presetTargets, type PresetId } from '@/lib/routing/routePresets';
@@ -407,13 +407,14 @@ export const ModelPoolsSection: React.FC = () => {
   const [routes, setRoutes] = React.useState<Record<string, ModelRoute> | null>(null);
   const [drafts, setDrafts] = React.useState<Record<string, ModelRoute>>({});
   const [tuning, setTuning] = React.useState<ModelRouteTuning | null>(null);
-  const [schedules, setSchedules] = React.useState<GlobalSchedule[]>([]);
+  const [schedules, setSchedules] = React.useState<ScheduleList | null>(null);
+  const [otherSchedules, setOtherSchedules] = React.useState<{ path: string; schedules: StoredSchedules }[]>([]);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [newId, setNewId] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const lastSavedRef = React.useRef<Record<string, ModelRoute> | null>(null);
-  const lastSavedSchedulesRef = React.useRef<GlobalSchedule[]>([]);
+  const lastSavedSchedulesRef = React.useRef<ScheduleList | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -423,8 +424,9 @@ export const ModelPoolsSection: React.FC = () => {
           lastSavedRef.current = state.routes;
           setRoutes(state.routes);
           setTuning(state.tuning ?? null);
-          lastSavedSchedulesRef.current = state.schedules ?? [];
-          setSchedules(state.schedules ?? []);
+          lastSavedSchedulesRef.current = state.schedules ?? null;
+          setSchedules(state.schedules ?? null);
+          setOtherSchedules(state.otherSchedules ?? []);
         }
       })
       .catch((failure) => {
@@ -466,12 +468,13 @@ export const ModelPoolsSection: React.FC = () => {
   }, []);
 
   // An empty list removes the key, so the config carries no `model_route_schedules: []`.
-  const saveSchedules = React.useCallback(async (next: GlobalSchedule[]) => {
+  const saveSchedules = React.useCallback(async (next: ScheduleListValue) => {
     setSchedules(next);
     try {
       const state = await saveModelRouteSchedules(next.length > 0 ? next : null);
-      lastSavedSchedulesRef.current = state.schedules ?? [];
-      setSchedules(state.schedules ?? []);
+      lastSavedSchedulesRef.current = state.schedules ?? null;
+      setSchedules(state.schedules ?? null);
+      setOtherSchedules(state.otherSchedules ?? []);
       setError(null);
     } catch (failure) {
       setSchedules(lastSavedSchedulesRef.current);
@@ -579,6 +582,7 @@ export const ModelPoolsSection: React.FC = () => {
               scope="global"
               schedules={schedules}
               onChange={(next) => void saveSchedules(next)}
+              otherFiles={otherSchedules}
               settingsItem="routing.pools-schedules"
             />
             <PoolTelemetry />

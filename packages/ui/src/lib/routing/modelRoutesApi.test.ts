@@ -86,6 +86,14 @@ describe('model pool schedules', () => {
     expect((await fetchModelRoutes()).routes.kept?.schedules).toEqual([{ factor: 2 }]);
   });
 
+  // Before schedules had types here, the pools loaded whatever a hand-written schedule held.
+  test('a malformed schedule still lets the pools load, as stored', async () => {
+    const routes = { kept: { targets: ['p/a'], schedules: [{ when: { start: 900 }, factor: 2 }] }, other: { targets: ['p/b'], schedules: {} } };
+    const otherSchedules = [{ path: '/repo/opencode.json', schedules: [{ when: 'weekdays' }] }];
+    respond = () => reply(JSON.stringify({ routes, schedules: { start: 900 }, otherSchedules }));
+    expect(await fetchModelRoutes()).toMatchObject({ routes, schedules: { start: 900 }, otherSchedules, available: true });
+  });
+
   test('saves the list across pools alone, and null removes it', async () => {
     const schedules = [{ models: ['*flash*'], when: {}, factor: 0.5 }];
     respond = (request) => reply(JSON.stringify({ routes: {}, schedules: JSON.parse(request.body).schedules }));

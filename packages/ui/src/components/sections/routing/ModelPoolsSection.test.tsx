@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 
-import type { GlobalSchedule } from '@/lib/routing/modelRoutesApi';
+import type { ScheduleList, ScheduleListValue, StoredSchedules } from '@/lib/routing/scheduleSchema';
 
 // Hand-rolled recorders rather than bun's `mock()`: its installed types omit
 // `.mock`/`mockClear`, while the runtime behaviour is all these tests need.
@@ -13,12 +13,13 @@ const tuningSaves: unknown[] = [];
 const scheduleSaves: unknown[] = [];
 let serverRoutes: Record<string, { targets: string[]; selection?: 'ordered' | 'round-robin' | 'weighted'; weights?: Record<string, number> }> = {};
 let serverTuning: unknown = null;
-let serverSchedules: GlobalSchedule[] | null = null;
+let serverSchedules: ScheduleList | null = null;
+let serverOtherSchedules: { path: string; schedules: StoredSchedules }[] = [];
 let saveError: Error | null = null;
 
 const fetchModelRoutes = async () => {
   routeFetches.push('fetch');
-  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, available: true };
+  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, otherSchedules: serverOtherSchedules, available: true };
 };
 const saveModelRoutes = async (routes: unknown) => {
   routeSaves.push(routes);
@@ -32,11 +33,11 @@ const saveModelRouteTuning = async (tuning: unknown) => {
   serverTuning = tuning;
   return { routes: serverRoutes, tuning, available: true };
 };
-const saveModelRouteSchedules = async (schedules: GlobalSchedule[] | null) => {
+const saveModelRouteSchedules = async (schedules: ScheduleListValue | null) => {
   scheduleSaves.push(schedules);
   if (saveError) throw saveError;
   serverSchedules = schedules;
-  return { routes: serverRoutes, tuning: serverTuning, schedules, available: true };
+  return { routes: serverRoutes, tuning: serverTuning, schedules, otherSchedules: serverOtherSchedules, available: true };
 };
 const fetchRouteStats = async () => ({ available: false, reason: 'no-database' });
 
@@ -219,6 +220,7 @@ describe('ModelPoolsSection', () => {
     serverRoutes = {};
     serverTuning = null;
     serverSchedules = null;
+    serverOtherSchedules = [];
     saveError = null;
     useConfigStore.setState({
       providers: [
@@ -477,6 +479,36 @@ describe('ModelPoolsSection', () => {
       await clickButton(dom.container, 'Remove schedule');
       expect(scheduleSaves.at(-1)).toBeNull();
       expect(routeSaves).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // OpenCode adds up the lists from every config file; only the user file's is editable here.
+  test('lists from other config files show read-only with their file, and saves never include them', async () => {
+    serverSchedules = [{ providers: ['deepseek'], when: {}, factor: 0.5 }];
+    serverOtherSchedules = [{ path: '/repo/opencode.json', schedules: [{ models: ['*flash*'], when: {}, weight: 2 }] }];
+    const { dom, cleanup } = await renderSection();
+    try {
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('These schedules from /repo/opencode.json also apply. Edit them in that file.');
+      expect(text).toContain('*flash*');
+      expect([...dom.container.querySelectorAll('input')].some((el) => el.value === '*flash*')).toBe(false);
+      await typeInto(findInput(dom.container, 'Pools'), 'cheap-pool');
+      expect(scheduleSaves.at(-1)).toEqual([{ providers: ['deepseek'], when: {}, factor: 0.5, routes: ['cheap-pool'] }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a malformed schedule list still lets the pools load', async () => {
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'], schedules: { start: 900 } } });
+    serverSchedules = [{ when: { start: 900 }, factor: 2 }];
+    const { dom, cleanup } = await renderSection();
+    try {
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('kept');
+      expect(text).toContain("OpenChamber can't read this schedule");
     } finally {
       await cleanup();
     }

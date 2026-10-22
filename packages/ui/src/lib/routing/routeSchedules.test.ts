@@ -4,6 +4,9 @@ import {
   isTimezone,
   parseDaysOfMonth,
   parseList,
+  readScheduleList,
+  scheduleListValue,
+  timeInputValue,
   toggleWeekday,
   windowWeekdays,
   withScheduleEffect,
@@ -48,5 +51,38 @@ describe('withScheduleEffect', () => {
   test('keeps exactly one of factor and weight', () => {
     expect(withScheduleEffect({ when: {}, factor: 0.5, weight: 3 }, 'weight', 2)).toEqual({ when: {}, weight: 2 });
     expect(withScheduleEffect({ when: {}, weight: 3 }, 'factor', 0.5)).toEqual({ when: {}, factor: 0.5 });
+  });
+});
+
+describe('timeInputValue', () => {
+  test('pads a stored time to what a time input holds, keeping seconds', () => {
+    expect(timeInputValue('9:30')).toBe('09:30');
+    expect(timeInputValue('9:5')).toBe('09:05');
+    expect(timeInputValue(' 17:05:15 ')).toBe('17:05:15');
+    expect(timeInputValue(undefined)).toBe('');
+  });
+
+  test('is null for a time OpenCode could not read', () => {
+    expect(timeInputValue('24:00')).toBeNull();
+    expect(timeInputValue('12:60')).toBeNull();
+    expect(timeInputValue('12:00:61')).toBeNull();
+    expect(timeInputValue('noon')).toBeNull();
+    expect(timeInputValue('')).toBeNull();
+  });
+});
+
+describe('readScheduleList', () => {
+  test('reads entries one by one, keeps the unreadable ones as stored, and writes both back', () => {
+    const unreadable = { when: { start: 900 }, factor: 2 };
+    const readable = { providers: ['p'], when: {}, factor: 0.5, future: true };
+    const entries = readScheduleList([unreadable, readable]);
+    expect(entries?.map((entry) => entry.kind)).toEqual(['stored', 'schedule']);
+    expect(entries === null ? null : scheduleListValue(entries)).toEqual([unreadable, readable]);
+  });
+
+  test('unset is an empty list, and a value that is not a list is null', () => {
+    expect(readScheduleList(undefined)).toEqual([]);
+    expect(readScheduleList(null)).toEqual([]);
+    expect(readScheduleList({ start: '09:00' })).toBeNull();
   });
 });

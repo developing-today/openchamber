@@ -1,4 +1,49 @@
-import type { GlobalSchedule, ScheduleWindow } from '@/lib/routing/modelRoutesApi';
+import {
+  globalScheduleSchema,
+  type GlobalSchedule,
+  type ScheduleList,
+  type ScheduleListValue,
+  type ScheduleWindow,
+} from '@/lib/routing/scheduleSchema';
+
+/** One entry of a stored list: a schedule the editor can read, or the stored value it cannot. */
+export type ScheduleEntry = { kind: 'schedule'; schedule: GlobalSchedule } | { kind: 'stored'; stored: ScheduleListValue[number] };
+
+/**
+ * Reads a stored schedule list entry by entry. Unset is an empty list; a value
+ * that is not a list at all is null. An entry the editor cannot read is kept as
+ * stored, so a save writes it back unchanged and the server names its problem.
+ */
+export const readScheduleList = (stored: ScheduleList | null | undefined): ScheduleEntry[] | null => {
+  if (stored === undefined || stored === null) return [];
+  if (!Array.isArray(stored)) return null;
+  const items: ScheduleListValue = stored;
+  return items.map((item): ScheduleEntry => {
+    const parsed = globalScheduleSchema.safeParse(item);
+    return parsed.success ? { kind: 'schedule', schedule: parsed.data } : { kind: 'stored', stored: item };
+  });
+};
+
+export const scheduleListValue = (entries: readonly ScheduleEntry[]): ScheduleListValue =>
+  entries.map((entry) => (entry.kind === 'schedule' ? entry.schedule : entry.stored));
+
+// OpenCode reads "9:30", "09:30" and "09:30:15" (`minutesOf` in packages/core/src/model-route-schedule.ts).
+const STORED_TIME = /^(\d{1,2}):(\d{1,2})(?::(\d{2}))?$/;
+
+/**
+ * A stored time as `<input type="time">` holds it: zero-padded HH:mm, seconds
+ * kept. Unset is ''. Null when the text is no time OpenCode could read; such a
+ * value would show as an empty time input and be erased on the next blur.
+ */
+export const timeInputValue = (stored: string | undefined): string | null => {
+  if (stored === undefined) return '';
+  const match = STORED_TIME.exec(stored.trim());
+  if (!match) return null;
+  const [, hours, minutes, seconds] = match;
+  if (Number(hours) > 23 || Number(minutes) > 59 || (seconds !== undefined && Number(seconds) > 59)) return null;
+  const padded = `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  return seconds === undefined ? padded : `${padded}:${seconds}`;
+};
 
 /** The day names OpenCode accepts, by weekday number, 0 for Sunday. Written back as the short form. */
 const SHORT_DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;

@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { storedSchedulesSchema, type ScheduleListValue } from '@/lib/routing/scheduleSchema';
 
 export const AUTONOMY_LEVELS = ['fixed', 'rules', 'adaptive', 'predictive', 'agent'] as const;
 export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
@@ -42,43 +43,7 @@ const budgetSchema = z
   })
   .passthrough();
 
-// Loose on purpose: a hand-written window the editor cannot fully read still
-// loads and shows, and the server names what is wrong with it on save.
-const scheduleWindowSchema = z
-  .object({
-    daysOfWeek: z.array(z.union([z.string(), z.number()])).optional(),
-    daysOfMonth: z.array(z.number()).optional(),
-    start: z.string().optional(),
-    end: z.string().optional(),
-    timezone: z.string().optional(),
-    from: z.number().optional(),
-    until: z.number().optional(),
-  })
-  .passthrough();
 
-/** A time-bound weight change inside one pool (OpenCode's `Schedule`). */
-const routeScheduleSchema = z
-  .object({
-    id: z.string().optional(),
-    targets: z.array(z.string()).optional(),
-    when: scheduleWindowSchema.optional(),
-    factor: z.number().optional(),
-    weight: z.number().optional(),
-    note: z.string().optional(),
-  })
-  .passthrough();
-
-/** A time-bound weight change across pools (OpenCode's `GlobalSchedule`). */
-const globalScheduleSchema = routeScheduleSchema
-  .extend({
-    providers: z.array(z.string()).optional(),
-    models: z.array(z.string()).optional(),
-    routes: z.array(z.string()).optional(),
-  })
-  .passthrough();
-
-export type ScheduleWindow = z.infer<typeof scheduleWindowSchema>;
-export type GlobalSchedule = z.infer<typeof globalScheduleSchema>;
 
 const modelRouteSchema = z
   .object({
@@ -91,7 +56,7 @@ const modelRouteSchema = z
     hedgeAfterMs: z.number().optional(),
     health: healthSchema.optional(),
     budgets: z.record(z.string(), budgetSchema).optional(),
-    schedules: z.array(routeScheduleSchema).optional(),
+    schedules: storedSchedulesSchema.optional(),
   })
   .passthrough();
 
@@ -111,7 +76,8 @@ export type ModelRouteTuning = z.infer<typeof modelRouteTuningSchema>;
 const modelRoutesStateSchema = z.object({
   routes: z.record(z.string(), modelRouteSchema),
   tuning: modelRouteTuningSchema.nullable().optional(),
-  schedules: z.array(globalScheduleSchema).nullable().optional(),
+  schedules: storedSchedulesSchema.nullable().optional(),
+  otherSchedules: z.array(z.object({ path: z.string(), schedules: storedSchedulesSchema })).optional(),
   path: z.string().optional(),
 });
 
@@ -133,7 +99,7 @@ export const fetchModelRoutes = async (): Promise<ModelRoutesState> => {
 const putModelRoutes = async (body: {
   routes?: Record<string, ModelRoute>;
   tuning?: ModelRouteTuning | null;
-  schedules?: GlobalSchedule[] | null;
+  schedules?: ScheduleListValue | null;
 }): Promise<ModelRoutesState> => {
   const response = await runtimeFetch('/api/model-routes', {
     method: 'PUT',
@@ -154,7 +120,7 @@ export const saveModelRoutes = (routes: Record<string, ModelRoute>): Promise<Mod
 export const saveModelRouteTuning = (tuning: ModelRouteTuning | null): Promise<ModelRoutesState> => putModelRoutes({ tuning });
 
 /** Saves the schedules that apply across pools; null removes the list from the config. */
-export const saveModelRouteSchedules = (schedules: GlobalSchedule[] | null): Promise<ModelRoutesState> => putModelRoutes({ schedules });
+export const saveModelRouteSchedules = (schedules: ScheduleListValue | null): Promise<ModelRoutesState> => putModelRoutes({ schedules });
 
 const routeTargetStatsSchema = z.object({
   providerID: z.string(),

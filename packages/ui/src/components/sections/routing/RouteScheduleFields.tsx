@@ -10,19 +10,23 @@ import {
   SettingsControlGroup,
 } from '@/components/sections/shared/SettingsSection';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import type { GlobalSchedule } from '@/lib/routing/modelRoutesApi';
+import type { GlobalSchedule, ScheduleList, ScheduleListValue, StoredSchedules } from '@/lib/routing/scheduleSchema';
 import {
   WEEKDAYS,
   isTimezone,
   newSchedule,
   parseDaysOfMonth,
   parseList,
+  readScheduleList,
   scheduleEffect,
+  scheduleListValue,
+  timeInputValue,
   toggleWeekday,
   windowWeekdays,
   withScheduleEffect,
   withScheduleField,
   withWindowField,
+  type ScheduleEntry,
 } from '@/lib/routing/routeSchedules';
 import { cn } from '@/lib/utils';
 
@@ -42,8 +46,6 @@ const MATCH_PLACEHOLDERS = {
   models: '*flash*',
   routes: 'cheap-pool',
 } as const satisfies Record<MatchField, string>;
-
-const TIME_INPUT = /^\d{1,2}:\d{2}$/;
 
 /** A text field that commits on blur or Enter, and only when `isValid` accepts the text. */
 const CheckedInput: React.FC<{
@@ -90,7 +92,47 @@ const CheckedInput: React.FC<{
   );
 };
 
-const ScheduleEntry: React.FC<{
+/**
+ * A time field. A stored "9:30" shows as "09:30", the only form a time input
+ * holds; shown raw it would read as empty and the next blur would erase it.
+ * A stored value no time input can hold shows as text, with the error.
+ */
+const TimeField: React.FC<{
+  label: string;
+  stored: string | undefined;
+  error: string;
+  onCommit: (text: string) => void;
+}> = ({ label, stored, error, onCommit }) => {
+  const display = timeInputValue(stored);
+  return (
+    <CheckedInput
+      label={label}
+      type={display === null ? 'text' : 'time'}
+      value={display ?? stored ?? ''}
+      error={error}
+      isValid={(text) => text === '' || timeInputValue(text) !== null}
+      onCommit={onCommit}
+    />
+  );
+};
+
+/** An entry the editor cannot read, shown as stored. It can only be removed here. */
+const StoredScheduleEntry: React.FC<{ number: number; stored: ScheduleListValue[number]; onRemove: () => void }> = ({ number, stored, onRemove }) => {
+  const { t } = useI18n();
+  return (
+    <div role="group" aria-label={t('settings.pools.schedules.entry', { number })} className="space-y-2 rounded-md border border-border/40 p-3">
+      <div className="flex min-w-0 items-start gap-2">
+        <p className={cn(SETTINGS_HELPER_CLASS, 'min-w-0 flex-1')}>{t('settings.pools.schedules.unreadable')}</p>
+        <Button size="sm" variant="ghost" onClick={onRemove}>
+          {t('settings.pools.schedules.remove')}
+        </Button>
+      </div>
+      <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-foreground">{JSON.stringify(stored, null, 2)}</pre>
+    </div>
+  );
+};
+
+const ScheduleEditor: React.FC<{
   number: number;
   schedule: GlobalSchedule;
   matchFields: readonly MatchField[];
@@ -170,20 +212,16 @@ const ScheduleEntry: React.FC<{
           isValid={(text) => text === '' || isTimezone(text)}
           onCommit={(text) => setWhen(withWindowField(when, 'timezone', text || undefined))}
         />
-        <CheckedInput
+        <TimeField
           label={t('settings.pools.schedules.start')}
-          type="time"
-          value={when.start ?? ''}
+          stored={when.start}
           error={t('settings.pools.schedules.timeInvalid')}
-          isValid={(text) => text === '' || TIME_INPUT.test(text)}
           onCommit={(text) => setWhen(withWindowField(when, 'start', text || undefined))}
         />
-        <CheckedInput
+        <TimeField
           label={t('settings.pools.schedules.end')}
-          type="time"
-          value={when.end ?? ''}
+          stored={when.end}
           error={t('settings.pools.schedules.timeInvalid')}
-          isValid={(text) => text === '' || TIME_INPUT.test(text)}
           onCommit={(text) => setWhen(withWindowField(when, 'end', text || undefined))}
         />
       </div>
@@ -233,15 +271,18 @@ const ScheduleEntry: React.FC<{
 
 /**
  * Time-bound weight changes, as a list of entries. `pool` edits one pool's
- * `schedules`; `global` edits `experimental.model_route_schedules`. Every edit
- * hands the whole list to `onChange`.
+ * `schedules`; `global` edits `experimental.model_route_schedules` in the file
+ * OpenChamber writes, and shows `otherFiles` (lists OpenCode also applies from
+ * other config files) read-only. `schedules` is the list as stored; every edit
+ * hands the whole list to `onChange`, entries the editor cannot read included.
  */
 export const RouteScheduleFields: React.FC<{
   scope: 'pool' | 'global';
-  schedules: readonly GlobalSchedule[];
-  onChange: (schedules: GlobalSchedule[]) => void;
+  schedules: ScheduleList | null | undefined;
+  onChange: (schedules: ScheduleListValue) => void;
+  otherFiles?: readonly { path: string; schedules: StoredSchedules }[];
   settingsItem?: string;
-}> = ({ scope, schedules, onChange, settingsItem }) => {
+}> = ({ scope, schedules, onChange, otherFiles = [], settingsItem }) => {
   const { t } = useI18n();
   // useI18n re-renders this on a language change, so the Intl locale read here is current.
   const intlLocale = getCurrentIntlLocale();
@@ -251,7 +292,8 @@ export const RouteScheduleFields: React.FC<{
     return WEEKDAYS.map((day) => format.format(new Date(2023, 0, 1 + day)));
   }, [intlLocale]);
 
-  const replace = (index: number, next: GlobalSchedule) => onChange(schedules.map((entry, i) => (i === index ? next : entry)));
+  const entries = readScheduleList(schedules);
+  const save = (next: readonly ScheduleEntry[]) => onChange(scheduleListValue(next));
 
   return (
     <SettingsControlGroup
@@ -261,20 +303,44 @@ export const RouteScheduleFields: React.FC<{
       contentClassName="space-y-3"
     >
       <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.schedules.listHint')}</p>
-      {schedules.map((schedule, index) => (
-        <ScheduleEntry
-          key={index}
-          number={index + 1}
-          schedule={schedule}
-          matchFields={MATCH_FIELDS[scope]}
-          weekdayLabels={weekdayLabels}
-          onChange={(next) => replace(index, next)}
-          onRemove={() => onChange(schedules.filter((_, i) => i !== index))}
-        />
+      {entries === null ? (
+        <div className="space-y-2">
+          <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.schedules.unreadableList')}</p>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-foreground">{JSON.stringify(schedules, null, 2)}</pre>
+        </div>
+      ) : (
+        <>
+          {entries.map((entry, index) =>
+            entry.kind === 'schedule' ? (
+              <ScheduleEditor
+                key={index}
+                number={index + 1}
+                schedule={entry.schedule}
+                matchFields={MATCH_FIELDS[scope]}
+                weekdayLabels={weekdayLabels}
+                onChange={(next) => save(entries.map((item, i) => (i === index ? { kind: 'schedule', schedule: next } : item)))}
+                onRemove={() => save(entries.filter((_, i) => i !== index))}
+              />
+            ) : (
+              <StoredScheduleEntry
+                key={index}
+                number={index + 1}
+                stored={entry.stored}
+                onRemove={() => save(entries.filter((_, i) => i !== index))}
+              />
+            ),
+          )}
+          <Button size="sm" variant="outline" onClick={() => save([...entries, { kind: 'schedule', schedule: newSchedule() }])}>
+            {t('settings.pools.schedules.add')}
+          </Button>
+        </>
+      )}
+      {otherFiles.map((file) => (
+        <div key={file.path} className="space-y-2">
+          <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.schedules.otherFile', { path: file.path })}</p>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{JSON.stringify(file.schedules, null, 2)}</pre>
+        </div>
       ))}
-      <Button size="sm" variant="outline" onClick={() => onChange([...schedules, newSchedule()])}>
-        {t('settings.pools.schedules.add')}
-      </Button>
     </SettingsControlGroup>
   );
 };
