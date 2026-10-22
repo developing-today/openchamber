@@ -140,3 +140,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #226 completion                            | 2026-10-21 | #230, #231                 |
 | Web dev-tunnel ports reject malformed values                        | 2026-10-21 | #233, #234                 |
 | Env-config ports reject malformed and out-of-range values           | 2026-10-21 | #235, #238                 |
+| ROADMAP Done records the #222 completion                            | 2026-10-21 | #236, #237                 |
+| ROADMAP Done records the #228, #230, #233 and #235 completions      | 2026-10-21 | #239, #240                 |
