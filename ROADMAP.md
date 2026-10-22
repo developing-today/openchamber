@@ -149,3 +149,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Reload no longer joins a stale in-flight environment run          | 2026-10-22 | #247, #249                 |
 | ROADMAP Done records the #241, #243, #174 and #246 completions    | 2026-10-22 | #250, #251                 |
 | SSH remote answers read past login-shell banner output            | 2026-10-22 | #253, #254                 |
+| Remote tool resolution no longer returns a banner line            | 2026-10-22 | #255, #257                 |
+| ROADMAP Done records the #247, #250 and #253 completions          | 2026-10-22 | #252, #256, #258           |
