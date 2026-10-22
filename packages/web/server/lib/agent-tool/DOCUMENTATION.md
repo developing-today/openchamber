@@ -93,7 +93,10 @@ both settings are `false`.
   next turn skip the prompt cache. A Code Mode tool changes only the catalog,
   which OpenCode keeps as a session baseline and updates by appending a message.
   The Settings page says which switches cost the cache for the current
-  `agentToolsCodeMode` (measured in developing-today/openchamber#149).
+  `agentToolsCodeMode` (measured in developing-today/openchamber#149), and only
+  while `managedToolsApplyLive` from `GET /api/config/settings` is true: with an
+  external OpenCode or a user-owned `OPENCODE_CONFIG` a switch waits for a
+  restart and leaves the running session alone.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly

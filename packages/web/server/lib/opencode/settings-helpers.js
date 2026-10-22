@@ -82,6 +82,7 @@ export const createSettingsHelpers = (dependencies) => {
     sanitizeModelRefs,
     sanitizeSkillCatalogs,
     sanitizeProjects,
+    areManagedToolsLive = () => false,
   } = dependencies;
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
@@ -1254,6 +1255,10 @@ export const createSettingsHelpers = (dependencies) => {
       // Jev routing needs the OpenChamber server, so it is present here and
       // absent wherever this payload does not come from one (VS Code).
       routingFeatureAvailable: true,
+      // Whether OpenChamber's tool switches reach the running OpenCode without a
+      // restart (managed-config-file.js `appliesLive`). The Tools page warns about
+      // the prompt cache only then.
+      managedToolsApplyLive: areManagedToolsLive() === true,
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,

@@ -1125,6 +1125,11 @@ under a running child.
   OpenChamber does not take it over. It merges its plugin directories into
   `OPENCODE_CONFIG_CONTENT` instead, and those installs keep the old behavior —
   a managed-tool toggle needs an OpenCode restart to take effect.
+- `appliesLive()` is true when OpenChamber launched the running OpenCode
+  (`isManagedOpenCode`: not external, not skip-start) and owns the config file.
+  `formatSettingsResponse` reports it as the computed, read-only
+  `managedToolsApplyLive`, so the Tools settings page shows its prompt cache
+  note only when a switch reaches the running process. No process or CLI call.
 
 The embedded server controller exposes `getManagedOpenCodePreflight()` for
 desktop bootstrap. It shares the lifecycle's current CLI validation promise,
