@@ -121,12 +121,15 @@ the "looks done" hint or the review offer, the suggestion
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
 
-`CurrentModelIndicator`, the real model of the session's last turn, is a line
+`CurrentModelIndicator`, the real model of the session's last turn, is a pill
 of the composer column above the box on desktop and a line of the model and
 agent row inside the box on mobile; `ChatInput` mounts both. Keep it out of
 `ChatContainer`'s composer slot: the slot lays its children out in a row, and
 the line mounted there sat to the left of the box, cut off, and made the box
-narrower.
+narrower. On desktop the pill is outside the box's opaque surface but over the
+scrolling transcript, so it has the same opaque surface and light
+(`oc-surface-floating oc-glass-floating`), as the status pills do; as a bare
+line it let the transcript's text show through.
 
 A session with no transcript yet (a new chat whose first message went to the
 goal writer) shows its goal writer card (`GoalSpecJobCard`) above the composer

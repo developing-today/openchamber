@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { formatModelRef } from '@/lib/opencode/modelRef';
+import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionMessages } from '@/sync/sync-context';
 
@@ -40,7 +41,7 @@ const CurrentModelIndicator: React.FC<CurrentModelIndicatorProps> = ({ sessionId
 
     return (
         <div
-            className={`flex min-w-0 items-center gap-1.5 px-1 font-mono text-xs text-muted-foreground/70 ${className ?? ''}`}
+            className={cn('flex min-w-0 items-center gap-1.5 px-1 font-mono text-xs text-muted-foreground/70', className)}
             data-current-model-indicator="true"
         >
             {isPool ? (

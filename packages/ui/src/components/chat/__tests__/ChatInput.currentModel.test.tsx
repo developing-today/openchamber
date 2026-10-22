@@ -133,7 +133,7 @@ afterAll(() => {
   browser.close();
 });
 
-test('desktop shows the current model as a line of the composer column, above the box', async () => {
+test('desktop shows the current model as an opaque pill of the composer column, above the box', async () => {
   useUIStore.setState({ isMobile: false });
   useDirectoryStore.setState({ currentDirectory: '/workspace' });
   useSessionUIStore.setState({ currentSessionId: SESSION_ID, currentSessionDirectory: '/workspace' });
@@ -165,6 +165,11 @@ test('desktop shows the current model as a line of the composer column, above th
     expect(indicators).toHaveLength(1);
     const indicator = indicators[0];
     expect(indicator?.textContent).toBe('fake/fake-model');
+    // It sits over the scrolling transcript, outside the box's opaque
+    // surface, so it carries an opaque surface of its own: a transparent line
+    // let the transcript's text show through it.
+    expect(indicator?.classList.contains('oc-surface-floating')).toBe(true);
+    expect(indicator?.classList.contains('oc-glass-floating')).toBe(true);
 
     // Inside the composer form, as a line of its column, ahead of the box
     // that holds the editor: never a sibling of the form, never in the box.

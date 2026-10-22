@@ -4720,13 +4720,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenPicker={handleMobileDraftPickerChange}
                     />
                 ) : null}
-                {/* The real model of the last turn, a line above the box on
-                    desktop; mobile shows it inside the box, by the model button. */}
+                {/* The real model of the last turn, a pill above the box on
+                    desktop; mobile shows it inside the box, by the model button.
+                    The pill is over the transcript, so it is opaque like the
+                    box: a transparent line let scrolled text show through it. */}
                 {!isMobile ? (
                     <CurrentModelIndicator
                         sessionId={currentSessionId}
                         directory={currentSessionDirectoryForSync ?? currentDirectory}
-                        className="mb-1"
+                        className="oc-surface-floating oc-glass-floating mb-1 w-fit max-w-full rounded-full px-2 py-0.5 [corner-shape:round]"
                     />
                 ) : null}
                 </>) : null}
