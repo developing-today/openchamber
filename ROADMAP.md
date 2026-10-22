@@ -152,3 +152,6 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Remote tool resolution no longer returns a banner line            | 2026-10-22 | #255, #257                 |
 | ROADMAP Done records the #247, #250 and #253 completions          | 2026-10-22 | #252, #256, #258           |
 | ROADMAP Done records the #259 completion                          | 2026-10-22 | #262, #263                 |
+| GitHub vault-add route and client covered by tests                | 2026-10-22 | #178, #261                 |
+| Queued-goal inline fallback honours the objective limit opt-out   | 2026-10-22 | #207, #205                 |
+| Dev-server listener ports and pids reject trailing junk           | 2026-10-22 | #264, #265                 |
