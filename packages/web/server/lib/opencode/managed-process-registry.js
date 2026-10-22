@@ -46,7 +46,7 @@
 // package); it carries a parity implementation that reads/writes the SAME dir.
 
 import fsp from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { renameWithRetry } from '../shared/atomic-rename.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -72,6 +72,32 @@ export const readManagedProcessOwner = (pid) => {
   try {
     const entry = JSON.parse(readFileSync(entryFilePath(pid), 'utf8'));
     return Number.isInteger(entry?.ownerPid) ? entry.ownerPid : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Claims OpenCode `pid` after its registered owner `fromOwner` is gone. Two
+ * servers on one data dir can find the same orphan at once; the claim file is
+ * named after the owner it is taken from and created exclusively, so only one
+ * of them can take it from that owner (the winner then re-registers itself,
+ * so the next handover has another name). Returns the server holding the
+ * claim: `claimant` when it won or already held it, another pid otherwise, or
+ * null when the claim could not be read.
+ */
+export const claimManagedProcess = (pid, fromOwner, claimant = process.pid) => {
+  const claimPath = path.join(resolveRegistryDir(), `${pid}.claim-from-${fromOwner}`);
+  try {
+    mkdirSync(resolveRegistryDir(), { recursive: true });
+    writeFileSync(claimPath, String(claimant), { flag: 'wx' });
+    return claimant;
+  } catch (error) {
+    if (error?.code !== 'EEXIST') return null;
+  }
+  try {
+    const holder = Number.parseInt(readFileSync(claimPath, 'utf8').trim(), 10);
+    return Number.isInteger(holder) ? holder : null;
   } catch {
     return null;
   }
