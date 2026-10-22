@@ -33,7 +33,10 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   answers `opencode service set env` variables under the user variables.
   `applyToDirectory(dir, env)` is the overlay consumers call. `forDirectory`
   reads vault references on a user action and otherwise uses the last value
-  read. `forOpenCodeResolved()` is `forOpenCode()` with references read, for
+  read. The environment command itself is spawned with the user variables
+  after the same vault resolution, under the caller's `refresh` flag, so it
+  receives the secret or no variable and never the literal `op://…` text.
+  `forOpenCodeResolved()` is `forOpenCode()` with references read, for
   the launch itself; the launch fingerprint keeps the unresolved
   `forOpenCode()`, so no secret is hashed or stored and a changed reference
   still restarts OpenCode. `vaultStatus()` answers each reference's last read.
