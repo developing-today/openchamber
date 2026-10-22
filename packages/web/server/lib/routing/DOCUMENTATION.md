@@ -310,7 +310,14 @@ makes that visible so the user can spread them.
   target at 70 percent or more gets a `lower-weight` suggestion while the
   target's weight is above 0.1, which the panel turns into a button that
   halves that weight. Without the routing tables the route still answers, with
-  `statsAvailable: false` and no counts. A damaged `plans.json` or links file
+  `statsAvailable: false` and no counts. The session and usage queries
+  settle separately (`sessionsAvailable`, `usageAvailable`), so one failing
+  costs only its own columns. Each telemetry row counts once per plan, even
+  when overlapping links (`openai/*` and `openai/gpt-x`) both cover it. When
+  OpenCode's base URL is not a loopback address (`OPENCODE_HOST` on another
+  machine), its database is not on this one, so the route reads no local file
+  and answers `statsReason: "remote-opencode"`; a local file could be a stale
+  one from another install. A damaged `plans.json` or links file
   is reported as `planError` / `linksError` and costs only the plan columns;
   a link to a plan that no longer exists is reported as `missingPlanID` so the
   panel can clear it. The panel reads again whenever the pools change.
