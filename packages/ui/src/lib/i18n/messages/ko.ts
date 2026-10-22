@@ -3077,6 +3077,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '인증 필요',
   'mcpDropdown.status.needsRegistration': '등록 필요: {error}',
   'mcpDropdown.empty.configureInConfig': '설정에서 MCP 서버를 구성하세요.',
+  "mcpDropdown.cacheNote": "Code Mode가 꺼진 서버를 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
   'sessionAuth.error.rateLimitTitle': '시도가 너무 많습니다',
   'sessionAuth.error.networkTitle': '서버에 연결할 수 없습니다',
   'sessionAuth.error.rateLimitDescriptionSingle': '{minutes}분 후 다시 시도하세요.',

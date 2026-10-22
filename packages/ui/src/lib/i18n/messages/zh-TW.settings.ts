@@ -1198,6 +1198,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "透過 Code Mode 執行",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "透過 Code Mode 執行 OpenChamber 工具",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "關閉：模型直接看到每個工具。開啟：工具放在一個執行短腳本的工具後面。能省一點上下文，但模型可能漏掉它們，較小的模型尤其如此。渲染工具始終直接可見，因為聊天介面根據它自己的呼叫繪製頁面。",
+  "settings.openchamber.tools.cacheNote.direct": "開啟或關閉某個工具或 Code Mode 後，執行中的工作階段下一輪不會使用提示快取。",
+  "settings.openchamber.tools.cacheNote.codeMode": "開啟或關閉展示工具或 Code Mode 後，執行中的工作階段下一輪不會使用提示快取。",
   'settings.openchamber.opencodeCli.tooltipPrefix': '可選的',
   'settings.openchamber.opencodeCli.tooltipSuffix': '二進位檔絕對路徑。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode 可執行檔路徑',

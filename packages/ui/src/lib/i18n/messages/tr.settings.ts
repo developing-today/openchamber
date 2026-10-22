@@ -1248,6 +1248,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Code Mode üzerinden çalıştır",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber araçlarını Code Mode üzerinden çalıştır",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Kapalı: model her aracı doğrudan görür. Açık: araçlar kısa bir betik çalıştıran tek bir aracın arkasına geçer. Biraz bağlam kazandırır ama model, özellikle küçük modeller, araçları gözden kaçırabilir. Render aracı her zaman doğrudan kalır, çünkü sohbet sayfayı onun kendi çağrısından çizer.",
+  "settings.openchamber.tools.cacheNote.direct": "Bir aracı veya Code Mode'u açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Görüntüleme aracını veya Code Mode'u açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'İsteğe bağlı mutlak dosya yolu: ',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary dosyası.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode Binary Yolu',

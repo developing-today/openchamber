@@ -300,6 +300,15 @@ export const OpenChamberToolsSettings: React.FC = () => {
         ariaLabel={t('settings.openchamber.tools.field.agentToolsCodeModeAria')}
         info={t('settings.openchamber.tools.field.agentToolsCodeModeInfo')}
       />
+
+      {/* A direct tool is part of the request's tool list, which providers cache as
+          the start of the prompt. In code mode only the render tool stays direct;
+          the rest change a catalog that OpenCode appends as a message. */}
+      <p className="mt-2 max-w-[44rem] typography-meta text-muted-foreground">
+        {agentToolsCodeMode
+          ? t('settings.openchamber.tools.cacheNote.codeMode')
+          : t('settings.openchamber.tools.cacheNote.direct')}
+      </p>
     </SettingsSection>
   );
 };

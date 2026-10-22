@@ -1214,6 +1214,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Über Code Mode ausführen",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber-Werkzeuge über Code Mode ausführen",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Aus: Das Modell sieht jedes Werkzeug direkt. An: Sie liegen hinter einem Werkzeug, das ein kurzes Skript ausführt. Spart etwas Kontext, aber das Modell kann sie übersehen, besonders kleinere Modelle. Das Render-Werkzeug bleibt immer direkt, weil der Chat die Seite aus seinem eigenen Aufruf zeichnet.",
+  "settings.openchamber.tools.cacheNote.direct": "Wenn du ein Tool oder Code Mode ein- oder ausschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Wenn du das Darstellungstool oder Code Mode ein- oder ausschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Optionaler absoluter Pfad zur',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'Binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode Binary-Pfad',

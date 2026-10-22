@@ -1243,6 +1243,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentToolsCodeMode': 'التشغيل عبر Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeAria': 'تشغيل أدوات OpenChamber عبر Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeInfo': 'عند الإيقاف: يرى النموذج كل أداة مباشرة. عند التفعيل: توضع خلف أداة واحدة تشغّل نصًا برمجيًا قصيرًا يستدعيها. يوفر قليلًا من السياق، لكن قد يغفل النموذج عنها، خاصة النماذج الأصغر. تبقى أداة العرض مباشرة دائمًا، لأن المحادثة ترسم صفحتها من استدعائها الخاص.',
+  "settings.openchamber.tools.cacheNote.direct": "تشغيل أداة أو Code Mode أو إيقافهما يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
+  "settings.openchamber.tools.cacheNote.codeMode": "تشغيل أداة العرض أو Code Mode أو إيقافهما يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'مسار مطلق اختياري إلى',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'الملف التنفيذي.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'مسار الملف التنفيذي لـ OpenCode',

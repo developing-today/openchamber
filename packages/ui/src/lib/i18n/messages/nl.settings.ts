@@ -1273,6 +1273,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Via Code Mode uitvoeren",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber-tools via Code Mode uitvoeren",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Uit: het model ziet elke tool direct. Aan: ze zitten achter één tool die een kort script uitvoert. Scheelt wat context, maar het model kan ze missen, vooral kleinere modellen. De render-tool blijft altijd direct, omdat de chat de pagina tekent vanuit zijn eigen aanroep.",
+  "settings.openchamber.tools.cacheNote.direct": "Een tool of Code Mode aan- of uitzetten zorgt dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
+  "settings.openchamber.tools.cacheNote.codeMode": "De weergavetool of Code Mode aan- of uitzetten zorgt dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Optioneel absoluut pad naar het',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'programma.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'Pad naar de OpenCode-binary',

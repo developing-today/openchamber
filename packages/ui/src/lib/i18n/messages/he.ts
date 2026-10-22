@@ -2979,6 +2979,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'נדרש אימות',
   'mcpDropdown.status.needsRegistration': 'נדרש רישום: {error}',
   'mcpDropdown.empty.configureInConfig': 'אפשר להגדיר שרתי MCP בהגדרות.',
+  "mcpDropdown.cacheNote": "הפעלה או כיבוי של שרת שמצב הקוד שלו כבוי גורמים לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
   'sessionAuth.error.rateLimitTitle': 'יותר מדי ניסיונות',
   'sessionAuth.error.networkTitle': 'לא ניתן להגיע לשרת',
   'sessionAuth.error.rateLimitDescriptionSingle': 'יש להמתין דקה אחת ({minutes}) לפני ניסיון נוסף.',

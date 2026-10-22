@@ -995,6 +995,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Uruchamiaj przez Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Uruchamiaj narzędzia OpenChamber przez Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Wyłączone: model widzi każde narzędzie bezpośrednio. Włączone: trafiają za jedno narzędzie uruchamiające krótki skrypt. Oszczędza trochę kontekstu, ale model może je przeoczyć, zwłaszcza mniejszy. Narzędzie renderowania zawsze zostaje bezpośrednie, bo czat rysuje stronę z jego własnego wywołania.",
+  "settings.openchamber.tools.cacheNote.direct": "Włączenie lub wyłączenie narzędzia albo Code Mode sprawia, że następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Włączenie lub wyłączenie narzędzia wyświetlania albo Code Mode sprawia, że następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Opcjonalna ścieżka absolutna do',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'pliku binarnego.',
   'settings.openchamber.passkeys.actions.add': 'Dodaj klucz dostępu (passkey)',

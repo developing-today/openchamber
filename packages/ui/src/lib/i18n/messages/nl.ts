@@ -3077,6 +3077,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Authenticatie vereist',
   'mcpDropdown.status.needsRegistration': 'Registratie vereist: {error}',
   'mcpDropdown.empty.configureInConfig': 'Configureer MCP-servers in Instellingen.',
+  "mcpDropdown.cacheNote": "Een server met Code Mode uit aan- of uitzetten zorgt dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
   'sessionAuth.error.rateLimitTitle': 'Te veel pogingen',
   'sessionAuth.error.networkTitle': 'Server niet bereikbaar',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Wacht {minutes} minuut voordat u het opnieuw probeert.',

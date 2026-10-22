@@ -1240,6 +1240,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Code Mode로 실행",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber 도구를 Code Mode로 실행",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "끔: 모델이 각 도구를 직접 봅니다. 켬: 짧은 스크립트를 실행하는 도구 하나 뒤에 놓입니다. 컨텍스트를 조금 아끼지만, 특히 작은 모델은 도구를 놓칠 수 있습니다. 렌더 도구는 항상 직접 노출됩니다. 채팅이 그 도구 자체의 호출에서 페이지를 그리기 때문입니다.",
+  "settings.openchamber.tools.cacheNote.direct": "도구나 Code Mode를 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
+  "settings.openchamber.tools.cacheNote.codeMode": "표시 도구나 Code Mode를 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
   'settings.openchamber.opencodeCli.tooltipPrefix': '선택적 절대 경로:',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode binary 경로',

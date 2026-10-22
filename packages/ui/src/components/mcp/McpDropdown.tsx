@@ -215,6 +215,15 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
         )}
         </div>
       </div>
+
+      {/* A server in code mode only changes a catalog that OpenCode appends as a
+          message. With code mode off its tools are in the request's tool list,
+          which providers cache as the start of the prompt. */}
+      {sortedNames.length > 0 && (
+        <p className={cn('px-4 typography-meta text-muted-foreground', mobileListDensity ? 'pb-3' : 'pb-2.5')}>
+          {t('mcpDropdown.cacheNote')}
+        </p>
+      )}
     </div>
   );
 };
@@ -426,6 +435,9 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
           <div className="py-1">
             {renderServerList()}
           </div>
+          {sortedNames.length > 0 && (
+            <p className="px-2 pb-2 typography-meta text-muted-foreground">{t('mcpDropdown.cacheNote')}</p>
+          )}
           {directory && (
             <div className="px-2 py-1 border-t border-border/40 mt-1">
               <span className="typography-meta text-muted-foreground truncate block">

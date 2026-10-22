@@ -1240,6 +1240,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Запускати через Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Запускати інструменти OpenChamber через Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Вимкнено: модель бачить кожен інструмент напряму. Увімкнено: вони ховаються за одним інструментом, що запускає короткий скрипт. Трохи економить контекст, але модель може їх пропустити, особливо слабша. Інструмент рендеру завжди лишається прямим, бо чат малює сторінку з його власного виклику.",
+  "settings.openchamber.tools.cacheNote.direct": "Якщо увімкнути чи вимкнути інструмент або Code Mode, наступний хід активної сесії не використає кеш промпту.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Якщо увімкнути чи вимкнути інструмент показу або Code Mode, наступний хід активної сесії не використає кеш промпту.",
   "settings.openchamber.opencodeCli.tooltipPrefix": "Додатковий абсолютний шлях до",
   "settings.openchamber.opencodeCli.tooltipSuffix": "бінарного файлу.",
   "settings.openchamber.opencodeCli.field.binaryPath": "Шлях до бінарного файлу OpenCode",

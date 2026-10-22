@@ -5,10 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { opencodeClient } from '@/lib/opencode/client';
 import { I18nProvider } from '@/lib/i18n';
+import { dict as enDict } from '@/lib/i18n/messages/en';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useUIStore } from '@/stores/useUIStore';
 import { WorkStatusMcpSection } from '@/components/chat/work-status/WorkStatusMcpSection';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { toast } from 'sonner';
@@ -296,5 +298,29 @@ describe('MCP dropdown status reads', () => {
     expect(useSessionUIStore.getState().newSessionDraft.preparedChatDirectory).toBe(currentPath);
     expect(listSpy.mock.calls).toEqual([[currentPath]]);
     expect(cleanup.mock.calls.length).toBe(1);
+  });
+
+  // A server with code mode off changes the request's tool list mid-session; the note
+  // tells the user that switching costs the next turn its prompt cache.
+  test('both MCP toggle surfaces show the prompt cache note next to their switches', async () => {
+    const note = enDict['mcpDropdown.cacheNote'];
+    expect(note.length).toBeGreaterThan(0);
+    const { McpDropdownContent } = await import('./McpDropdown');
+
+    const empty = await renderNode(<McpDropdownContent active />);
+    expect(empty.querySelector('[role="switch"]')).toBeNull();
+    expect(empty.textContent).not.toContain(note);
+    const emptyRoot = root;
+    root = null;
+    await act(async () => emptyRoot?.unmount());
+
+    listServers = async () => [{ name: 'fixture', status: { status: 'connected' } }];
+    const initialExpanded = useUIStore.getState().workStatusExpandedSections;
+    useUIStore.setState({ workStatusExpandedSections: { ...initialExpanded, mcp: true } });
+    extraSpies.push({ mockRestore: () => useUIStore.setState({ workStatusExpandedSections: initialExpanded }) });
+    const host = await renderNode(<><McpDropdownContent active /><WorkStatusMcpSection sessionId={null} directory="C:/proj-a" /></>);
+    await act(async () => { await useMcpStore.getState().refresh({ directory: 'C:/proj-a' }); });
+    expect(host.querySelectorAll('[role="switch"]').length).toBe(2);
+    expect(host.textContent?.split(note).length).toBe(3);
   });
 });

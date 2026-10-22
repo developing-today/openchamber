@@ -1243,6 +1243,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentToolsCodeMode': 'הרצה דרך Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeAria': 'הרץ את הכלים של OpenChamber דרך Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeInfo': 'כבוי: המודל רואה כל כלי ישירות. מופעל: הכלים נמצאים מאחורי כלי אחד שמריץ סקריפט קצר שקורא להם. חוסך מעט הקשר, אבל המודל עלול לפספס אותם, במיוחד מודלים קטנים. כלי הרינדור נשאר תמיד ישיר, כי הצ\'אט מצייר את הדף מהקריאה שלו עצמו.',
+  "settings.openchamber.tools.cacheNote.direct": "הפעלה או כיבוי של כלי או של Code Mode גורמים לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
+  "settings.openchamber.tools.cacheNote.codeMode": "הפעלה או כיבוי של כלי התצוגה או של Code Mode גורמים לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'נתיב מוחלט (רשות) לקובץ ההרצה',
   'settings.openchamber.opencodeCli.tooltipSuffix': '.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'נתיב קובץ ההרצה של OpenCode',

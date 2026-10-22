@@ -1272,6 +1272,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Run through code mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Run OpenChamber tools through code mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Off: the model sees each tool directly. On: they sit behind one tool that runs a short script calling them. Saves a little context, but the model can miss them, especially smaller models. The render tool always stays direct, because the chat draws its page from its own call.",
+  "settings.openchamber.tools.cacheNote.direct": "Turning a tool or code mode on or off makes a running session's next turn skip the prompt cache.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Turning the render tool or code mode on or off makes a running session's next turn skip the prompt cache.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Optional absolute path to the',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode binary path',

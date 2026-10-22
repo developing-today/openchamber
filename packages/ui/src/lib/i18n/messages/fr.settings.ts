@@ -1146,6 +1146,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Exécuter via Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Exécuter les outils OpenChamber via Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Désactivé : le modèle voit chaque outil directement. Activé : ils passent derrière un outil qui exécute un court script. Économise un peu de contexte, mais le modèle peut les manquer, surtout les petits. L’outil de rendu reste toujours direct, car le chat dessine la page à partir de son propre appel.",
+  "settings.openchamber.tools.cacheNote.direct": "Activer ou désactiver un outil ou Code Mode empêche le prochain tour d’une session en cours d’utiliser le cache du prompt.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Activer ou désactiver l’outil d’affichage ou Code Mode empêche le prochain tour d’une session en cours d’utiliser le cache du prompt.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Chemin absolu facultatif vers le',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binaire.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'Chemin binaire OpenCode',

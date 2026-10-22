@@ -1273,6 +1273,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Code Mode で実行",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber のツールを Code Mode で実行",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "オフ: モデルは各ツールを直接見ます。オン: 短いスクリプトを実行する 1 つのツールの背後に置かれます。コンテキストを少し節約できますが、特に小さいモデルはツールを見落とすことがあります。 レンダーツールは常に直接のままです。チャットはそのツール自身の呼び出しからページを描くためです。",
+  "settings.openchamber.tools.cacheNote.direct": "ツールや Code Mode をオン・オフすると、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
+  "settings.openchamber.tools.cacheNote.codeMode": "表示ツールや Code Mode をオン・オフすると、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
   'settings.openchamber.opencodeCli.tooltipPrefix': '以下への絶対パス（任意）:',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'バイナリ。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode バイナリパス',
