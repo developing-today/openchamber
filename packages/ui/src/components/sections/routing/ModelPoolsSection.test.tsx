@@ -3,18 +3,22 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 
+import type { GlobalSchedule } from '@/lib/routing/modelRoutesApi';
+
 // Hand-rolled recorders rather than bun's `mock()`: its installed types omit
 // `.mock`/`mockClear`, while the runtime behaviour is all these tests need.
 const routeFetches: string[] = [];
 const routeSaves: unknown[] = [];
 const tuningSaves: unknown[] = [];
+const scheduleSaves: unknown[] = [];
 let serverRoutes: Record<string, { targets: string[]; selection?: 'ordered' | 'round-robin' | 'weighted'; weights?: Record<string, number> }> = {};
 let serverTuning: unknown = null;
+let serverSchedules: GlobalSchedule[] | null = null;
 let saveError: Error | null = null;
 
 const fetchModelRoutes = async () => {
   routeFetches.push('fetch');
-  return { routes: serverRoutes, tuning: serverTuning, available: true };
+  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, available: true };
 };
 const saveModelRoutes = async (routes: unknown) => {
   routeSaves.push(routes);
@@ -28,6 +32,12 @@ const saveModelRouteTuning = async (tuning: unknown) => {
   serverTuning = tuning;
   return { routes: serverRoutes, tuning, available: true };
 };
+const saveModelRouteSchedules = async (schedules: GlobalSchedule[] | null) => {
+  scheduleSaves.push(schedules);
+  if (saveError) throw saveError;
+  serverSchedules = schedules;
+  return { routes: serverRoutes, tuning: serverTuning, schedules, available: true };
+};
 const fetchRouteStats = async () => ({ available: false, reason: 'no-database' });
 
 mock.module('@/lib/routing/modelRoutesApi', () => ({
@@ -35,6 +45,7 @@ mock.module('@/lib/routing/modelRoutesApi', () => ({
   fetchModelRoutes,
   saveModelRoutes,
   saveModelRouteTuning,
+  saveModelRouteSchedules,
   fetchRouteStats,
 }));
 
@@ -204,8 +215,10 @@ describe('ModelPoolsSection', () => {
     routeFetches.length = 0;
     routeSaves.length = 0;
     tuningSaves.length = 0;
+    scheduleSaves.length = 0;
     serverRoutes = {};
     serverTuning = null;
+    serverSchedules = null;
     saveError = null;
     useConfigStore.setState({
       providers: [
@@ -432,6 +445,51 @@ describe('ModelPoolsSection', () => {
       expect(dom.container.textContent).toContain('Enter a number from 1 to 1440.');
       await typeInto(findInput(dom.container, 'Minutes between reviews'), '30');
       expect(tuningSaves.at(-1)).toEqual({ intervalMinutes: 30 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a pool schedule saves inside that pool', async () => {
+    // beforeEach gave the server an empty map; the pool is added to it.
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'] } });
+    const { dom, cleanup } = await renderSection();
+    try {
+      await openAdvanced(dom.container);
+      // The pool's list renders before the one across pools, so its button comes first.
+      await clickButton(dom.container, 'Add schedule');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], schedules: [{ when: {}, factor: 1 }] } });
+      expect(scheduleSaves).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('schedules across pools load, save through their own request, and an empty list removes them', async () => {
+    serverSchedules = [{ providers: ['deepseek'], when: { start: '09:00', end: '17:00' }, factor: 0.5 }];
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(findInput(dom.container, 'Providers').value).toBe('deepseek');
+      await typeInto(findInput(dom.container, 'Pools'), 'cheap-pool');
+      expect(scheduleSaves.at(-1)).toEqual([
+        { providers: ['deepseek'], when: { start: '09:00', end: '17:00' }, factor: 0.5, routes: ['cheap-pool'] },
+      ]);
+      await clickButton(dom.container, 'Remove schedule');
+      expect(scheduleSaves.at(-1)).toBeNull();
+      expect(routeSaves).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a refused schedule save rolls back to the saved list and shows why', async () => {
+    saveError = new Error('schedule 1 when.timezone must be an IANA timezone');
+    const { dom, cleanup } = await renderSection();
+    try {
+      await clickButton(dom.container, 'Add schedule');
+      expect(scheduleSaves).toEqual([[{ when: {}, factor: 1 }]]);
+      expect([...dom.container.querySelectorAll('button')].some((el) => el.textContent?.trim() === 'Remove schedule')).toBe(false);
+      expect(dom.container.textContent).toContain('schedule 1 when.timezone must be an IANA timezone');
     } finally {
       await cleanup();
     }

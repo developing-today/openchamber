@@ -42,6 +42,44 @@ const budgetSchema = z
   })
   .passthrough();
 
+// Loose on purpose: a hand-written window the editor cannot fully read still
+// loads and shows, and the server names what is wrong with it on save.
+const scheduleWindowSchema = z
+  .object({
+    daysOfWeek: z.array(z.union([z.string(), z.number()])).optional(),
+    daysOfMonth: z.array(z.number()).optional(),
+    start: z.string().optional(),
+    end: z.string().optional(),
+    timezone: z.string().optional(),
+    from: z.number().optional(),
+    until: z.number().optional(),
+  })
+  .passthrough();
+
+/** A time-bound weight change inside one pool (OpenCode's `Schedule`). */
+const routeScheduleSchema = z
+  .object({
+    id: z.string().optional(),
+    targets: z.array(z.string()).optional(),
+    when: scheduleWindowSchema.optional(),
+    factor: z.number().optional(),
+    weight: z.number().optional(),
+    note: z.string().optional(),
+  })
+  .passthrough();
+
+/** A time-bound weight change across pools (OpenCode's `GlobalSchedule`). */
+const globalScheduleSchema = routeScheduleSchema
+  .extend({
+    providers: z.array(z.string()).optional(),
+    models: z.array(z.string()).optional(),
+    routes: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+export type ScheduleWindow = z.infer<typeof scheduleWindowSchema>;
+export type GlobalSchedule = z.infer<typeof globalScheduleSchema>;
+
 const modelRouteSchema = z
   .object({
     name: z.string().optional(),
@@ -53,6 +91,7 @@ const modelRouteSchema = z
     hedgeAfterMs: z.number().optional(),
     health: healthSchema.optional(),
     budgets: z.record(z.string(), budgetSchema).optional(),
+    schedules: z.array(routeScheduleSchema).optional(),
   })
   .passthrough();
 
@@ -72,6 +111,7 @@ export type ModelRouteTuning = z.infer<typeof modelRouteTuningSchema>;
 const modelRoutesStateSchema = z.object({
   routes: z.record(z.string(), modelRouteSchema),
   tuning: modelRouteTuningSchema.nullable().optional(),
+  schedules: z.array(globalScheduleSchema).nullable().optional(),
   path: z.string().optional(),
 });
 
@@ -90,7 +130,11 @@ export const fetchModelRoutes = async (): Promise<ModelRoutesState> => {
   return { ...modelRoutesStateSchema.parse(payload), available: true };
 };
 
-const putModelRoutes = async (body: { routes?: Record<string, ModelRoute>; tuning?: ModelRouteTuning | null }): Promise<ModelRoutesState> => {
+const putModelRoutes = async (body: {
+  routes?: Record<string, ModelRoute>;
+  tuning?: ModelRouteTuning | null;
+  schedules?: GlobalSchedule[] | null;
+}): Promise<ModelRoutesState> => {
   const response = await runtimeFetch('/api/model-routes', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -108,6 +152,9 @@ export const saveModelRoutes = (routes: Record<string, ModelRoute>): Promise<Mod
 
 /** Saves the automatic-review settings; null removes them so OpenCode's defaults apply. */
 export const saveModelRouteTuning = (tuning: ModelRouteTuning | null): Promise<ModelRoutesState> => putModelRoutes({ tuning });
+
+/** Saves the schedules that apply across pools; null removes the list from the config. */
+export const saveModelRouteSchedules = (schedules: GlobalSchedule[] | null): Promise<ModelRoutesState> => putModelRoutes({ schedules });
 
 const routeTargetStatsSchema = z.object({
   providerID: z.string(),

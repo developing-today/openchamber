@@ -1085,6 +1085,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {
+    id: 'routing.pools-schedules',
+    page: 'routing',
+    titleKey: 'settings.pools.schedules.globalTitle',
+    descriptionKey: 'settings.pools.schedules.globalInfo',
+    keywords: ['schedule', 'schedules', 'peak hours', 'weekdays', 'weekends', 'timezone', 'weight', 'pool', 'routing'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
+  },
+  {
     id: 'git.identities',
     page: 'git',
     titleKey: 'settings.gitIdentities.page.section.title',

@@ -87,6 +87,15 @@ request OpenCode makes to the target, background ones such as titles included),
 and be tuned by the agent from its recorded history. These are OpenCode route
 options; see its configuration reference.
 
+Schedules change target weights on set days or hours, for example to send less
+traffic to a provider during its peak hours. A pool's own schedules sit under
+its advanced options in **Settings → Routing → Model pools**, and
+**Schedules across pools** below the pool list changes matching targets in
+every pool, or only in the pools you list. Each schedule takes weekdays, days of
+the month, a start and end time, a timezone, and either a factor that multiplies
+the weight or a weight that replaces it. Outside its window the configured
+weights apply.
+
 Jev sorts prompts by reading the category names and descriptions, so the descriptions work as instructions. Say what belongs in the category and what doesn't. You can edit, turn off, remove or add categories, and restore a built-in one if you change your mind. Auto needs at least two categories turned on.
 
 ## What happens when you send

@@ -219,3 +219,83 @@ describe('PoolAdvancedFields', () => {
     expect(changes.at(-1)).toMatchObject({ weights: { 'p/cheap': 3 } });
   });
 });
+
+const buttonNamed = (container: HTMLElement, text: string): HTMLButtonElement => {
+  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.trim() === text);
+  if (!button) throw new Error(`no button "${text}"`);
+  return button;
+};
+
+describe('PoolAdvancedFields schedules', () => {
+  let changes: ModelRoute[] = [];
+  const onChange = (next: ModelRoute) => {
+    changes.push(next);
+  };
+  const scheduled: ModelRoute = { targets: ['p/cheap'], schedules: [{ when: {}, factor: 1 }] };
+
+  beforeEach(() => {
+    changes = [];
+  });
+
+  afterEach(async () => {
+    if (!mounted) return;
+    const current = mounted;
+    mounted = null;
+    await act(async () => current.root.unmount());
+    current.restore();
+  });
+
+  test('a new schedule changes nothing until edited, and removing the last one drops the key', async () => {
+    const empty = await renderFields({ targets: ['p/cheap'] }, onChange);
+    await act(async () => buttonNamed(empty, 'Add schedule').click());
+    expect(changes.at(-1)).toEqual({ targets: ['p/cheap'], schedules: [{ when: {}, factor: 1 }] });
+    await act(async () => mounted?.root.unmount());
+    mounted?.restore();
+    mounted = null;
+
+    const container = await renderFields(scheduled, onChange);
+    await act(async () => buttonNamed(container, 'Remove schedule').click());
+    expect(changes.at(-1)).toEqual({ targets: ['p/cheap'] });
+  });
+
+  test('weekday chips save short day names in week order, and the last one off means every day', async () => {
+    const container = await renderFields(
+      { targets: ['p/cheap'], schedules: [{ when: { daysOfWeek: ['friday'] }, factor: 0.5 }] },
+      onChange,
+    );
+    expect(buttonNamed(container, 'Fri').getAttribute('aria-pressed')).toBe('true');
+    await act(async () => buttonNamed(container, 'Mon').click());
+    expect(changes.at(-1)?.schedules).toEqual([{ when: { daysOfWeek: ['mon', 'fri'] }, factor: 0.5 }]);
+    await act(async () => buttonNamed(container, 'Fri').click());
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, factor: 0.5 }]);
+  });
+
+  test('saves the targets, hours and days of the month as typed', async () => {
+    const container = await renderFields(scheduled, onChange);
+    await typeInto(inputNamed(container, 'Targets'), 'deepseek/*, , openai/gpt-6-luna');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, factor: 1, targets: ['deepseek/*', 'openai/gpt-6-luna'] }]);
+    await typeInto(inputNamed(container, 'Start'), '09:00');
+    expect(changes.at(-1)?.schedules?.[0]?.when).toEqual({ start: '09:00' });
+    await typeInto(inputNamed(container, 'Days of the month'), '1, 15, -1');
+    expect(changes.at(-1)?.schedules?.[0]?.when).toEqual({ daysOfMonth: [1, 15, -1] });
+  });
+
+  test('refuses a day of the month or a timezone OpenCode cannot read, and saves nothing', async () => {
+    const container = await renderFields(scheduled, onChange);
+    await typeInto(inputNamed(container, 'Days of the month'), '0, 32');
+    await typeInto(inputNamed(container, 'Timezone'), 'Mars/Olympus');
+    expect(changes).toEqual([]);
+    expect(container.textContent).toContain('Enter days from 1 to 31, or -1 for the last day of the month.');
+    expect(container.textContent).toContain('Enter an IANA timezone such as America/Chicago.');
+    await typeInto(inputNamed(container, 'Timezone'), 'America/Chicago');
+    expect(changes.at(-1)?.schedules?.[0]?.when).toEqual({ timezone: 'America/Chicago' });
+  });
+
+  test('switching to an outright weight replaces the factor, and the amount saves under it', async () => {
+    const container = await renderFields({ targets: ['p/cheap'], schedules: [{ when: {}, factor: 0.5 }] }, onChange);
+    await pickOption(container, 'Change', 'Set weight');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, weight: 0.5 }]);
+    await typeInto(inputNamed(container, 'Multiply weight by'), '2');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, factor: 2 }]);
+  });
+});

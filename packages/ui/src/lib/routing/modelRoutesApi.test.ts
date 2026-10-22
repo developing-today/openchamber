@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 import type { ModelRoute } from './modelRoutesApi';
-import { fetchMessageModelAttribution, fetchModelRoutes, saveModelRouteTuning, saveModelRoutes } from './modelRoutesApi';
+import { fetchMessageModelAttribution, fetchModelRoutes, saveModelRouteSchedules, saveModelRouteTuning, saveModelRoutes } from './modelRoutesApi';
 
 type Sent = { url: string; method: string; body: string };
 
@@ -70,6 +70,28 @@ describe('saveModelRouteTuning', () => {
     const state = await saveModelRouteTuning(tuning);
     expect(JSON.parse(sent[0]?.body ?? '')).toEqual({ tuning });
     expect(state.tuning).toEqual(tuning);
+  });
+});
+
+describe('model pool schedules', () => {
+  test('reads pool schedules and the list across pools, keeping fields the editor does not know', async () => {
+    const routes = { kept: { targets: ['p/a'], schedules: [{ targets: ['p/*'], when: { daysOfWeek: ['mon', 1], start: '09:00' }, factor: 0.5 }] } };
+    const schedules = [{ providers: ['p'], routes: ['kept'], when: { daysOfMonth: [-1] }, weight: 2, future: true }];
+    respond = () => reply(JSON.stringify({ routes, tuning: null, schedules }));
+    expect(await fetchModelRoutes()).toMatchObject({ routes, schedules, available: true });
+  });
+
+  test('loads a pool schedule without a window, so the editor shows it and the server names the problem', async () => {
+    respond = () => reply(JSON.stringify({ routes: { kept: { targets: ['p/a'], schedules: [{ factor: 2 }] } }, schedules: null }));
+    expect((await fetchModelRoutes()).routes.kept?.schedules).toEqual([{ factor: 2 }]);
+  });
+
+  test('saves the list across pools alone, and null removes it', async () => {
+    const schedules = [{ models: ['*flash*'], when: {}, factor: 0.5 }];
+    respond = (request) => reply(JSON.stringify({ routes: {}, schedules: JSON.parse(request.body).schedules }));
+    expect((await saveModelRouteSchedules(schedules)).schedules).toEqual(schedules);
+    expect(await saveModelRouteSchedules(null)).toMatchObject({ schedules: null });
+    expect(sent.map((request) => request.body)).toEqual([JSON.stringify({ schedules }), JSON.stringify({ schedules: null })]);
   });
 });
 
