@@ -17,6 +17,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   AUTONOMY_LEVELS,
+  POOL_DETAILS_MAX_LENGTH,
   fetchModelRoutes,
   fetchRouteStats,
   saveModelRouteTuning,
@@ -89,7 +90,37 @@ const TargetWait: React.FC<{ providerID: string; modelID: string }> = ({ provide
   );
 };
 
-/** One pool: its targets, its autonomy level, and an expert JSON view. */
+/** A paragraph field that saves when it loses focus, like `CommitInput` does for one line. */
+const CommitTextarea: React.FC<{
+  label: string;
+  value: string;
+  placeholder?: string;
+  onCommit: (value: string) => void;
+}> = ({ label, value, placeholder, onCommit }) => {
+  const [draft, setDraft] = React.useState(value);
+
+  React.useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  return (
+    <Textarea
+      aria-label={label}
+      value={draft}
+      placeholder={placeholder}
+      maxLength={POOL_DETAILS_MAX_LENGTH}
+      rows={3}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={(event) => {
+        const next = event.currentTarget.value.trim();
+        if (next !== value) onCommit(next);
+      }}
+      className="w-full"
+    />
+  );
+};
+
+/** One pool: what it is for, its targets, its autonomy level, and an expert JSON view. */
 const PoolRow: React.FC<{
   id: string;
   route: ModelRoute;
@@ -153,9 +184,10 @@ const PoolRow: React.FC<{
           <span className="typography-ui-label font-medium text-foreground truncate">
             {route.name || id}
           </span>
-          <span className="typography-meta text-muted-foreground truncate">
+          <span className="typography-meta text-muted-foreground truncate" title={route.description}>
             {t('settings.pools.targetCount', { count: targets.length })}
             {route.autonomy ? ` · ${route.autonomy}` : ''}
+            {route.description ? ` · ${route.description}` : ''}
           </span>
         </button>
         <Button size="sm" variant="ghost" onClick={onRemove}>
@@ -170,6 +202,22 @@ const PoolRow: React.FC<{
               value={route.name ?? ''}
               placeholder={id}
               onCommit={(next) => onChange({ ...route, name: next || undefined })}
+            />
+          </SettingsStackedField>
+          <SettingsStackedField label={t('settings.pools.poolDescription')} info={t('settings.pools.poolDescriptionInfo')} controlClassName="max-w-none">
+            <CommitInput
+              label={t('settings.pools.poolDescription')}
+              value={route.description ?? ''}
+              placeholder={t('settings.pools.poolDescriptionPlaceholder')}
+              onCommit={(next) => onChange({ ...route, description: next || undefined })}
+            />
+          </SettingsStackedField>
+          <SettingsStackedField label={t('settings.pools.poolDetails')} info={t('settings.pools.poolDetailsInfo')} controlClassName="max-w-none">
+            <CommitTextarea
+              label={t('settings.pools.poolDetails')}
+              value={route.details ?? ''}
+              placeholder={t('settings.pools.poolDetailsPlaceholder')}
+              onCommit={(next) => onChange({ ...route, details: next || undefined })}
             />
           </SettingsStackedField>
           <SettingsStackedField label={t('settings.pools.autonomy')} info={t('settings.pools.autonomyInfo')} controlClassName="max-w-none">

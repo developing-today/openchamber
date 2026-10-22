@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { POOL_DESCRIPTION_MAX_LENGTH, POOL_DETAILS_MAX_LENGTH } from '@/lib/routing/modelRoutesApi';
 import {
   AUTONOMY_LEVELS,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_DETAILS_LENGTH,
   readModelRoutes,
   registerModelRouteRoutes,
   validateModelRoute,
@@ -100,6 +103,35 @@ describe('validateModelRoute target options and display name', () => {
     expect(
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: 3 } }] }),
     ).toMatch(/remap "low" must be a string/);
+  });
+});
+
+describe('validateModelRoute description and details', () => {
+  const base = { targets: ['openai/gpt-6-luna'] };
+
+  it('accepts a one-line description and a paragraph of details', () => {
+    expect(
+      validateModelRoute('strong', {
+        ...base,
+        description: 'Long refactors across many files; slow; costs the most.',
+        details: 'Use for work that spans packages.\nAvoid for one-line fixes.',
+      }),
+    ).toBeNull();
+  });
+
+  // The UI reads a value over its own copy of these limits as absent, so a
+  // drift would either drop text the server accepts or let through text it refuses.
+  it('uses the same limits as the UI', () => {
+    expect(MAX_DESCRIPTION_LENGTH).toBe(POOL_DESCRIPTION_MAX_LENGTH);
+    expect(MAX_DETAILS_LENGTH).toBe(POOL_DETAILS_MAX_LENGTH);
+  });
+
+  it('rejects a multi-line or non-string description, non-string details and text over the caps', () => {
+    expect(validateModelRoute('x', { ...base, description: 'one\ntwo' })).toMatch(/description must be one line/);
+    expect(validateModelRoute('x', { ...base, description: 4 })).toMatch(/description must be one line/);
+    expect(validateModelRoute('x', { ...base, description: 'a'.repeat(201) })).toMatch(/at most 200/);
+    expect(validateModelRoute('x', { ...base, details: ['a'] })).toMatch(/details must be text/);
+    expect(validateModelRoute('x', { ...base, details: 'a'.repeat(2001) })).toMatch(/at most 2000/);
   });
 });
 
