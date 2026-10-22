@@ -153,6 +153,47 @@ export const queryRouteStats = async (dbPath, { hours = 24, now = Date.now() } =
   }
 };
 
+/**
+ * How many distinct sessions have an attempt on each target within the last
+ * `minutes`: the blast radius a demotion on that target would have right now.
+ * A session that sent several requests to the same target counts once.
+ */
+export const queryActiveSessionsPerTarget = async (dbPath, { minutes = 15, now = Date.now() } = {}) => {
+  const db = await openRouteDb(dbPath);
+  try {
+    const since = now - Math.max(1, Number(minutes) || 15) * 60_000;
+    const rows = db
+      .prepare(
+        `select provider_id as providerID, model_id as modelID, count(distinct session_id) as activeSessions
+        from route_attempt
+        where time_started >= ? and session_id is not null
+        group by provider_id, model_id`,
+      )
+      .all(since);
+    return { available: true, minutes, targets: rows };
+  } finally {
+    db.close();
+  }
+};
+
+/** Attempts and tokens per target over `hours`, for a simple recent-burn-rate estimate. */
+export const queryAttemptCountsPerTarget = async (dbPath, { hours = 24, now = Date.now() } = {}) => {
+  const db = await openRouteDb(dbPath);
+  try {
+    const since = now - Math.max(0.1, Number(hours) || 24) * 3_600_000;
+    const rows = db
+      .prepare(
+        `select provider_id as providerID, model_id as modelID, count(*) as attempts,
+          coalesce(sum(coalesce(tokens_input, 0) + coalesce(tokens_output, 0) + coalesce(tokens_reasoning, 0)), 0) as tokens
+        from route_attempt where time_started >= ? group by provider_id, model_id`,
+      )
+      .all(since);
+    return { available: true, hours, targets: rows };
+  } finally {
+    db.close();
+  }
+};
+
 export const registerModelRouteStatsRoutes = (app, dependencies = {}) => {
   const { resolveDbPath = resolveOpenCodeDbPath } = dependencies;
 

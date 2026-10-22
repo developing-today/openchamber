@@ -1,0 +1,177 @@
+import React from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import {
+  SETTINGS_HELPER_CLASS,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
+} from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+import { fetchPoolHealth, savePoolPlanLink, type PoolHealthState, type PoolTargetHealth } from '@/lib/routing/poolHealthApi';
+import { fetchPlanState, type PlanRecord } from '@/lib/routing/plansApi';
+
+const NO_PLAN_VALUE = '__none__';
+
+// A rejected request carries an Error; anything else thrown is shown as text.
+const errorText = (failure: Error | string) => (failure instanceof Error ? failure.message : failure);
+
+const statusClass = (status: 'ok' | 'warn' | 'over') =>
+  status === 'over'
+    ? 'text-status-error'
+    : status === 'warn'
+      ? 'text-[var(--status-warning)]'
+      : 'text-muted-foreground';
+
+/** One target's row: active sessions, its plan link, and a projection when one is known. */
+const TargetHealthRow: React.FC<{
+  target: PoolTargetHealth;
+  plans: readonly PlanRecord[];
+  onLink: (planID: string | null) => void;
+  onLowerWeight: () => void;
+}> = ({ target, plans, onLink, onLowerWeight }) => {
+  const { t } = useI18n();
+  const status = target.plan?.projection?.status;
+  return (
+    <div className="flex flex-col gap-1 py-1.5 sm:flex-row sm:items-center sm:gap-3">
+      <span className="typography-ui-label min-w-0 flex-1 truncate text-foreground">{target.ref}</span>
+      <span className="typography-meta text-muted-foreground shrink-0">
+        {target.activeSessions === null ? '—' : `${t('settings.pools.health.activeSessions')}: ${target.activeSessions}`}
+      </span>
+      <div className="flex shrink-0 items-center gap-1">
+        <Select
+          value={target.plan?.id ?? NO_PLAN_VALUE}
+          onValueChange={(next) => onLink(next === NO_PLAN_VALUE ? null : next)}
+        >
+          <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-44')} aria-label={t('settings.pools.health.plan')}>
+            <SelectValue placeholder={t('settings.pools.health.planNone')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_PLAN_VALUE}>{t('settings.pools.health.planNone')}</SelectItem>
+            {plans.map((plan) => (
+              <SelectItem key={plan.id} value={plan.id}>{plan.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <SettingsInfoHint>{t('settings.pools.health.planInfo')}</SettingsInfoHint>
+      </div>
+      {status ? (
+        <span className={cn('typography-meta shrink-0', statusClass(status))}>
+          {t(`settings.pools.health.status.${status}`)}
+        </span>
+      ) : null}
+      {target.suggestion === 'lower-weight' ? (
+        <Button size="sm" variant="outline" onClick={onLowerWeight} title={t('settings.pools.health.lowerWeightInfo')}>
+          {t('settings.pools.health.lowerWeight')}
+        </Button>
+      ) : null}
+    </div>
+  );
+};
+
+/**
+ * Pool health: how many sessions share each target right now, and, for a
+ * target linked to a plan, a rough projection against its quota window.
+ * Linking a target to a plan and lowering a suggested weight are the only
+ * writes this section makes.
+ */
+export const PoolHealthSection: React.FC<{
+  onLowerWeight: (poolID: string, targetRef: string) => void;
+}> = ({ onLowerWeight }) => {
+  const { t } = useI18n();
+  const [health, setHealth] = React.useState<PoolHealthState | null>(null);
+  const [plans, setPlans] = React.useState<readonly PlanRecord[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
+  const [planError, setPlanError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  // Only the newest read may land: a refresh and a link change can overlap.
+  const loadSeqRef = React.useRef(0);
+
+  const load = React.useCallback(() => {
+    const seq = ++loadSeqRef.current;
+    setLoading(true);
+    Promise.allSettled([fetchPoolHealth(), fetchPlanState()]).then(([healthResult, planResult]) => {
+      if (seq !== loadSeqRef.current) return;
+      setLoading(false);
+      if (healthResult.status === 'fulfilled') {
+        setHealth(healthResult.value);
+        setError(null);
+      } else {
+        setError(errorText(healthResult.reason));
+      }
+      if (planResult.status === 'fulfilled') {
+        setPlans(planResult.value.plans);
+        setPlanError(null);
+      } else {
+        setPlanError(t('settings.routing.plans.loadFailed', { error: errorText(planResult.reason) }));
+      }
+    });
+  }, [t]);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  const link = (target: string, planID: string | null) => {
+    void savePoolPlanLink(target, planID).then(load).catch((failure: Error) => setError(errorText(failure)));
+  };
+
+  if (!health) {
+    return <p className={SETTINGS_HELPER_CLASS}>{error ?? t('settings.pools.loading')}</p>;
+  }
+  const poolEntries = Object.entries(health.pools);
+  if (poolEntries.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        <p className="typography-ui-label font-medium text-foreground">{t('settings.pools.health.title')}</p>
+        <SettingsInfoHint>{t('settings.pools.health.description')}</SettingsInfoHint>
+        <Button size="xs" variant="ghost" className="ms-auto !font-normal" onClick={load} disabled={loading}>
+          {t('settings.pools.health.refresh')}
+        </Button>
+      </div>
+      {error ? <p className={SETTINGS_HELPER_CLASS}>{error}</p> : null}
+      {planError ? <p className={SETTINGS_HELPER_CLASS}>{planError}</p> : null}
+      {health.statsAvailable === false ? (
+        <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.health.statsUnavailable')}</p>
+      ) : null}
+      <div className="space-y-3">
+        {poolEntries.map(([poolID, pool]) => (
+          <div key={poolID} className="space-y-0.5">
+            <p className="typography-meta text-muted-foreground">{poolID}</p>
+            <div className="divide-y divide-border/40">
+              {pool.targets.map((target) => (
+                <React.Fragment key={target.ref}>
+                  <TargetHealthRow
+                    target={target}
+                    plans={plans}
+                    onLink={(planID) => link(target.ref, planID)}
+                    onLowerWeight={() => onLowerWeight(poolID, target.ref)}
+                  />
+                  {target.blastRadius ? (
+                    <p className={cn(SETTINGS_HELPER_CLASS, 'pb-1.5')}>{t('settings.pools.health.blastRadius')}</p>
+                  ) : null}
+                  {target.plan?.siblingRefs.length ? (
+                    <p className={cn(SETTINGS_HELPER_CLASS, 'pb-1.5')}>
+                      {t('settings.pools.health.siblings', { refs: target.plan.siblingRefs.join(', ') })}
+                    </p>
+                  ) : null}
+                  {target.plan?.projection ? (
+                    <p className={cn(SETTINGS_HELPER_CLASS, 'pb-1.5')}>
+                      {t(`settings.pools.health.projection.${target.plan.projection.unit}`, {
+                        projected: target.plan.projection.projected,
+                        limit: target.plan.projection.limit,
+                        hours: target.plan.projection.windowHours,
+                      })}
+                    </p>
+                  ) : null}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};

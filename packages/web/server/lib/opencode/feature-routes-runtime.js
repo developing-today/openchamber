@@ -29,6 +29,8 @@ import { registerModelRouteRoutes } from '../routing/model-routes.js';
 import { registerModelRouteStatsRoutes } from '../routing/model-route-stats.js';
 import { registerMessageModelAttributionRoutes } from '../routing/message-model-attribution.js';
 import { registerPlanRoutes } from '../routing/plan-routes.js';
+import { registerPoolPlanLinkRoutes } from '../routing/pool-plan-links.js';
+import { registerPoolHealthRoutes } from '../routing/pool-health.js';
 import { registerRouteRulesRoutes } from '../routing/route-rules-routes.js';
 import { createJevClient } from '../routing/jev.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
@@ -312,6 +314,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerModelRouteStatsRoutes(app);
     registerMessageModelAttributionRoutes(app);
     registerPlanRoutes(app);
+    registerPoolPlanLinkRoutes(app, { openchamberDataDir });
+    registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir });
     registerRouteRulesRoutes(app, { routingRuntime, jev: createJevClient() });
     // Before the generic OpenCode proxy: swallows the `openchamber/auto` model
     // switch and routes the sends that follow it.

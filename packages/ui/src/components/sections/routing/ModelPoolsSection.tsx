@@ -28,6 +28,7 @@ import {
   type RouteTargetStats,
 } from '@/lib/routing/modelRoutesApi';
 import { PoolAdvancedFields } from '@/components/sections/routing/PoolAdvancedFields';
+import { PoolHealthSection } from '@/components/sections/routing/PoolHealthSection';
 import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/PoolTargetOptions';
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
@@ -486,6 +487,15 @@ export const ModelPoolsSection: React.FC = () => {
     [decisions],
   );
 
+  const lowerTargetWeight = React.useCallback((poolID: string, targetRef: string) => {
+    if (!routes) return;
+    const route = routes[poolID];
+    if (!route) return;
+    const current = route.weights?.[targetRef] ?? 1;
+    const next = Math.max(0.1, Math.round((current / 2) * 100) / 100);
+    void persist({ ...routes, [poolID]: { ...route, weights: { ...route.weights, [targetRef]: next } } });
+  }, [routes, persist]);
+
   return (
     <SettingsSection title={t('settings.pools.title')}>
       <div className={SETTINGS_FIELDS_STACK_CLASS}>
@@ -554,6 +564,7 @@ export const ModelPoolsSection: React.FC = () => {
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.tuning.title')}</p>
               <RouteTuningFields tuning={tuning} onSave={(next) => void saveTuning(next)} />
             </div>
+            <PoolHealthSection onLowerWeight={lowerTargetWeight} />
             <PoolTelemetry />
             {recentDecisions.length > 0 ? (
               <div className="space-y-1">
