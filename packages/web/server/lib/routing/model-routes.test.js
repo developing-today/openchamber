@@ -103,6 +103,28 @@ describe('validateModelRoute target options and display name', () => {
   });
 });
 
+describe('validateModelRoute description and details', () => {
+  const base = { targets: ['openai/gpt-6-luna'] };
+
+  it('accepts a one-line description and a paragraph of details', () => {
+    expect(
+      validateModelRoute('strong', {
+        ...base,
+        description: 'Long refactors across many files; slow; costs the most.',
+        details: 'Use for work that spans packages.\nAvoid for one-line fixes.',
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects a multi-line or non-string description, non-string details and text over the caps', () => {
+    expect(validateModelRoute('x', { ...base, description: 'one\ntwo' })).toMatch(/description must be one line/);
+    expect(validateModelRoute('x', { ...base, description: 4 })).toMatch(/description must be one line/);
+    expect(validateModelRoute('x', { ...base, description: 'a'.repeat(201) })).toMatch(/at most 200/);
+    expect(validateModelRoute('x', { ...base, details: ['a'] })).toMatch(/details must be text/);
+    expect(validateModelRoute('x', { ...base, details: 'a'.repeat(2001) })).toMatch(/at most 2000/);
+  });
+});
+
 describe('validateModelRouteTuning', () => {
   it('accepts partial tuning and rejects out-of-range values', () => {
     expect(validateModelRouteTuning({})).toBeNull();

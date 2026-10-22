@@ -10,9 +10,35 @@ import {
   SAFETY_KINDS,
 } from './defaults.js';
 
-export const buildRoutingRequest = ({ categories, history, request }) => {
+// A category whose model is a pool (`opencode-route/<id>`) runs on whatever
+// that pool picks; the pool's own description says what it is for.
+const ROUTE_PROVIDER_ID = 'opencode-route';
+// The pool keys Jev reads; `model-routes.js` validates them on save, but the
+// config file can be edited by hand.
+const poolTextSchema = z.object({ description: z.string().optional(), details: z.string().optional() });
+
+/**
+ * The criteria text of one category: its description, plus the description and
+ * details of the model pool it runs on, when it runs on one that has them.
+ * Jev's request keeps one string per category (`ROUTING_INSTRUCTIONS` note in
+ * DOCUMENTATION.md).
+ */
+const categoryCriteria = (category, pools) => {
+  if (category.model?.providerID !== ROUTE_PROVIDER_ID) return category.description;
+  const poolID = category.model.modelID;
+  const pool = poolTextSchema.safeParse(Object.hasOwn(pools, poolID) ? pools[poolID] : null);
+  if (!pool.success) return category.description;
+  const notes = [pool.data.description, pool.data.details]
+    .map((text) => text?.trim())
+    .filter(Boolean);
+  if (notes.length === 0) return category.description;
+  return `${category.description}\n\nRuns on the model pool "${poolID}": ${notes.join('\n')}`;
+};
+
+/** `pools` is the `experimental.model_routes` map (`model-routes.js` `readModelRoutes`). */
+export const buildRoutingRequest = ({ categories, history, request, pools = {} }) => {
   const criteria = {};
-  for (const category of categories) criteria[category.id] = category.description;
+  for (const category of categories) criteria[category.id] = categoryCriteria(category, pools);
   return {
     state: { history, request },
     questions: { category: { type: 'choice', instructions: ROUTING_INSTRUCTIONS, criteria } },

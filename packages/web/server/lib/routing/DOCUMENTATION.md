@@ -35,7 +35,9 @@ Auto. There is no env gate — the feature shipped dark behind
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
 - `jev.js` — request builders, answer parsing, and the HTTP call with a
-  timeout to the endpoint `classifierEndpoint` chose.
+  timeout to the endpoint `classifierEndpoint` chose. A category whose model is
+  a pool (`opencode-route/<id>`) gets that pool's `description` and `details`
+  appended to its criteria string (see "Pool descriptions" below).
 - `history.js` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
@@ -251,6 +253,31 @@ the source and manages the TypeSafe key and, through `CustomEndpointFields.tsx`,
 the custom endpoint; `JevAccessNote` links there from the
 features that need Jev.
 
+## Pool descriptions
+
+`model-routes.js` reads and writes OpenCode's `experimental.model_routes` in the
+user's `opencode.json(c)`. Besides OpenCode's own route keys it accepts two that
+OpenChamber owns: `description` (one line, at most 200 characters) and
+`details` (at most 2000). OpenCode decodes its config with
+`onExcessProperty: "ignore"` (core `config.ts`, `config/normalize.ts`), so a
+route carrying them loads and the two keys are dropped. OpenCode's published
+JSON schema sets `additionalProperties: false` on a route, so an editor that
+validates the file may flag them. Both were checked against OpenCode on
+2026-10-22.
+
+Because OpenCode's own config read drops the keys, the routing runtime reads
+the pools from the config files (`readModelPools`, wired in `index.js` to
+`readConfigLayers(directory)`), not from OpenCode's config API. In a routed
+send, each enabled category whose own model is a pool gets
+`\n\nRuns on the model pool "<id>": <description>\n<details>` appended to its
+description; a category without a model of its own, or on a pool with neither
+key, keeps its description alone. Criteria stay one string per category. A
+config that cannot be read means no pool text, and routing goes on.
+
+The text goes to the same classification provider as the rest of the routing
+request, so enterprise mode already covers it. The OpenCode `plan_info` pool
+`purpose` is a separate record in OpenCode's plan store and is not read here.
+
 ## Model pool telemetry
 
 Separate from Jev/Auto above: read-only views over OpenCode's own
@@ -276,12 +303,13 @@ its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
 
 ## Tests
 
-`store.test.js` (defaults, deviation round-trip, the cache setting's default,
+`model-routes.test.js` (route validation, pool description and details limits,
+the routes), `store.test.js` (defaults, deviation round-trip, the cache setting's default,
 deleted built-ins, malformed
 file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
 excerpts, decisions, cache holds and the warm window, endpoints, custom URL normalization and setter,
 classifier fallback, rewrite and fallback
-paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
+paths, pool descriptions in the criteria, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send
 ahead of a stand-in proxy, the routes). The queue and auto-accept tests cover
 their hooks.

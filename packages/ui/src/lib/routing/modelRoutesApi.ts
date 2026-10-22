@@ -45,6 +45,10 @@ const budgetSchema = z
 const modelRouteSchema = z
   .object({
     name: z.string().optional(),
+    // OpenChamber's own keys: what the pool is for, read by Jev when a routing
+    // category runs on the pool. OpenCode ignores them.
+    description: z.string().optional(),
+    details: z.string().optional(),
     targets: z.array(targetSchema),
     autonomy: z.enum(AUTONOMY_LEVELS).optional(),
     selection: z.enum(['ordered', 'round-robin', 'weighted']).optional(),

@@ -25,7 +25,7 @@ const readyConfig = () => {
 const makeRuntime = ({
   config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true,
   enterprise = false, pinned = null, catalog = [], answers, askError, lastAnswer = null, configEntries = [], nowMs = 1_000_000_000,
-  warmSessions = [],
+  warmSessions = [], readModelPools = () => ({}),
 } = {}) => {
   const events = [];
   const store = {
@@ -66,6 +66,7 @@ const makeRuntime = ({
     readConfigEntries,
     isSessionWarm: (sessionId) => warmSessions.includes(sessionId),
     now: () => nowMs,
+    readModelPools,
   });
   return { runtime, store, jev, events, readConfigEntries };
 };
@@ -182,6 +183,39 @@ describe('resolveAutoSelection', () => {
     expect(routing.questions.category.instructions).toEqual(expect.any(String));
     expect(routing.questions.category.instructions).toContain('The thing to classify is `request`');
     expect(probe.questions.probe.instructions).toEqual(expect.any(String));
+  });
+
+  it('adds the description and details of the pool a category runs on to that category\'s criteria', async () => {
+    const config = readyConfig();
+    config.categories = config.categories.map((c) => (c.id === 'hard'
+      ? { ...c, model: { providerID: 'opencode-route', modelID: 'strong' }, variant: null, agent: null }
+      : c));
+    const readModelPools = vi.fn(() => ({
+      strong: { targets: ['openai/gpt-6-astra'], description: 'Long refactors; slow; costs the most.', details: ' Spans packages. ' },
+      cheap: { targets: ['openai/gpt-6-luna'], description: 'Not used by any category.' },
+    }));
+    const { runtime, jev } = makeRuntime({ config, readModelPools, answers: { category: { choice: 'hard', confidence: 0.97 } } });
+    await runtime.resolveAutoSelection(send({ directory: '/repo' }));
+    expect(readModelPools).toHaveBeenCalledWith('/repo');
+    const { criteria } = jev.ask.mock.calls[0][0].questions.category;
+    const hard = config.categories.find((c) => c.id === 'hard');
+    expect(criteria.hard).toBe(`${hard.description}\n\nRuns on the model pool "strong": Long refactors; slow; costs the most.\nSpans packages.`);
+    for (const category of config.categories.filter((c) => c.enabled && c.id !== 'hard')) {
+      expect(criteria[category.id]).toBe(category.description);
+    }
+  });
+
+  it('routes on the category descriptions alone when the pools cannot be read', async () => {
+    const config = readyConfig();
+    config.categories = config.categories.map((c) => (c.id === 'hard' ? { ...c, model: { providerID: 'opencode-route', modelID: 'strong' } } : c));
+    const readModelPools = () => { throw new Error('bad JSONC'); };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { runtime, jev } = makeRuntime({ config, readModelPools, answers: { category: { choice: 'hard', confidence: 0.97 } } });
+    const resolved = await runtime.resolveAutoSelection(send());
+    warn.mockRestore();
+    expect(resolved.decision.reason).toBe('routed');
+    const hard = config.categories.find((c) => c.id === 'hard');
+    expect(jev.ask.mock.calls[0][0].questions.category.criteria.hard).toBe(hard.description);
   });
 
   it('uses the fallback pair and keeps the composer agent when the category has no model', async () => {

@@ -25,7 +25,13 @@ const MAX_COUNT = 50;
 
 // The keys each object may carry, as OpenCode's schema defines them. OpenCode
 // reads only these, so any other key would be saved and silently ignored.
-const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights"];
+// `description` and `details` are the exception: OpenChamber owns them and
+// gives them to Jev (`jev.js`). OpenCode decodes its config with
+// `onExcessProperty: "ignore"` (core config.ts, config/normalize.ts), so it
+// loads a route that carries them and drops the two keys.
+const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "description", "details"];
+const MAX_DESCRIPTION_LENGTH = 200;
+const MAX_DETAILS_LENGTH = 2000;
 const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
@@ -145,6 +151,18 @@ export const validateModelRoute = (id, route) => {
   const unknown = unknownKeysProblem(route, ROUTE_KEYS);
   if (unknown) return `route "${id}" has ${unknown}`;
   if (route.name !== undefined && typeof route.name !== "string") return `route "${id}" name must be a string`;
+  // Only a string is equal to its own String(), so these are plain value checks.
+  if (route.description !== undefined) {
+    if (String(route.description) !== route.description || /[\r\n]/.test(route.description))
+      return `route "${id}" description must be one line of text`;
+    if (route.description.length > MAX_DESCRIPTION_LENGTH)
+      return `route "${id}" description must be at most ${MAX_DESCRIPTION_LENGTH} characters`;
+  }
+  if (route.details !== undefined) {
+    if (String(route.details) !== route.details) return `route "${id}" details must be text`;
+    if (route.details.length > MAX_DETAILS_LENGTH)
+      return `route "${id}" details must be at most ${MAX_DETAILS_LENGTH} characters`;
+  }
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
   for (const target of route.targets) {
