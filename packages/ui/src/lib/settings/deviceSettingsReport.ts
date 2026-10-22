@@ -1,4 +1,5 @@
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useUIStore } from '@/stores/useUIStore';
@@ -61,6 +62,8 @@ type ReporterDeps<T> = {
   schedule: (callback: () => void, delayMs: number) => number;
   cancel: (handle: number) => void;
   debounceMs?: number;
+  /** The last revision this window sent, kept across reloads (`revisionStore`). */
+  revisionStore?: { read: () => number; write: (revision: number) => void };
 };
 
 /**
@@ -69,13 +72,14 @@ type ReporterDeps<T> = {
  * refused (signed out, offline) counts as not delivered, so the next request
  * sends it again.
  */
-export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface, schedule, cancel, debounceMs = 2_000 }: ReporterDeps<T>) => {
+export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface, schedule, cancel, debounceMs = 2_000, revisionStore }: ReporterDeps<T>) => {
   let delivered: string | null = null;
   let timer: number | null = null;
   // Bumped when another server takes over: a reply to a report sent to the
   // previous one must not mark the new one as told.
   let generation = 0;
-  let revision = 0;
+  // Kept across reloads so it never runs backwards, even if the clock does.
+  let revision = revisionStore?.read() ?? 0;
 
   // One send at a time: a slow earlier report must not land after a newer one.
   let inFlight: Promise<void> = Promise.resolve();
@@ -86,6 +90,7 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
     if (snapshot === delivered) return;
     const sentFor = generation;
     revision = Math.max(Date.now(), revision + 1);
+    revisionStore?.write(revision);
     if (await send({ deviceId, surface, values, revision }, closing) && sentFor === generation) delivered = snapshot;
   };
 
@@ -118,6 +123,25 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
 };
 
 const WINDOW_ID_KEY = 'openchamber:device-settings-window-id';
+const REVISION_KEY = 'openchamber:device-settings-revision';
+
+const sessionRevisionStore = {
+  read: (): number => {
+    try {
+      const stored = Number(window.sessionStorage.getItem(REVISION_KEY));
+      return Number.isSafeInteger(stored) && stored > 0 ? stored : 0;
+    } catch {
+      return 0;
+    }
+  },
+  write: (revision: number): void => {
+    try {
+      window.sessionStorage.setItem(REVISION_KEY, String(revision));
+    } catch {
+      // Without storage the revision restarts with the page; the clock still moves it forward.
+    }
+  },
+};
 
 // One id per window (tab): two tabs of one browser keep separate stores, so
 // sharing an id would let a stale tab overwrite the other's report. Session
@@ -168,6 +192,7 @@ export const startDeviceSettingsReport = (): void => {
     surface: getSettingsSurface(),
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (handle) => window.clearTimeout(handle),
+    revisionStore: sessionRevisionStore,
   });
 
   useUIStore.subscribe(() => reporter.request());
@@ -183,6 +208,21 @@ export const startDeviceSettingsReport = (): void => {
     }
   });
   window.addEventListener('pagehide', () => { void reporter.flush(true); });
+  // Capacitor suspends the app without pagehide, and a WKWebView's visibility
+  // events are not dependable; appStateChange is the signal the settings
+  // lifecycle trusts too (persistence.ts).
+  if (isCapacitorApp()) {
+    void import('@capacitor/app')
+      .then(({ App }) => App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) {
+          reporter.forget();
+          reporter.request();
+        } else {
+          void reporter.flush(true);
+        }
+      }))
+      .catch(() => undefined);
+  }
   subscribeRuntimeEndpointChanged(() => {
     reporter.forget();
     reporter.request();

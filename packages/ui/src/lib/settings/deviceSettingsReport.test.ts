@@ -148,3 +148,21 @@ test('the keys this window reports are the keys the server keeps', () => {
   expect(serverKeys.length).toBeGreaterThan(20);
   expect(Object.keys(readDeviceSettings(useUIStore.getState())).sort()).toEqual(serverKeys);
 });
+
+test('the revision continues from the stored one, even when the clock is behind it', async () => {
+  let stored = Date.now() + 60 * 60 * 1000; // a revision from before the clock went back an hour
+  const sent: number[] = [];
+  const reporter = createDeviceSettingsReporter({
+    read: () => ({ sidebarWidth: 280 }),
+    send: async (report) => { sent.push(report.revision); return true; },
+    deviceId: 'device-aaaa',
+    surface: 'web',
+    schedule: () => 0,
+    cancel: () => {},
+    revisionStore: { read: () => stored, write: (revision) => { stored = revision; } },
+  });
+  const before = stored;
+  await reporter.flush();
+  expect(sent[0]).toBeGreaterThan(before);
+  expect(stored).toBe(sent[0]);
+});
