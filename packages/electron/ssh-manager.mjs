@@ -1366,7 +1366,7 @@ export class ElectronSshManager {
     }
     if (!payload) throw firstError ?? new Error('Remote OpenChamber status output held no server registry');
     return payload.instances
-      .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port))
+      .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port) && entry.port >= 1 && entry.port <= 65535)
       .map((entry) => ({
         port: entry.port,
         launchMode: entry.launchMode,
