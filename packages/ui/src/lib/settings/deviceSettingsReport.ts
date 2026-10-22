@@ -2,6 +2,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useUIStore } from '@/stores/useUIStore';
+import { generateUuid } from '@/lib/uuid';
 import { getSettingsSurface } from './surface';
 import type { SettingsSurface } from './registry';
 
@@ -15,7 +16,7 @@ type UIState = ReturnType<typeof useUIStore.getState>;
  * per-folder panel state, "last viewed" stamps, terminal names that mean
  * nothing on another device).
  */
-const readDeviceSettings = (state: UIState) => ({
+export const readDeviceSettings = (state: UIState) => ({
   theme: state.theme,
   isSidebarOpen: state.isSidebarOpen,
   sidebarWidth: state.sidebarWidth,
@@ -48,8 +49,8 @@ type DeviceSettingsReport<T> = { deviceId: string; surface: SettingsSurface; val
 
 type ReporterDeps<T> = {
   read: () => T;
-  /** Resolves true when the server took the report. */
-  send: (report: DeviceSettingsReport<T>) => Promise<boolean>;
+  /** Resolves true when the server took the report. `closing`: the window is going away. */
+  send: (report: DeviceSettingsReport<T>, closing: boolean) => Promise<boolean>;
   deviceId: string;
   surface: SettingsSurface;
   /** Returns the timer handle `cancel` takes. */
@@ -67,13 +68,18 @@ type ReporterDeps<T> = {
 export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface, schedule, cancel, debounceMs = 2_000 }: ReporterDeps<T>) => {
   let delivered: string | null = null;
   let timer: number | null = null;
+  // Bumped when another server takes over: a reply to a report sent to the
+  // previous one must not mark the new one as told.
+  let generation = 0;
 
-  const flush = async (): Promise<void> => {
+  const flush = async (closing = false): Promise<void> => {
+    if (timer !== null) cancel(timer);
     timer = null;
     const values = read();
     const snapshot = JSON.stringify(values);
     if (snapshot === delivered) return;
-    if (await send({ deviceId, surface, values })) delivered = snapshot;
+    const sentFor = generation;
+    if (await send({ deviceId, surface, values }, closing) && sentFor === generation) delivered = snapshot;
   };
 
   const request = (): void => {
@@ -83,6 +89,7 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
 
   /** Another server is now on the other end; it has been told nothing yet. */
   const forget = (): void => {
+    generation += 1;
     delivered = null;
   };
 
@@ -92,7 +99,8 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
 const DEVICE_ID_KEY = 'openchamber:device-id';
 
 const readDeviceId = (): string => {
-  const fresh = () => crypto.randomUUID().replace(/-/g, '');
+  // generateUuid works where crypto.randomUUID does not (plain-HTTP LAN origins).
+  const fresh = () => generateUuid().replace(/-/g, '');
   try {
     const stored = window.localStorage.getItem(DEVICE_ID_KEY);
     if (stored && /^[A-Za-z0-9_-]{8,64}$/.test(stored)) return stored;
@@ -110,7 +118,8 @@ let started = false;
 /**
  * Starts reporting this window's device settings to its server. The VS Code
  * extension runs no OpenChamber server and has no agent tool, so it reports
- * nothing.
+ * nothing; a desktop Mini Chat window does not start it (it shares the
+ * device id but not the main window's layout state).
  */
 export const startDeviceSettingsReport = (): void => {
   if (started || globalThis.window === undefined || isVSCodeRuntime()) return;
@@ -118,12 +127,14 @@ export const startDeviceSettingsReport = (): void => {
 
   const reporter = createDeviceSettingsReporter<DeviceSettings>({
     read: () => readDeviceSettings(useUIStore.getState()),
-    send: async (report) => {
+    send: async (report, closing) => {
       try {
         const response = await runtimeFetch('/api/config/device-settings', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(report),
+          // Lets a report sent as the window closes outlive the page.
+          keepalive: closing,
         });
         return response.ok;
       } catch {
@@ -137,10 +148,13 @@ export const startDeviceSettingsReport = (): void => {
   });
 
   useUIStore.subscribe(() => reporter.request());
-  // Covers the report a signed-out window could not deliver.
+  // Visible again: covers a report a signed-out window could not deliver.
+  // Hidden or closing: a change still inside the debounce goes out now.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') reporter.request();
+    else void reporter.flush(true);
   });
+  window.addEventListener('pagehide', () => { void reporter.flush(true); });
   subscribeRuntimeEndpointChanged(() => {
     reporter.forget();
     reporter.request();

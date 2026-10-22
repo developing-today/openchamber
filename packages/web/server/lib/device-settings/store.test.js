@@ -17,9 +17,18 @@ describe('device settings store', () => {
     ]);
   });
 
-  it('keeps only keys the registry scopes to the device', () => {
+  it('keeps only the reportable device keys', () => {
     const store = createDeviceSettingsStore();
-    store.report(report({ values: { sidebarWidth: 280, themeId: 'x', desktopUiPassword: 'secret', notAKey: 1 } }));
+    store.report(report({ values: {
+      sidebarWidth: 280,
+      themeId: 'x', // profile
+      desktopUiPassword: 'secret', // instance secret
+      notAKey: 1,
+      // Device-scoped but transient: the UI leaves them out, and so does the server.
+      contextPanelByDirectory: { '/repo': {} },
+      agentTerminalNames: { t1: 'x' },
+      workStatusScrollTop: 10,
+    } }));
     expect(store.list()[0].values).toEqual({ sidebarWidth: 280 });
   });
 

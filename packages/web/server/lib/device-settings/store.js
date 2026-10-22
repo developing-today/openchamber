@@ -11,11 +11,24 @@ import { isPlainObject, isString } from '../shared/guards.js';
  * Kept in memory only: a window reports again after a change and on load, so
  * a restart forgets devices until their windows report again. At most
  * `maxDevices` devices are kept, the least recently reported dropped first.
- * Only keys the registry scopes to the device are kept, so a report cannot
- * carry anything else into the server.
+ * Only the reportable keys are kept, so a modified client cannot carry
+ * anything else in: the registry's device-scoped preferences, without the
+ * transient state the UI leaves out (per-folder panels, open dialogs, the
+ * Settings page on screen, "last viewed" stamps, terminal names). Keep this
+ * list equal to `readDeviceSettings` in
+ * `packages/ui/src/lib/settings/deviceSettingsReport.ts`.
  */
+const REPORTABLE_KEYS = new Set([
+  'theme', 'isSidebarOpen', 'sidebarWidth', 'contextRailOrder', 'contextRailHiddenSurfaces',
+  'mobileWorkspaceTabOrder', 'mobileWorkspaceHiddenTabs', 'contextSurfaceZones', 'contextEditorTreeVisible',
+  'contextEditorVisible', 'contextEditorTreeWidth', 'workStatusExpandedSections', 'messageQueueExpanded',
+  'messageLimit', 'walkthroughTocWidth', 'diffFileListMode', 'diffFileTreeWidth', 'showTerminalQuickKeysOnDesktop',
+  'dockBadgeEnabled', 'alwaysShowScrollbars', 'mobileKeyboardMode', 'desktopWindowControlsPosition',
+  'desktopWindowControlsStyle', 'inputBarOffset',
+]);
+// Every reportable key must stay device-scoped in the registry.
 const registry = createRequire(import.meta.url)('../opencode/settings-registry.json');
-const DEVICE_KEYS = new Set(Object.entries(registry.fields).filter(([, field]) => field.scope === 'device').map(([key]) => key));
+const DEVICE_KEYS = new Set([...REPORTABLE_KEYS].filter((key) => registry.fields[key]?.scope === 'device'));
 const SURFACES = new Set(['web', 'desktop', 'vscode', 'mobile']);
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 const MAX_REPORT_BYTES = 64 * 1024;
