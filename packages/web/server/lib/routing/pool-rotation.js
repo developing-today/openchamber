@@ -87,8 +87,10 @@ const concreteModel = (rawTarget) => {
   const providerID = reference.slice(0, slash);
   const id = reference.slice(slash + 1);
   if (providerID === ROUTE_PROVIDER_ID || id === '' || id.includes('*')) return null;
+  const model = { providerID, id };
   const variant = inlineVariant ?? parsed.data.defaultVariant;
-  return { ref: reference, model: { providerID, id, ...(variant ? { variant } : {}) } };
+  if (variant) model.variant = variant;
+  return { ref: reference, model };
 };
 
 const NEAR_LIMIT = new Set(['warn', 'over']);
@@ -236,7 +238,7 @@ export const createPoolRotation = ({
  * session's own location, so no directory header is sent and no location
  * starts for them.
  */
-export const createOpenCodeSessionAccess = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
+const createOpenCodeSessionAccess = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   const client = () => OpenCode.make({
     baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
     headers: { ...getOpenCodeAuthHeaders() },

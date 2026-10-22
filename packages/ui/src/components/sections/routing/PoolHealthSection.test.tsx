@@ -12,6 +12,8 @@ const planLinkSaves: Array<{ target: string; planID: string | null }> = [];
 
 mock.module('@/lib/routing/poolHealthApi', () => ({
   fetchPoolHealth: async () => healthState,
+  fetchRotation: async () => ({ settings: { enabled: false, intervalMinutes: 5 }, moves: [] }),
+  saveRotation: async () => ({ settings: { enabled: false, intervalMinutes: 5 }, moves: [] }),
   savePoolPlanLink: async (target: string, planID: string | null) => {
     planLinkSaves.push({ target, planID });
     if (linkFailure) throw linkFailure;

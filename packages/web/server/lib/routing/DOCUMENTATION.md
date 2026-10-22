@@ -311,6 +311,25 @@ makes that visible so the user can spread them.
   is reported as `planError` / `linksError` and costs only the plan columns;
   a link to a plan that no longer exists is reported as `missingPlanID` so the
   panel can clear it. The panel reads again whenever the pools change.
+- `pool-rotation.js` moves sessions off a target one at a time before its plan
+  runs out, so they do not all restart on a cold cache together. Off by
+  default; `GET`/`PUT /api/model-routes/rotation` read and write
+  `{ enabled, intervalMinutes }` in `pool-rotation.json` in the OpenChamber
+  data directory (missing reads as off, malformed answers 409). OpenCode keeps
+  a session's pool target in memory and has no route to move one session,
+  and route overrides apply to every session, so a move sets the session's
+  model to a sibling target through `session.switchModel`. The session leaves
+  the pool and no longer fails over inside it; that is why the switch is off
+  by default and its description says so. Once a minute, per pool: a source
+  is a target whose linked plan projects to `warn` or `over` with two or more
+  sessions; a destination is another concrete target of the pool not linked
+  to the same plan and not near its own limit (linked with the most headroom
+  first, then unlinked); one session moves, subagents (`parentID`) first,
+  then the one idle longest. Only sessions whose model is still the pool
+  move; Auto sessions never do, because Auto picks a model on every send.
+  At most one move per pool per `intervalMinutes`. The pace and the last 20
+  moves are kept in memory, so a restart forgets them. A failed switch is
+  logged and does not count as a move.
 
 ## Tests
 

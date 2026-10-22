@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { fetchPoolHealth, savePoolPlanLink, type PoolHealthState, type PoolTargetHealth } from '@/lib/routing/poolHealthApi';
 import { fetchPlanState, type PlanRecord } from '@/lib/routing/plansApi';
+import { PoolRotationFields } from '@/components/sections/routing/PoolRotationFields';
 
 const NO_PLAN_VALUE = '__none__';
 
@@ -79,8 +80,8 @@ const TargetHealthRow: React.FC<{
 /**
  * Pool health: how many sessions share each target right now, and, for a
  * target linked to a plan, a rough projection against its quota window.
- * Linking a target to a plan and lowering a suggested weight are the only
- * writes this section makes.
+ * Linking a target to a plan, lowering a suggested weight and the rotation
+ * settings are the only writes this section makes.
  */
 export const PoolHealthSection: React.FC<{
   onLowerWeight: (poolID: string, targetRef: string) => void;
@@ -186,6 +187,7 @@ export const PoolHealthSection: React.FC<{
           </div>
         ))}
       </div>
+      <PoolRotationFields reloadKey={reloadKey} />
     </div>
   );
 };
