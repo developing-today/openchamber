@@ -5174,7 +5174,7 @@ export const routingI18n = {
     "settings.pools.nameInfo": "מוצג במקום מזהה המאגר. אפשר להשאיר ריק כדי להציג את המזהה.",
     "settings.pools.targetPool": "מאגר",
     "settings.pools.addPoolTarget": "הוסף מאגר נוסף",
-    "settings.pools.addPoolTargetInfo": "מוסיף מאגר שלם כיעד אחד. היעדים של אותו מאגר נוסים לפי הסדר שלו.",
+    "settings.pools.addPoolTargetInfo": "מוסיף מאגר שלם כיעד אחד. מנסים את היעדים של אותו מאגר לפי הסדר שלו.",
     "settings.pools.addPoolTargetPlaceholder": "בחירת מאגר",
     "settings.pools.target.options": "אפשרויות",
     "settings.pools.target.hideOptions": "הסתר אפשרויות",
