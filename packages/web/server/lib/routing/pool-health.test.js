@@ -184,6 +184,52 @@ describe('computePoolHealth', () => {
     expect(health.pools.pool1.targets[0]).toMatchObject({ plan: null, missingPlanID: 'deleted-plan' });
   });
 
+  it('counts a session on the target of its latest attempt, not one it failed over from', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [
+      { time: now - 5 * 60_000, session: 's1', provider: 'openai', model: 'a' },
+      { time: now - 1 * 60_000, session: 's1', provider: 'anthropic', model: 'b' },
+      { time: now - 2 * 60_000, session: 's2', provider: 'openai', model: 'a' },
+    ]);
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a', 'anthropic/b'] } } }), now });
+    expect(health.pools.pool1.targets.map(({ ref, activeSessions }) => [ref, activeSessions])).toEqual([['openai/a', 1], ['anthropic/b', 1]]);
+  });
+
+  it('gives no projection for a window of zero or negative hours', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('broken', [{ name: 'none', unit: 'requests', limit: 10, windowHours: 0 }, { name: 'negative', unit: 'requests', limit: 10, windowHours: -5 }])];
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'broken' } }), now });
+    expect(health.pools.pool1.targets[0].plan.projection).toBeNull();
+  });
+
+  it('projects from the hours the query actually sampled when asked for less than its minimum', async () => {
+    const now = Date.now();
+    // One attempt 4 minutes ago: inside the 6-minute (0.1 h) minimum sample, outside 3 minutes.
+    const dbPath = seedDb(tempDir(), [{ time: now - 4 * 60_000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('openai-plus', [{ name: 'hourly', unit: 'requests', limit: 100, windowHours: 1 }])];
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-plus' } }), now, hours: 0.05 });
+    expect(health.pools.pool1.targets[0].plan.projection.projected).toBe(10);
+  });
+
+  it('offers no lower-weight suggestion once the weight is at its floor', async () => {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 0; i < 24; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'a' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const at = (weight) => computePoolHealth({
+      ...baseDeps(dbPath, {
+        routes: { pool1: { selection: 'round-robin', targets: ['openai/a', 'anthropic/b'], weights: { 'openai/a': weight } } },
+        plans,
+        links: { 'openai/a': 'openai-plus' },
+      }),
+      now,
+    });
+    expect((await at(0.2)).pools.pool1.targets[0].suggestion).toBe('lower-weight');
+    expect((await at(0.1)).pools.pool1.targets[0].suggestion).toBeNull();
+  });
+
   it('degrades to statsAvailable: false instead of throwing when the database is missing', async () => {
     const routes = { pool1: { targets: ['openai/a'] } };
     const health = await computePoolHealth({ ...baseDeps(path.join(tempDir(), 'missing.db'), { routes }) });

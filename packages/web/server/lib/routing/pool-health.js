@@ -34,6 +34,9 @@ const targetRef = (target) => (targetRefSchema.safeParse(target).data ?? '').spl
 
 const WARN_RATIO = 0.7;
 
+/** The lowest weight the Lower weight button halves a target to (`ModelPoolsSection`). */
+const MIN_WEIGHT = 0.1;
+
 // Which recent-usage figure a quota unit is measured in. `tokens` is input,
 // output and reasoning together, the figure OpenCode meters plans by
 // (`packages/core/src/model-usage.ts`). Cost and percent windows need prices
@@ -42,7 +45,7 @@ const USAGE_BY_UNIT = { requests: 'attempts', messages: 'attempts', tokens: 'tok
 
 const projectionFor = (quota, usage, hours) => {
   const measure = USAGE_BY_UNIT[quota?.unit];
-  if (!measure || quota.limit === undefined || quota.windowHours === undefined || !(quota.limit > 0)) return null;
+  if (!measure || !(quota.limit > 0) || !(quota.windowHours > 0)) return null;
   const projected = (usage[measure] / hours) * quota.windowHours;
   const ratio = projected / quota.limit;
   return {
@@ -75,7 +78,8 @@ export const computePoolHealth = async ({
   activeMinutes: requestedActiveMinutes,
   now = Date.now(),
 } = {}) => {
-  const hours = Math.min(336, positiveOr(requestedHours, 24));
+  // The same bounds the attempt query samples with, so the rate divides by the hours it read.
+  const hours = Math.min(336, Math.max(0.1, positiveOr(requestedHours, 24)));
   const activeMinutes = Math.min(1440, positiveOr(requestedActiveMinutes, 15));
   const layers = readConfigLayers(null);
   const routes = readModelRoutes(layers.mergedConfig);
@@ -150,7 +154,11 @@ export const computePoolHealth = async ({
       // A link to a plan that is gone (or unreadable) is reported so it can be cleared.
       const missingPlanID = planID && !plan && planError === null ? planID : null;
       const blastRadius = activeSessions !== null && activeSessions >= 2;
-      const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && (route.targets?.length ?? 0) > 1 && projection.status !== 'ok'
+      // Both selections draw by weight (OpenCode's round-robin is smooth weighted round
+      // robin). A weight already at the floor the button halves to has nothing left to give.
+      const weight = route.weights?.[ref] ?? 1;
+      const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && (route.targets?.length ?? 0) > 1
+        && projection.status !== 'ok' && weight > MIN_WEIGHT
         ? 'lower-weight'
         : null;
       return { ref, activeSessions, plan: planInfo, missingPlanID, blastRadius, suggestion };

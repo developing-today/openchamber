@@ -28,9 +28,17 @@ const TargetHealthRow: React.FC<{
   target: PoolTargetHealth;
   plans: readonly PlanRecord[];
   onLink: (planID: string | null) => void;
+  linkPending: boolean;
   onLowerWeight: () => void;
-}> = ({ target, plans, onLink, onLowerWeight }) => {
+}> = ({ target, plans, onLink, linkPending, onLowerWeight }) => {
   const { t } = useI18n();
+  // Plans for the target's own provider first; others stay pickable, since a
+  // custom provider id can front the same account.
+  const provider = target.ref.split('/')[0];
+  const orderedPlans = React.useMemo(
+    () => [...plans].sort((left, right) => Number(right.providerID === provider) - Number(left.providerID === provider)),
+    [plans, provider],
+  );
   const status = target.plan?.projection?.status;
   return (
     <div className="flex flex-col gap-1 py-1.5 @xl:flex-row @xl:items-center @xl:gap-3">
@@ -41,6 +49,7 @@ const TargetHealthRow: React.FC<{
       <div className="flex shrink-0 items-center gap-1">
         <Select
           value={target.plan?.id ?? target.missingPlanID ?? NO_PLAN_VALUE}
+          disabled={linkPending}
           onValueChange={(next) => onLink(next === NO_PLAN_VALUE ? null : next)}
         >
           <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-44')} aria-label={t('settings.pools.health.plan')}>
@@ -55,7 +64,7 @@ const TargetHealthRow: React.FC<{
             {target.missingPlanID ? (
               <SelectItem value={target.missingPlanID}>{t('settings.pools.health.planMissing', { id: target.missingPlanID })}</SelectItem>
             ) : null}
-            {plans.map((plan) => (
+            {orderedPlans.map((plan) => (
               <SelectItem key={plan.id} value={plan.id}>{plan.label}</SelectItem>
             ))}
           </SelectContent>
@@ -93,6 +102,8 @@ export const PoolHealthSection: React.FC<{
   const [error, setError] = React.useState<string | null>(null);
   const [planError, setPlanError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  // One save per target at a time, so an earlier pick cannot land after a later one.
+  const [pendingLinks, setPendingLinks] = React.useState<ReadonlySet<string>>(new Set());
   // Only the newest read may land: a refresh and a link change can overlap.
   const loadSeqRef = React.useRef(0);
 
@@ -122,7 +133,15 @@ export const PoolHealthSection: React.FC<{
   }, [load, reloadKey]);
 
   const link = (target: string, planID: string | null) => {
-    void savePoolPlanLink(target, planID).then(load).catch((failure: Error) => setError(errorText(failure)));
+    setPendingLinks((current) => new Set(current).add(target));
+    void savePoolPlanLink(target, planID)
+      .then(load)
+      .catch((failure: Error) => setError(errorText(failure)))
+      .finally(() => setPendingLinks((current) => {
+        const next = new Set(current);
+        next.delete(target);
+        return next;
+      }));
   };
 
   if (!health) {
@@ -155,12 +174,13 @@ export const PoolHealthSection: React.FC<{
           <div key={poolID} className="space-y-0.5">
             <p className="typography-meta text-muted-foreground">{poolID}</p>
             <div className="divide-y divide-border/40">
-              {pool.targets.map((target) => (
-                <React.Fragment key={target.ref}>
+              {pool.targets.map((target, index) => (
+                <React.Fragment key={`${target.ref}-${index}`}>
                   <TargetHealthRow
                     target={target}
                     plans={plans}
                     onLink={(planID) => link(target.ref, planID)}
+                    linkPending={pendingLinks.has(target.ref)}
                     onLowerWeight={() => onLowerWeight(poolID, target.ref)}
                   />
                   {target.blastRadius ? (

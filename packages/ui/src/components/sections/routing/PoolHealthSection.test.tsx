@@ -8,12 +8,14 @@ import type { PlanState } from '@/lib/routing/plansApi';
 let healthState: PoolHealthState = { available: true, statsAvailable: true, pools: {} };
 let planState: PlanState = { plans: [], models: {}, pools: {}, notes: [] };
 let linkFailure: Error | null = null;
+let linkGate: Promise<void> | null = null;
 const planLinkSaves: Array<{ target: string; planID: string | null }> = [];
 
 mock.module('@/lib/routing/poolHealthApi', () => ({
   fetchPoolHealth: async () => healthState,
   savePoolPlanLink: async (target: string, planID: string | null) => {
     planLinkSaves.push({ target, planID });
+    if (linkGate) await linkGate;
     if (linkFailure) throw linkFailure;
     return { version: 1, links: planID ? { [target]: planID } : {} };
   },
@@ -134,6 +136,7 @@ describe('PoolHealthSection', () => {
   beforeEach(() => {
     planLinkSaves.length = 0;
     linkFailure = null;
+    linkGate = null;
     planState = { plans: [{
       id: 'openai-plus', providerID: 'openai', label: 'OpenAI Plus', coverage: 'subscription', status: 'active',
       quotas: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
@@ -156,7 +159,7 @@ describe('PoolHealthSection', () => {
     };
     const { dom, cleanup } = await renderSection();
     try {
-      expect(dom.container.textContent).toContain('Active sessions: 3');
+      expect(dom.container.textContent).toContain('Sessions in the last 15 min: 3');
       expect(dom.container.textContent).toContain('resets all of their caches at once');
       expect(dom.container.textContent).toContain('No plan linked');
       expect(dom.container.textContent).not.toContain('__none__');
@@ -230,7 +233,7 @@ describe('PoolHealthSection', () => {
     try {
       expect(dom.container.textContent).toContain('Plan information could not be read: plans.json is not valid JSON');
       expect(dom.container.textContent).toContain('Plan links could not be read: pool-plan-links.json is not valid JSON');
-      expect(dom.container.textContent).toContain('Active sessions: 2');
+      expect(dom.container.textContent).toContain('Sessions in the last 15 min: 2');
     } finally {
       await cleanup();
     }
@@ -311,6 +314,50 @@ describe('PoolHealthSection', () => {
     const { dom, cleanup } = await renderSection();
     try {
       expect(dom.container.textContent).toContain('At this rate: 2400 of 2000 tokens in a 24h window');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("locks a target's plan picker until its save finishes", async () => {
+    let release: () => void = () => {};
+    linkGate = new Promise<void>((resolve) => { release = resolve; });
+    healthState = {
+      available: true,
+      statsAvailable: true,
+      pools: { pool1: { selection: 'ordered', targets: [{ ref: 'openai/a', activeSessions: 0, plan: null, blastRadius: false, suggestion: null }] } },
+    };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await pickOption(dom.container, 'Plan', 'OpenAI Plus');
+      const trigger = [...dom.container.querySelectorAll<HTMLElement>('[role="combobox"]')].find((el) => el.getAttribute('aria-label') === 'Plan');
+      expect(trigger?.hasAttribute('data-disabled') || trigger?.getAttribute('aria-disabled') === 'true' || trigger?.hasAttribute('disabled')).toBe(true);
+      await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+      expect(trigger?.hasAttribute('data-disabled') || trigger?.getAttribute('aria-disabled') === 'true' || trigger?.hasAttribute('disabled')).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("lists the plans of the target's own provider first", async () => {
+    planState = { plans: [
+      { id: 'anthropic-max', providerID: 'anthropic', label: 'Anthropic Max', coverage: 'subscription', status: 'active', quotas: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'openai-plus', providerID: 'openai', label: 'OpenAI Plus', coverage: 'subscription', status: 'active', quotas: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+    ], models: {}, pools: {}, notes: [] };
+    healthState = {
+      available: true,
+      statsAvailable: true,
+      pools: { pool1: { selection: 'ordered', targets: [{ ref: 'openai/a', activeSessions: 0, plan: null, blastRadius: false, suggestion: null }] } },
+    };
+    const { dom, cleanup } = await renderSection();
+    try {
+      const trigger = [...dom.container.querySelectorAll<HTMLElement>('[role="combobox"]')].find((el) => el.getAttribute('aria-label') === 'Plan')!;
+      await act(async () => {
+        fire(trigger, 'pointerdown');
+        fire(trigger, 'mousedown');
+      });
+      const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')].map((el) => el.textContent?.trim());
+      expect(options).toEqual(['No plan linked', 'OpenAI Plus', 'Anthropic Max']);
     } finally {
       await cleanup();
     }
