@@ -32,7 +32,7 @@ export const registerEnvironmentRoutes = (app, { store, runtime, listProjects })
 
   const withReferences = (described, variables) => {
     const references = Object.fromEntries(Object.entries(variables).filter(([, value]) => isVaultReference(value)));
-    const statuses = runtime.vaultStatus();
+    const statuses = runtime.vaultStatus(variables);
     return {
       ...described,
       references,

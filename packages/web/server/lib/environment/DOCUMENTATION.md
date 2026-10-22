@@ -49,7 +49,12 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   read leaves the variable out (a stale good value is kept instead when
   there is one) and records `{ state: 'failed', reason }` per variable:
   `op-not-installed`, `timeout` (30 s), `op-read-failed`, `empty`. It warns
-  once per variable and reason, naming the variable only.
+  once per variable and reason, naming the variable only. A recorded
+  outcome belongs to the reference it was recorded under: serving a
+  variable from the cache records `resolved` for its current reference,
+  and `status(variables)` answers only outcomes whose reference matches
+  the one the variable currently holds, so a replaced reference never
+  inherits the previous one's outcome.
 - `opencode-service-env.js`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
   OpenCode contract; anything unexpected reads as no variables.
