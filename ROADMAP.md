@@ -146,3 +146,6 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #236 and #239 completions                  | 2026-10-22 | #243, #244                 |
 | Project environment command receives resolved vault values          | 2026-10-22 | #174, #245                 |
 | SSH remote probe reads status lines by prefix                       | 2026-10-22 | #246, #248                 |
+| Reload no longer joins a stale in-flight environment run          | 2026-10-22 | #247, #249                 |
+| ROADMAP Done records the #241, #243, #174 and #246 completions    | 2026-10-22 | #250, #251                 |
+| SSH remote answers read past login-shell banner output            | 2026-10-22 | #253, #254                 |
