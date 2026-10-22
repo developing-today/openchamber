@@ -827,6 +827,48 @@ printf '4321\\n'`);
     });
   });
 
+  test('does not let probe statuses with trailing junk fake a healthy server', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=200junk',
+      'AUTH_STATUS=0',
+      'HEALTH_STATUS=200.9',
+      JSON.stringify({ openchamberVersion: '1.2.3', runtime: 'web' }),
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      null,
+    )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
+  });
+
+  test('does not report a password accepted on a junk-suffixed auth status', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=401',
+      'AUTH_STATUS=200junk',
+      'HEALTH_STATUS=200',
+      '{}',
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      'secret',
+    )).rejects.toThrow(/configured password was rejected \(auth status 0\)/);
+  });
+
   test('refuses to start when the remote machine has no opencode CLI', async () => {
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),

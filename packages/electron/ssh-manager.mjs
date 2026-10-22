@@ -403,10 +403,17 @@ const parseVersionToken = (raw) => {
   return null;
 };
 
+// The probe script only ever prints a curl `%{http_code}` (three digits, 000
+// when the connection failed) or the literal 0/200 fallbacks, so the value is
+// judged whole: parseInt alone would accept '200junk' or '200.9' as 200, and a
+// login-shell banner line carrying such a value must not fake a healthy
+// server or an accepted password.
 const parseProbeStatusLine = (line, prefix) => {
   if (!line || !line.startsWith(prefix)) return null;
-  const value = Number.parseInt(line.slice(prefix.length).trim(), 10);
-  return Number.isFinite(value) ? value : null;
+  const raw = line.slice(prefix.length).trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const value = Number.parseInt(raw, 10);
+  return value === 0 || (value >= 100 && value <= 599) ? value : null;
 };
 
 // `serve --quiet` reports its bound port as a line containing only the port
