@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 
-import { readModelRoutes } from './model-routes.js';
+import { keyNamesTarget, readModelRoutes } from './model-routes.js';
 import { readPlanStore } from './plans.js';
 import { readPoolPlanLinks } from './pool-plan-links.js';
 import {
@@ -79,12 +79,26 @@ export const computePoolHealth = async ({
   const activeMinutes = Math.min(1440, positiveOr(requestedActiveMinutes, 15));
   const layers = readConfigLayers(null);
   const routes = readModelRoutes(layers.mergedConfig);
-  const planStore = loadPlanStore();
-  const links = loadPoolPlanLinks(openchamberDataDir).links;
-  const planByID = new Map(planStore.plans.map((plan) => [plan.id, plan]));
+  // A damaged plans.json or links file costs the plan columns only: the
+  // session counts come from OpenCode's database and still show.
+  let plans = [];
+  let planError = null;
+  try {
+    plans = loadPlanStore().plans;
+  } catch (error) {
+    planError = error?.message ?? String(error);
+  }
+  let links = {};
+  let linksError = null;
+  try {
+    links = loadPoolPlanLinks(openchamberDataDir).links;
+  } catch (error) {
+    linksError = error?.message ?? String(error);
+  }
+  const planByID = new Map(plans.map((plan) => [plan.id, plan]));
 
-  let activeByRef = new Map();
-  let usageByRef = new Map();
+  let sessionRows = [];
+  let usageRows = [];
   let statsAvailable = true;
   let statsReason;
   try {
@@ -93,32 +107,34 @@ export const computePoolHealth = async ({
       queryActiveSessionsPerTarget(dbPath, { minutes: activeMinutes, now }),
       queryAttemptCountsPerTarget(dbPath, { hours, now }),
     ]);
-    activeByRef = new Map(active.targets.map((row) => [`${row.providerID}/${row.modelID}`, row.activeSessions]));
-    usageByRef = new Map(usage.targets.map((row) => [`${row.providerID}/${row.modelID}`, { attempts: row.attempts, tokens: row.tokens }]));
+    sessionRows = active.sessions;
+    usageRows = usage.targets;
   } catch (error) {
     statsAvailable = false;
     statsReason = STATS_ERROR_CODES.has(error?.code) ? error.code : 'unknown';
   }
 
+  // A target may be a pattern (`openai/*`); OpenCode records the concrete
+  // model it called, so a target covers every row its pattern names.
+  const covers = (ref, row) => ref !== '' && keyNamesTarget(`${row.providerID}/${row.modelID}`, ref);
+  const activeSessionsOf = (ref) => new Set(sessionRows.filter((row) => covers(ref, row)).map((row) => row.sessionID)).size;
+  const usageOf = (ref) => usageRows
+    .filter((row) => covers(ref, row))
+    .reduce((total, row) => ({ attempts: total.attempts + row.attempts, tokens: total.tokens + row.tokens }), { attempts: 0, tokens: 0 });
+
   // Targets sharing one plan id pool their recent usage, so a quota ratio
   // reflects the plan's combined traffic, not one target's slice of it.
-  const usageForPlan = (planID) => {
-    const total = { attempts: 0, tokens: 0 };
-    for (const [ref, planLinkID] of Object.entries(links)) {
-      if (planLinkID !== planID) continue;
-      const usage = usageByRef.get(ref);
-      total.attempts += usage?.attempts ?? 0;
-      total.tokens += usage?.tokens ?? 0;
-    }
-    return total;
-  };
+  const usageForPlan = (planID) => Object.entries(links)
+    .filter(([, linkedPlanID]) => linkedPlanID === planID)
+    .map(([ref]) => usageOf(ref))
+    .reduce((total, usage) => ({ attempts: total.attempts + usage.attempts, tokens: total.tokens + usage.tokens }), { attempts: 0, tokens: 0 });
 
   const pools = {};
   for (const [poolID, route] of Object.entries(routes)) {
     const selection = route.selection ?? 'ordered';
     const targets = (route.targets ?? []).map((target) => {
       const ref = targetRef(target);
-      const activeSessions = statsAvailable ? activeByRef.get(ref) ?? 0 : null;
+      const activeSessions = statsAvailable ? activeSessionsOf(ref) : null;
       const planID = links[ref];
       const plan = planID ? planByID.get(planID) : undefined;
       const projection = statsAvailable && plan ? tightestProjection(plan.quotas, usageForPlan(planID), hours) : null;
@@ -131,16 +147,18 @@ export const computePoolHealth = async ({
             projection,
           }
         : null;
+      // A link to a plan that is gone (or unreadable) is reported so it can be cleared.
+      const missingPlanID = planID && !plan && planError === null ? planID : null;
       const blastRadius = activeSessions !== null && activeSessions >= 2;
       const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && (route.targets?.length ?? 0) > 1 && projection.status !== 'ok'
         ? 'lower-weight'
         : null;
-      return { ref, activeSessions, plan: planInfo, blastRadius, suggestion };
+      return { ref, activeSessions, plan: planInfo, missingPlanID, blastRadius, suggestion };
     });
     pools[poolID] = { selection, targets };
   }
 
-  return { available: true, statsAvailable, statsReason, generatedAt: now, pools };
+  return { available: true, statsAvailable, statsReason, planError, linksError, generatedAt: now, pools };
 };
 
 export const registerPoolHealthRoutes = (app, dependencies) => {

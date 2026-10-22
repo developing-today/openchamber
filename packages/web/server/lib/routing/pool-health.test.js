@@ -141,6 +141,49 @@ describe('computePoolHealth', () => {
     expect(health.pools.pool1.targets[0].plan.projection).toMatchObject({ projected: 1, status: 'ok' });
   });
 
+  it('counts a pattern target across the concrete models it matches, each session once', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [
+      { time: now - 1000, session: 's1', provider: 'openai', model: 'gpt-x' },
+      { time: now - 2000, session: 's1', provider: 'openai', model: 'gpt-y' },
+      { time: now - 3000, session: 's2', provider: 'openai', model: 'gpt-y' },
+      { time: now - 4000, session: 's3', provider: 'anthropic', model: 'gpt-x' },
+    ]);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 100, windowHours: 24 }])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/*'] } }, plans, links: { 'openai/*': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    expect(health.pools.pool1.targets[0]).toMatchObject({ ref: 'openai/*', activeSessions: 2 });
+    expect(health.pools.pool1.targets[0].plan.projection.projected).toBe(3);
+  });
+
+  it('keeps the session counts when plans.json or the links file cannot be read', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [
+      { time: now - 1000, session: 's1', provider: 'openai', model: 'a' },
+      { time: now - 2000, session: 's2', provider: 'openai', model: 'a' },
+    ]);
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } } }),
+      loadPlanStore: () => { throw new Error('plans.json is not valid JSON'); },
+      loadPoolPlanLinks: () => { throw new Error('pool-plan-links.json is not valid JSON'); },
+      now,
+    });
+    expect(health.planError).toContain('plans.json');
+    expect(health.linksError).toContain('pool-plan-links.json');
+    expect(health.pools.pool1.targets[0]).toMatchObject({ activeSessions: 2, blastRadius: true, plan: null, missingPlanID: null });
+  });
+
+  it('reports a link to a plan that no longer exists', async () => {
+    const dbPath = seedDb(tempDir(), []);
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, links: { 'openai/a': 'deleted-plan' } }),
+    });
+    expect(health.pools.pool1.targets[0]).toMatchObject({ plan: null, missingPlanID: 'deleted-plan' });
+  });
+
   it('degrades to statsAvailable: false instead of throwing when the database is missing', async () => {
     const routes = { pool1: { targets: ['openai/a'] } };
     const health = await computePoolHealth({ ...baseDeps(path.join(tempDir(), 'missing.db'), { routes }) });

@@ -30,6 +30,7 @@ const targetHealthSchema = z.object({
   ref: z.string(),
   activeSessions: z.number().nullable(),
   plan: planInfoSchema.nullable(),
+  missingPlanID: z.string().nullable().optional(),
   blastRadius: z.boolean(),
   suggestion: z.literal('lower-weight').nullable(),
 });
@@ -43,6 +44,8 @@ const poolHealthStateSchema = z.object({
   available: z.boolean(),
   statsAvailable: z.boolean().optional(),
   statsReason: z.string().optional(),
+  planError: z.string().nullable().optional(),
+  linksError: z.string().nullable().optional(),
   generatedAt: z.number().optional(),
   pools: z.record(z.string(), poolHealthSchema),
 });

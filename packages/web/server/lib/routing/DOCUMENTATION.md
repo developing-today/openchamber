@@ -282,26 +282,35 @@ one target lose their prompt cache together when its plan runs out; the panel
 makes that visible so the user can spread them.
 
 - `pool-plan-links.js` keeps `pool-plan-links.json` in the OpenChamber data
-  directory: a map from a target reference (`provider/model`) to a plan id
-  from the plan store. Two targets linked to one plan are siblings sharing one
-  quota. It is OpenChamber's own file because `plans.json` is OpenCode's, read
-  by its `plan_info` tool through a strict schema that would reject new
-  fields. A missing file reads as empty, a malformed one answers 409. Only
-  `PUT /api/model-routes/plan-links` (`{ target, planID }`, `planID: null`
-  clears) exists; reads go through the health route.
+  directory: a map from a target reference (`provider/model`, or a `*`
+  pattern) to a plan id from the plan store. Two targets linked to one plan
+  are siblings sharing one quota. `plans.json` already has
+  `models["provider/model"].coveredBy`, but that entry needs a cost tier
+  before it can exist and lists every plan whose price covers a model; a pool
+  link names the one quota a target draws on and needs no tier, so it lives
+  in OpenChamber's own file. A missing file reads as empty, a malformed one
+  answers 409. Only `PUT /api/model-routes/plan-links` (`{ target, planID }`,
+  `planID: null` clears) exists; it refuses a plan id the plan store does not
+  have, and clearing always works. Reads go through the health route.
 - `pool-health.js` answers `GET /api/model-routes/health` (`hours`, default 24,
   and `activeMinutes`, default 15). Per pool target it reports the distinct
   sessions with an attempt in the last `activeMinutes`, the linked plan and
   its siblings, and a projection for the plan's tightest window: the recent
   usage of every target linked to the plan, scaled to the window's length.
-  `requests` and `messages` windows count attempts; `tokens` windows count
-  input, output and reasoning tokens, as OpenCode's `model-usage.ts` meters
-  plans. `usd`, `percent` and `other` windows get no projection. The
-  projection is an estimate from recent traffic and cannot see usage outside
-  OpenCode. A weighted or round-robin pool with a target at 70 percent or more
-  gets a `lower-weight` suggestion, which the panel turns into a button that
-  halves that target's weight. Without the routing tables the route still
-  answers, with `statsAvailable: false` and no counts.
+  OpenCode records an attempt for every request, routed or direct, so direct
+  use of the same model counts too. A pattern target counts every concrete
+  model its pattern matches, each session once. `requests` and `messages`
+  windows count attempts; `tokens` windows count input, output and reasoning
+  tokens, as OpenCode's `model-usage.ts` meters plans. `usd`, `percent` and
+  `other` windows get no projection. The projection is an estimate from
+  recent traffic and cannot see usage outside OpenCode. A weighted or
+  round-robin pool with a target at 70 percent or more gets a `lower-weight`
+  suggestion, which the panel turns into a button that halves that target's
+  weight. Without the routing tables the route still answers, with
+  `statsAvailable: false` and no counts. A damaged `plans.json` or links file
+  is reported as `planError` / `linksError` and costs only the plan columns;
+  a link to a plan that no longer exists is reported as `missingPlanID` so the
+  panel can clear it. The panel reads again whenever the pools change.
 
 ## Tests
 
