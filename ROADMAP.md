@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20 and 2026-10-21.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21 and 2026-10-22.
 
 ## Areas
 
@@ -142,3 +142,7 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Env-config ports reject malformed and out-of-range values           | 2026-10-21 | #235, #238                 |
 | ROADMAP Done records the #222 completion                            | 2026-10-21 | #236, #237                 |
 | ROADMAP Done records the #228, #230, #233 and #235 completions      | 2026-10-21 | #239, #240                 |
+| SSH managed remote port read from anchored serve output             | 2026-10-22 | #241, #242                 |
+| ROADMAP Done records the #236 and #239 completions                  | 2026-10-22 | #243, #244                 |
+| Project environment command receives resolved vault values          | 2026-10-22 | #174, #245                 |
+| SSH remote probe reads status lines by prefix                       | 2026-10-22 | #246, #248                 |
