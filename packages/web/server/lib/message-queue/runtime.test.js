@@ -481,6 +481,17 @@ describe('a message queued as a goal', () => {
     expect(intro).toContain('<goal-spec>\n## Objective\nShip &lt;it&gt;\n</goal-spec>');
   });
 
+  it('briefs a goal queued with briefAgent and no objective with the message text', async () => {
+    process.env.OPENCHAMBER_DATA_DIR = makeDataDir();
+    const { runtime, openCode, emit } = createRuntime({ persistSessionGoal: async () => {} });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'ship <it>', text: 'ship <it>', goal: { tokenBudget: null, briefAgent: true } }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    const intro = openCode.state.sent.find((entry) => entry.path.endsWith('/synthetic'))?.body.text;
+    expect(intro).toContain('<goal-spec>\nship &lt;it&gt;\n</goal-spec>');
+  });
+
   it('uses the objective the arming flow supplied', async () => {
     process.env.OPENCHAMBER_DATA_DIR = makeDataDir();
     const persisted = [];

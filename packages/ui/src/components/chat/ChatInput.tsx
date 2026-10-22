@@ -8,7 +8,7 @@ import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { rearmQueuedGoal, useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { planGoalWriter, requestGoalSpec, type GoalSubmitChoice } from '@/lib/goalWriter';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -1344,6 +1344,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
+    // The goal writer's choice for this send, as the composer arm. Applied
+    // right before the message leaves, sent or queued, so an early return
+    // that sends nothing never leaves a stale arm behind.
+    const applyGoalChoice = (choice: GoalSubmitChoice | undefined) => {
+        if (!choice) return;
+        const goalArm = useSessionGoalArmStore.getState();
+        if (choice.kind === 'none') goalArm.setArmed(false);
+        else if (choice.kind === 'unchanged') goalArm.setArmed(true, null, { settled: true });
+        else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message', ignoreLimit: choice.ignoreLimit });
+    };
+
     // A send waiting on the goal writer: the dialog's request and the
     // message it was written from, which the chosen send uses. Both belong to
     // the composer they were asked from: a choice made after the composer
@@ -1375,11 +1386,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     // Add message to queue instead of sending
-    const handleQueueMessage = React.useCallback(async () => {
+    // `presetText` queues that text instead of the composer's: the goal
+    // writer's resubmit sends the generated spec as the message.
+    const handleQueueMessage = React.useCallback(async (presetText?: string) => {
         // The comment's exit paths are attach/cancel; queueing a real prompt
         // underneath comment mode must never fire.
         if (isMobileCommentOpen()) return;
-        const inputSnapshot = getCurrentInputSnapshot();
+        const composerSnapshot = getCurrentInputSnapshot();
+        const inputSnapshot = presetText != null
+            ? { message: presetText, hasContent: presetText.trim().length > 0 || composerSnapshot.hasContent }
+            : composerSnapshot;
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
         // A local or extension command is run, not queued: the queue delivers
@@ -1496,7 +1512,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         } catch (error) {
             console.warn('[queue] failed to queue message:', error);
             toast.error(t('chat.queuedMessage.toast.queueFailed'));
-            if (goalArm.armed) useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride);
+            if (goalArm.armed) rearmQueuedGoal({ ...goalArm, objective: goalArm.objectiveOverride });
             // The composer was cleared on queueing; give everything back. The
             // text is appended if the user has already typed something new.
             const currentInput = composerRef.current?.getValue() ?? messageRef.current;
@@ -1591,7 +1607,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleQueuedMessageEdit = React.useCallback((queued: QueuedMessage) => {
         setMessage(queued.content);
         // Back in the composer, the message is armed again as it was queued.
-        if (queued.goal) useSessionGoalArmStore.getState().setArmed(true, queued.goal.objective ?? null);
+        if (queued.goal) rearmQueuedGoal(queued.goal);
         restoreQueuedContext(queued.context ?? []);
         setTimeout(() => {
             composerRef.current?.focus();
@@ -1887,7 +1903,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // Auto-review owns the active workflow; follow-ups wait in its queue.
         if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
-            void handleQueueMessage();
+            applyGoalChoice(options?.goal);
+            void handleQueueMessage(options?.presetText);
             return;
         }
 
@@ -1908,7 +1925,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // race with that run, so it is queued; the queued-message auto-send
             // hook delivers it once the session returns to idle (#1740, #3369).
             if ((deniedPermissions || dismissedForms) && delivery !== 'steer') {
-                void handleQueueMessage();
+                applyGoalChoice(options?.goal);
+                void handleQueueMessage(options?.presetText);
                 return;
             }
         }
@@ -2368,13 +2386,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // The goal writer's choice decides this send's goal; set last, so no
         // early return above can leave a stale arm behind.
-        if (options?.goal) {
-            const goalArm = useSessionGoalArmStore.getState();
-            const choice = options.goal;
-            if (choice.kind === 'none') goalArm.setArmed(false);
-            else if (choice.kind === 'unchanged') goalArm.setArmed(true, null, { settled: true });
-            else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message', ignoreLimit: choice.ignoreLimit });
-        }
+        applyGoalChoice(options?.goal);
 
         const sendPromise = sendMessage(
             primaryText,
