@@ -163,6 +163,24 @@ describe('session goal creation', () => {
     expect(persistSessionGoal.mock.calls[0][2]).toMatchObject({ ignoreObjectiveLimit: true, objectiveFile: true });
   });
 
+  it('keeps a long objective whole inline when it ignores the limit and the objective file cannot be written', async () => {
+    writeObjectiveMock.mockRejectedValueOnce(new Error('disk unavailable'));
+    const persistSessionGoal = vi.fn(async () => undefined);
+    const long = 'x'.repeat(6_000);
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: long,
+      onWarning: vi.fn(),
+      persistSessionGoal,
+      goalWriterSettings: WRITER_OFF,
+      ignoreLimit: true,
+    });
+
+    const [, , goal] = persistSessionGoal.mock.calls[0];
+    expect(goal).toMatchObject({ objective: long, objectiveFile: false, ignoreObjectiveLimit: true });
+  });
+
   it('fits a long objective to the limit when the goal does not ignore it', async () => {
     const persistSessionGoal = vi.fn(async () => undefined);
     await createSessionGoal({

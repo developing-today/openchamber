@@ -11,7 +11,7 @@ the web server and survives UI disconnects.
 ```
 {
   id,                      // opaque per-logical-goal id; stale-write guard
-  objective,               // inline user text (fallback), <= the goal length limit
+  objective,               // inline user text (fallback), <= the goal length limit unless ignoreObjectiveLimit
   objectiveFile,           // true: objective text lives in a server-side file
   ignoreObjectiveLimit,    // true: the user switched the length limit off for this goal
   status,                  // active | paused | blocked | budgetLimited | complete

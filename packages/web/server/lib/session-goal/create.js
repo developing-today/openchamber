@@ -124,7 +124,10 @@ export const createSessionGoal = async ({
   const now = Date.now();
   const goal = {
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-    objective: objectiveFile ? '' : objectiveText.slice(0, charLimit),
+    // The inline fallback is fitted to the limit like everything else —
+    // unless this goal ignores the limit, in which case slicing here would
+    // silently cut the objective to the very limit it turns off.
+    objective: objectiveFile ? '' : (ignoreLimit ? objectiveText : objectiveText.slice(0, charLimit)),
     objectiveFile,
     // Stated outright: the store merges, so a flag left out would carry over
     // from the goal this one replaces.
