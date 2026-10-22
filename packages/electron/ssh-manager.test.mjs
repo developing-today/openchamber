@@ -727,6 +727,43 @@ printf '4321\\n'`);
     expect(servers).toEqual([{ port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1', passwordProtected: null }]);
   });
 
+  test('drops out-of-range ports from stored instances instead of forwarding them to ssh', () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+
+    const instance = manager.sanitizeInstance({
+      id: 'ssh-1',
+      sshCommand: 'ssh user@example.com',
+      remoteOpenchamber: { preferredPort: 99999 },
+      localForward: { preferredLocalPort: -5 },
+      portForwards: [
+        { id: 'bad-remote', type: 'local', localPort: 8080, remotePort: 70000 },
+        { id: 'bad-local', type: 'remote', localPort: -1, remotePort: 80 },
+        { id: 'fractional', type: 'local', localPort: 8080.9, remotePort: 80 },
+        { id: 'too-big-dynamic', type: 'dynamic', localPort: 123456 },
+        { id: 'good', type: 'local', localPort: 1, remotePort: 65535 },
+      ],
+    });
+
+    expect(instance.remoteOpenchamber).not.toHaveProperty('preferredPort');
+    expect(instance.localForward).not.toHaveProperty('preferredLocalPort');
+    expect(instance.portForwards).toEqual([
+      { id: 'good', enabled: true, type: 'local', localPort: 1, remoteHost: '127.0.0.1', remotePort: 65535, localHost: '127.0.0.1' },
+    ]);
+
+    const valid = manager.sanitizeInstance({
+      id: 'ssh-2',
+      sshCommand: 'ssh user@example.com',
+      remoteOpenchamber: { preferredPort: 4096 },
+      localForward: { preferredLocalPort: 65535 },
+    });
+    expect(valid.remoteOpenchamber.preferredPort).toBe(4096);
+    expect(valid.localForward.preferredLocalPort).toBe(65535);
+  });
+
   test('drops registry entries whose port is outside 1-65535', async () => {
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),

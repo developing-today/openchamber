@@ -460,6 +460,12 @@ const parseRemoteOs = (output) => {
 // spaces, so resolveRemoteTool adds position and ending checks there.
 const isRemotePathLine = (value) => value.startsWith('/');
 
+// A stored port is only a port when it is an integer in 1-65535: a finite
+// number alone lets 99999, -1 or 8080.9 through the sanitizers and into an
+// ssh -L/-R spec or a remote `serve --port`, where it fails opaquely. The
+// same range check guards discovered servers in listRemoteServers.
+const validPort = (value) => (Number.isInteger(value) && value >= 1 && value <= 65535 ? value : null);
+
 const isAuthHttpStatus = (status) => status === 401 || status === 403;
 const isLivenessHttpStatus = (status) => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
 
@@ -876,9 +882,9 @@ export class ElectronSshManager {
       enabled: forward?.enabled !== false,
       type,
       ...(forward?.localHost ? { localHost: sanitizeBindHost(forward.localHost) } : {}),
-      ...(Number.isFinite(forward?.localPort) ? { localPort: Number(forward.localPort) } : {}),
+      ...(validPort(forward?.localPort) !== null ? { localPort: Number(forward.localPort) } : {}),
       ...(forward?.remoteHost ? { remoteHost: String(forward.remoteHost).trim() || '127.0.0.1' } : {}),
-      ...(Number.isFinite(forward?.remotePort) ? { remotePort: Number(forward.remotePort) } : {}),
+      ...(validPort(forward?.remotePort) !== null ? { remotePort: Number(forward.remotePort) } : {}),
     };
 
     if (type === 'local' || type === 'remote') {
@@ -921,7 +927,7 @@ export class ElectronSshManager {
       remoteOpenchamber: {
         mode: instance?.remoteOpenchamber?.mode === 'external' ? 'external' : 'managed',
         keepRunning: instance?.remoteOpenchamber?.keepRunning !== false,
-        ...(Number.isFinite(instance?.remoteOpenchamber?.preferredPort) ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
+        ...(validPort(instance?.remoteOpenchamber?.preferredPort) !== null ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
         installMethod: ['auto', 'npm', 'bun'].includes(instance?.remoteOpenchamber?.installMethod)
           ? instance.remoteOpenchamber.installMethod
           : 'auto',
@@ -930,7 +936,7 @@ export class ElectronSshManager {
       },
       localForward: {
         bindHost: sanitizeBindHost(instance?.localForward?.bindHost),
-        ...(Number.isFinite(instance?.localForward?.preferredLocalPort) ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
+        ...(validPort(instance?.localForward?.preferredLocalPort) !== null ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
       },
       auth: {
         ...(this.sanitizeStoredSecret(instance?.auth?.sshPassword) ? { sshPassword: this.sanitizeStoredSecret(instance.auth.sshPassword) } : {}),
