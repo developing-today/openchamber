@@ -45,7 +45,11 @@ export const readDeviceSettings = (state: UIState) => ({
 
 type DeviceSettings = ReturnType<typeof readDeviceSettings>;
 
-type DeviceSettingsReport<T> = { deviceId: string; surface: SettingsSurface; values: T };
+/**
+ * `revision` grows with every send, across reloads of the window (it follows
+ * the clock), so the server can ignore a report that arrives after a newer one.
+ */
+type DeviceSettingsReport<T> = { deviceId: string; surface: SettingsSurface; values: T; revision: number };
 
 type ReporterDeps<T> = {
   read: () => T;
@@ -71,6 +75,7 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
   // Bumped when another server takes over: a reply to a report sent to the
   // previous one must not mark the new one as told.
   let generation = 0;
+  let revision = 0;
 
   // One send at a time: a slow earlier report must not land after a newer one.
   let inFlight: Promise<void> = Promise.resolve();
@@ -80,7 +85,8 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
     const snapshot = JSON.stringify(values);
     if (snapshot === delivered) return;
     const sentFor = generation;
-    if (await send({ deviceId, surface, values }, closing) && sentFor === generation) delivered = snapshot;
+    revision = Math.max(Date.now(), revision + 1);
+    if (await send({ deviceId, surface, values, revision }, closing) && sentFor === generation) delivered = snapshot;
   };
 
   const flush = (closing = false): Promise<void> => {
@@ -104,6 +110,8 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
   const forget = (): void => {
     generation += 1;
     delivered = null;
+    // The new server need not wait for a send to the old one that may never answer.
+    inFlight = Promise.resolve();
   };
 
   return { request, flush, forget };

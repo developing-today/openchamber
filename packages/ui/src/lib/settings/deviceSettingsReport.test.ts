@@ -8,7 +8,7 @@ const harness = (accept = () => true) => {
   let values = { sidebarWidth: 280 };
   const timers = new Map<number, () => void>();
   let nextHandle = 0;
-  const sent: Array<{ deviceId: string; values: { sidebarWidth: number }; closing: boolean }> = [];
+  const sent: Array<{ deviceId: string; values: { sidebarWidth: number }; closing: boolean; revision: number }> = [];
   let release: (() => void) | null = null;
   const reporter = createDeviceSettingsReporter({
     read: () => values,
@@ -95,6 +95,29 @@ describe('device settings reporter, closing and switching', () => {
     }
   });
 
+  test('a send to the previous server that never answers does not hold up the new one', async () => {
+    hold = true;
+    try {
+      const { reporter, sent } = harness();
+      void reporter.flush();
+      await Promise.resolve();
+      hold = false;
+      reporter.forget();
+      await reporter.flush();
+      expect(sent).toHaveLength(2);
+    } finally {
+      hold = false;
+    }
+  });
+
+  test('every send carries a larger revision', async () => {
+    const { reporter, sent, set } = harness();
+    await reporter.flush();
+    set(300);
+    await reporter.flush();
+    expect(sent[1].revision).toBeGreaterThan(sent[0].revision);
+  });
+
   test('a reply from the previous server does not count for the new one', async () => {
     hold = true;
     try {
@@ -120,8 +143,8 @@ describe('device settings reporter, closing and switching', () => {
 // the server drops, or the other way round, would go unnoticed without this.
 test('the keys this window reports are the keys the server keeps', () => {
   const store = readFileSync(new URL('../../../../web/server/lib/device-settings/store.js', import.meta.url), 'utf8');
-  const block = store.slice(store.indexOf('const REPORTABLE_KEYS = new Set(['), store.indexOf(']);', store.indexOf('const REPORTABLE_KEYS')));
-  const serverKeys = [...block.matchAll(/'([A-Za-z]+)'/g)].map((match) => match[1]).sort();
+  const block = store.slice(store.indexOf('const REPORTABLE = {'), store.indexOf('};', store.indexOf('const REPORTABLE = {')));
+  const serverKeys = [...block.matchAll(/^ {2}([A-Za-z]+):/gm)].map((match) => match[1]).sort();
   expect(serverKeys.length).toBeGreaterThan(20);
   expect(Object.keys(readDeviceSettings(useUIStore.getState())).sort()).toEqual(serverKeys);
 });
