@@ -362,7 +362,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
+  // The record this server last wrote. state.json is shared by every server on
+  // the data dir and another one can overwrite it, so this server's own reload
+  // and restart decisions start from this copy when the file names someone else's.
+  let ownRecord = null;
+  const writeOwnState = (record) => {
+    ownRecord = record;
+    writeManagedOpenCodeState(managedPaths.statePath, record);
+  };
+  const clearOwnState = () => {
+    ownRecord = null;
+    clearManagedOpenCodeState(managedPaths.statePath);
+  };
+
   const clearManagedStateIfOwned = (pid) => {
+    if (ownRecord?.pid === pid) ownRecord = null;
     const saved = readManagedOpenCodeState(managedPaths.statePath);
     if (saved?.pid === pid) clearManagedOpenCodeState(managedPaths.statePath);
   };
@@ -457,9 +471,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // Another live OpenChamber server's OpenCode: never adopted, handed off
   // from, drained or stopped here. Its owner is this process, a server that is
   // gone, or the predecessor handing off to this one in every other case.
+  // Unknown ownership (no readable registry entry: the write is best effort)
+  // is not taken as ours either: leaving an OpenCode running costs a process,
+  // stopping another server's costs its sessions. Returns the other owner's
+  // pid, 'unknown', or null when the OpenCode is this server's to manage.
   const otherServerOwning = (pid) => {
     const owner = readProcessOwner(pid);
-    if (!Number.isInteger(owner) || owner === process.pid || owner === getHandoffPredecessorPid()) return null;
+    if (!Number.isInteger(owner)) return 'unknown';
+    if (owner === process.pid || owner === getHandoffPredecessorPid()) return null;
     return isPidAlive(owner) ? owner : null;
   };
 
@@ -519,6 +538,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       parts.push(`stderr:\n${stderr.trim()}`);
     }
     return parts.length > 0 ? parts.join('\n\n') : 'No stdout/stderr captured';
+  };
+
+  const portOfUrl = (value) => {
+    try {
+      return Number(new URL(value).port);
+    } catch {
+      return null;
+    }
   };
 
   const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0, attempt }) => {
@@ -657,9 +684,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         output += chunk.text;
         // OpenCode 2.x prints `server listening on http://host:port` with no
         // "opencode" prefix, and `{"url":"http://host:port"}` under --stdio.
-        const match = output.match(/server listening on\s+(https?:\/\/\S+)/)
-          ?? output.match(/^\s*\{"url":"(https?:\/\/[^"\s]+)"\}\s*$/m);
-        if (match) finish(resolve, match[1]);
+        // The log is shared by every server on the data dir; another server's
+        // child starting at the same time writes its own line here, so only a
+        // URL on the port this child was given counts.
+        const urls = [
+          ...output.matchAll(/server listening on\s+(https?:\/\/\S+)/g),
+          ...output.matchAll(/^\s*\{"url":"(https?:\/\/[^"\s]+)"\}\s*$/gm),
+        ].map((match) => match[1]);
+        const url = urls.find((candidate) => !(port > 0) || portOfUrl(candidate) === port);
+        if (url) finish(resolve, url);
       };
 
       const onExit = (code, signal) => {
@@ -859,9 +892,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const recordedState = readManagedOpenCodeState(managedPaths.statePath);
     const recordedOwner = recordedState ? otherServerOwning(recordedState.pid) : null;
     if (recordedOwner !== null) {
-      console.log(`[OpenCode] managed state names OpenCode ${recordedState.pid} of another OpenChamber server (pid ${recordedOwner}); leaving it alone`);
+      console.log(recordedOwner === 'unknown'
+        ? `[OpenCode] managed state names OpenCode ${recordedState.pid}, whose owner the registry does not record; leaving it alone`
+        : `[OpenCode] managed state names OpenCode ${recordedState.pid} of another OpenChamber server (pid ${recordedOwner}); leaving it alone`);
+      // Two servers cannot share a pinned port: say so instead of a bind failure.
+      if (Number.isInteger(recordedOwner) && desiredPort > 0 && desiredPort === recordedState.port && isPidAlive(recordedState.pid)) {
+        throw new Error(`OpenCode port ${desiredPort} is held by another OpenChamber server (pid ${recordedOwner}) using the same data folder. Give one of them a different OPENCODE_PORT, or its own OPENCHAMBER_DATA_DIR.`);
+      }
     }
-    const savedState = recordedOwner === null ? recordedState : null;
+    // When the shared file names another server's OpenCode, this server's own
+    // still-running one (from its own last write) is the one it manages.
+    const ownAlive = ownRecord && isPidAlive(ownRecord.pid) ? ownRecord : null;
+    const savedState = recordedOwner === null ? recordedState : ownAlive;
     seedDrainingOpenCode();
     let handoffPredecessor = null;
     const reusedPort = savedState && (desiredPort === 0 || desiredPort === savedState.port) ? savedState.port : null;
@@ -959,6 +1001,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       if (decision.action === 'adopt') {
         serverInstance = adoptManagedOpenCodeServer(savedState, hostname);
+        ownRecord = savedState;
         // The adopted OpenCode is this server's now: another live server must
         // not see its old, gone owner and take it as unclaimed.
         await registerManagedProcess({
@@ -983,7 +1026,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           shellEnvKeysCount: Object.keys(shellEnv).length,
           env: processEnv,
         });
-        writeManagedOpenCodeState(managedPaths.statePath, {
+        writeOwnState({
           pid: serverInstance.pid,
           port: spawnPort,
           binary: binaryIdentity,
@@ -1001,7 +1044,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             await terminateRecordedOpenCodeProcess(savedState.pid);
             await waitForPortRelease(savedState.port, 5000);
           }
-          clearManagedOpenCodeState(managedPaths.statePath);
+          clearOwnState();
           if (reusedPort !== null && desiredPort === 0) {
             spawnPort = await resolveManagedOpenCodePort(desiredPort, hostname);
             launchFingerprint = computeLaunchFingerprint({ binary: binaryIdentity, hostname, port: spawnPort, cwd, password: openCodePassword, managedEnv: managedOpenCodeEnv });
@@ -1017,7 +1060,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           shellEnvKeysCount: Object.keys(shellEnv).length,
           env: processEnv,
         });
-        writeManagedOpenCodeState(managedPaths.statePath, {
+        writeOwnState({
           pid: serverInstance.pid,
           port: spawnPort,
           binary: binaryIdentity,
@@ -1073,7 +1116,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       diagnosticJournal.record('managed startup failed', { attempt });
       await serverInstance?.close();
       if (serverInstance && state.openCodeProcess === serverInstance) state.openCodeProcess = null;
-      if (handoffPredecessor) writeManagedOpenCodeState(managedPaths.statePath, handoffPredecessor);
+      if (handoffPredecessor) writeOwnState(handoffPredecessor);
       const message = error instanceof Error ? error.message : String(error);
       state.lastOpenCodeError = message;
       if (!handoffContext) state.openCodePort = null;
@@ -1123,8 +1166,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // interrupts running sessions for them.
   const reloadOpenCode = async () => {
     if (state.isShuttingDown || state.isExternalOpenCode || !state.openCodeProcess) return false;
-    const saved = readManagedOpenCodeState(managedPaths.statePath);
-    if (!saved || saved.pid !== state.openCodeProcess.pid) return false;
+    const recorded = readManagedOpenCodeState(managedPaths.statePath);
+    const saved = recorded?.pid === state.openCodeProcess.pid ? recorded : ownRecord?.pid === state.openCodeProcess.pid ? ownRecord : null;
+    if (!saved) return false;
     await applyOpencodeBinaryFromSettings({ strict: false });
     const binary = ensureOpencodeCliEnv();
     const args = managedOpenCodeArgs(env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
