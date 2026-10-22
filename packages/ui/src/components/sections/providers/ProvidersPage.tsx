@@ -72,15 +72,19 @@ const ADD_PROVIDER_ID = '__add_provider__';
 const CLASSIFICATION_PAGE_ID = '__classification__';
 
 /**
- * Says a provider is off. Nothing under it is locked: its model choices can
- * still be changed, and they apply again once the provider is back on.
+ * Says a provider is off. Nothing under it is locked: the model choices shown
+ * under it can still be changed, and they apply again once the provider is
+ * back on. A provider shown with no models (`hasModels` false) says only what
+ * brings them back.
  */
-const DisabledNotice: React.FC = () => {
+const DisabledNotice: React.FC<{ hasModels: boolean }> = ({ hasModels }) => {
   const { t } = useI18n();
   return (
     <div className="oc-tile mb-6 flex items-start gap-2 rounded-lg p-3">
       <Icon name="pause" className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <p className="typography-meta text-foreground">{t('settings.providers.disabled.banner')}</p>
+      <p className="typography-meta text-foreground">
+        {hasModels ? t('settings.providers.disabled.banner') : t('settings.providers.disabled.bannerNoModels')}
+      </p>
     </div>
   );
 };
@@ -721,7 +725,7 @@ export const ProvidersPage: React.FC = () => {
     // OpenCode drops a turned-off provider's models from its catalog with the
     // provider, so the models its OpenCode config entry names are the ones whose
     // show and hide choice can still be changed here. A provider whose entry
-    // names none shows the notice alone.
+    // names none shows the notice alone, saying what brings its models back.
     const configuredModels = Object.entries(storedProviderConfigs[selectedProviderId]?.models ?? {})
       .map(([id, model]) => ({ id, name: model.name?.trim() || id }));
     return (
@@ -737,7 +741,7 @@ export const ProvidersPage: React.FC = () => {
         headerEnd={disableToggle}
         showSaveStatus={false}
       >
-        <DisabledNotice />
+        <DisabledNotice hasModels={configuredModels.length > 0} />
         {configuredModels.length > 0 ? (
           <ProviderModelsSection
             providerId={selectedProviderId}
@@ -820,7 +824,7 @@ export const ProvidersPage: React.FC = () => {
         headerEnd={disableToggle}
         showSaveStatus={false}
       >
-        {selectedDisabled ? <DisabledNotice /> : null}
+        {selectedDisabled ? <DisabledNotice hasModels /> : null}
         <CustomProviderForm
           mode="edit"
           existingProviderIDs={connectedProviderIds}
@@ -850,7 +854,7 @@ export const ProvidersPage: React.FC = () => {
       headerEnd={disableToggle}
       showSaveStatus={false}
     >
-      {selectedDisabled ? <DisabledNotice /> : null}
+      {selectedDisabled ? <DisabledNotice hasModels={showModelsSection} /> : null}
       {routeProvider ? null : (
       <SettingsSection
         title={t('settings.providers.accounts.title')}

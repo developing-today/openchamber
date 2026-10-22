@@ -170,11 +170,24 @@ describe('ProvidersPage models', () => {
     const page = await openProviderPage('lab', { disabled: ['lab'], catalog: [] });
 
     expect(page.text()).toContain('Turned off.');
+    expect(page.text()).toContain('model choices can still be changed');
     expect(page.text()).toContain('Fast Llama');
     expect(page.text()).toContain('deep');
     expect(page.text()).not.toContain('Accounts');
     expect(page.hideButtons()).toHaveLength(2);
     await act(async () => page.hideButtons()[0]?.click());
     expect(page.hiddenModels()).toEqual([{ providerID: 'lab', modelID: 'fast' }]);
+  });
+
+  // A built-in provider's config entry names no models, so the page lists
+  // none of them: the notice says what brings them back, and never that
+  // model choices can still be changed.
+  test('a turned-off built-in provider with no models in its config says how to see them again', async () => {
+    const page = await openProviderPage('groq', { disabled: ['groq'], catalog: [] });
+
+    expect(page.text()).toContain('Turned off.');
+    expect(page.text()).toContain('Turn it back on to see and choose its models.');
+    expect(page.text()).not.toContain('model choices can still be changed');
+    expect(page.hideButtons()).toHaveLength(0);
   });
 });

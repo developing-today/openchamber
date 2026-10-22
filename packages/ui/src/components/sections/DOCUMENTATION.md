@@ -164,7 +164,9 @@ therefore lists the models the provider's OpenCode config entry names,
 switch from `providers/ProviderModelsSection.tsx`, which a listed provider's
 page uses too. Such a page shows no accounts or sign-in. A provider whose
 config entry names no models, such as a built-in one left at its defaults,
-shows the header button and the notice alone.
+shows the header button and the notice alone, and that notice says to turn
+the provider back on to see and choose its models, since no model choice is
+on the page to change.
 
 The routes provider (`opencode-route`, `isRouteProvider`) is OpenCode's list
 of model pools from `experimental.model_routes`. Its models are the pools, it
