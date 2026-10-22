@@ -727,6 +727,31 @@ printf '4321\\n'`);
     expect(servers).toEqual([{ port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1', passwordProtected: null }]);
   });
 
+  test('drops registry entries whose port is outside 1-65535', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => JSON.stringify({
+      instances: [
+        { runtime: 'cli', port: 0, launchMode: 'daemon' },
+        { runtime: 'cli', port: -1, launchMode: 'daemon' },
+        { runtime: 'cli', port: 65536, launchMode: 'daemon' },
+        { runtime: 'cli', port: 99999, launchMode: 'daemon' },
+        { runtime: 'cli', port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1' },
+      ],
+    });
+
+    const servers = await manager.listRemoteServers(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      '/home/pi/.openchamber/npm-global/bin/openchamber',
+    );
+
+    expect(servers).toEqual([{ port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1', passwordProtected: null }]);
+  });
+
   test('starts the resolved OpenChamber binary rather than whatever PATH exposes', async () => {
     let started = '';
     const manager = new ElectronSshManager({
