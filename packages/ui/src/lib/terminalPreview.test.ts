@@ -45,6 +45,23 @@ describe('announced preview url', () => {
   test('ignores a routing-table line, which announces nothing', () => {
     expect(extractTerminalPreviewUrl('[gateway] - analytics -> http://127.0.0.1:4323')).toBeNull();
   });
+
+  test('rejects an announced port above 65535 instead of returning an invalid URL', () => {
+    expect(extractAnnouncedUrls('Local: http://localhost:99999/')).toEqual([]);
+    expect(extractAnnouncedUrls('Local: http://localhost:65536/')).toEqual([]);
+  });
+
+  test('never truncates a 6-digit port into a different server', () => {
+    expect(extractAnnouncedUrls('Local: http://localhost:123456/')).toEqual([]);
+  });
+
+  test('keeps a 1-digit port instead of dropping it to port 80', () => {
+    expect(extractTerminalPreviewUrl('Local: http://localhost:8/')).toBe('http://localhost:8/');
+  });
+
+  test('rejects an out-of-range Python server port reached through the URL on the same line', () => {
+    expect(extractAnnouncedUrls('Serving HTTP on 0.0.0.0 port 99999 (http://0.0.0.0:99999/) ...')).toEqual([]);
+  });
 });
 
 describe('project action url', () => {
