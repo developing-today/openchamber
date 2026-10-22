@@ -2204,6 +2204,34 @@ describe('goal objective directory scoping', () => {
     expect(useSessionGoalArmStore.getState().armed).toBe(true);
   });
 
+  test('a queued goal keeps the composer flags: a settled spec is not rewritten and briefs the agent', async () => {
+    const specRequests = [];
+    const sent = [];
+    opencodeClient.sendMessage = async (params) => {
+      sent.push(params);
+      return 'msg';
+    };
+    const metadataFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if ((input instanceof Request ? input.url : String(input)).endsWith('/api/goals/spec')) {
+        specRequests.push(JSON.parse(init.body));
+        return Response.json({ spec: 'Rewritten', providerID: 'provider-a', modelID: 'model-a' });
+      }
+      return metadataFetch(input, init);
+    };
+    useUIStore.setState({ sessionGoalRewriteAll: true });
+    try {
+      await sendQueued('ship it', { objective: 'Approved <spec>', tokenBudget: null, settled: true, briefAgent: true, ignoreLimit: true });
+
+      expect(specRequests).toEqual([]);
+      expect(metadataWrites[0].patch.openchamber.goal).toMatchObject({ objective: 'Approved <spec>', ignoreObjectiveLimit: true });
+      expect(JSON.stringify(sent[0])).toContain('<goal-spec>\\nApproved &lt;spec&gt;\\n</goal-spec>');
+    } finally {
+      useUIStore.setState({ sessionGoalRewriteAll: false });
+      globalThis.fetch = metadataFetch;
+    }
+  });
+
   test('a queued message without a goal starts none, even while the composer is armed', async () => {
     await sendQueued('plain queued message', null);
 

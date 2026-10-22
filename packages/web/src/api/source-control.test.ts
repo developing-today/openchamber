@@ -1145,6 +1145,25 @@ describe('createWebSourceControlAPI', () => {
     await expect(api.authStatus({ provider: 'github', instance: 'github.example.com' })).rejects.toThrow('only github.com is available');
   });
 
+  it('sends a GitHub token to the vault route as a reference, not to the token route', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const reference = 'op://Vertex SRE/github_token/credential';
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user: { id: 42, login: 'vault-user' } }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user: { id: 42, login: 'vault-user' }, accounts: [] }));
+
+    await expect(api.authSetToken({ provider: 'github', instance: 'github.com' }, reference)).resolves.toMatchObject({
+      status: 'connected', user: { provider: 'github', instance: 'github.com', id: '42', username: 'vault-user' },
+    });
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/auth/vault', expect.objectContaining({
+      body: JSON.stringify({ reference }), query: new URLSearchParams({ instance: 'github.com' }),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/auth/status', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'github.com' }),
+    }));
+    expect(runtimeFetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('parses provider-neutral GitLab merge request context without GitHub identities', async () => {
     const gitlab: SourceControlIdentity = { provider: 'gitlab', instance: 'gitlab.example.com' };
     runtimeFetchMock.mockResolvedValueOnce(Response.json({

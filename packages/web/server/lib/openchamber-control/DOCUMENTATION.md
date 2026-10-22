@@ -241,7 +241,8 @@ other.
   actions answer 503). A refusal keeps the route's status and message.
   Secrets: no action signs in or takes a token, password or client secret;
   an input object with a key ending in token, secret, password, passphrase or
-  key is refused with 400 before any operation runs; every answer has such keys
+  key, in singular or plural form, is refused with 400 before any operation
+  runs; every answer has such keys
   removed at any depth (`withoutSecrets`). `github.remove`, `gitlab.remove`,
   `linear.disconnect`, `extensions.disconnect` and every `binding.set` except
   `bindingOperation: provider` need `confirm: true`. GitLab actions accept
@@ -298,6 +299,12 @@ other.
   for the registry's `perSurface` keys, because the sidebar layout, themes and
   font sizes the user changes in the app are stored per surface and the base
   read alone shows them as absent.
+- `settings.devices` (`config-actions.js`) lists the device settings each open
+  window reported (`../device-settings/store.js`, `PUT /api/config/device-settings`):
+  the registry's device-scoped keys, which `settings.get` cannot show because
+  they live in the window's own storage. One entry per window, memory only, at most 20, keys
+  outside the registry's device scope dropped. Read only. 503 when the server
+  did not wire the store.
 - `opencode.config.set` (`config-actions.js`) writes the user file (default),
   the project file, or with `configScope: custom` the file the user's own
   `OPENCODE_CONFIG` names, the file Settings writes when it is set. Without

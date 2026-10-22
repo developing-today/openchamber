@@ -612,6 +612,26 @@ describe('a message queued while the agent works, with a goal armed', () => {
     }
   });
 
+  test('a queued goal keeps the arm\'s flags: settled, briefing and the length choice', async () => {
+    // As the goal writer card arms the composer for an approved spec sent with the message.
+    useSessionGoalArmStore.getState().setArmed(true, 'The approved spec', { settled: true, briefAgent: true, ignoreLimit: true });
+    const composer = await mountComposer();
+    try {
+      await composer.setStatus('busy');
+      await composer.send('Add dark mode', anything);
+
+      expect(queued().map((call) => call.body.item.goal)).toEqual([{
+        tokenBudget: 50_000,
+        objective: 'The approved spec',
+        settled: true,
+        briefAgent: true,
+        ignoreLimit: true,
+      }]);
+    } finally {
+      await composer.unmount();
+    }
+  });
+
   test('with the writer the message starts a goal writer job and does not join the queue', async () => {
     useUIStore.setState({ sessionGoalWriterEnabled: true });
     useSessionGoalArmStore.getState().setArmed(true);

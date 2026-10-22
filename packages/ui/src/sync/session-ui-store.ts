@@ -1877,10 +1877,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const queuedGoal = options?.queuedGoal
       const goalArm = inputMode === "shell" || content.trim().length === 0
         ? { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }
-        // A caller's own goal leaves the composer's arm where it is.
+        // A caller's own goal leaves the composer's arm where it is. A queued
+        // goal keeps the flags it was queued with: a settled spec is not
+        // rewritten, the briefing and the length choice hold.
         : options?.goalArm
           ?? (queuedGoal !== undefined
-            ? createGoalArm(queuedGoal !== null, queuedGoal?.objective ?? null)
+            ? createGoalArm(queuedGoal !== null, queuedGoal?.objective ?? null, {
+              settled: queuedGoal?.settled,
+              briefAgent: queuedGoal?.briefAgent,
+              ignoreLimit: queuedGoal?.ignoreLimit,
+            })
             : useSessionGoalArmStore.getState().consume())
       const goalArmed = goalArm.armed
       // A queued goal keeps the budget it was queued with.

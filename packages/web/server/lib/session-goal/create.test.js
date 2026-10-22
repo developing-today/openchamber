@@ -176,6 +176,75 @@ describe('session goal creation', () => {
     expect(result.spec).toBeNull();
   });
 
+  // The composer's goal flags, carried by a queued message (message-queue/runtime.js).
+  it('leaves a settled objective alone even when rewrite-all is on', async () => {
+    const writeSpec = vi.fn();
+    const result = await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'the approved spec',
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: { model: 'anthropic/claude', rewriteAll: true },
+      writeSpec,
+      settled: true,
+    });
+
+    expect(writeSpec).not.toHaveBeenCalled();
+    expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', 'the approved spec');
+    expect(result.spec).toBeNull();
+  });
+
+  it('keeps a long objective whole and marks the goal when it ignores the limit', async () => {
+    const persistSessionGoal = vi.fn(async () => undefined);
+    const long = 'x'.repeat(6_000);
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: long,
+      persistSessionGoal,
+      goalWriterSettings: WRITER_OFF,
+      ignoreLimit: true,
+    });
+
+    expect(generateSmallModelTextMock).not.toHaveBeenCalled();
+    expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', long);
+    expect(persistSessionGoal.mock.calls[0][2]).toMatchObject({ ignoreObjectiveLimit: true, objectiveFile: true });
+  });
+
+  // The inline copy is broadcast with every goal update, so it is capped even
+  // for an ignore-limit goal (the UI caps it too). See #207 and the review on #205.
+  it('caps an ignore-limit objective inline when the objective file cannot be written', async () => {
+    writeObjectiveMock.mockRejectedValueOnce(new Error('disk unavailable'));
+    const persistSessionGoal = vi.fn(async () => undefined);
+    const long = 'x'.repeat(6_000);
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: long,
+      onWarning: vi.fn(),
+      persistSessionGoal,
+      goalWriterSettings: WRITER_OFF,
+      ignoreLimit: true,
+    });
+
+    const [, , goal] = persistSessionGoal.mock.calls[0];
+    expect(goal).toMatchObject({ objective: 'x'.repeat(5_000), objectiveFile: false, ignoreObjectiveLimit: true });
+  });
+
+  it('fits a long objective to the limit when the goal does not ignore it', async () => {
+    const persistSessionGoal = vi.fn(async () => undefined);
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'x'.repeat(6_000),
+      persistSessionGoal,
+      goalWriterSettings: WRITER_OFF,
+    });
+
+    expect(writeObjectiveMock.mock.calls[0][1].length).toBeLessThanOrEqual(5_000);
+    expect(persistSessionGoal.mock.calls[0][2]).toMatchObject({ ignoreObjectiveLimit: false });
+  });
+
   it('leaves the objective alone when rewrite-all is off', async () => {
     const writeSpec = vi.fn();
 

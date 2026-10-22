@@ -11,7 +11,7 @@ the web server and survives UI disconnects.
 ```
 {
   id,                      // opaque per-logical-goal id; stale-write guard
-  objective,               // inline user text (fallback), <= the goal length limit
+  objective,               // inline user text (fallback), <= the goal length limit, ignoreObjectiveLimit too (it is broadcast with every update)
   objectiveFile,           // true: objective text lives in a server-side file
   ignoreObjectiveLimit,    // true: the user switched the length limit off for this goal
   status,                  // active | paused | blocked | budgetLimited | complete
@@ -157,11 +157,16 @@ progress check judges against. `spec-writer.js` owns it.
 - Rewrite all: with `sessionGoalRewriteAll` on, `createSessionGoal` runs every
   server-created objective (scheduled tasks, CLI `--goal`, the agent tool's
   `goalAction: set`) through the writer before fitting it. A failed rewrite
-  logs a warning and keeps the objective as written. With `ignoreLimit` (a
-  goal writer job whose card switched the limit off) the objective is kept
-  whole up to the hard cap instead of being condensed to the goal length
-  limit, and the record says `ignoreObjectiveLimit: true`. `createSessionGoal`
-  returns `{ goal, spec }`; scheduled tasks and the sessions route pass the
+  logs a warning and keeps the objective as written. `settled: true` skips
+  the rewrite. With `ignoreLimit: true` (a goal writer job whose card switched
+  the limit off, or a queued message whose composer had it off) the objective
+  is kept whole up to the hard cap instead of being condensed to the goal
+  length limit, the writer is told to drop its length line, and the record
+  says `ignoreObjectiveLimit: true`; the inline fallback, used only when the
+  objective file cannot be written, is still cut to the length limit, since
+  every goal update broadcasts it. A queued message passes both flags from
+  the composer. `createSessionGoal` returns `{ goal, spec }`; scheduled tasks,
+  queued messages and the sessions route pass the
   spec to `buildGoalIntroText(tokenBudget, spec)`, whose reminder then
   carries it in an escaped `<goal-spec>` block. A slash command normally gets
   no reminder; with a rewritten spec the reminder is admitted with

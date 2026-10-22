@@ -159,6 +159,7 @@ import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
+import { createDeviceSettingsStore } from './lib/device-settings/store.js';
 import { readManagedOpenCodeState, resolveManagedOpenCodePaths } from './lib/opencode/managed-opencode-state.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
@@ -1437,6 +1438,8 @@ const clientPairingRuntime = createClientPairingRuntime({
   storePath: CLIENT_PAIRING_SESSIONS_FILE_PATH,
   remoteClientAuthRuntime,
 });
+// What each open window reports of its device-only settings (lib/device-settings).
+const deviceSettingsStore = createDeviceSettingsStore();
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
 });
@@ -1993,6 +1996,7 @@ const openChamberControlService = createOpenChamberControlService({
       // Set inside main() once the self-handoff runtime exists, and only when
       // this process owns its signals (a standalone server, not an embedder).
       getRequestHandoff: () => requestSelfHandoff,
+      listDeviceSettings: () => deviceSettingsStore.list(),
     }),
     createIntegrationActions({ readSettingsFromDiskMigrated, persistSettings }),
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
@@ -2731,6 +2735,7 @@ async function main(options = {}) {
     scheduledTaskService,
     openChamberSessionService,
     openChamberControlService,
+    deviceSettingsStore,
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,

@@ -33,8 +33,9 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
     if (!raw) {
       return null;
     }
-    const parsed = parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    const trimmed = String(raw).trim();
+    const parsed = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : Number.NaN;
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : null;
   })();
 
   const configuredOpenCodeHost = (() => {

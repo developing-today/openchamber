@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { isBoolean } from '../shared/guards.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
@@ -99,6 +100,11 @@ const parseGoal = (value) => {
   const goal = { tokenBudget };
   const objective = asNonEmptyString(raw.objective);
   if (objective) goal.objective = objective;
+  // The composer's goal flags (session-goal/create.js): kept only when true.
+  for (const flag of ['settled', 'briefAgent', 'ignoreLimit']) {
+    if (raw[flag] !== undefined && !isBoolean(raw[flag])) throw new TypeError(`invalid goal ${flag}`);
+    if (raw[flag] === true) goal[flag] = true;
+  }
   return goal;
 };
 
@@ -596,6 +602,8 @@ export function createMessageQueueRuntime({
         tokenBudget: item.goal.tokenBudget,
         providerID: model.providerID,
         modelID: model.id,
+        settled: item.goal.settled === true,
+        ignoreLimit: item.goal.ignoreLimit === true,
         onWarning: (message, error) => console.warn(`[message-queue] ${message}:`, error?.message || error),
       })
       : null;
@@ -619,7 +627,9 @@ export function createMessageQueueRuntime({
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
-        body: { text: buildGoalIntroText(item.goal.tokenBudget, goal.spec), resume: false },
+        // As a UI send: the spec the user approved when they asked to brief the
+        // agent with it, otherwise the one the writer just produced, if any.
+        body: { text: buildGoalIntroText(item.goal.tokenBudget, item.goal.briefAgent ? (item.goal.objective ?? item.text) : goal.spec), resume: false },
       });
     }
 

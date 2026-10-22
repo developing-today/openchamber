@@ -66,3 +66,22 @@ export const useSessionGoalArmStore = create<SessionGoalArmStore>((set, get) => 
     return { armed, objectiveOverride, settled, briefAgent, ignoreLimit };
   },
 }));
+
+/**
+ * Arms the composer again with a goal that left with a queued message: when the
+ * message comes back to the composer to be edited, or when queueing it failed.
+ * The flags come back with it, so a retry neither rewrites a settled spec nor
+ * drops the briefing or the length choice.
+ */
+export const rearmQueuedGoal = (goal: {
+  objective?: string | null;
+  settled?: boolean;
+  briefAgent?: boolean;
+  ignoreLimit?: boolean;
+}): void => {
+  useSessionGoalArmStore.getState().setArmed(true, goal.objective ?? null, {
+    settled: goal.settled === true,
+    briefAgent: goal.briefAgent === true,
+    ignoreLimit: goal.ignoreLimit === true,
+  });
+};

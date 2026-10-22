@@ -187,6 +187,35 @@ describe('environment runtime', () => {
     expect(await runtime.reloadProject('path_project', projectPath)).toBeNull();
   });
 
+  it('runs a fresh command on reload instead of joining a run started before the invalidation', async () => {
+    await store.updateProject('path_project', { command: 'direnv export json' });
+    const gated = new EventEmitter();
+    gated.stdout = new EventEmitter();
+    gated.kill = vi.fn();
+    const releaseFirst = () => {
+      gated.stdout.emit('data', Buffer.from('{"VERSION":"1"}'));
+      gated.emit('close', 0);
+    };
+    const spawn = vi.fn()
+      .mockImplementationOnce(() => gated)
+      .mockImplementation(() => fakeChild({ stdout: '{"VERSION":"2"}' }));
+    const runtime = createRuntime({ spawn });
+
+    const first = runtime.forDirectory(projectPath, USER_ACTION);
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+
+    await store.updateProject('path_project', { command: 'new command' });
+    const reloading = runtime.reloadProject('path_project', projectPath);
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
+    expect(spawn.mock.calls[1][0]).toBe('new command');
+
+    releaseFirst();
+    await expect(reloading).resolves.toMatchObject({ state: 'applied', count: 1 });
+    expect(runtime.projectStatus('path_project')).toMatchObject({ state: 'applied', count: 1 });
+    await first;
+    expect(runtime.projectStatus('path_project')).toMatchObject({ state: 'applied', count: 1 });
+  });
+
   it('gives OpenCode the service variables under the user variables, and nothing in enterprise mode', async () => {
     await store.updateUser({ variables: { SHARED: 'user' } });
     const readOpenCodeServiceEnv = () => ({ SHARED: 'service', ONLY_SERVICE: 's' });
@@ -215,6 +244,50 @@ describe('environment runtime', () => {
     const runtime = createRuntime({ vault: { resolve, status: () => ({}) } });
     expect(await runtime.forDirectory(projectPath, USER_ACTION)).toEqual({ GITHUB_TOKEN: 'ghp_secret' });
     expect(await runtime.forDirectory(projectPath, { refresh: false })).toBeNull();
+  });
+
+  it('gives the project command the user variables with vault references read, never the reference text', async () => {
+    await store.updateUser({ variables: { GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential', PLAIN: 'p' } });
+    await store.updateProject('path_project', { command: 'direnv export json' });
+    const resolve = vi.fn(async (variables) => Object.fromEntries(Object.entries(variables).map(([name, value]) => [name, value.startsWith('op://') ? 'ghp_secret' : value])));
+    const spawn = vi.fn(() => fakeChild({ stdout: '{"FROM_COMMAND":"1"}' }));
+    const runtime = createRuntime({ spawn, vault: { resolve, status: () => ({}) } });
+
+    await runtime.forDirectory(projectPath, USER_ACTION);
+
+    const [, options] = spawn.mock.calls[0];
+    expect(options.env).toMatchObject({ GITHUB_TOKEN: 'ghp_secret', PLAIN: 'p' });
+    expect(JSON.stringify(options.env)).not.toContain('op://');
+    expect(resolve).toHaveBeenCalledWith({ GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential', PLAIN: 'p' }, { refresh: true });
+  });
+
+  it('leaves a vault reference the resolver cannot read out of the project command environment', async () => {
+    await store.updateUser({ variables: { GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential', PLAIN: 'p' } });
+    await store.updateProject('path_project', { command: 'direnv export json' });
+    const resolve = vi.fn(async (variables) => Object.fromEntries(Object.entries(variables).filter(([, value]) => !value.startsWith('op://'))));
+    const spawn = vi.fn(() => fakeChild({ stdout: '{"FROM_COMMAND":"1"}' }));
+    const runtime = createRuntime({ spawn, vault: { resolve, status: () => ({}) } });
+
+    await runtime.forDirectory(projectPath, USER_ACTION);
+
+    const [, options] = spawn.mock.calls[0];
+    expect(options.env).toMatchObject({ PLAIN: 'p' });
+    expect(options.env).not.toHaveProperty('GITHUB_TOKEN');
+    expect(JSON.stringify(options.env)).not.toContain('op://');
+  });
+
+  it('reads vault references for the project command on a reload', async () => {
+    await store.updateUser({ variables: { GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' } });
+    await store.updateProject('path_project', { command: 'direnv export json' });
+    const resolve = vi.fn(async (variables) => Object.fromEntries(Object.entries(variables).map(([name, value]) => [name, value.startsWith('op://') ? 'ghp_secret' : value])));
+    const spawn = vi.fn(() => fakeChild({ stdout: '{"FROM_COMMAND":"1"}' }));
+    const runtime = createRuntime({ spawn, vault: { resolve, status: () => ({}) } });
+
+    await runtime.reloadProject('path_project', projectPath);
+
+    const [, options] = spawn.mock.calls[0];
+    expect(options.env).toMatchObject({ GITHUB_TOKEN: 'ghp_secret' });
+    expect(resolve).toHaveBeenCalledWith({ GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' }, { refresh: true });
   });
 
   it('keeps spawns going when the store is broken, and says so once', async () => {

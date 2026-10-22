@@ -244,6 +244,31 @@ describe('dev tunnel end to end', () => {
     expect(client.list()).toEqual([]);
   });
 
+  test('rejects a malformed remote port instead of coercing it to another port', async () => {
+    const client = createDevTunnelClient({ logger: { warn: () => {} } });
+    await expect(client.open({ baseUrl: 'http://127.0.0.1:1', port: '8080junk' })).rejects.toThrow('valid remote port');
+    await expect(client.open({ baseUrl: 'http://127.0.0.1:1', port: '80.9' })).rejects.toThrow('valid remote port');
+    await expect(client.open({ baseUrl: 'http://127.0.0.1:1', port: 8080.5 })).rejects.toThrow('valid remote port');
+    await expect(client.open({ baseUrl: 'http://127.0.0.1:1', port: '' })).rejects.toThrow('valid remote port');
+    expect(client.list()).toEqual([]);
+  });
+
+  test('refuses a malformed port spelling that would coerce to a discovered port', async () => {
+    const devPort = await startDevServer((_req, res) => res.end('secret service'));
+    const host = await startHost({ allowedPorts: [devPort] });
+
+    const body = await new Promise((resolve) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${host.port}/api/dev-tunnel?port=${devPort}junk`);
+      const settle = (value) => { try { socket.close(); } catch { /* already closed */ } resolve(value); };
+      socket.on('open', () => socket.send('GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'));
+      socket.on('message', (data) => settle(Buffer.from(data).toString()));
+      socket.on('error', () => settle(null));
+      socket.on('close', () => settle(null));
+      setTimeout(() => settle(null), 3_000);
+    });
+    expect(body).toBeNull();
+  });
+
   test('rejects a non-http(s) base URL instead of crashing on first connection', async () => {
     // A non-special scheme survives the `ws:` protocol assignment (WHATWG URL
     // ignores it), so `new WebSocket(...)` used to throw inside the connection
