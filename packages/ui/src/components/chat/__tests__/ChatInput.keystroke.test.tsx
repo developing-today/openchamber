@@ -371,10 +371,11 @@ test('a streaming session updating its record does not re-render the composer', 
  */
 test('sending from an existing session calls the store sendMessage current at send time', async () => {
   const { useConfigStore } = await import('@/stores/useConfigStore');
-  useConfigStore.setState({ currentProviderId: 'openai', currentModelId: 'gpt-test' });
+  const { currentProviderId: originalProviderId, currentModelId: originalModelId } = useConfigStore.getState();
   const originalSendMessage = useSessionUIStore.getState().sendMessage;
   const calls: Parameters<typeof originalSendMessage>[] = [];
   try {
+    useConfigStore.setState({ currentProviderId: 'openai', currentModelId: 'gpt-test' });
     await countComposerRenders('session', async (view) => {
       useSessionUIStore.setState({ sendMessage: async (...args) => { calls.push(args); } });
       await act(async () => {
@@ -383,10 +384,17 @@ test('sending from an existing session calls the store sendMessage current at se
       const sendButton = document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]');
       if (!sendButton) throw new Error('The send button did not render');
       await act(async () => { sendButton.click(); });
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      // The submit handler awaits before it sends; wait for the call, up to a deadline.
+      const deadline = Date.now() + 2000;
+      await act(async () => {
+        while (calls.length === 0 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      });
     });
   } finally {
     useSessionUIStore.setState({ sendMessage: originalSendMessage });
+    useConfigStore.setState({ currentProviderId: originalProviderId, currentModelId: originalModelId });
   }
   expect(calls).toHaveLength(1);
   const [content, providerID, modelID] = calls[0] ?? [];
