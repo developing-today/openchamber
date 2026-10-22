@@ -323,4 +323,38 @@ describe('MCP dropdown status reads', () => {
     expect(host.querySelectorAll('[role="switch"]').length).toBe(2);
     expect(host.textContent?.split(note).length).toBe(3);
   });
+
+  // happy-dom does no layout, so this checks the classes that do it: in a host with a
+  // bounded height (the mobile workspace pane, overflow hidden), the server list is
+  // the column's scrolling child and the note sits outside it, so neither is clipped.
+  test('the content is a column whose server list scrolls and whose cache note stays outside it', async () => {
+    listServers = async () => Array.from({ length: 30 }, (_, index) => ({ name: `server-${index}`, status: { status: 'connected' } }));
+    const { McpDropdownContent } = await import('./McpDropdown');
+    const host = await renderNode(
+      <div className="h-96 overflow-hidden">
+        <McpDropdownContent active fillHeight hideHeader mobileListDensity />
+      </div>,
+    );
+    await act(async () => { await useMcpStore.getState().refresh({ directory: 'C:/proj-a' }); });
+    const content = host.querySelector<HTMLElement>('[data-mcp-content]');
+    const list = host.querySelector<HTMLElement>('[data-mcp-server-list]');
+    const note = host.querySelector<HTMLElement>('[data-mcp-cache-note]');
+    if (!content || !list || !note) throw new Error('Missing MCP content, list or note');
+    expect(list.querySelectorAll('[role="switch"]').length).toBe(30);
+    for (const name of ['flex', 'flex-col', 'min-h-0', 'h-full']) expect(content.classList.contains(name)).toBe(true);
+    for (const name of ['flex-1', 'min-h-0', 'overflow-y-auto']) expect(list.classList.contains(name)).toBe(true);
+    expect(list.classList.contains('max-h-64')).toBe(false);
+    expect(note.parentElement).toBe(content);
+    expect(note.classList.contains('shrink-0')).toBe(true);
+  });
+
+  test('the desktop dropdown keeps its list capped at the same height', async () => {
+    listServers = async () => [{ name: 'fixture', status: { status: 'connected' } }];
+    const { McpDropdownContent } = await import('./McpDropdown');
+    const host = await renderNode(<McpDropdownContent active />);
+    await act(async () => { await useMcpStore.getState().refresh({ directory: 'C:/proj-a' }); });
+    const list = host.querySelector<HTMLElement>('[data-mcp-server-list]');
+    expect(list?.classList.contains('max-h-64')).toBe(true);
+    expect(list?.classList.contains('overflow-y-auto')).toBe(true);
+  });
 });
