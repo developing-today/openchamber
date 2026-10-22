@@ -25,11 +25,20 @@ const MAX_COUNT = 50;
 
 // The keys each object may carry, as OpenCode's schema defines them. OpenCode
 // reads only these, so any other key would be saved and silently ignored.
-const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights"];
+const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules"];
 const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
 const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
+const WINDOW_KEYS = ["daysOfWeek", "daysOfMonth", "start", "end", "timezone", "from", "until"];
+const SCHEDULE_KEYS = ["id", "targets", "when", "factor", "weight", "note"];
+const GLOBAL_SCHEDULE_KEYS = ["id", "providers", "models", "targets", "routes", "when", "factor", "weight", "note"];
+
+// The weekday names OpenCode's schema accepts (`DayOfWeek` in
+// packages/schema/src/config/model-routes.ts); 0 (Sunday) to 6 also work.
+const DAY_NAMES = ["sun", "sunday", "mon", "monday", "tue", "tuesday", "tues", "wed", "wednesday", "thu", "thursday", "thur", "thurs", "fri", "friday", "sat", "saturday"];
+// The times OpenCode's window parser reads (`minutesOf` in packages/core/src/model-route-schedule.ts).
+const TIME_PATTERN = /^(\d{1,2}):(\d{1,2})(?::\d{2})?$/;
 
 // OpenCode's defaults for the health window (model-route.ts).
 const DEFAULT_SAMPLE_WINDOW = 5;
@@ -52,6 +61,11 @@ export const readModelRoutes = (config) => {
 const readModelRouteTuning = (config) => {
   const tuning = config?.experimental?.model_route_tuning;
   return isRecord(tuning) ? tuning : null;
+};
+
+const readModelRouteSchedules = (config) => {
+  const schedules = config?.experimental?.model_route_schedules;
+  return Array.isArray(schedules) ? schedules : null;
 };
 
 const HEALTH_LIMITS = {
@@ -98,6 +112,109 @@ const validateBudgets = (id, budgets) => {
     }
     if (budget.softLimit !== undefined && !(typeof budget.softLimit === "number" && budget.softLimit >= 0.125 && budget.softLimit <= 1))
       return `route "${id}" budget for "${target}" softLimit must be between 0.125 and 1`;
+  }
+  return null;
+};
+
+/** "9:30" or "09:30" as minutes since midnight, or null when it is not a time. */
+const minutesOf = (value) => {
+  const match = TIME_PATTERN.exec(value.trim());
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+};
+
+const isTimezone = (value) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value.trim() });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// Only a string is equal to its own String(), so this is a plain value check.
+const isString = (value) => String(value) === value;
+
+const isStringList = (value) => Array.isArray(value) && value.every((item) => isString(item) && item.trim() !== "");
+
+/**
+ * A schedule's `when` window. OpenCode's schema accepts more than its window
+ * parser reads, and the parser drops the whole rule when it cannot read one
+ * field, so a typo would leave a schedule saved and never applied. Everything
+ * the parser would drop is refused here instead.
+ */
+const validateWindow = (label, when) => {
+  if (!isRecord(when)) return `${label} needs a when window object`;
+  const unknown = unknownKeysProblem(when, WINDOW_KEYS);
+  if (unknown) return `${label} when has ${unknown}`;
+  if (when.daysOfWeek !== undefined) {
+    if (!Array.isArray(when.daysOfWeek) || when.daysOfWeek.length === 0)
+      return `${label} when.daysOfWeek must list at least one day; leave it out for every day`;
+    for (const day of when.daysOfWeek)
+      if (!DAY_NAMES.includes(day) && !isWhole(day, 0, 6))
+        return `${label} when.daysOfWeek has "${day}" (expected a lowercase day name such as "mon", or 0 for Sunday to 6)`;
+  }
+  if (when.daysOfMonth !== undefined) {
+    if (!Array.isArray(when.daysOfMonth) || when.daysOfMonth.length === 0)
+      return `${label} when.daysOfMonth must list at least one day; leave it out for every day`;
+    for (const day of when.daysOfMonth)
+      if (day !== -1 && !isWhole(day, 1, 31))
+        return `${label} when.daysOfMonth has "${day}" (expected 1 to 31, or -1 for the last day)`;
+  }
+  for (const key of ["start", "end"]) {
+    if (when[key] !== undefined && !(isString(when[key]) && minutesOf(when[key]) !== null))
+      return `${label} when.${key} must be a time such as "09:00"`;
+  }
+  if (when.start !== undefined && when.end !== undefined && minutesOf(when.start) === minutesOf(when.end))
+    return `${label} when.start and when.end are the same, so the window would never be active`;
+  if (when.timezone !== undefined && !(isString(when.timezone) && isTimezone(when.timezone)))
+    return `${label} when.timezone must be an IANA timezone such as "America/Chicago"`;
+  for (const key of ["from", "until"]) {
+    if (when[key] !== undefined && !isWhole(when[key], 1, Number.MAX_SAFE_INTEGER))
+      return `${label} when.${key} must be a positive epoch-millisecond time`;
+  }
+  if (when.from !== undefined && when.until !== undefined && when.from >= when.until)
+    return `${label} when.from must be before when.until`;
+  return null;
+};
+
+/** One schedule entry, inside a route (`Schedule`) or across routes (`GlobalSchedule`). */
+const validateSchedule = (label, schedule, allowed) => {
+  if (!isRecord(schedule)) return `${label} must be an object`;
+  const unknown = unknownKeysProblem(schedule, allowed);
+  if (unknown) return `${label} has ${unknown}`;
+  for (const key of ["id", "note"])
+    if (schedule[key] !== undefined && !isString(schedule[key])) return `${label} ${key} must be a string`;
+  for (const key of ["targets", "providers", "models", "routes"])
+    if (schedule[key] !== undefined && !isStringList(schedule[key]))
+      return `${label} ${key} must be a list of non-empty strings`;
+  const problem = validateWindow(label, schedule.when);
+  if (problem) return problem;
+  for (const key of ["factor", "weight"])
+    if (schedule[key] !== undefined && !(Number.isFinite(schedule[key]) && schedule[key] > 0))
+      return `${label} ${key} must be a positive number`;
+  // OpenCode drops a schedule with neither, and ignores factor when both are set.
+  if (schedule.factor === undefined && schedule.weight === undefined)
+    return `${label} needs a factor or a weight`;
+  if (schedule.factor !== undefined && schedule.weight !== undefined)
+    return `${label} sets both factor and weight; OpenCode would apply the weight and ignore the factor`;
+  return null;
+};
+
+const validateRouteSchedules = (id, schedules) => {
+  if (!Array.isArray(schedules)) return `route "${id}" schedules must be a list`;
+  for (const [index, schedule] of schedules.entries()) {
+    const problem = validateSchedule(`route "${id}" schedule ${index + 1}`, schedule, SCHEDULE_KEYS);
+    if (problem) return problem;
+  }
+  return null;
+};
+
+export const validateModelRouteSchedules = (schedules) => {
+  if (!Array.isArray(schedules)) return "schedules must be a list";
+  for (const [index, schedule] of schedules.entries()) {
+    const problem = validateSchedule(`schedule ${index + 1}`, schedule, GLOBAL_SCHEDULE_KEYS);
+    if (problem) return problem;
   }
   return null;
 };
@@ -179,6 +296,10 @@ export const validateModelRoute = (id, route) => {
     const problem = validateBudgets(id, route.budgets);
     if (problem) return problem;
   }
+  if (route.schedules !== undefined) {
+    const problem = validateRouteSchedules(id, route.schedules);
+    if (problem) return problem;
+  }
   return null;
 };
 
@@ -205,8 +326,7 @@ export const validateModelRouteTuning = (tuning) => {
   if (tuning.windowHours !== undefined && !isWhole(tuning.windowHours, 1, 336))
     return "tuning.windowHours must be a whole number from 1 to 336";
   if (tuning.notes !== undefined) {
-    // Only a string is equal to its own String(), so this is a plain value check.
-    if (!Array.isArray(tuning.notes) || !tuning.notes.every((line) => String(line) === line))
+    if (!Array.isArray(tuning.notes) || !tuning.notes.every(isString))
       return "tuning.notes must be a list of strings";
     const bad = tuning.notes.findIndex((line) => !NOTE_LINE.test(line));
     if (bad !== -1) return `tuning.notes line ${bad + 1} must read "match: text" on one line`;
@@ -235,6 +355,7 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       res.json({
         routes: readModelRoutes(layers.mergedConfig),
         tuning: readModelRouteTuning(layers.mergedConfig),
+        schedules: readModelRouteSchedules(layers.mergedConfig),
         path: layers.paths.userPath ?? CONFIG_FILE,
       });
     } catch (error) {
@@ -244,15 +365,19 @@ export const registerModelRouteRoutes = (app, dependencies) => {
 
   app.put("/api/model-routes", express.json({ limit: "256kb" }), refuseInEnterpriseMode, async (req, res) => {
     try {
-      const { routes, tuning } = req.body ?? {};
-      if (routes === undefined && tuning === undefined)
-        return res.status(400).json({ error: "Send routes, tuning, or both" });
+      const { routes, tuning, schedules } = req.body ?? {};
+      if (routes === undefined && tuning === undefined && schedules === undefined)
+        return res.status(400).json({ error: "Send routes, tuning, schedules, or any of them together" });
       if (routes !== undefined) {
         const problem = validateModelRoutes(routes);
         if (problem) return res.status(400).json({ error: problem });
       }
       if (tuning !== undefined && tuning !== null) {
         const problem = validateModelRouteTuning(tuning);
+        if (problem) return res.status(400).json({ error: problem });
+      }
+      if (schedules !== undefined && schedules !== null) {
+        const problem = validateModelRouteSchedules(schedules);
         if (problem) return res.status(400).json({ error: problem });
       }
       const layers = readConfigLayers(null);
@@ -262,6 +387,8 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       if (routes !== undefined) targetConfig.experimental.model_routes = routes;
       if (tuning === null) delete targetConfig.experimental.model_route_tuning;
       else if (tuning !== undefined) targetConfig.experimental.model_route_tuning = tuning;
+      if (schedules === null) delete targetConfig.experimental.model_route_schedules;
+      else if (schedules !== undefined) targetConfig.experimental.model_route_schedules = schedules;
       writeConfig(targetConfig, targetPath);
       if (refreshOpenCodeAfterConfigChange) {
         try {
@@ -273,6 +400,7 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       res.json({
         routes: routes ?? readModelRoutes(layers.mergedConfig),
         tuning: tuning === undefined ? readModelRouteTuning(layers.mergedConfig) : tuning,
+        schedules: schedules === undefined ? readModelRouteSchedules(layers.mergedConfig) : schedules,
         path: targetPath,
       });
     } catch (error) {

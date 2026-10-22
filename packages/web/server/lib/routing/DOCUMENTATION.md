@@ -251,6 +251,21 @@ the source and manages the TypeSafe key and, through `CustomEndpointFields.tsx`,
 the custom endpoint; `JevAccessNote` links there from the
 features that need Jev.
 
+## Model pool config
+
+`model-routes.js` — `GET`/`PUT /api/model-routes`: OpenCode's
+`experimental.model_routes` (the pools), `model_route_tuning` (automatic
+review) and `model_route_schedules` (weight changes across pools), written to
+the user's global `opencode.json(c)` and refused in enterprise mode. A `PUT`
+carries any of `routes`, `tuning` and `schedules`; `null` removes `tuning` or
+`schedules`. Every key is checked against OpenCode's schema
+(`packages/schema/src/config/model-routes.ts`) before anything is written, and
+one bad pool refuses the whole map. A schedule window is also refused where
+OpenCode's window parser (`packages/core/src/model-route-schedule.ts`) would
+drop the rule without saying so: an empty day list, an unreadable time or
+timezone, a start equal to its end, and a schedule with neither or both of
+`factor` and `weight`.
+
 ## Model pool telemetry
 
 Separate from Jev/Auto above: read-only views over OpenCode's own
