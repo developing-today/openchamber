@@ -55,6 +55,19 @@ export const readModelRoutes = (config) => {
   return isRecord(routes) ? routes : {};
 };
 
+/**
+ * The pools OpenCode builds from every config file it reads (`sources` from
+ * `readConfigSources`, lowest priority first). A later file's pool replaces an
+ * earlier one of the same id whole, as OpenCode's model-routes config plugin
+ * does (`routes.set(id, route)`), so a pool's description comes from the same
+ * file as its targets. A file that failed to parse reads as empty and adds nothing.
+ */
+export const readLayeredModelRoutes = (sources) => {
+  const routes = {};
+  for (const source of sources) Object.assign(routes, readModelRoutes(source.config));
+  return routes;
+};
+
 const readModelRouteTuning = (config) => {
   const tuning = config?.experimental?.model_route_tuning;
   return isRecord(tuning) ? tuning : null;

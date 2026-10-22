@@ -46,9 +46,11 @@ const modelRouteSchema = z
   .object({
     name: z.string().optional(),
     // OpenChamber's own keys: what the pool is for, read by Jev when a routing
-    // category runs on the pool. OpenCode ignores them.
-    description: z.string().optional(),
-    details: z.string().optional(),
+    // category runs on the pool. OpenCode ignores them. A hand-edited file can
+    // hold any type here, and that must not stop the page from editing every
+    // pool, so a wrong type reads as absent (as `jev.js` reads it).
+    description: z.string().optional().catch(undefined),
+    details: z.string().optional().catch(undefined),
     targets: z.array(targetSchema),
     autonomy: z.enum(AUTONOMY_LEVELS).optional(),
     selection: z.enum(['ordered', 'round-robin', 'weighted']).optional(),

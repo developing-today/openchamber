@@ -37,6 +37,22 @@ describe('fetchModelRoutes', () => {
   });
 });
 
+describe('fetchModelRoutes with hand-edited pool text', () => {
+  test('reads a non-string description or details as absent and keeps every pool', async () => {
+    respond = () => reply(JSON.stringify({
+      routes: {
+        odd: { targets: ['p/a'], description: 42, details: ['x'] },
+        kept: { targets: ['p/b'], description: 'Quick fixes', details: 'Notes' },
+      },
+    }));
+    const state = await fetchModelRoutes();
+    expect(state.routes.odd.targets).toEqual(['p/a']);
+    expect(state.routes.odd.description).toBeUndefined();
+    expect(state.routes.odd.details).toBeUndefined();
+    expect(state.routes.kept).toMatchObject({ description: 'Quick fixes', details: 'Notes' });
+  });
+});
+
 describe('saveModelRoutes', () => {
   test('sends the whole route map in one PUT and returns the saved state', async () => {
     const routes = { kept: { targets: ['p/a', 'p/b'], selection: 'weighted', weights: { 'p/a': 2 } } } satisfies Record<string, ModelRoute>;

@@ -267,7 +267,17 @@ validates the file may flag them. Both were checked against OpenCode on
 
 Because OpenCode's own config read drops the keys, the routing runtime reads
 the pools from the config files (`readModelPools`, wired in `index.js` to
-`readConfigLayers(directory)`), not from OpenCode's config API. In a routed
+`readLayeredModelRoutes(readConfigSources(directory))`), not from OpenCode's
+config API. `readConfigSources` (`../opencode/shared.js`, shared with Settings ›
+MCP) lists the files OpenCode reads, lowest priority first: the global
+`opencode.json` and `opencode.jsonc`, `OPENCODE_CONFIG`, then every
+`opencode.json(c)` from the outermost ancestor folder down to the project, then
+every `.opencode/opencode.json(c)` in the same order. A later file's pool
+replaces an earlier one whole, as OpenCode's model-routes config plugin does,
+so a description never outlives the pool definition it came with. Not covered:
+the system config folder, macOS managed preferences, `.well-known` remote
+config and `OPENCODE_CONFIG_CONTENT`; a pool defined only there reaches Jev
+without its text. In a routed
 send, each enabled category whose own model is a pool gets
 `\n\nRuns on the model pool "<id>": <description>\n<details>` appended to its
 description; a category without a model of its own, or on a pool with neither
@@ -304,7 +314,8 @@ its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
 ## Tests
 
 `model-routes.test.js` (route validation, pool description and details limits,
-the routes), `store.test.js` (defaults, deviation round-trip, the cache setting's default,
+the routes), `model-pools-folder-config.test.js` (which files the pool text
+comes from and which one wins), `store.test.js` (defaults, deviation round-trip, the cache setting's default,
 deleted built-ins, malformed
 file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
 excerpts, decisions, cache holds and the warm window, endpoints, custom URL normalization and setter,
