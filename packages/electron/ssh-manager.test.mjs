@@ -628,6 +628,36 @@ printf '4321\\n'`);
     expect(port).toBe(4321);
   });
 
+  test('reads probe statuses by prefix when login-shell banner output precedes them', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    // The probe runs through a login shell (`sh -lc`): a distro banner can
+    // precede the status lines, so their position in the output is not fixed.
+    manager.runRemoteCommand = async () => [
+      'Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0 x86_64)',
+      'INFO_STATUS=200',
+      'AUTH_STATUS=0',
+      'HEALTH_STATUS=200',
+      JSON.stringify({ openchamberVersion: '1.2.3', runtime: 'web' }),
+    ].join('\n');
+
+    const probe = await manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      null,
+    );
+
+    expect(probe).toEqual({
+      info: { openchamberVersion: '1.2.3', runtime: 'web' },
+      passwordAccepted: false,
+      authStatus: 0,
+    });
+  });
+
   test('refuses to start when the remote machine has no opencode CLI', async () => {
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
