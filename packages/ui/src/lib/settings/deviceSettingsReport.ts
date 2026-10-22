@@ -1,0 +1,149 @@
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useUIStore } from '@/stores/useUIStore';
+import { getSettingsSurface } from './surface';
+import type { SettingsSurface } from './registry';
+
+type UIState = ReturnType<typeof useUIStore.getState>;
+
+/**
+ * The device-scoped settings this window reports to its server, so the agent
+ * tool can read them (`settings.devices`); the server keeps only registry
+ * device keys. Left out: state that moves as the user works rather than a
+ * preference (scroll position, open dialogs, the Settings page on screen,
+ * per-folder panel state, "last viewed" stamps, terminal names that mean
+ * nothing on another device).
+ */
+const readDeviceSettings = (state: UIState) => ({
+  theme: state.theme,
+  isSidebarOpen: state.isSidebarOpen,
+  sidebarWidth: state.sidebarWidth,
+  contextRailOrder: state.contextRailOrder,
+  contextRailHiddenSurfaces: state.contextRailHiddenSurfaces,
+  mobileWorkspaceTabOrder: state.mobileWorkspaceTabOrder,
+  mobileWorkspaceHiddenTabs: state.mobileWorkspaceHiddenTabs,
+  contextSurfaceZones: state.contextSurfaceZones,
+  contextEditorTreeVisible: state.contextEditorTreeVisible,
+  contextEditorVisible: state.contextEditorVisible,
+  contextEditorTreeWidth: state.contextEditorTreeWidth,
+  workStatusExpandedSections: state.workStatusExpandedSections,
+  messageQueueExpanded: state.messageQueueExpanded,
+  messageLimit: state.messageLimit,
+  walkthroughTocWidth: state.walkthroughTocWidth,
+  diffFileListMode: state.diffFileListMode,
+  diffFileTreeWidth: state.diffFileTreeWidth,
+  showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
+  dockBadgeEnabled: state.dockBadgeEnabled,
+  alwaysShowScrollbars: state.alwaysShowScrollbars,
+  mobileKeyboardMode: state.mobileKeyboardMode,
+  desktopWindowControlsPosition: state.desktopWindowControlsPosition,
+  desktopWindowControlsStyle: state.desktopWindowControlsStyle,
+  inputBarOffset: state.inputBarOffset,
+});
+
+type DeviceSettings = ReturnType<typeof readDeviceSettings>;
+
+type DeviceSettingsReport<T> = { deviceId: string; surface: SettingsSurface; values: T };
+
+type ReporterDeps<T> = {
+  read: () => T;
+  /** Resolves true when the server took the report. */
+  send: (report: DeviceSettingsReport<T>) => Promise<boolean>;
+  deviceId: string;
+  surface: SettingsSurface;
+  /** Returns the timer handle `cancel` takes. */
+  schedule: (callback: () => void, delayMs: number) => number;
+  cancel: (handle: number) => void;
+  debounceMs?: number;
+};
+
+/**
+ * Sends the device settings after they have been still for `debounceMs`, and
+ * only when they differ from what the server last took. A report the server
+ * refused (signed out, offline) counts as not delivered, so the next request
+ * sends it again.
+ */
+export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface, schedule, cancel, debounceMs = 2_000 }: ReporterDeps<T>) => {
+  let delivered: string | null = null;
+  let timer: number | null = null;
+
+  const flush = async (): Promise<void> => {
+    timer = null;
+    const values = read();
+    const snapshot = JSON.stringify(values);
+    if (snapshot === delivered) return;
+    if (await send({ deviceId, surface, values })) delivered = snapshot;
+  };
+
+  const request = (): void => {
+    if (timer !== null) cancel(timer);
+    timer = schedule(() => { void flush(); }, debounceMs);
+  };
+
+  /** Another server is now on the other end; it has been told nothing yet. */
+  const forget = (): void => {
+    delivered = null;
+  };
+
+  return { request, flush, forget };
+};
+
+const DEVICE_ID_KEY = 'openchamber:device-id';
+
+const readDeviceId = (): string => {
+  const fresh = () => crypto.randomUUID().replace(/-/g, '');
+  try {
+    const stored = window.localStorage.getItem(DEVICE_ID_KEY);
+    if (stored && /^[A-Za-z0-9_-]{8,64}$/.test(stored)) return stored;
+    const id = fresh();
+    window.localStorage.setItem(DEVICE_ID_KEY, id);
+    return id;
+  } catch {
+    // No storage (private mode, a locked-down webview): this window reports as its own device.
+    return fresh();
+  }
+};
+
+let started = false;
+
+/**
+ * Starts reporting this window's device settings to its server. The VS Code
+ * extension runs no OpenChamber server and has no agent tool, so it reports
+ * nothing.
+ */
+export const startDeviceSettingsReport = (): void => {
+  if (started || globalThis.window === undefined || isVSCodeRuntime()) return;
+  started = true;
+
+  const reporter = createDeviceSettingsReporter<DeviceSettings>({
+    read: () => readDeviceSettings(useUIStore.getState()),
+    send: async (report) => {
+      try {
+        const response = await runtimeFetch('/api/config/device-settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(report),
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    },
+    deviceId: readDeviceId(),
+    surface: getSettingsSurface(),
+    schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    cancel: (handle) => window.clearTimeout(handle),
+  });
+
+  useUIStore.subscribe(() => reporter.request());
+  // Covers the report a signed-out window could not deliver.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') reporter.request();
+  });
+  subscribeRuntimeEndpointChanged(() => {
+    reporter.forget();
+    reporter.request();
+  });
+  reporter.request();
+};

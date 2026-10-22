@@ -4,6 +4,7 @@ import { initializeLocale } from '@/lib/i18n';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { initializeAppearancePreferences, syncDesktopSettings } from '@/lib/persistence';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
+import { startDeviceSettingsReport } from '@/lib/settings/deviceSettingsReport';
 
 type InitializeSharedPreferencesOptions = {
   /** Console prefix for init failures, for example `[vscode-main]`. */
@@ -30,6 +31,7 @@ export const initializeSharedPreferences = ({
     startAppearanceAutoSave();
     startModelPrefsAutoSave();
     startTypographyWatcher();
+    startDeviceSettingsReport();
   }).catch((err) => {
     console.error(`${logLabel} appearance init failed:`, err);
   }).finally(() => {
