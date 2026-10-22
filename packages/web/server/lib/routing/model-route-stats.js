@@ -194,6 +194,29 @@ export const queryAttemptCountsPerTarget = async (dbPath, { hours = 24, now = Da
 };
 
 /**
+ * Per target over the last `minutes`: attempts, failures, and when it last
+ * succeeded and last failed. Rotation uses it to keep sessions off a target
+ * that is failing right now.
+ */
+export const queryTargetReliability = async (dbPath, { minutes = 15, now = Date.now() } = {}) => {
+  const db = await openRouteDb(dbPath);
+  try {
+    const since = now - Math.max(1, Number(minutes) || 15) * 60_000;
+    return db
+      .prepare(
+        `select provider_id as providerID, model_id as modelID, count(*) as attempts,
+          sum(case when outcome in ('failure','timeout') then 1 else 0 end) as failures,
+          max(case when outcome = 'success' then time_started end) as lastSuccess,
+          max(case when outcome in ('failure','timeout') then time_started end) as lastFailure
+        from route_attempt where time_started >= ? group by provider_id, model_id`,
+      )
+      .all(since);
+  } finally {
+    db.close();
+  }
+};
+
+/**
  * The sessions whose latest attempt in `routeID` within the last `minutes`
  * went to `providerID/modelID`, with that attempt's time. A session that has
  * since moved to another target of the route is left out.

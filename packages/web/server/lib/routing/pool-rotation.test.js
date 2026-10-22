@@ -6,7 +6,7 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
-import { querySessionsOnTarget } from './model-route-stats.js';
+import { querySessionsOnTarget, queryTargetReliability } from './model-route-stats.js';
 import {
   DEFAULT_ROTATION_SETTINGS,
   createPoolRotation,
@@ -38,9 +38,9 @@ const setup = ({
   targets = [target('openai/a', 3, 'plan-a', 0.9), target('anthropic/b', 0, 'plan-b', 0.2)],
   rawTargets = ['openai/a', 'anthropic/b#high'],
   onTarget = [
-    { sessionID: 'primary-old', lastAttempt: 1_000 },
-    { sessionID: 'primary-new', lastAttempt: 5_000 },
-    { sessionID: 'sub', lastAttempt: 9_000 },
+    { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+    { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+    { sessionID: 'sub', lastAttempt: 9.5 * MINUTE },
   ],
   sessions = {
     'primary-old': { model: { providerID: 'opencode-route', id: 'busy' } },
@@ -49,6 +49,9 @@ const setup = ({
   },
   auto = new Set(),
   statsAvailable = true,
+  reliability = [],
+  switchModel = null,
+  callTimeoutMs = 15_000,
 } = {}) => {
   const data = dir();
   fs.writeFileSync(path.join(data, 'pool-rotation.json'), JSON.stringify({ enabled, intervalMinutes }));
@@ -59,14 +62,19 @@ const setup = ({
     computeHealth: async () => ({ available: true, statsAvailable, pools: { busy: { selection: 'ordered', targets } } }),
     readRoutes: () => ({ busy: { targets: rawTargets } }),
     // Like the database, this knows only the last attempts, not a model the session was switched to since.
-    sessionsOnTarget: async () => onTarget,
+    // An entry is on `openai/a` unless it names another target.
+    sessionsOnTarget: async ({ providerID, modelID }) => onTarget
+      .filter((entry) => (entry.target ?? 'openai/a') === `${providerID}/${modelID}`)
+      .map(({ sessionID, lastAttempt }) => ({ sessionID, lastAttempt })),
     getSession: async (sessionID) => sessions[sessionID],
-    switchModel: async (sessionID, model) => {
+    targetReliability: async () => reliability,
+    switchModel: switchModel ?? (async (sessionID, model) => {
       switches.push({ sessionID, model });
       sessions[sessionID] = { ...sessions[sessionID], model };
-    },
+    }),
     isAutoSession: (sessionID) => auto.has(sessionID),
     now: () => clock.now,
+    callTimeoutMs,
     log: { warn: () => {} },
   });
   return { rotation, switches, clock, data, sessions };
@@ -105,12 +113,14 @@ describe('pool rotation', () => {
       sessions: {
         'primary-old': { model: { providerID: 'openai', id: 'a' } },
         'primary-new': { model: { providerID: 'opencode-route', id: 'busy' } },
+        other: { model: { providerID: 'opencode-route', id: 'busy' } },
         sub: { parentID: 'x', model: { providerID: 'opencode-route', id: 'busy' } },
       },
       onTarget: [
-        { sessionID: 'primary-old', lastAttempt: 1_000 },
-        { sessionID: 'primary-new', lastAttempt: 5_000 },
-        { sessionID: 'sub', lastAttempt: 9_000 },
+        { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+        { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+        { sessionID: 'other', lastAttempt: 6 * MINUTE },
+        { sessionID: 'sub', lastAttempt: 9.5 * MINUTE },
       ],
     });
     await rotation.tick();
@@ -127,28 +137,139 @@ describe('pool rotation', () => {
   });
 
   it('moves nothing off a target with a single session, or when telemetry is unavailable', async () => {
-    const single = setup({ targets: [target('openai/a', 1, 'plan-a', 0.95), target('anthropic/b', 0, 'plan-b', 0.1)] });
+    const single = setup({
+      targets: [target('openai/a', 1, 'plan-a', 0.95), target('anthropic/b', 0, 'plan-b', 0.1)],
+      onTarget: [{ sessionID: 'primary-old', lastAttempt: 1 * MINUTE }],
+    });
     expect(await single.rotation.tick()).toEqual([]);
     const blind = setup({ statsAvailable: false });
     expect(await blind.rotation.tick()).toEqual([]);
     expect([...single.switches, ...blind.switches]).toEqual([]);
   });
 
-  it('keeps going when a session switch fails, and does not count the failure as a move', async () => {
-    const { rotation, clock } = setup();
-    const failing = createPoolRotation({
-      dataDir: (() => { const data = dir(); fs.writeFileSync(path.join(data, 'pool-rotation.json'), JSON.stringify({ enabled: true, intervalMinutes: 5 })); return data; })(),
-      computeHealth: async () => ({ available: true, statsAvailable: true, pools: { busy: { selection: 'ordered', targets: [target('openai/a', 3, 'plan-a', 0.9), target('anthropic/b', 0, 'plan-b', 0.2)] } } }),
-      readRoutes: () => ({ busy: { targets: ['openai/a', 'anthropic/b'] } }),
-      sessionsOnTarget: async () => [{ sessionID: 's1', lastAttempt: 1 }],
-      getSession: async () => ({ model: { providerID: 'opencode-route', id: 'busy' } }),
-      switchModel: async () => { throw new Error('OpenCode is restarting'); },
-      now: () => clock.now,
-      log: { warn: () => {} },
+  it('moves the next session when one switch fails, and skips the failed one for a while', async () => {
+    const attempts = [];
+    const ctx = setup({
+      switchModel: async (sessionID, model) => {
+        attempts.push(sessionID);
+        if (sessionID === 'sub') throw new Error('LocationNotFoundError');
+        ctx.switches.push({ sessionID, model });
+        ctx.sessions[sessionID] = { ...ctx.sessions[sessionID], model };
+      },
     });
-    expect(await failing.tick()).toEqual([]);
-    expect(failing.recentMoves()).toEqual([]);
-    expect(await rotation.tick()).toHaveLength(1);
+    const [move] = await ctx.rotation.tick();
+    expect(attempts).toEqual(['sub', 'primary-old']);
+    expect(move).toMatchObject({ sessionID: 'primary-old' });
+    ctx.clock.now += 5 * MINUTE;
+    // 'sub' is still running and first in line, but it failed and is skipped.
+    await ctx.rotation.tick();
+    expect(attempts).toEqual(['sub', 'primary-old']);
+    expect(ctx.rotation.recentMoves().map(({ sessionID }) => sessionID)).toEqual(['primary-old']);
+  });
+
+  it('does not throttle a pool when every switch failed', async () => {
+    let fail = true;
+    const onTarget = [
+      { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+      { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+    ];
+    const ctx = setup({
+      onTarget,
+      switchModel: async (sessionID, model) => {
+        if (fail) throw new Error('OpenCode is restarting');
+        ctx.switches.push({ sessionID, model });
+        ctx.sessions[sessionID] = { ...ctx.sessions[sessionID], model };
+      },
+    });
+    expect(await ctx.rotation.tick()).toEqual([]);
+    // One minute later, well inside the 5-minute pace: two new sessions arrive and one moves.
+    fail = false;
+    ctx.clock.now += 1 * MINUTE;
+    onTarget.push({ sessionID: 'fresh-a', lastAttempt: 10.5 * MINUTE }, { sessionID: 'fresh-b', lastAttempt: 10.8 * MINUTE });
+    ctx.sessions['fresh-a'] = { model: { providerID: 'opencode-route', id: 'busy' } };
+    ctx.sessions['fresh-b'] = { model: { providerID: 'opencode-route', id: 'busy' } };
+    const [move] = await ctx.rotation.tick();
+    expect(move).toMatchObject({ sessionID: 'fresh-a' });
+  });
+
+  it('a call that never answers does not stop the tick or later ticks', async () => {
+    const onTarget = [
+      { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+      { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+      { sessionID: 'sub', lastAttempt: 9.5 * MINUTE },
+    ];
+    const ctx = setup({
+      onTarget,
+      callTimeoutMs: 20,
+      switchModel: (sessionID, model) => {
+        if (sessionID === 'sub') return new Promise(() => {});
+        ctx.switches.push({ sessionID, model });
+        ctx.sessions[sessionID] = { ...ctx.sessions[sessionID], model };
+        return Promise.resolve();
+      },
+    });
+    const [first] = await ctx.rotation.tick();
+    expect(first).toMatchObject({ sessionID: 'primary-old' });
+    ctx.clock.now += 5 * MINUTE;
+    // The stuck subagent kept sending, so primary-new is not the last live session on the target.
+    onTarget[2].lastAttempt = ctx.clock.now - 30_000;
+    const [second] = await ctx.rotation.tick();
+    expect(second).toMatchObject({ sessionID: 'primary-new' });
+  });
+
+  it('never moves a session onto a target whose latest request failed', async () => {
+    const now = 10 * MINUTE;
+    const { rotation, switches } = setup({
+      reliability: [{ providerID: 'anthropic', modelID: 'b', attempts: 3, failures: 2, lastSuccess: now - 5 * MINUTE, lastFailure: now - 1 * MINUTE }],
+    });
+    expect(await rotation.tick()).toEqual([]);
+    expect(switches).toEqual([]);
+  });
+
+  it('keeps the last session on a target even when the health count is stale', async () => {
+    const { rotation, switches } = setup({
+      targets: [target('openai/a', 3, 'plan-a', 0.9), target('anthropic/b', 0, 'plan-b', 0.2)],
+      onTarget: [{ sessionID: 'primary-old', lastAttempt: 1 * MINUTE }],
+    });
+    expect(await rotation.tick()).toEqual([]);
+    expect(switches).toEqual([]);
+  });
+
+  it('does not spend a move on a subagent that has finished', async () => {
+    const { rotation, switches } = setup({
+      onTarget: [
+        { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+        { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+        { sessionID: 'sub', lastAttempt: 6 * MINUTE },
+      ],
+    });
+    await rotation.tick();
+    expect(switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old']);
+  });
+
+  it('keeps the pace when the clock moves during a tick', async () => {
+    const ctx = setup({
+      intervalMinutes: 5,
+      onTarget: [
+        { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+        { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+        { sessionID: 'third', lastAttempt: 6 * MINUTE },
+      ],
+      sessions: {
+        'primary-old': { model: { providerID: 'opencode-route', id: 'busy' } },
+        'primary-new': { model: { providerID: 'opencode-route', id: 'busy' } },
+        third: { model: { providerID: 'opencode-route', id: 'busy' } },
+      },
+      switchModel: async (sessionID, model) => {
+        ctx.clock.now += 1000;
+        ctx.switches.push({ sessionID, model });
+        ctx.sessions[sessionID] = { ...ctx.sessions[sessionID], model };
+      },
+    });
+    await ctx.rotation.tick();
+    ctx.clock.now = 10 * MINUTE + 5 * MINUTE;
+    await ctx.rotation.tick();
+    expect(ctx.switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old', 'primary-new']);
   });
 
   it('refuses invalid settings and a damaged settings file', () => {
@@ -162,6 +283,12 @@ describe('pool rotation', () => {
 });
 
 describe('pickDestination and orderForMove', () => {
+  it('prefers a target with a recent success, then the most headroom', () => {
+    const health = { targets: [target('openai/a', 3, 'plan-a', 0.9), target('y/quiet', 0, 'plan-y', 0.1), target('z/proven', 0, 'plan-z', 0.5)] };
+    const reliability = new Map([['z/proven', { failures: 0, lastSuccess: 5, lastFailure: null }]]);
+    expect(pickDestination(health, ['openai/a', 'y/quiet', 'z/proven'], health.targets[0], reliability).ref).toBe('z/proven');
+  });
+
   it('prefers a linked target with the most headroom over an unlinked one', () => {
     const health = { targets: [target('openai/a', 3, 'plan-a', 0.9), target('x/unlinked', 0), target('y/linked', 0, 'plan-y', 0.3), target('z/linked', 0, 'plan-z', 0.1)] };
     expect(pickDestination(health, ['openai/a', 'x/unlinked', 'y/linked', 'z/linked'], health.targets[0]).ref).toBe('z/linked');
@@ -197,6 +324,27 @@ describe('querySessionsOnTarget', () => {
     db.close();
     const rows = await querySessionsOnTarget(dbPath, { routeID: 'busy', providerID: 'openai', modelID: 'a', minutes: 15, now });
     expect(rows).toEqual([{ sessionID: 'stays', lastAttempt: now - 3 * MINUTE }]);
+  });
+});
+
+describe('queryTargetReliability', () => {
+  it('reports attempts, failures and the latest success and failure per target in the window', async () => {
+    const dbPath = path.join(dir(), 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    db.exec(`create table route_attempt (time_started integer, provider_id text, model_id text, outcome text)`);
+    const insert = db.prepare('insert into route_attempt values (?, ?, ?, ?)');
+    const now = Date.now();
+    insert.run(now - 5 * MINUTE, 'anthropic', 'b', 'success');
+    insert.run(now - 2 * MINUTE, 'anthropic', 'b', 'failure');
+    insert.run(now - 1 * MINUTE, 'anthropic', 'b', 'timeout');
+    insert.run(now - 60 * MINUTE, 'anthropic', 'b', 'success');
+    insert.run(now - 3 * MINUTE, 'openai', 'a', 'success');
+    db.close();
+    const rows = await queryTargetReliability(dbPath, { minutes: 15, now });
+    expect(rows.find((row) => row.providerID === 'anthropic')).toEqual({
+      providerID: 'anthropic', modelID: 'b', attempts: 3, failures: 2, lastSuccess: now - 5 * MINUTE, lastFailure: now - 1 * MINUTE,
+    });
+    expect(rows.find((row) => row.providerID === 'openai')).toMatchObject({ failures: 0, lastFailure: null });
   });
 });
 

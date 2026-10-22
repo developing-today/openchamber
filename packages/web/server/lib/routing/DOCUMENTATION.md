@@ -321,15 +321,24 @@ makes that visible so the user can spread them.
   model to a sibling target through `session.switchModel`. The session leaves
   the pool and no longer fails over inside it; that is why the switch is off
   by default and its description says so. Once a minute, per pool: a source
-  is a target whose linked plan projects to `warn` or `over` with two or more
-  sessions; a destination is another concrete target of the pool not linked
-  to the same plan and not near its own limit (linked with the most headroom
-  first, then unlinked); one session moves, subagents (`parentID`) first,
-  then the one idle longest. Only sessions whose model is still the pool
-  move; Auto sessions never do, because Auto picks a model on every send.
-  At most one move per pool per `intervalMinutes`. The pace and the last 20
-  moves are kept in memory, so a restart forgets them. A failed switch is
-  logged and does not count as a move.
+  is a target whose linked plan projects to `warn` or `over`; a destination
+  is another concrete target of the pool not linked to the same plan, not
+  near its own limit, and whose latest request in the last 15 minutes did not
+  fail (`queryTargetReliability`), a target with a recent success before one
+  with no recent traffic, then the most headroom. The target needs two or
+  more live sessions still on the pool (the per-route list, not the health
+  count, which includes other routes and sessions already moved): the last
+  one stays. One session moves: running subagents (`parentID` and a request
+  in the last two minutes) first, then the one idle longest; finished
+  subagents are not moved, Auto sessions never are, and only sessions whose
+  model is still the pool count. A switch that fails puts that session in a
+  30-minute back-off and the next session is tried; a pool where every
+  switch failed is not throttled. OpenCode calls time out after 15 seconds.
+  `session.switchModel` goes through OpenCode's session location middleware,
+  so a move starts the session's location when it is not running. At most
+  one move per pool per `intervalMinutes`, measured from the start of the
+  tick that moved. The pace, the back-off and the last 20 moves are kept in
+  memory, so a restart forgets them.
 
 ## Tests
 
