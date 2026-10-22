@@ -797,6 +797,48 @@ printf '4321\\n'`);
     expect(port).toBe(4321);
   });
 
+  test('does not let a leading-zero banner line fake the served port', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    // serve prints the bound port canonically, so a leading-zero line can
+    // only be login-shell banner output; the real port line follows it.
+    manager.runRemoteCommand = async () => '080\n4321\n';
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      '/home/pi/.bun/bin/openchamber',
+    );
+
+    expect(port).toBe(4321);
+  });
+
+  test('falls back to the desired port when the only port-like line has a leading zero', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    manager.runRemoteCommand = async () => '080 pass:secret\n';
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      '/home/pi/.bun/bin/openchamber',
+    );
+
+    expect(port).toBe(4321);
+  });
+
   test('reads probe statuses by prefix when login-shell banner output precedes them', async () => {
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
