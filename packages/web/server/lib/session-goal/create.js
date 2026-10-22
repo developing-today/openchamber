@@ -124,10 +124,13 @@ export const createSessionGoal = async ({
   const now = Date.now();
   const goal = {
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-    // The inline fallback is fitted to the limit like everything else —
-    // unless this goal ignores the limit, in which case slicing here would
-    // silently cut the objective to the very limit it turns off.
-    objective: objectiveFile ? '' : (ignoreLimit ? objectiveText : objectiveText.slice(0, charLimit)),
+    // Inline only when the objective file could not be written, and then cut to
+    // the limit even for a goal that ignores it: the inline objective rides in
+    // the session metadata every goal update broadcasts to every window, so an
+    // unlimited one (up to 200,000 characters) would be resent on each update.
+    // The UI's setSessionGoal does the same; the full text still went out in
+    // the chat message. Deliberate: see #207 and the review on #205.
+    objective: objectiveFile ? '' : objectiveText.slice(0, charLimit),
     objectiveFile,
     // Stated outright: the store merges, so a flag left out would carry over
     // from the goal this one replaces.

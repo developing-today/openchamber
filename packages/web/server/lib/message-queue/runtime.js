@@ -619,7 +619,7 @@ export function createMessageQueueRuntime({
         method: 'POST',
         // As a UI send: the spec the user approved when they asked to brief the
         // agent with it, otherwise the one the writer just produced, if any.
-        body: { text: buildGoalIntroText(item.goal.tokenBudget, item.goal.briefAgent ? (item.goal.objective ?? null) : goalSpec), resume: false },
+        body: { text: buildGoalIntroText(item.goal.tokenBudget, item.goal.briefAgent ? (item.goal.objective ?? item.text) : goalSpec), resume: false },
       });
     }
 

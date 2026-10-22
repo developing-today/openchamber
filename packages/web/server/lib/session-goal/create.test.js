@@ -163,7 +163,9 @@ describe('session goal creation', () => {
     expect(persistSessionGoal.mock.calls[0][2]).toMatchObject({ ignoreObjectiveLimit: true, objectiveFile: true });
   });
 
-  it('keeps a long objective whole inline when it ignores the limit and the objective file cannot be written', async () => {
+  // The inline copy is broadcast with every goal update, so it is capped even
+  // for an ignore-limit goal (the UI caps it too). See #207 and the review on #205.
+  it('caps an ignore-limit objective inline when the objective file cannot be written', async () => {
     writeObjectiveMock.mockRejectedValueOnce(new Error('disk unavailable'));
     const persistSessionGoal = vi.fn(async () => undefined);
     const long = 'x'.repeat(6_000);
@@ -178,7 +180,7 @@ describe('session goal creation', () => {
     });
 
     const [, , goal] = persistSessionGoal.mock.calls[0];
-    expect(goal).toMatchObject({ objective: long, objectiveFile: false, ignoreObjectiveLimit: true });
+    expect(goal).toMatchObject({ objective: 'x'.repeat(5_000), objectiveFile: false, ignoreObjectiveLimit: true });
   });
 
   it('fits a long objective to the limit when the goal does not ignore it', async () => {
