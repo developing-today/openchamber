@@ -423,10 +423,13 @@ const parseProbeStatusLine = (line, prefix) => {
 // remote command runs through a login shell, whose banner/profile output can
 // precede that line and contain arbitrary numbers, so the port must be read
 // from an anchored whole-line match — never the first number in the output —
-// and range-checked like any other port.
+// and range-checked like any other port. The match also requires the
+// canonical spelling: serve prints the port with no leading zeros, so a
+// leading-zero line ('080', '04096') can only be banner output, the same
+// canonical-shape rule parseProbeStatusLine applies to probe statuses.
 const parseServedPortLine = (output) => {
   for (const line of String(output ?? '').split('\n')) {
-    const match = line.trim().match(/^(\d{1,5})(?:\s+pass:\S+)?$/);
+    const match = line.trim().match(/^([1-9]\d{0,4})(?:\s+pass:\S+)?$/);
     if (!match) continue;
     const value = Number.parseInt(match[1], 10);
     if (value >= 1 && value <= 65535) return value;
