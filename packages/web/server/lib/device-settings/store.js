@@ -44,7 +44,10 @@ export const createDeviceSettingsStore = ({ now = Date.now, maxDevices = 20 } = 
     if (!SURFACES.has(surface)) return { ok: false, status: 400, error: `surface is one of ${[...SURFACES].join(', ')}` };
     if (!isPlainObject(values)) return { ok: false, status: 400, error: 'values is an object of device settings' };
     if (JSON.stringify(values).length > MAX_REPORT_BYTES) return { ok: false, status: 413, error: 'Device settings report is too large' };
-    const kept = Object.fromEntries(Object.entries(values).filter(([key, value]) => DEVICE_KEYS.has(key) && value !== undefined));
+    // A key the registry limits to other surfaces (the mobile keyboard on a
+    // desktop window) is a default this window never uses.
+    const usedHere = (key) => !registry.fields[key].surfaces || registry.fields[key].surfaces.includes(surface);
+    const kept = Object.fromEntries(Object.entries(values).filter(([key, value]) => DEVICE_KEYS.has(key) && usedHere(key) && value !== undefined));
     devices.delete(deviceId);
     devices.set(deviceId, { deviceId, surface, values: kept, updatedAt: now() });
     while (devices.size > maxDevices) devices.delete(devices.keys().next().value);

@@ -32,6 +32,18 @@ describe('device settings store', () => {
     expect(store.list()[0].values).toEqual({ sidebarWidth: 280 });
   });
 
+  it('drops keys the registry limits to other surfaces', () => {
+    const store = createDeviceSettingsStore();
+    const values = { sidebarWidth: 280, mobileKeyboardMode: 'native', desktopWindowControlsStyle: 'classic', inputBarOffset: 0 };
+    store.report(report({ deviceId: 'device-web1', surface: 'web', values }));
+    store.report(report({ deviceId: 'device-dsk1', surface: 'desktop', values }));
+    store.report(report({ deviceId: 'device-mob1', surface: 'mobile', values }));
+    const bySurface = Object.fromEntries(store.list().map((device) => [device.surface, device.values]));
+    expect(bySurface.web).toEqual({ sidebarWidth: 280, inputBarOffset: 0 });
+    expect(bySurface.desktop).toEqual({ sidebarWidth: 280, desktopWindowControlsStyle: 'classic' });
+    expect(bySurface.mobile).toEqual({ sidebarWidth: 280, mobileKeyboardMode: 'native', inputBarOffset: 0 });
+  });
+
   it('refuses malformed and oversized reports and changes nothing', () => {
     const store = createDeviceSettingsStore();
     expect(store.report(null)).toMatchObject({ ok: false, status: 400 });
