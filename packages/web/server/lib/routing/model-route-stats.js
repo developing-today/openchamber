@@ -194,6 +194,33 @@ export const queryAttemptCountsPerTarget = async (dbPath, { hours = 24, now = Da
   }
 };
 
+/**
+ * The sessions whose latest attempt in `routeID` within the last `minutes`
+ * went to `providerID/modelID`, with that attempt's time. A session that has
+ * since moved to another target of the route is left out.
+ */
+export const querySessionsOnTarget = async (dbPath, { routeID, providerID, modelID, minutes = 15, now = Date.now() }) => {
+  const db = await openRouteDb(dbPath);
+  try {
+    const since = now - Math.max(1, Number(minutes) || 15) * 60_000;
+    const rows = db
+      .prepare(
+        `select session_id as sessionID, provider_id as providerID, model_id as modelID, time_started as time
+        from route_attempt
+        where route_id = ? and time_started >= ? and session_id is not null
+        order by time_started desc`,
+      )
+      .all(routeID, since);
+    const latest = new Map();
+    for (const row of rows) if (!latest.has(row.sessionID)) latest.set(row.sessionID, row);
+    return [...latest.values()]
+      .filter((row) => row.providerID === providerID && row.modelID === modelID)
+      .map((row) => ({ sessionID: row.sessionID, lastAttempt: row.time }));
+  } finally {
+    db.close();
+  }
+};
+
 export const registerModelRouteStatsRoutes = (app, dependencies = {}) => {
   const { resolveDbPath = resolveOpenCodeDbPath } = dependencies;
 
