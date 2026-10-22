@@ -74,12 +74,35 @@ describe('device settings reporter, closing and switching', () => {
     expect(sent[0]).toMatchObject({ values: { sidebarWidth: 300 }, closing: true });
   });
 
+  test('a later report waits for the one still in flight, so the server ends on the newest', async () => {
+    hold = true;
+    try {
+      const { reporter, sent, set, release } = harness();
+      set(300);
+      const first = reporter.flush();
+      await Promise.resolve();
+      set(320);
+      const second = reporter.flush();
+      await Promise.resolve();
+      expect(sent.map((report) => report.values.sidebarWidth)).toEqual([300]);
+      hold = false;
+      release();
+      await first;
+      await second;
+      expect(sent.map((report) => report.values.sidebarWidth)).toEqual([300, 320]);
+    } finally {
+      hold = false;
+    }
+  });
+
   test('a reply from the previous server does not count for the new one', async () => {
     hold = true;
     try {
       const { reporter, sent, tick, release } = harness();
       const pending = reporter.flush();
+      await Promise.resolve();
       reporter.forget();
+      hold = false;
       release();
       await pending;
       hold = false;

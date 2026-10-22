@@ -302,7 +302,7 @@ other.
 - `settings.devices` (`config-actions.js`) lists the device settings each open
   window reported (`../device-settings/store.js`, `PUT /api/config/device-settings`):
   the registry's device-scoped keys, which `settings.get` cannot show because
-  they live in the window's own storage. Memory only, at most 20 devices, keys
+  they live in the window's own storage. One entry per window, memory only, at most 20, keys
   outside the registry's device scope dropped. Read only. 503 when the server
   did not wire the store.
 - `opencode.config.set` (`config-actions.js`) writes the user file (default),

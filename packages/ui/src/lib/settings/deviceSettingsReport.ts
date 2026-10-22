@@ -72,9 +72,10 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
   // previous one must not mark the new one as told.
   let generation = 0;
 
-  const flush = async (closing = false): Promise<void> => {
-    if (timer !== null) cancel(timer);
-    timer = null;
+  // One send at a time: a slow earlier report must not land after a newer one.
+  let inFlight: Promise<void> = Promise.resolve();
+
+  const sendLatest = async (closing: boolean): Promise<void> => {
     const values = read();
     const snapshot = JSON.stringify(values);
     if (snapshot === delivered) return;
@@ -82,12 +83,24 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
     if (await send({ deviceId, surface, values }, closing) && sentFor === generation) delivered = snapshot;
   };
 
+  const flush = (closing = false): Promise<void> => {
+    if (timer !== null) cancel(timer);
+    timer = null;
+    // A closing window cannot wait for an earlier send; it goes out at once.
+    inFlight = closing ? sendLatest(true) : inFlight.then(() => sendLatest(false));
+    return inFlight;
+  };
+
   const request = (): void => {
     if (timer !== null) cancel(timer);
     timer = schedule(() => { void flush(); }, debounceMs);
   };
 
-  /** Another server is now on the other end; it has been told nothing yet. */
+  /**
+   * The server may not hold this report any more: another server took over,
+   * or the same one restarted (it keeps reports in memory). The next flush
+   * sends even an unchanged snapshot.
+   */
   const forget = (): void => {
     generation += 1;
     delivered = null;
@@ -96,19 +109,21 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
   return { request, flush, forget };
 };
 
-const DEVICE_ID_KEY = 'openchamber:device-id';
+const WINDOW_ID_KEY = 'openchamber:device-settings-window-id';
 
-const readDeviceId = (): string => {
+// One id per window (tab): two tabs of one browser keep separate stores, so
+// sharing an id would let a stale tab overwrite the other's report. Session
+// storage keeps the id across a reload of the same tab.
+const readWindowId = (): string => {
   // generateUuid works where crypto.randomUUID does not (plain-HTTP LAN origins).
   const fresh = () => generateUuid().replace(/-/g, '');
   try {
-    const stored = window.localStorage.getItem(DEVICE_ID_KEY);
+    const stored = window.sessionStorage.getItem(WINDOW_ID_KEY);
     if (stored && /^[A-Za-z0-9_-]{8,64}$/.test(stored)) return stored;
     const id = fresh();
-    window.localStorage.setItem(DEVICE_ID_KEY, id);
+    window.sessionStorage.setItem(WINDOW_ID_KEY, id);
     return id;
   } catch {
-    // No storage (private mode, a locked-down webview): this window reports as its own device.
     return fresh();
   }
 };
@@ -118,8 +133,8 @@ let started = false;
 /**
  * Starts reporting this window's device settings to its server. The VS Code
  * extension runs no OpenChamber server and has no agent tool, so it reports
- * nothing; a desktop Mini Chat window does not start it (it shares the
- * device id but not the main window's layout state).
+ * nothing; a desktop Mini Chat window does not start it (its layout state
+ * is not the main window's).
  */
 export const startDeviceSettingsReport = (): void => {
   if (started || globalThis.window === undefined || isVSCodeRuntime()) return;
@@ -141,18 +156,23 @@ export const startDeviceSettingsReport = (): void => {
         return false;
       }
     },
-    deviceId: readDeviceId(),
+    deviceId: readWindowId(),
     surface: getSettingsSurface(),
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (handle) => window.clearTimeout(handle),
   });
 
   useUIStore.subscribe(() => reporter.request());
-  // Visible again: covers a report a signed-out window could not deliver.
-  // Hidden or closing: a change still inside the debounce goes out now.
+  // Visible again: report once more, unchanged or not. Covers a report a
+  // signed-out window could not deliver and a server that restarted and
+  // forgot it. Hidden or closing: a change still inside the debounce goes out now.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') reporter.request();
-    else void reporter.flush(true);
+    if (document.visibilityState === 'visible') {
+      reporter.forget();
+      reporter.request();
+    } else {
+      void reporter.flush(true);
+    }
   });
   window.addEventListener('pagehide', () => { void reporter.flush(true); });
   subscribeRuntimeEndpointChanged(() => {
