@@ -13,7 +13,7 @@ import type { SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 
 const DOM_GLOBAL_NAMES = [
   'window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'HTMLTextAreaElement', 'Event', 'KeyboardEvent',
-  'MouseEvent', 'PointerEvent', 'MutationObserver', 'ResizeObserver', 'localStorage', 'getComputedStyle',
+  'MouseEvent', 'PointerEvent', 'MutationObserver', 'ResizeObserver', 'IntersectionObserver', 'localStorage', 'getComputedStyle',
   'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT',
 ] as const;
 
@@ -23,7 +23,8 @@ const domValues = {
   window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
   HTMLElement: win.HTMLElement, HTMLTextAreaElement: win.HTMLTextAreaElement, Event: win.Event,
   KeyboardEvent: win.KeyboardEvent, MouseEvent: win.MouseEvent, PointerEvent: win.PointerEvent,
-  MutationObserver: win.MutationObserver, ResizeObserver: win.ResizeObserver, localStorage: win.localStorage,
+  MutationObserver: win.MutationObserver, ResizeObserver: win.ResizeObserver, IntersectionObserver: win.IntersectionObserver,
+  localStorage: win.localStorage,
   getComputedStyle: win.getComputedStyle.bind(win), requestAnimationFrame: win.requestAnimationFrame.bind(win),
   cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true,
 };
@@ -319,5 +320,39 @@ describe('GoalSpecJobCard choices for this spec', () => {
     await click('Remember');
     await settingsSettled();
     expect(serverSettings).toMatchObject({ sessionGoalWriterModel: 'p/m', sessionGoalWriterVariant: 'high' });
+  });
+
+  // While the job is being sent or waits for the agent's turn, a pick would
+  // name a writer that did not write this spec, and with every pick remembered
+  // it would also become the Settings default.
+  test('the writer model menu closes and stays shut while the job waits for the turn, and does not reopen by itself', async () => {
+    useConfigStore.setState({ providersLoaded: true });
+    // A boolean, never the element: a failing match on a happy-dom element
+    // prints the whole window graph, and the run never ends.
+    const modelMenuOpen = () => document.querySelector('[role="listbox"][aria-label="Models"]') !== null;
+    const openWriterModels = async () => {
+      const trigger = Array.from(document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-trigger"]'))
+        .find((element) => element.textContent?.trim() === 'M');
+      if (!trigger) throw new Error(`No writer model trigger in: ${text()}`);
+      await act(async () => { trigger.click(); });
+    };
+    try {
+      const written = job();
+      show(written);
+      await render();
+      await openWriterModels();
+      expect(modelMenuOpen()).toBe(true);
+
+      await act(async () => { show({ ...written, waiting: true, updatedAt: 2 }); });
+      expect(modelMenuOpen()).toBe(false);
+      await openWriterModels();
+      expect(modelMenuOpen()).toBe(false);
+
+      // Open again, the job does not bring back the menu it closed.
+      await act(async () => { show({ ...written, updatedAt: 3 }); });
+      expect(modelMenuOpen()).toBe(false);
+    } finally {
+      useConfigStore.setState({ providersLoaded: originalConfig.providersLoaded });
+    }
   });
 });

@@ -44,6 +44,8 @@ interface ModelSelectorProps {
      * Defaults); a routing category or fallback must name a real model.
      */
     offerAuto?: boolean;
+    /** Shows the choice but does not open, as while the choice cannot change. */
+    disabled?: boolean;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -59,6 +61,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     compact = false,
     directory,
     offerAuto = false,
+    disabled = false,
 }) => {
     const { t } = useI18n();
     const autoReady = useRoutingStore(selectAutoReady);
@@ -67,6 +70,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         : null), [autoReady, offerAuto, t]);
     const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
+    const canOpen = isReady && !disabled;
     const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
         ? state.providers : selectProvidersForDirectory(state, directory));
     const loadProviders = useConfigStore((state) => state.loadProviders);
@@ -92,6 +96,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         setIsDropdownOpen(false);
         setSearchQuery('');
     }, []);
+
+    // A picker disabled while open closes, and stays closed once it is enabled again.
+    React.useEffect(() => {
+        if (disabled) closePicker();
+    }, [closePicker, disabled]);
 
     const handleSelect = React.useCallback((entry: ModelPickerEntry) => {
         onChange(entry.providerID, entry.modelID);
@@ -166,8 +175,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <>
                 <button
                     type="button"
-                    onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
-                    disabled={!isReady}
+                    onClick={canOpen ? () => setIsMobilePanelOpen(true) : undefined}
+                    disabled={!canOpen}
                     className={cn(
                         dropdownTriggerVariants({ size: 'mobile' }),
                         'w-full',
@@ -192,7 +201,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                 </button>
                 <MobileOverlayPanel
-                    open={isMobilePanelOpen}
+                    open={isMobilePanelOpen && !disabled}
                     onClose={closePicker}
                     title={t('settings.agents.modelSelector.title')}
                 >
@@ -203,15 +212,16 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }
 
     return (
-        <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
+        <DropdownMenu open={canOpen && isDropdownOpen} onOpenChange={canOpen ? setIsDropdownOpen : undefined}>
             <DropdownMenuTrigger asChild nativeButton={false}>
                 <div
                     className={cn(
                         dropdownTriggerVariants(),
                         'min-w-0 w-fit',
-                        !isReady && 'opacity-60 cursor-not-allowed',
+                        !canOpen && 'opacity-60 cursor-not-allowed',
                         className,
                     )}
+                    aria-disabled={disabled || undefined}
                     // The name is gone from the trigger, so it has to stay
                     // reachable somewhere.
                     title={compact && displayReady ? triggerLabel : undefined}

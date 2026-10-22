@@ -650,7 +650,11 @@ sees only that final turn, so the report is its evidence.
   length limit for this goal". Both apply to this spec only: the store keeps
   them per job (`choiceEdits`) until Write again hands them to the server,
   which writes with them and keeps them on the job, and every send carries
-  the switch. The spec field takes any length: past the goal length limit
+  the switch. While the job is being sent or waits for the agent's turn, the
+  writer row and the menu stay on screen but take no choice: the writer's
+  model menu (`ModelSelector`'s `disabled`) and effort do not open, and a
+  model menu open when the job locks closes and does not come back by itself.
+  The spec field takes any length: past the goal length limit
   its counter turns to the warning color and the line kept under it says
   saving condenses the spec; with the limit off the counter shows the length
   alone and the line says the goal is saved whole. Actions on an open job:

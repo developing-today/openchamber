@@ -88,6 +88,7 @@ export function GoalWriterPicker({ directory, sessionModel, value, onChange, dis
         allowedProviderIds={allowedProviders}
         placeholder={t('settings.openchamber.visual.goal.writer.modelSessionDefault')}
         className="max-w-[16rem]"
+        disabled={disabled}
       />
       {efforts.length > 0 && shown ? (
         <Select
