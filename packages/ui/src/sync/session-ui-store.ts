@@ -1865,9 +1865,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           ? {
             armed: queuedGoal !== null,
             objectiveOverride: queuedGoal?.objective ?? null,
-            settled: false,
-            briefAgent: false,
-            ignoreLimit: false,
+            settled: queuedGoal?.settled === true,
+            briefAgent: queuedGoal?.briefAgent === true,
+            ignoreLimit: queuedGoal?.ignoreLimit === true,
           }
           : useSessionGoalArmStore.getState().consume()
       const goalArmed = goalArm.armed

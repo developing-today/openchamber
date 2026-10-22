@@ -1161,6 +1161,94 @@ describe('GitHub account routes', () => {
     expect(onAccountRemoved).toHaveBeenCalledWith({ provider: 'github', instance: 'github.com', accountId: account.accountId });
     expect(await auth.getGitHubAuthAccounts()).toEqual([]);
   });
+
+  describe('accounts from a vault', () => {
+    const REFERENCE = 'op://Vertex SRE/github_token/credential';
+    const VAULT_TOKEN = 'ghp_from_vault_route';
+
+    const stubVaultUser = () => {
+      const fetch = vi.fn(async (url, init) => {
+        const authorization = new Headers(init?.headers).get('authorization');
+        if (String(url) === 'https://api.github.com/user' && authorization === `token ${VAULT_TOKEN}`) {
+          return Response.json({ id: 42, login: 'vault-user', email: 'vault@example.com', avatar_url: null, name: 'Vault User' });
+        }
+        if (String(url) === 'https://api.github.com/user/emails') {
+          return Response.json([]);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      });
+      vi.stubGlobal('fetch', fetch);
+      return fetch;
+    };
+
+    it('adds an account from a reference, checking the token and storing only the reference', async () => {
+      const readSecret = vi.fn(async (reference) => (reference === REFERENCE
+        ? { ok: true, value: VAULT_TOKEN }
+        : { ok: false, reason: 'op-read-failed' }));
+      auth.configureGitHubVaultReader(readSecret);
+      const fetch = stubVaultUser();
+      const onAccountConnected = vi.fn();
+
+      const response = await request(makeApp({ onAccountConnected }))
+        .post('/api/source-control/github/auth/vault').send({ reference: REFERENCE }).expect(200);
+
+      expect(response.body).toMatchObject({ connected: true, user: { id: 42, login: 'vault-user' } });
+      expect(JSON.stringify(response.body)).not.toContain(VAULT_TOKEN);
+      expect(readSecret).toHaveBeenCalledWith(REFERENCE);
+      // The token was checked against GitHub before anything was stored.
+      expect(fetch).toHaveBeenCalled();
+      const stored = await fs.readFile(path.join(directory, 'github-auth.json'), 'utf8');
+      expect(stored).toContain(REFERENCE);
+      expect(stored).not.toContain(VAULT_TOKEN);
+      const [account] = await auth.getGitHubAuthAccounts();
+      expect(account).toMatchObject({ source: 'pat', tokenReference: REFERENCE });
+      expect(JSON.stringify(account)).not.toContain(VAULT_TOKEN);
+      expect(onAccountConnected).toHaveBeenCalledWith(expect.objectContaining({
+        account: expect.objectContaining({ provider: 'github', instance: 'github.com' }),
+        user: expect.objectContaining({ id: 42, login: 'vault-user' }),
+      }));
+    });
+
+    it('refuses a reference that is not a vault reference and stores nothing', async () => {
+      const readSecret = vi.fn(async () => ({ ok: true, value: VAULT_TOKEN }));
+      auth.configureGitHubVaultReader(readSecret);
+      const fetch = stubVaultUser();
+      const app = makeApp();
+
+      const response = await request(app).post('/api/source-control/github/auth/vault')
+        .send({ reference: 'ghp_plain_token' }).expect(400);
+      expect(response.body).toMatchObject({ code: 'INVALID_REFERENCE' });
+      await request(app).post('/api/source-control/github/auth/vault').send({}).expect(400);
+
+      expect(readSecret).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await auth.getGitHubAuthAccounts()).toEqual([]);
+    });
+
+    it('says why when the reference cannot be read, and stores nothing', async () => {
+      auth.configureGitHubVaultReader(async () => ({ ok: false, reason: 'op-not-installed' }));
+      const fetch = stubVaultUser();
+
+      const response = await request(makeApp()).post('/api/source-control/github/auth/vault')
+        .send({ reference: REFERENCE }).expect(400);
+
+      expect(response.body).toMatchObject({ code: 'VAULT_READ_FAILED', reason: 'op-not-installed' });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await auth.getGitHubAuthAccounts()).toEqual([]);
+    });
+
+    it('names a refused vault token and stores nothing', async () => {
+      auth.configureGitHubVaultReader(async () => ({ ok: true, value: VAULT_TOKEN }));
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ message: 'Bad credentials' }, { status: 401 })));
+
+      const response = await request(makeApp()).post('/api/source-control/github/auth/vault')
+        .send({ reference: REFERENCE }).expect(400);
+
+      expect(response.body).toMatchObject({ code: 'INVALID_TOKEN' });
+      expect(JSON.stringify(response.body)).not.toContain(VAULT_TOKEN);
+      expect(await auth.getGitHubAuthAccounts()).toEqual([]);
+    });
+  });
 });
 
 describe('gh CLI account consent', () => {

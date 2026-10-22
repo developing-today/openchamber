@@ -77,6 +77,11 @@ export const createSessionGoal = async ({
   persistSessionGoal,
   goalWriterSettings = readGoalWriterSettings(),
   writeSpec = writeGoalSpec,
+  // The objective is final: "Rewrite every goal" leaves it as it is.
+  settled = false,
+  // Keep the whole objective for the progress check instead of fitting it
+  // to the goal limit; the goal records that it ignores the limit.
+  ignoreLimit = false,
 }) => {
   const warn = (message, error) => {
     if (typeof onWarning === 'function') {
@@ -87,9 +92,9 @@ export const createSessionGoal = async ({
   };
   const requested = String(objective ?? '').trim();
   let spec = null;
-  if (goalWriterSettings?.rewriteAll && requested) {
+  if (goalWriterSettings?.rewriteAll && !settled && requested) {
     try {
-      ({ spec } = await writeSpec({ request: requested, directory, providerID, modelID, settings: goalWriterSettings }));
+      ({ spec } = await writeSpec({ request: requested, directory, providerID, modelID, ignoreLimit, settings: goalWriterSettings }));
     } catch (error) {
       // The goal still runs on what the user wrote; a missing writer model
       // must not cost them the goal.
@@ -97,7 +102,7 @@ export const createSessionGoal = async ({
     }
   }
   const charLimit = goalWriterSettings?.charLimit ?? GOAL_OBJECTIVE_CHAR_LIMIT;
-  const objectiveText = await fitObjective({
+  const objectiveText = ignoreLimit ? (spec ?? requested) : await fitObjective({
     objective: spec ?? requested,
     charLimit,
     directory,
@@ -119,11 +124,17 @@ export const createSessionGoal = async ({
   const now = Date.now();
   const goal = {
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    // Inline only when the objective file could not be written, and then cut to
+    // the limit even for a goal that ignores it: the inline objective rides in
+    // the session metadata every goal update broadcasts to every window, so an
+    // unlimited one (up to 200,000 characters) would be resent on each update.
+    // The UI's setSessionGoal does the same; the full text still went out in
+    // the chat message. Deliberate: see #207 and the review on #205.
     objective: objectiveFile ? '' : objectiveText.slice(0, charLimit),
     objectiveFile,
     // Stated outright: the store merges, so a flag left out would carry over
     // from the goal this one replaces.
-    ignoreObjectiveLimit: false,
+    ignoreObjectiveLimit: ignoreLimit === true,
     status: 'active',
     tokenBudget: tokenBudget || null,
     tokensUsed: 0,
