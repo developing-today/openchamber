@@ -39,7 +39,11 @@ import { createVaultResolver } from './vault.js';
  * A value that is a vault reference (`op://…`, see `vault.js`) is read when a
  * process needs it: the managed OpenCode reads it at every launch, and a
  * directory's processes read it on a user action and otherwise use the last
- * value read. A reference that cannot be read leaves its variable out.
+ * value read. A reference that cannot be read leaves its variable out. The
+ * project's environment command is a process too: it receives the user's
+ * variables with references read under the same `refresh` flag as the caller
+ * that runs it, so it never receives the literal reference text and a
+ * background run never starts `op` for it.
  */
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
@@ -205,14 +209,15 @@ export const createEnvironmentRuntime = ({
 
   const generationOf = (projectId) => generations.get(projectId) ?? 0;
 
-  const runProjectCommand = (projectId, root, command) => {
+  const runProjectCommand = (projectId, root, command, refresh) => {
     const key = `${projectId}\0${root}`;
     const pending = commandRuns.get(key);
     if (pending) return pending;
 
     const generation = generationOf(projectId);
     const run = (async () => {
-      const env = overlayEnvironment(commandBaseEnv(), readUserVariables());
+      const userVariables = await vault.resolve(readUserVariables(), { refresh });
+      const env = overlayEnvironment(commandBaseEnv(), userVariables);
       const outcome = await runCommand({ spawn, command, cwd: root, env, timeoutMs: commandTimeoutMs });
       const variables = outcome.ok ? parseEnvironmentOutput(outcome.stdout, env) : null;
       const status = outcome.ok
@@ -238,8 +243,8 @@ export const createEnvironmentRuntime = ({
   const commandVariables = async (projectId, root, command, refresh) => {
     const cached = commandCache.get(`${projectId}\0${root}`);
     if (!refresh) return cached?.variables ?? {};
-    if (!cached) return runProjectCommand(projectId, root, command);
-    if (now() - cached.at >= commandTtlMs) void runProjectCommand(projectId, root, command);
+    if (!cached) return runProjectCommand(projectId, root, command, refresh);
+    if (now() - cached.at >= commandTtlMs) void runProjectCommand(projectId, root, command, refresh);
     return cached.variables;
   };
 
@@ -308,7 +313,7 @@ export const createEnvironmentRuntime = ({
     invalidateProject(projectId);
     const entry = store.projectEntry(projectId);
     if (!entry.command) return null;
-    await runProjectCommand(projectId, path.resolve(projectPath), entry.command);
+    await runProjectCommand(projectId, path.resolve(projectPath), entry.command, true);
     return projectStatus(projectId);
   };
 
