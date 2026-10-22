@@ -2,9 +2,9 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
-const LOOPBACK_URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{2,5})?(?:\/[^\s<>'"`]*)?)/gi;
+const LOOPBACK_URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{1,5})?(?:\/[^\s<>'"`]*)?)/gi;
 const PREVIEW_OUTPUT_PATTERN = /(?:➜\s*(?:Local|Network):)|\b(?:local|network|loopback|serving|listening|available|ready|started|running|server|vite|webpack|next\.js|astro|sveltekit|nuxt)\b/i;
-const PYTHON_HTTP_SERVER_PATTERN = /Serving HTTP on .*? port (\d{2,5})/i;
+const PYTHON_HTTP_SERVER_PATTERN = /Serving HTTP on .*? port (\d{1,5})(?!\d)/i;
 // portless (vercel-labs/portless) puts a dev server behind a named address:
 // it prints "-- Using port 4123" for the port it hands the server, then the
 // address itself as "  -> https://auth.myapp.localhost". The server then
@@ -57,7 +57,7 @@ const portOf = (url: string): number | null => {
     const parsed = new URL(url);
     if (!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) return null;
     const port = Number.parseInt(parsed.port, 10);
-    return Number.isFinite(port) ? port : null;
+    return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
   } catch {
     return null;
   }
@@ -134,16 +134,31 @@ export const extractAnnouncedUrls = (
     if (!PREVIEW_OUTPUT_PATTERN.test(line)) continue;
 
     const matches = Array.from(line.matchAll(LOOPBACK_URL_PATTERN));
-    if (matches.length === 0) continue;
+    // A match the URL parser rejects (a port above 65535) names no server
+    // that exists, and a pathless match followed by another digit was cut
+    // short mid-number (a 6-digit port) — either would send the preview to
+    // a wrong or unparseable address, so neither is announced.
+    const usable = matches.filter((match) => {
+      const end = (match.index ?? 0) + match[0].length;
+      const hasPath = match[1].split('/').length > 3;
+      if (!hasPath && /\d/.test(line[end] ?? '')) return false;
+      try {
+        new URL(normalizeLoopbackUrl(match[1]));
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (usable.length === 0) continue;
 
-    const withPort = matches.find((match) => {
+    const withPort = usable.find((match) => {
       try {
         return Boolean(new URL(normalizeLoopbackUrl(match[1])).port);
       } catch {
         return false;
       }
     });
-    add(normalizeLoopbackUrl((withPort ?? matches[0])[1]));
+    add(normalizeLoopbackUrl((withPort ?? usable[0])[1]));
   }
 
   return found;
