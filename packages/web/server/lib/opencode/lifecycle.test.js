@@ -1447,6 +1447,55 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     expect(current.binary).toBe('/opt/other/opencode');
   });
 
+  // Two OpenChamber servers on one data dir (the desktop app and `openchamber
+  // serve`) share state.json and draining.json. The recorded OpenCode may be
+  // the other server's; it must never be adopted, handed off from or drained.
+  // The test runner's parent stands in for that other server: alive, not us.
+  it('leaves an OpenCode that another live server owns alone and starts its own', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const recorded = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => '/opt/other/opencode'),
+      readProcessOwner: () => process.ppid,
+    });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const drainingPath = path.join(dataDir, 'managed-opencode', 'draining.json');
+    const draining = fsSync.existsSync(drainingPath) ? JSON.parse(fsSync.readFileSync(drainingPath, 'utf8')).draining : [];
+    expect(draining.map((record) => record.pid)).not.toContain(recorded.pid);
+  });
+
+  it('adopts the OpenCode of the server handing off to it, and records itself as the owner', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir, server: firstServer } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    // The registry names the predecessor as the owner, as it would after it spawned this OpenCode.
+    const entryPath = path.join(process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY, `${firstServer.pid}.json`);
+    const entry = JSON.parse(fsSync.readFileSync(entryPath, 'utf8'));
+    fsSync.writeFileSync(entryPath, JSON.stringify({ ...entry, ownerPid: process.ppid }));
+
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      getHandoffPredecessorPid: () => process.ppid,
+    });
+    const adopted = await second.startOpenCode();
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(adopted.pid).toBe(firstServer.pid);
+    expect(JSON.parse(fsSync.readFileSync(entryPath, 'utf8')).ownerPid).toBe(process.pid);
+  });
+
   it('replaces the recorded OpenCode when the launch fingerprint changed', async () => {
     delete process.env.OPENCODE_BINARY;
     const { dataDir } = await startFirstRuntime();

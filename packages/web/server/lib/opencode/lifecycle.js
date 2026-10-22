@@ -5,7 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
-import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
+import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner } from './managed-process-registry.js';
 import {
   clearManagedOpenCodeState,
   createLaunchFingerprint,
@@ -175,6 +175,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // The folder holding the managed config OpenCode reads (instance-dir.js), saved with the
     // managed state so a server that adopts this OpenCode takes the same folder over.
     getInstanceDir = () => null,
+    // Whose OpenCode a recorded pid is (managed-process-registry.js), and the
+    // server handing off to this one, if any. Two OpenChamber servers on one
+    // data dir share state.json and draining.json; without this each took the
+    // other's OpenCode for its own and retired it.
+    readProcessOwner = readManagedProcessOwner,
+    getHandoffPredecessorPid = () => null,
     // Variables from Settings and `opencode service set env` (lib/environment).
     getUserEnvironment = () => ({}),
     // The same variables with vault references read; only the launch sees them.
@@ -448,9 +454,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     onChange: persistDrainingOpenCode,
   });
 
+  // Another live OpenChamber server's OpenCode: never adopted, handed off
+  // from, drained or stopped here. Its owner is this process, a server that is
+  // gone, or the predecessor handing off to this one in every other case.
+  const otherServerOwning = (pid) => {
+    const owner = readProcessOwner(pid);
+    if (!Number.isInteger(owner) || owner === process.pid || owner === getHandoffPredecessorPid()) return null;
+    return isPidAlive(owner) ? owner : null;
+  };
+
   const seedDrainingOpenCode = () => {
     for (const record of readDrainingOpenCodeRecords(managedPaths.drainingPath)) {
-      if (drainingOpenCode.has(record.pid) || !isOwnedOpenCodePid(record.pid, record.binary)) continue;
+      if (drainingOpenCode.has(record.pid) || !isOwnedOpenCodePid(record.pid, record.binary) || otherServerOwning(record.pid) !== null) continue;
       drainingOpenCode.add({
         ...record,
         close: () => closeRecordedOpenCodeProcess(record),
@@ -841,7 +856,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     let phaseStartedAt = attemptStartedAt;
     recordStartupPerformance('opencode.attempt.start', { attempt });
     const desiredPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? 0;
-    const savedState = readManagedOpenCodeState(managedPaths.statePath);
+    const recordedState = readManagedOpenCodeState(managedPaths.statePath);
+    const recordedOwner = recordedState ? otherServerOwning(recordedState.pid) : null;
+    if (recordedOwner !== null) {
+      console.log(`[OpenCode] managed state names OpenCode ${recordedState.pid} of another OpenChamber server (pid ${recordedOwner}); leaving it alone`);
+    }
+    const savedState = recordedOwner === null ? recordedState : null;
     seedDrainingOpenCode();
     let handoffPredecessor = null;
     const reusedPort = savedState && (desiredPort === 0 || desiredPort === savedState.port) ? savedState.port : null;
@@ -939,6 +959,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       if (decision.action === 'adopt') {
         serverInstance = adoptManagedOpenCodeServer(savedState, hostname);
+        // The adopted OpenCode is this server's now: another live server must
+        // not see its old, gone owner and take it as unclaimed.
+        await registerManagedProcess({
+          pid: savedState.pid,
+          ownerPid: process.pid,
+          port: savedState.port,
+          binary: savedState.binary,
+          runtime: process.env.OPENCHAMBER_RUNTIME || 'web',
+        });
       } else if (decision.action === 'handoff') {
         if (spawnPort === savedState.port) {
           spawnPort = await resolveManagedOpenCodePort(0, hostname);

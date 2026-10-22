@@ -46,6 +46,7 @@
 // package); it carries a parity implementation that reads/writes the SAME dir.
 
 import fsp from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { renameWithRetry } from '../shared/atomic-rename.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -61,6 +62,20 @@ const resolveRegistryDir = () => {
 };
 
 const entryFilePath = (pid) => path.join(resolveRegistryDir(), `${pid}.json`);
+
+/**
+ * The OpenChamber process that registered OpenCode `pid`, or null when the
+ * registry has no readable entry for it. Synchronous, for the launch decision.
+ */
+export const readManagedProcessOwner = (pid) => {
+  if (!Number.isInteger(pid)) return null;
+  try {
+    const entry = JSON.parse(readFileSync(entryFilePath(pid), 'utf8'));
+    return Number.isInteger(entry?.ownerPid) ? entry.ownerPid : null;
+  } catch {
+    return null;
+  }
+};
 
 const isPidAlive = (pid) => {
   if (!Number.isInteger(pid)) return false;
