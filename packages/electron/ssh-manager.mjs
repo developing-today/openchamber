@@ -407,12 +407,14 @@ const parseVersionToken = (raw) => {
 // when the connection failed) or the literal 0/200 fallbacks, so the value is
 // judged whole and in its canonical shape: parseInt alone would accept
 // '200junk' or '200.9' as 200, and a digit string of any other length is a
-// leading-zero spelling ('0200', '000200') the script never emits. A
+// leading-zero spelling ('0200', '000200') the script never emits. Padding
+// counts too: the script prints no spaces or tabs around the value, so a
+// padded spelling (' 200', '200 ') is judged as written, with no trim. A
 // login-shell banner line carrying such a value must not fake a healthy
 // server or an accepted password.
 const parseProbeStatusLine = (line, prefix) => {
   if (!line || !line.startsWith(prefix)) return null;
-  const raw = line.slice(prefix.length).trim();
+  const raw = line.slice(prefix.length);
   if (raw !== '0' && !/^\d{3}$/.test(raw)) return null;
   const value = Number.parseInt(raw, 10);
   return value === 0 || (value >= 100 && value <= 599) ? value : null;

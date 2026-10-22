@@ -936,6 +936,76 @@ printf '4321\\n'`);
     )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
   });
 
+  test('does not let whitespace-padded probe statuses fake a healthy server', async () => {
+    // The probe script prints each status with no padding, so a padded
+    // spelling can only be login-shell banner output. HEALTH stays 000 so
+    // success could only come through the padded info status.
+    for (const padded of [' 200', '200 ', '\t200', '200\t']) {
+      const manager = new ElectronSshManager({
+        settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+        appVersion: '1.2.3',
+        emit: () => undefined,
+      });
+      manager.runRemoteCommand = async () => [
+        `INFO_STATUS=${padded}`,
+        'AUTH_STATUS=0',
+        'HEALTH_STATUS=000',
+        JSON.stringify({ openchamberVersion: '1.2.3', runtime: 'web' }),
+      ].join('\n');
+
+      await expect(manager.probeRemoteServer(
+        { destination: 'user@example.test', args: [] },
+        '/tmp/control.sock',
+        4096,
+        null,
+      )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
+    }
+
+    // A padded health status is judged the same way, with an info status
+    // that is not itself a liveness answer.
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=000',
+      'AUTH_STATUS=0',
+      'HEALTH_STATUS= 200',
+      '{}',
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      null,
+    )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
+  });
+
+  test('does not report a password accepted on a whitespace-padded auth status', async () => {
+    for (const padded of ['200 ', '\t200']) {
+      const manager = new ElectronSshManager({
+        settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+        appVersion: '1.2.3',
+        emit: () => undefined,
+      });
+      manager.runRemoteCommand = async () => [
+        'INFO_STATUS=401',
+        `AUTH_STATUS=${padded}`,
+        'HEALTH_STATUS=200',
+        '{}',
+      ].join('\n');
+
+      await expect(manager.probeRemoteServer(
+        { destination: 'user@example.test', args: [] },
+        '/tmp/control.sock',
+        4096,
+        'secret',
+      )).rejects.toThrow(/configured password was rejected \(auth status 0\)/);
+    }
+  });
+
   test('does not report a password accepted on a leading-zero auth status', async () => {
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
