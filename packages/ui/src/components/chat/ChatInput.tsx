@@ -1386,11 +1386,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     // Add message to queue instead of sending
-    const handleQueueMessage = React.useCallback(async () => {
+    // `presetText` queues that text instead of the composer's: the goal
+    // writer's resubmit sends the generated spec as the message.
+    const handleQueueMessage = React.useCallback(async (presetText?: string) => {
         // The comment's exit paths are attach/cancel; queueing a real prompt
         // underneath comment mode must never fire.
         if (isMobileCommentOpen()) return;
-        const inputSnapshot = getCurrentInputSnapshot();
+        const composerSnapshot = getCurrentInputSnapshot();
+        const inputSnapshot = presetText != null
+            ? { message: presetText, hasContent: presetText.trim().length > 0 || composerSnapshot.hasContent }
+            : composerSnapshot;
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
         // A local or extension command is run, not queued: the queue delivers
@@ -1899,7 +1904,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Auto-review owns the active workflow; follow-ups wait in its queue.
         if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
             applyGoalChoice(options?.goal);
-            void handleQueueMessage();
+            void handleQueueMessage(options?.presetText);
             return;
         }
 
@@ -1921,7 +1926,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // hook delivers it once the session returns to idle (#1740, #3369).
             if ((deniedPermissions || dismissedForms) && delivery !== 'steer') {
                 applyGoalChoice(options?.goal);
-                void handleQueueMessage();
+                void handleQueueMessage(options?.presetText);
                 return;
             }
         }
