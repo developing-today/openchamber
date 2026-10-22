@@ -409,6 +409,22 @@ const parseProbeStatusLine = (line, prefix) => {
   return Number.isFinite(value) ? value : null;
 };
 
+// `serve --quiet` reports its bound port as a line containing only the port
+// (plus a trailing `pass:<generated>` when it generated a UI password). The
+// remote command runs through a login shell, whose banner/profile output can
+// precede that line and contain arbitrary numbers, so the port must be read
+// from an anchored whole-line match — never the first number in the output —
+// and range-checked like any other port.
+const parseServedPortLine = (output) => {
+  for (const line of String(output ?? '').split('\n')) {
+    const match = line.trim().match(/^(\d{1,5})(?:\s+pass:\S+)?$/);
+    if (!match) continue;
+    const value = Number.parseInt(match[1], 10);
+    if (value >= 1 && value <= 65535) return value;
+  }
+  return null;
+};
+
 const isAuthHttpStatus = (status) => status === 401 || status === 403;
 const isLivenessHttpStatus = (status) => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
 
@@ -1208,9 +1224,10 @@ export class ElectronSshManager {
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
-    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} ${shellQuote(binPath)} serve --hostname ${remoteBindHost} --port ${desiredPort}`);
-    const port = output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
-    return port || desiredPort;
+    // --quiet makes serve print exactly one machine-readable line (the bound
+    // port), instead of the human summary the port used to be scraped from.
+    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} ${shellQuote(binPath)} serve --quiet --hostname ${remoteBindHost} --port ${desiredPort}`);
+    return parseServedPortLine(output) || desiredPort;
   }
 
   // `openchamber stop` owns the daemon lifecycle. The HTTP shutdown route sits
