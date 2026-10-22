@@ -18,7 +18,7 @@ import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
 import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
 import { GoalEditStrip } from '@/components/chat/GoalEditStrip';
 import { GoalSpecJobCard } from '@/components/chat/GoalSpecJobCard';
-import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
+import { materializeOpenDraftSession, useSessionUIStore, type SessionUIState } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { isSameComposerEditTarget, prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type ComposerEditTarget, type SyntheticContextPart } from '@/sync/input-store';
@@ -519,10 +519,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const largeTextPasteOfferIdRef = React.useRef(0);
     const [largeTextPasteGesture] = React.useState(() => new LargeTextPasteGesture());
 
-    // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
-    // oxlint-disable-next-line typescript/no-explicit-any
-    const sendMessage = React.useRef((...args: any[]) =>
-        Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
+    // Looked up per call, so the store's current implementation is the one used.
+    const sendMessage = React.useRef<SessionUIState['sendMessage']>(
+        (...args) => useSessionUIStore.getState().sendMessage(...args),
     ).current;
     // Inside the chat column the composer follows the session the timeline is
     // showing (see chatColumnSession.ts); elsewhere it follows the live one.
