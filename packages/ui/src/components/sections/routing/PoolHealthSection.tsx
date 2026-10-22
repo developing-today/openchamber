@@ -40,15 +40,21 @@ const TargetHealthRow: React.FC<{
       </span>
       <div className="flex shrink-0 items-center gap-1">
         <Select
-          value={target.plan?.id ?? NO_PLAN_VALUE}
+          value={target.plan?.id ?? target.missingPlanID ?? NO_PLAN_VALUE}
           onValueChange={(next) => onLink(next === NO_PLAN_VALUE ? null : next)}
         >
           <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-44')} aria-label={t('settings.pools.health.plan')}>
             {/* Base UI shows the raw value unless the label is given, and the "no plan" value is a sentinel. */}
-            <SelectValue>{target.plan?.label ?? t('settings.pools.health.planNone')}</SelectValue>
+            <SelectValue>
+              {target.plan?.label
+                ?? (target.missingPlanID ? t('settings.pools.health.planMissing', { id: target.missingPlanID }) : t('settings.pools.health.planNone'))}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NO_PLAN_VALUE}>{t('settings.pools.health.planNone')}</SelectItem>
+            {target.missingPlanID ? (
+              <SelectItem value={target.missingPlanID}>{t('settings.pools.health.planMissing', { id: target.missingPlanID })}</SelectItem>
+            ) : null}
             {plans.map((plan) => (
               <SelectItem key={plan.id} value={plan.id}>{plan.label}</SelectItem>
             ))}
@@ -78,7 +84,9 @@ const TargetHealthRow: React.FC<{
  */
 export const PoolHealthSection: React.FC<{
   onLowerWeight: (poolID: string, targetRef: string) => void;
-}> = ({ onLowerWeight }) => {
+  /** Changes whenever the pools change, so the panel reads them again. */
+  reloadKey?: string;
+}> = ({ onLowerWeight, reloadKey }) => {
   const { t } = useI18n();
   const [health, setHealth] = React.useState<PoolHealthState | null>(null);
   const [plans, setPlans] = React.useState<readonly PlanRecord[]>([]);
@@ -111,7 +119,7 @@ export const PoolHealthSection: React.FC<{
 
   React.useEffect(() => {
     load();
-  }, [load]);
+  }, [load, reloadKey]);
 
   const link = (target: string, planID: string | null) => {
     void savePoolPlanLink(target, planID).then(load).catch((failure: Error) => setError(errorText(failure)));
@@ -133,7 +141,12 @@ export const PoolHealthSection: React.FC<{
         </Button>
       </div>
       {error ? <p className={SETTINGS_HELPER_CLASS}>{error}</p> : null}
-      {planError ? <p className={SETTINGS_HELPER_CLASS}>{planError}</p> : null}
+      {health.planError ? (
+        <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.plans.loadFailed', { error: health.planError })}</p>
+      ) : planError ? <p className={SETTINGS_HELPER_CLASS}>{planError}</p> : null}
+      {health.linksError ? (
+        <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.health.linksLoadFailed', { error: health.linksError })}</p>
+      ) : null}
       {health.statsAvailable === false ? (
         <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.health.statsUnavailable')}</p>
       ) : null}

@@ -15,6 +15,9 @@ import path from 'node:path';
 import express from 'express';
 import { z } from 'zod';
 
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readPlanStore } from './plans.js';
+
 const FILE_NAME = 'pool-plan-links.json';
 
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
@@ -55,7 +58,7 @@ export const writePoolPlanLinks = (value, dataDir) => {
   const file = linksPath(dataDir);
   const temporary = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(valid, null, 2)}\n`);
-  fs.renameSync(temporary, file);
+  renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporary, file);
   return valid;
 };
 
@@ -69,7 +72,7 @@ export const setPoolPlanLink = (store, target, planID, dataDir) => {
 
 // Links are read through `GET /api/model-routes/health`, which resolves each
 // target's plan, so this module exposes only the write.
-export const registerPoolPlanLinkRoutes = (app, { openchamberDataDir } = {}) => {
+export const registerPoolPlanLinkRoutes = (app, { openchamberDataDir, loadPlanStore = readPlanStore } = {}) => {
   app.put('/api/model-routes/plan-links', express.json({ limit: '4kb' }), (req, res) => {
     try {
       const request = linkRequestSchema.safeParse(req.body);
@@ -77,6 +80,10 @@ export const registerPoolPlanLinkRoutes = (app, { openchamberDataDir } = {}) => 
         return res.status(400).json({ error: 'target must be a provider/model reference', code: 'INVALID_POOL_LINKS' });
       }
       const { target, planID } = request.data;
+      // Clearing a link always works, so one left by a deleted plan can be removed.
+      if (planID && !loadPlanStore().plans.some((plan) => plan.id === planID)) {
+        return res.status(400).json({ error: `There is no plan "${planID}".`, code: 'UNKNOWN_PLAN' });
+      }
       res.json(setPoolPlanLink(readPoolPlanLinks(openchamberDataDir), target, planID ?? null, openchamberDataDir));
     } catch (error) {
       res.status(error?.status ?? 500).json({ error: error?.message ?? 'Failed to save the pool-plan link', code: error?.code });

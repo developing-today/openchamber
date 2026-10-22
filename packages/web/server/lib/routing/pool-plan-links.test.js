@@ -50,7 +50,7 @@ describe('pool-plan-links store', () => {
 describe('PUT /api/model-routes/plan-links', () => {
   const appFor = (data) => {
     const app = express();
-    registerPoolPlanLinkRoutes(app, { openchamberDataDir: data });
+    registerPoolPlanLinkRoutes(app, { openchamberDataDir: data, loadPlanStore: () => ({ plans: [{ id: 'openai-plus' }] }) });
     return app;
   };
 
@@ -63,6 +63,18 @@ describe('PUT /api/model-routes/plan-links', () => {
     const cleared = await request(app).put('/api/model-routes/plan-links').send({ target: 'openai/gpt-6-luna', planID: null });
     expect(cleared.body.links).toEqual({});
     expect(readPoolPlanLinks(data).links).toEqual({});
+  });
+
+  it('refuses a plan that does not exist, and still clears a link to one', async () => {
+    const data = dir();
+    writePoolPlanLinks({ version: 1, links: { 'openai/gpt-6-luna': 'deleted-plan' } }, data);
+    const app = appFor(data);
+    const refused = await request(app).put('/api/model-routes/plan-links').send({ target: 'openai/gpt-6-luna', planID: 'no-such-plan' });
+    expect(refused.status).toBe(400);
+    expect(refused.body.code).toBe('UNKNOWN_PLAN');
+    expect(readPoolPlanLinks(data).links).toEqual({ 'openai/gpt-6-luna': 'deleted-plan' });
+    const cleared = await request(app).put('/api/model-routes/plan-links').send({ target: 'openai/gpt-6-luna', planID: null });
+    expect(cleared.body.links).toEqual({});
   });
 
   it('refuses a request without a target', async () => {

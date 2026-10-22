@@ -7,7 +7,6 @@ import type { PlanState } from '@/lib/routing/plansApi';
 
 let healthState: PoolHealthState = { available: true, statsAvailable: true, pools: {} };
 let planState: PlanState = { plans: [], models: {}, pools: {}, notes: [] };
-let planFailure: Error | null = null;
 let linkFailure: Error | null = null;
 const planLinkSaves: Array<{ target: string; planID: string | null }> = [];
 
@@ -21,10 +20,7 @@ mock.module('@/lib/routing/poolHealthApi', () => ({
 }));
 
 mock.module('@/lib/routing/plansApi', () => ({
-  fetchPlanState: async () => {
-    if (planFailure) throw planFailure;
-    return planState;
-  },
+  fetchPlanState: async () => planState,
 }));
 
 const DOM_GLOBAL_NAMES = [
@@ -78,17 +74,21 @@ const renderSection = async (onLowerWeight: (poolID: string, targetRef: string) 
   const { PoolHealthSection } = await import('./PoolHealthSection');
   const { I18nProvider } = await import('@/lib/i18n');
   const root = createRoot(dom.container);
-  await act(async () => {
-    root.render(
-      <I18nProvider>
-        <PoolHealthSection onLowerWeight={onLowerWeight} />
-      </I18nProvider>,
-    );
-  });
-  // Flush the microtask queue the data-loading effect's Promise.all runs on.
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  const render = async (reloadKey: string) => {
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <PoolHealthSection onLowerWeight={onLowerWeight} reloadKey={reloadKey} />
+        </I18nProvider>,
+      );
+    });
+    // Flush the microtask queue the data-loading effect's Promise.allSettled runs on.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  };
+  await render('initial');
   return {
     dom,
+    rerender: render,
     cleanup: async () => {
       await act(async () => root.unmount());
       dom.restore();
@@ -133,7 +133,6 @@ const pickOption = async (container: HTMLElement, label: string, option: string)
 describe('PoolHealthSection', () => {
   beforeEach(() => {
     planLinkSaves.length = 0;
-    planFailure = null;
     linkFailure = null;
     planState = { plans: [{
       id: 'openai-plus', providerID: 'openai', label: 'OpenAI Plus', coverage: 'subscription', status: 'active',
@@ -219,17 +218,56 @@ describe('PoolHealthSection', () => {
     }
   });
 
-  test('says when the plan list cannot be read and keeps the pools on screen', async () => {
-    planFailure = new Error('plans.json is not valid JSON');
+  test('says when the server cannot read plans or links and keeps the pools on screen', async () => {
     healthState = {
       available: true,
       statsAvailable: true,
-      pools: { pool1: { selection: 'ordered', targets: [{ ref: 'openai/a', activeSessions: 1, plan: null, blastRadius: false, suggestion: null }] } },
+      planError: 'plans.json is not valid JSON',
+      linksError: 'pool-plan-links.json is not valid JSON',
+      pools: { pool1: { selection: 'ordered', targets: [{ ref: 'openai/a', activeSessions: 2, plan: null, blastRadius: true, suggestion: null }] } },
     };
     const { dom, cleanup } = await renderSection();
     try {
       expect(dom.container.textContent).toContain('Plan information could not be read: plans.json is not valid JSON');
-      expect(dom.container.textContent).toContain('openai/a');
+      expect(dom.container.textContent).toContain('Plan links could not be read: pool-plan-links.json is not valid JSON');
+      expect(dom.container.textContent).toContain('Active sessions: 2');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('shows a link to a deleted plan and clears it', async () => {
+    healthState = {
+      available: true,
+      statsAvailable: true,
+      pools: { pool1: { selection: 'ordered', targets: [{ ref: 'openai/a', activeSessions: 0, plan: null, missingPlanID: 'old-plan', blastRadius: false, suggestion: null }] } },
+    };
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(dom.container.textContent).toContain('Deleted plan: old-plan');
+      await pickOption(dom.container, 'Plan', 'No plan linked');
+      expect(planLinkSaves).toEqual([{ target: 'openai/a', planID: null }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('reads again when the pools change', async () => {
+    healthState = {
+      available: true,
+      statsAvailable: true,
+      pools: { pool1: { selection: 'ordered', targets: [{ ref: 'openai/a', activeSessions: 0, plan: null, blastRadius: false, suggestion: null }] } },
+    };
+    const { dom, rerender, cleanup } = await renderSection();
+    try {
+      healthState = {
+        available: true,
+        statsAvailable: true,
+        pools: { pool1: { selection: 'ordered', targets: [{ ref: 'anthropic/b', activeSessions: 0, plan: null, blastRadius: false, suggestion: null }] } },
+      };
+      await rerender('changed');
+      expect(dom.container.textContent).toContain('anthropic/b');
+      expect(dom.container.textContent).not.toContain('openai/a');
     } finally {
       await cleanup();
     }

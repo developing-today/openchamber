@@ -487,6 +487,9 @@ export const ModelPoolsSection: React.FC = () => {
     [decisions],
   );
 
+  // The health panel reads again whenever a pool's content changes.
+  const routesKey = React.useMemo(() => JSON.stringify(routes), [routes]);
+
   const lowerTargetWeight = React.useCallback((poolID: string, targetRef: string) => {
     if (!routes) return;
     const route = routes[poolID];
@@ -564,7 +567,7 @@ export const ModelPoolsSection: React.FC = () => {
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.tuning.title')}</p>
               <RouteTuningFields tuning={tuning} onSave={(next) => void saveTuning(next)} />
             </div>
-            <PoolHealthSection onLowerWeight={lowerTargetWeight} />
+            <PoolHealthSection onLowerWeight={lowerTargetWeight} reloadKey={routesKey} />
             <PoolTelemetry />
             {recentDecisions.length > 0 ? (
               <div className="space-y-1">
