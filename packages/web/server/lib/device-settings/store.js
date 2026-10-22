@@ -22,7 +22,9 @@ import { isBoolean, isPlainObject, isString } from '../shared/guards.js';
 // carry free text the agent would then read as a setting.
 const IDENTIFIER = /^[A-Za-z0-9_.:-]{1,64}$/;
 const isIdentifier = (value) => isString(value) && IDENTIFIER.test(value);
-const number = (value) => Number.isFinite(value) && Math.abs(value) <= 1_000_000;
+// Whole numbers within the range the UI keeps the setting in.
+const integer = (min, max) => (value) => Number.isInteger(value) && value >= min && value <= max;
+const pixels = integer(0, 10_000);
 const oneOf = (...allowed) => (value) => allowed.includes(value);
 const identifierList = (value) => Array.isArray(value) && value.length <= 64 && value.every(isIdentifier);
 const identifierMap = (isValue) => (value) => isPlainObject(value)
@@ -31,9 +33,8 @@ const identifierMap = (isValue) => (value) => isPlainObject(value)
 
 // The value check for each reportable key; a key absent here is not kept.
 const REPORTABLE = {
-  theme: oneOf('light', 'dark', 'system'),
   isSidebarOpen: isBoolean,
-  sidebarWidth: number,
+  sidebarWidth: pixels,
   contextRailOrder: identifierList,
   contextRailHiddenSurfaces: identifierList,
   mobileWorkspaceTabOrder: identifierList,
@@ -41,20 +42,20 @@ const REPORTABLE = {
   contextSurfaceZones: identifierMap(isIdentifier),
   contextEditorTreeVisible: isBoolean,
   contextEditorVisible: isBoolean,
-  contextEditorTreeWidth: number,
+  contextEditorTreeWidth: pixels,
   workStatusExpandedSections: identifierMap(isBoolean),
   messageQueueExpanded: isBoolean,
-  messageLimit: number,
-  walkthroughTocWidth: number,
+  messageLimit: integer(10, 500),
+  walkthroughTocWidth: pixels,
   diffFileListMode: oneOf('flat', 'tree'),
-  diffFileTreeWidth: number,
+  diffFileTreeWidth: pixels,
   showTerminalQuickKeysOnDesktop: isBoolean,
   dockBadgeEnabled: isBoolean,
   alwaysShowScrollbars: isBoolean,
   mobileKeyboardMode: oneOf('native', 'resize-content'),
   desktopWindowControlsPosition: oneOf('left', 'right'),
   desktopWindowControlsStyle: oneOf('classic', 'traffic-lights'),
-  inputBarOffset: number,
+  inputBarOffset: integer(0, 2_000),
 };
 const REPORTABLE_KEYS = new Set(Object.keys(REPORTABLE));
 // Every reportable key must stay device-scoped in the registry.

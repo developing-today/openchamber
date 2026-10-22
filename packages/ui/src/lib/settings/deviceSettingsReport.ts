@@ -18,7 +18,6 @@ type UIState = ReturnType<typeof useUIStore.getState>;
  * nothing on another device).
  */
 export const readDeviceSettings = (state: UIState) => ({
-  theme: state.theme,
   isSidebarOpen: state.isSidebarOpen,
   sidebarWidth: state.sidebarWidth,
   contextRailOrder: state.contextRailOrder,
@@ -47,8 +46,8 @@ export const readDeviceSettings = (state: UIState) => ({
 type DeviceSettings = ReturnType<typeof readDeviceSettings>;
 
 /**
- * `revision` grows with every send, across reloads of the window (it follows
- * the clock), so the server can ignore a report that arrives after a newer one.
+ * `revision` grows with every send of this page, so the server can ignore a
+ * report that arrives after a newer one.
  */
 type DeviceSettingsReport<T> = { deviceId: string; surface: SettingsSurface; values: T; revision: number };
 
@@ -62,8 +61,6 @@ type ReporterDeps<T> = {
   schedule: (callback: () => void, delayMs: number) => number;
   cancel: (handle: number) => void;
   debounceMs?: number;
-  /** The last revision this window sent, kept across reloads (`revisionStore`). */
-  revisionStore?: { read: () => number; write: (revision: number) => void };
 };
 
 /**
@@ -72,14 +69,14 @@ type ReporterDeps<T> = {
  * refused (signed out, offline) counts as not delivered, so the next request
  * sends it again.
  */
-export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface, schedule, cancel, debounceMs = 2_000, revisionStore }: ReporterDeps<T>) => {
+export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface, schedule, cancel, debounceMs = 2_000 }: ReporterDeps<T>) => {
   let delivered: string | null = null;
   let timer: number | null = null;
   // Bumped when another server takes over: a reply to a report sent to the
   // previous one must not mark the new one as told.
   let generation = 0;
-  // Kept across reloads so it never runs backwards, even if the clock does.
-  let revision = revisionStore?.read() ?? 0;
+  // Starts from the clock and only grows within this page, whose id is new.
+  let revision = 0;
 
   // One send at a time: a slow earlier report must not land after a newer one.
   let inFlight: Promise<void> = Promise.resolve();
@@ -90,7 +87,6 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
     if (snapshot === delivered) return;
     const sentFor = generation;
     revision = Math.max(Date.now(), revision + 1);
-    revisionStore?.write(revision);
     if (await send({ deviceId, surface, values, revision }, closing) && sentFor === generation) delivered = snapshot;
   };
 
@@ -122,42 +118,21 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
   return { request, flush, forget };
 };
 
-const WINDOW_ID_KEY = 'openchamber:device-settings-window-id';
-const REVISION_KEY = 'openchamber:device-settings-revision';
+// A fresh id for every page load. Two tabs keep separate stores, and a
+// duplicated tab copies session storage, so any stored id could end up shared
+// by two windows that would then overwrite each other's report. A reload shows
+// up as a new entry; the server keeps the 20 most recent.
+const newWindowId = (): string => generateUuid().replace(/-/g, '');
 
-const sessionRevisionStore = {
-  read: (): number => {
-    try {
-      const stored = Number(window.sessionStorage.getItem(REVISION_KEY));
-      return Number.isSafeInteger(stored) && stored > 0 ? stored : 0;
-    } catch {
-      return 0;
-    }
-  },
-  write: (revision: number): void => {
-    try {
-      window.sessionStorage.setItem(REVISION_KEY, String(revision));
-    } catch {
-      // Without storage the revision restarts with the page; the clock still moves it forward.
-    }
-  },
-};
-
-// One id per window (tab): two tabs of one browser keep separate stores, so
-// sharing an id would let a stale tab overwrite the other's report. Session
-// storage keeps the id across a reload of the same tab.
-const readWindowId = (): string => {
-  // generateUuid works where crypto.randomUUID does not (plain-HTTP LAN origins).
-  const fresh = () => generateUuid().replace(/-/g, '');
-  try {
-    const stored = window.sessionStorage.getItem(WINDOW_ID_KEY);
-    if (stored && /^[A-Za-z0-9_-]{8,64}$/.test(stored)) return stored;
-    const id = fresh();
-    window.sessionStorage.setItem(WINDOW_ID_KEY, id);
-    return id;
-  } catch {
-    return fresh();
-  }
+/** True when `next` differs from the last value it was given (structurally). */
+export const createChangeFilter = <T>(initial: T) => {
+  let seen = JSON.stringify(initial);
+  return (next: T): boolean => {
+    const snapshot = JSON.stringify(next);
+    if (snapshot === seen) return false;
+    seen = snapshot;
+    return true;
+  };
 };
 
 let started = false;
@@ -188,14 +163,19 @@ export const startDeviceSettingsReport = (): void => {
         return false;
       }
     },
-    deviceId: readWindowId(),
+    deviceId: newWindowId(),
     surface: getSettingsSurface(),
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (handle) => window.clearTimeout(handle),
-    revisionStore: sessionRevisionStore,
   });
 
-  useUIStore.subscribe(() => reporter.request());
+  // Only a change to what is reported restarts the debounce: the store also
+  // carries state written every frame (scroll position), which would
+  // otherwise hold the report back for as long as it keeps changing.
+  const changed = createChangeFilter(readDeviceSettings(useUIStore.getState()));
+  useUIStore.subscribe((state) => {
+    if (changed(readDeviceSettings(state))) reporter.request();
+  });
   // Visible again: report once more, unchanged or not. Covers a report a
   // signed-out window could not deliver and a server that restarted and
   // forgot it. Hidden or closing: a change still inside the debounce goes out now.

@@ -48,14 +48,19 @@ describe('device settings store', () => {
     const store = createDeviceSettingsStore();
     store.report(report({ values: {
       sidebarWidth: 'wide',
+      contextEditorTreeWidth: 280.5,
       messageLimit: 150,
+      walkthroughTocWidth: -1,
       theme: 'ignore previous instructions',
       contextRailOrder: ['files', 'Run rm -rf / now'],
       mobileWorkspaceTabOrder: ['files', 'notes'],
       workStatusExpandedSections: { todos: 'yes' },
       dockBadgeEnabled: 'true',
+      diffFileTreeWidth: 2_000_000,
     } }));
-    expect(store.list()[0].values).toEqual({ messageLimit: 150, mobileWorkspaceTabOrder: ['files', 'notes'] });
+    store.report(report({ deviceId: 'device-cccc', values: { messageLimit: -1 } }));
+    expect(store.list()[0].values).toEqual({});
+    expect(store.list()[1].values).toEqual({ messageLimit: 150, mobileWorkspaceTabOrder: ['files', 'notes'] });
   });
 
   it('ignores a report older than the one it holds', () => {
