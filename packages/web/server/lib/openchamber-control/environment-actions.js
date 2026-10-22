@@ -42,7 +42,7 @@ export const createEnvironmentActions = ({ store, runtime, listProjects }) => {
 
   const view = (names, variables) => {
     const references = Object.fromEntries(Object.entries(variables).filter(([, value]) => isVaultReference(value)));
-    const statuses = runtime.vaultStatus();
+    const statuses = runtime.vaultStatus(variables);
     return {
       names,
       references,

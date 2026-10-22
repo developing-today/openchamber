@@ -58,6 +58,36 @@ describe('vault references', () => {
     expect(execFile).toHaveBeenCalledTimes(2);
   });
 
+  it('reports resolved when a failed variable is repointed at an already-cached reference', async () => {
+    const BROKEN = 'op://Vault/broken/field';
+    const execFile = fakeOp({ [REFERENCE]: 'ghp_secret', [BROKEN]: new Error('signed out') });
+    const vault = createVaultResolver({ execFile, env: () => ({}), logger: { warn: vi.fn() } });
+
+    await vault.resolve({ OTHER_TOKEN: REFERENCE });
+    await expect(vault.resolve({ GITHUB_TOKEN: BROKEN })).resolves.toEqual({});
+    expect(vault.status()).toMatchObject({ GITHUB_TOKEN: { state: 'failed', reason: 'op-read-failed' } });
+
+    // The fix serves the new reference from the cache, with no second read.
+    await expect(vault.resolve({ GITHUB_TOKEN: REFERENCE })).resolves.toEqual({ GITHUB_TOKEN: 'ghp_secret' });
+    expect(execFile).toHaveBeenCalledTimes(2);
+    expect(vault.status()).toMatchObject({ GITHUB_TOKEN: { state: 'resolved' } });
+    expect(vault.status({ GITHUB_TOKEN: REFERENCE })).toMatchObject({ GITHUB_TOKEN: { state: 'resolved' } });
+  });
+
+  it('never presents a previous reference outcome as the current reference outcome', async () => {
+    const OTHER = 'op://Vault/other/field';
+    const execFile = fakeOp({ [REFERENCE]: 'ghp_secret', [OTHER]: 'other_secret' });
+    const vault = createVaultResolver({ execFile, env: () => ({}), logger: { warn: vi.fn() } });
+
+    await vault.resolve({ GITHUB_TOKEN: REFERENCE });
+    expect(vault.status({ GITHUB_TOKEN: REFERENCE })).toMatchObject({ GITHUB_TOKEN: { state: 'resolved' } });
+    // Repointed, not yet read under this name: no status answers for it.
+    expect(vault.status({ GITHUB_TOKEN: OTHER })).toEqual({});
+    await expect(vault.resolve({ GITHUB_TOKEN: OTHER }, { refresh: false })).resolves.toEqual({});
+    expect(vault.status({ GITHUB_TOKEN: OTHER })).toEqual({});
+    expect(vault.status()).toEqual({});
+  });
+
   it('keeps the last good value when a later read fails', async () => {
     let clock = 0;
     const answers = { [REFERENCE]: 'ghp_secret' };
