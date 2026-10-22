@@ -17,6 +17,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   AUTONOMY_LEVELS,
+  POOL_DETAILS_MAX_LENGTH,
   fetchModelRoutes,
   fetchRouteStats,
   saveModelRouteTuning,
@@ -89,9 +90,6 @@ const TargetWait: React.FC<{ providerID: string; modelID: string }> = ({ provide
   );
 };
 
-// Matches the server's cap on `details` (model-routes.js).
-const MAX_POOL_DETAILS_LENGTH = 2000;
-
 /** A paragraph field that saves when it loses focus, like `CommitInput` does for one line. */
 const CommitTextarea: React.FC<{
   label: string;
@@ -110,7 +108,7 @@ const CommitTextarea: React.FC<{
       aria-label={label}
       value={draft}
       placeholder={placeholder}
-      maxLength={MAX_POOL_DETAILS_LENGTH}
+      maxLength={POOL_DETAILS_MAX_LENGTH}
       rows={3}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={(event) => {

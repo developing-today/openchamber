@@ -38,6 +38,7 @@ const fetchRouteStats = async () => ({ available: false, reason: 'no-database' }
 
 mock.module('@/lib/routing/modelRoutesApi', () => ({
   AUTONOMY_LEVELS: ['fixed', 'rules', 'adaptive', 'predictive', 'agent'],
+  POOL_DETAILS_MAX_LENGTH: 2000,
   fetchModelRoutes,
   saveModelRoutes,
   saveModelRouteTuning,

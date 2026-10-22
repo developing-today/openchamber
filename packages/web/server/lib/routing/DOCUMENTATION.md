@@ -258,7 +258,10 @@ features that need Jev.
 `model-routes.js` reads and writes OpenCode's `experimental.model_routes` in the
 user's `opencode.json(c)`. Besides OpenCode's own route keys it accepts two that
 OpenChamber owns: `description` (one line, at most 200 characters) and
-`details` (at most 2000). OpenCode decodes its config with
+`details` (at most 2000). The Routing page reads a value the save would
+refuse as absent (`modelRoutesApi.ts`, same limits, checked equal by
+`model-routes.test.js`), because every save sends the whole map and one bad
+hand-edited value would otherwise block saving any pool. OpenCode decodes its config with
 `onExcessProperty: "ignore"` (core `config.ts`, `config/normalize.ts`), so a
 route carrying them loads and the two keys are dropped. OpenCode's published
 JSON schema sets `additionalProperties: false` on a route, so an editor that

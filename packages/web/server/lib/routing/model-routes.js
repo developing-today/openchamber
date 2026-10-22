@@ -30,8 +30,10 @@ const MAX_COUNT = 50;
 // `onExcessProperty: "ignore"` (core config.ts, config/normalize.ts), so it
 // loads a route that carries them and drops the two keys.
 const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "description", "details"];
-const MAX_DESCRIPTION_LENGTH = 200;
-const MAX_DETAILS_LENGTH = 2000;
+// The UI reads a value over these as absent (`modelRoutesApi.ts`), so the two
+// must match; `model-routes.test.js` checks that.
+export const MAX_DESCRIPTION_LENGTH = 200;
+export const MAX_DETAILS_LENGTH = 2000;
 const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];

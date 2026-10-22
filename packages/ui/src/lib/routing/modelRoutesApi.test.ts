@@ -51,6 +51,22 @@ describe('fetchModelRoutes with hand-edited pool text', () => {
     expect(state.routes.odd.details).toBeUndefined();
     expect(state.routes.kept).toMatchObject({ description: 'Quick fixes', details: 'Notes' });
   });
+
+  test('reads text the server would refuse as absent, so saving the map is not blocked', async () => {
+    respond = () => reply(JSON.stringify({
+      routes: {
+        multiline: { targets: ['p/a'], description: 'one\ntwo' },
+        long: { targets: ['p/b'], description: 'a'.repeat(201), details: 'b'.repeat(2001) },
+        edge: { targets: ['p/c'], description: 'a'.repeat(200), details: 'b'.repeat(2000) },
+      },
+    }));
+    const { routes } = await fetchModelRoutes();
+    expect(routes.multiline.description).toBeUndefined();
+    expect(routes.long.description).toBeUndefined();
+    expect(routes.long.details).toBeUndefined();
+    expect(routes.edge.description).toHaveLength(200);
+    expect(routes.edge.details).toHaveLength(2000);
+  });
 });
 
 describe('saveModelRoutes', () => {
