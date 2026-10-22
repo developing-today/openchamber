@@ -312,8 +312,14 @@ makes that visible so the user can spread them.
   halves that weight. Without the routing tables the route still answers, with
   `statsAvailable: false` and no counts. The session and usage queries
   settle separately (`sessionsAvailable`, `usageAvailable`), so one failing
-  costs only its own columns. Each telemetry row counts once per plan, even
-  when overlapping links (`openai/*` and `openai/gpt-x`) both cover it. When
+  costs only its own columns. Each telemetry row belongs to the most specific
+  link that covers it (an exact reference beats a pattern, a longer pattern a
+  shorter one), so it counts once, toward one plan, even when `openai/*` and
+  `openai/gpt-x` are both linked. Nested pools (`opencode-route/<id>`) are left
+  out of a pool's targets; they are listed as pools of their own. The
+  `lower-weight` suggestion also needs another target in the pool on a
+  different plan (or none): moving weight between siblings on one quota
+  changes nothing. When
   OpenCode's base URL is not a loopback address (`OPENCODE_HOST` on another
   machine), its database is not on this one, so the route reads no local file
   and answers `statsReason: "remote-opencode"`; a local file could be a stale
