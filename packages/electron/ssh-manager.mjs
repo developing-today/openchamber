@@ -425,6 +425,25 @@ const parseServedPortLine = (output) => {
   return null;
 };
 
+// Every remote command runs through a login shell (`sh -lc`), whose
+// banner/profile output can precede the script's own output, so no parser may
+// treat the whole stdout as the script's answer. `uname -s` prints exactly one
+// line; read it as a whole-line match, the way the served port is read.
+const parseRemoteOs = (output) => {
+  for (const line of String(output ?? '').split(/\r?\n/)) {
+    const value = line.trim().toLowerCase();
+    if (value === 'linux' || value === 'darwin') return value;
+  }
+  return null;
+};
+
+// The resolved-tool and candidate scripts print remote paths the login shell
+// expanded from the probed candidates. A genuine path is absolute; a banner
+// line is not, so an absolute first field is what separates a script answer
+// from login-shell output. (Remote paths may contain spaces, so whitespace
+// alone proves nothing.)
+const isRemotePathLine = (value) => value.startsWith('/');
+
 const isAuthHttpStatus = (status) => status === 401 || status === 403;
 const isLivenessHttpStatus = (status) => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
 
@@ -1081,7 +1100,13 @@ export class ElectronSshManager {
 
     try {
       const output = await this.runRemoteCommand(parsed, controlPath, script);
-      return output.trim() || null;
+      // The script prints its one answer last, with no trailing newline, and
+      // login-shell banner output can only precede it — so the answer is the
+      // last non-empty line, and only when it is an absolute path. Returning
+      // the whole stdout would hand the banner to callers as the tool path.
+      const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const last = lines[lines.length - 1] || '';
+      return isRemotePathLine(last) ? last : null;
     } catch {
       return null;
     }
@@ -1109,11 +1134,15 @@ export class ElectronSshManager {
     const candidates = [];
     const seen = new Set();
     for (const line of output.split(/\r?\n/)) {
-      const [binPath, versionRaw] = line.split('\t');
-      const trimmed = (binPath || '').trim();
-      if (!trimmed || seen.has(trimmed)) continue;
+      // The script prints one `path<TAB>version` line per candidate; a line
+      // without the tab — login-shell banner output above all — is not a
+      // candidate, and neither is a first field that is not a remote path.
+      const tabIndex = line.indexOf('\t');
+      if (tabIndex < 0) continue;
+      const trimmed = line.slice(0, tabIndex).trim();
+      if (!isRemotePathLine(trimmed) || seen.has(trimmed)) continue;
       seen.add(trimmed);
-      candidates.push({ binPath: trimmed, version: parseVersionToken(versionRaw || '') });
+      candidates.push({ binPath: trimmed, version: parseVersionToken(line.slice(tabIndex + 1)) });
     }
     return candidates;
   }
@@ -1301,7 +1330,24 @@ export class ElectronSshManager {
   // The remote CLI registry is the authority on which servers run there.
   async listRemoteServers(parsed, controlPath, binPath) {
     const output = await this.runRemoteCommand(parsed, controlPath, `${shellQuote(binPath)} status --json`);
-    const payload = JSON.parse(output.slice(output.indexOf('{')));
+    // Login-shell output can precede the registry JSON and can itself contain
+    // a `{`, so try each brace as the start of the payload and keep the first
+    // one that parses to a registry; if none does, the first parse error is
+    // the failure the caller should see.
+    let payload = null;
+    let firstError = null;
+    for (let start = output.indexOf('{'); start !== -1; start = output.indexOf('{', start + 1)) {
+      try {
+        const parsedPayload = JSON.parse(output.slice(start));
+        if (parsedPayload && Array.isArray(parsedPayload.instances)) {
+          payload = parsedPayload;
+          break;
+        }
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    if (!payload) throw firstError ?? new Error('Remote OpenChamber status output held no server registry');
     return payload.instances
       .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port))
       .map((entry) => ({
@@ -1476,6 +1522,19 @@ export class ElectronSshManager {
     }
   }
 
+  // The first remote parse in a connect. `uname -s` runs through the login
+  // shell, so banner output can precede its one-line answer: accept only a
+  // whole line naming a supported OS, and name the raw output when none does
+  // so a genuinely unsupported host still fails here.
+  async probeRemoteOs(parsed, controlPath, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC) {
+    const output = await this.runRemoteCommand(parsed, controlPath, 'uname -s', timeoutSec);
+    const remoteOs = parseRemoteOs(output);
+    if (!remoteOs) {
+      throw new Error(`Unsupported remote OS: ${String(output ?? '').trim().toLowerCase()}`);
+    }
+    return remoteOs;
+  }
+
   async connectBlocking(instance) {
     const id = instance.id;
     this.setStatus(id, 'config_resolved', 'Resolving SSH command');
@@ -1513,10 +1572,7 @@ export class ElectronSshManager {
     }
 
     this.setStatus(id, 'remote_probe', 'Probing remote platform');
-    const remoteOs = (await this.runRemoteCommand(parsed, controlPath, 'uname -s', instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC)).trim().toLowerCase();
-    if (!['linux', 'darwin'].includes(remoteOs)) {
-      throw new Error(`Unsupported remote OS: ${remoteOs}`);
-    }
+    await this.probeRemoteOs(parsed, controlPath, instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC);
 
     const { remotePort, startedByUs, ownsRemoteServer, remoteBinPath } = await this.ensureRemoteServer(instance, parsed, controlPath);
     session.remotePort = remotePort;

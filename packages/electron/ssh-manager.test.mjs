@@ -558,6 +558,116 @@ printf '4321\\n'`);
     ]);
   });
 
+  test('ignores login-shell banner lines when listing remote OpenChamber binaries', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    // The candidate script runs through a login shell (`sh -lc`): a distro
+    // banner precedes its `path<TAB>version` lines and is not a binary.
+    manager.runRemoteCommand = async () => [
+      'Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0 x86_64)',
+      '/home/pi/.openchamber/npm-global/bin/openchamber\t1.2.3',
+      '/usr/bin/openchamber\t0.9.0',
+      '',
+    ].join('\n');
+
+    const candidates = await manager.remoteOpenChamberCandidates({ destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(candidates).toEqual([
+      { binPath: '/home/pi/.openchamber/npm-global/bin/openchamber', version: '1.2.3' },
+      { binPath: '/usr/bin/openchamber', version: '0.9.0' },
+    ]);
+  });
+
+  test('resolves a remote tool to its path when login-shell banner output precedes it', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0 x86_64)',
+      '/home/pi/.opencode/bin/opencode',
+    ].join('\n');
+
+    const resolved = await manager.resolveRemoteTool(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      'opencode',
+      ['"$HOME/.opencode/bin/opencode"'],
+    );
+
+    expect(resolved).toBe('/home/pi/.opencode/bin/opencode');
+  });
+
+  test('resolves no remote tool when only login-shell banner output comes back', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => 'Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0 x86_64)\n';
+
+    const resolved = await manager.resolveRemoteTool(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      'opencode',
+      ['"$HOME/.opencode/bin/opencode"'],
+    );
+
+    expect(resolved).toBeNull();
+  });
+
+  test('reads the remote OS from its own line when login-shell banner output precedes it', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0 x86_64)',
+      'Linux',
+    ].join('\n');
+
+    const remoteOs = await manager.probeRemoteOs({ destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(remoteOs).toBe('linux');
+  });
+
+  test('still refuses a genuinely unsupported remote OS', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => 'FreeBSD\n';
+
+    await expect(manager.probeRemoteOs({ destination: 'user@example.test', args: [] }, '/tmp/control.sock'))
+      .rejects.toThrow(/Unsupported remote OS: freebsd/);
+  });
+
+  test('finds the server registry when login-shell banner output contains a brace', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'Welcome {admin} to Ubuntu 24.04.3 LTS',
+      JSON.stringify({ instances: [{ runtime: 'cli', port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1' }] }),
+    ].join('\n');
+
+    const servers = await manager.listRemoteServers(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      '/home/pi/.openchamber/npm-global/bin/openchamber',
+    );
+
+    expect(servers).toEqual([{ port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1', passwordProtected: null }]);
+  });
+
   test('starts the resolved OpenChamber binary rather than whatever PATH exposes', async () => {
     let started = '';
     const manager = new ElectronSshManager({
