@@ -187,6 +187,35 @@ describe('environment runtime', () => {
     expect(await runtime.reloadProject('path_project', projectPath)).toBeNull();
   });
 
+  it('runs a fresh command on reload instead of joining a run started before the invalidation', async () => {
+    await store.updateProject('path_project', { command: 'direnv export json' });
+    const gated = new EventEmitter();
+    gated.stdout = new EventEmitter();
+    gated.kill = vi.fn();
+    const releaseFirst = () => {
+      gated.stdout.emit('data', Buffer.from('{"VERSION":"1"}'));
+      gated.emit('close', 0);
+    };
+    const spawn = vi.fn()
+      .mockImplementationOnce(() => gated)
+      .mockImplementation(() => fakeChild({ stdout: '{"VERSION":"2"}' }));
+    const runtime = createRuntime({ spawn });
+
+    const first = runtime.forDirectory(projectPath, USER_ACTION);
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+
+    await store.updateProject('path_project', { command: 'new command' });
+    const reloading = runtime.reloadProject('path_project', projectPath);
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
+    expect(spawn.mock.calls[1][0]).toBe('new command');
+
+    releaseFirst();
+    await expect(reloading).resolves.toMatchObject({ state: 'applied', count: 1 });
+    expect(runtime.projectStatus('path_project')).toMatchObject({ state: 'applied', count: 1 });
+    await first;
+    expect(runtime.projectStatus('path_project')).toMatchObject({ state: 'applied', count: 1 });
+  });
+
   it('gives OpenCode the service variables under the user variables, and nothing in enterprise mode', async () => {
     await store.updateUser({ variables: { SHARED: 'user' } });
     const readOpenCodeServiceEnv = () => ({ SHARED: 'service', ONLY_SERVICE: 's' });

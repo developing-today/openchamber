@@ -211,10 +211,15 @@ export const createEnvironmentRuntime = ({
 
   const runProjectCommand = (projectId, root, command, refresh) => {
     const key = `${projectId}\0${root}`;
-    const pending = commandRuns.get(key);
+    // A run is only shared with callers from the same generation: an
+    // invalidation (a settings edit, a reload) must not be answered by a
+    // run that started before it, whose result the generation guard below
+    // would discard anyway.
+    const generation = generationOf(projectId);
+    const runKey = `${key}\0${generation}`;
+    const pending = commandRuns.get(runKey);
     if (pending) return pending;
 
-    const generation = generationOf(projectId);
     const run = (async () => {
       const userVariables = await vault.resolve(readUserVariables(), { refresh });
       const env = overlayEnvironment(commandBaseEnv(), userVariables);
@@ -234,9 +239,9 @@ export const createEnvironmentRuntime = ({
       }
       return variables ?? {};
     })().finally(() => {
-      if (commandRuns.get(key) === run) commandRuns.delete(key);
+      if (commandRuns.get(runKey) === run) commandRuns.delete(runKey);
     });
-    commandRuns.set(key, run);
+    commandRuns.set(runKey, run);
     return run;
   };
 

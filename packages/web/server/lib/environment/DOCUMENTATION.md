@@ -98,7 +98,10 @@ token, PATH entries it needs) are applied after the user's variables and win.
   The first user action in a checkout waits for the run; a result older than
   five minutes is used by the next user action while a fresh run happens in
   the background. Editing the project's settings drops what was kept, and a
-  run that started before the edit is not kept.
+  run that started before the edit is not kept. A reload after the edit
+  starts a fresh run; it never joins a run still in flight from before the
+  edit, so the command that runs is the one just saved and the reload
+  answers that run's outcome.
 - `refresh-scope.js`: the AsyncLocalStorage flag behind `runAsUserAction` /
   `isUserAction`, so the Git service needs no extra argument between route
   and spawn.
