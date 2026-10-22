@@ -159,6 +159,8 @@ describe('PoolHealthSection', () => {
     try {
       expect(dom.container.textContent).toContain('Active sessions: 3');
       expect(dom.container.textContent).toContain('resets all of their caches at once');
+      expect(dom.container.textContent).toContain('No plan linked');
+      expect(dom.container.textContent).not.toContain('__none__');
     } finally {
       await cleanup();
     }

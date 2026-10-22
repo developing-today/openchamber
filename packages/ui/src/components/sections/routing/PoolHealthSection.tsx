@@ -33,7 +33,7 @@ const TargetHealthRow: React.FC<{
   const { t } = useI18n();
   const status = target.plan?.projection?.status;
   return (
-    <div className="flex flex-col gap-1 py-1.5 sm:flex-row sm:items-center sm:gap-3">
+    <div className="flex flex-col gap-1 py-1.5 @xl:flex-row @xl:items-center @xl:gap-3">
       <span className="typography-ui-label min-w-0 flex-1 truncate text-foreground">{target.ref}</span>
       <span className="typography-meta text-muted-foreground shrink-0">
         {target.activeSessions === null ? '—' : `${t('settings.pools.health.activeSessions')}: ${target.activeSessions}`}
@@ -44,7 +44,8 @@ const TargetHealthRow: React.FC<{
           onValueChange={(next) => onLink(next === NO_PLAN_VALUE ? null : next)}
         >
           <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-44')} aria-label={t('settings.pools.health.plan')}>
-            <SelectValue placeholder={t('settings.pools.health.planNone')} />
+            {/* Base UI shows the raw value unless the label is given, and the "no plan" value is a sentinel. */}
+            <SelectValue>{target.plan?.label ?? t('settings.pools.health.planNone')}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NO_PLAN_VALUE}>{t('settings.pools.health.planNone')}</SelectItem>
