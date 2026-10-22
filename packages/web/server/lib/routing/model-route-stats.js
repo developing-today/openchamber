@@ -9,8 +9,9 @@
  * tables) reads as `{ available: false }`, never as an empty report.
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { resolveOpenCodeDataDir } from './route-overrides-store.js';
 
 // The driver is imported lazily: a static import of `node:sqlite` would keep
 // the whole server from booting on a runtime that lacks it, and only this
@@ -34,13 +35,15 @@ const loadSqlite = async () => {
   }
 };
 
-const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
-
-/** Where OpenCode keeps its database: `OPENCODE_DB` when set, else `opencode.db`. */
+/**
+ * Where OpenCode keeps its database: `OPENCODE_DB` when set, else `opencode.db`,
+ * both in OpenCode's data directory, which follows `XDG_DATA_HOME` as OpenCode does.
+ */
 export const resolveOpenCodeDbPath = (env = process.env) => {
+  const dataDir = resolveOpenCodeDataDir(env);
   const configured = (env.OPENCODE_DB ?? '').trim();
-  if (configured && configured !== ':memory:') return path.resolve(OPENCODE_DATA_DIR, configured);
-  return path.join(OPENCODE_DATA_DIR, 'opencode.db');
+  if (configured && configured !== ':memory:') return path.resolve(dataDir, configured);
+  return path.join(dataDir, 'opencode.db');
 };
 
 const hasRouteTables = (db) => {
@@ -154,21 +157,25 @@ export const queryRouteStats = async (dbPath, { hours = 24, now = Date.now() } =
 };
 
 /**
- * Each distinct (target, session) pair with an attempt in the last `minutes`.
- * Counting is left to the caller, because a pattern target (`openai/*`)
- * covers several concrete models and a session using two of them counts once.
+ * Each session with an attempt in the last `minutes`, on the target of its
+ * latest attempt: a session that failed over or was moved since counts on
+ * where it is now. Counting is left to the caller, because a pattern target
+ * (`openai/*`) covers several concrete models.
  */
 export const queryActiveSessionsPerTarget = async (dbPath, { minutes = 15, now = Date.now() } = {}) => {
   const db = await openRouteDb(dbPath);
   try {
     const since = now - Math.max(1, Number(minutes) || 15) * 60_000;
+    // SQLite returns the other columns from the row that holds max(time_started).
     const sessions = db
       .prepare(
-        `select distinct provider_id as providerID, model_id as modelID, session_id as sessionID
+        `select provider_id as providerID, model_id as modelID, session_id as sessionID, max(time_started) as lastAttempt
         from route_attempt
-        where time_started >= ? and session_id is not null`,
+        where time_started >= ? and session_id is not null
+        group by session_id`,
       )
-      .all(since);
+      .all(since)
+      .map(({ providerID, modelID, sessionID }) => ({ providerID, modelID, sessionID }));
     return { available: true, minutes, sessions };
   } finally {
     db.close();

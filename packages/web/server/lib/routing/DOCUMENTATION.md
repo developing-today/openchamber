@@ -293,8 +293,9 @@ makes that visible so the user can spread them.
   `planID: null` clears) exists; it refuses a plan id the plan store does not
   have, and clearing always works. Reads go through the health route.
 - `pool-health.js` answers `GET /api/model-routes/health` (`hours`, default 24,
-  and `activeMinutes`, default 15). Per pool target it reports the distinct
-  sessions with an attempt in the last `activeMinutes`, the linked plan and
+  and `activeMinutes`, default 15). Per pool target it reports the sessions
+  whose latest attempt in the last `activeMinutes` went to it (a session that
+  failed over or was moved counts where it is now), the linked plan and
   its siblings, and a projection for the plan's tightest window: the recent
   usage of every target linked to the plan, scaled to the window's length.
   OpenCode records an attempt for every request, routed or direct, so direct
@@ -303,11 +304,20 @@ makes that visible so the user can spread them.
   windows count attempts; `tokens` windows count input, output and reasoning
   tokens, as OpenCode's `model-usage.ts` meters plans. `usd`, `percent` and
   `other` windows get no projection. The projection is an estimate from
-  recent traffic and cannot see usage outside OpenCode. A weighted or
-  round-robin pool with a target at 70 percent or more gets a `lower-weight`
-  suggestion, which the panel turns into a button that halves that target's
-  weight. Without the routing tables the route still answers, with
-  `statsAvailable: false` and no counts. A damaged `plans.json` or links file
+  recent traffic and cannot see usage outside OpenCode; a window of zero or
+  negative hours gets none. A weighted or round-robin pool (OpenCode's
+  round-robin is smooth weighted round robin, so both draw by weight) with a
+  target at 70 percent or more gets a `lower-weight` suggestion while the
+  target's weight is above 0.1, which the panel turns into a button that
+  halves that weight. Without the routing tables the route still answers, with
+  `statsAvailable: false` and no counts. The session and usage queries
+  settle separately (`sessionsAvailable`, `usageAvailable`), so one failing
+  costs only its own columns. Each telemetry row counts once per plan, even
+  when overlapping links (`openai/*` and `openai/gpt-x`) both cover it. When
+  OpenCode's base URL is not a loopback address (`OPENCODE_HOST` on another
+  machine), its database is not on this one, so the route reads no local file
+  and answers `statsReason: "remote-opencode"`; a local file could be a stale
+  one from another install. A damaged `plans.json` or links file
   is reported as `planError` / `linksError` and costs only the plan columns;
   a link to a plan that no longer exists is reported as `missingPlanID` so the
   panel can clear it. The panel reads again whenever the pools change.

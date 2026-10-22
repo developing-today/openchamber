@@ -330,11 +330,12 @@ export const registerPoolRotationRoutes = (app, rotation) => {
 };
 
 /** Builds the rotation job from the server's dependencies, registers its routes and starts its timer. */
-export const registerPoolRotation = (app, { readConfigLayers, openchamberDataDir, buildOpenCodeUrl, getOpenCodeAuthHeaders, isAutoSession }) => {
+export const registerPoolRotation = (app, { readConfigLayers, openchamberDataDir, buildOpenCodeUrl, getOpenCodeAuthHeaders, isAutoSession, isOpenCodeLocal = () => true }) => {
   const sessions = createOpenCodeSessionAccess({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
   const rotation = createPoolRotation({
     dataDir: openchamberDataDir,
-    computeHealth: () => computePoolHealth({ readConfigLayers, openchamberDataDir }),
+    // A remote OpenCode's telemetry is not on this machine; health then reports it unavailable and nothing moves.
+    computeHealth: () => computePoolHealth({ readConfigLayers, openchamberDataDir, telemetryLocal: isOpenCodeLocal() }),
     readRoutes: () => readModelRoutes(readConfigLayers(null).mergedConfig),
     sessionsOnTarget: (target) => querySessionsOnTarget(resolveOpenCodeDbPath(), target),
     targetReliability: () => queryTargetReliability(resolveOpenCodeDbPath()),

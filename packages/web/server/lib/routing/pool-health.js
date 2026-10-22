@@ -34,6 +34,9 @@ const targetRef = (target) => (targetRefSchema.safeParse(target).data ?? '').spl
 
 const WARN_RATIO = 0.7;
 
+/** The lowest weight the Lower weight button halves a target to (`ModelPoolsSection`). */
+const MIN_WEIGHT = 0.1;
+
 // Which recent-usage figure a quota unit is measured in. `tokens` is input,
 // output and reasoning together, the figure OpenCode meters plans by
 // (`packages/core/src/model-usage.ts`). Cost and percent windows need prices
@@ -42,7 +45,7 @@ const USAGE_BY_UNIT = { requests: 'attempts', messages: 'attempts', tokens: 'tok
 
 const projectionFor = (quota, usage, hours) => {
   const measure = USAGE_BY_UNIT[quota?.unit];
-  if (!measure || quota.limit === undefined || quota.windowHours === undefined || !(quota.limit > 0)) return null;
+  if (!measure || !(quota.limit > 0) || !(quota.windowHours > 0)) return null;
   const projected = (usage[measure] / hours) * quota.windowHours;
   const ratio = projected / quota.limit;
   return {
@@ -71,11 +74,13 @@ export const computePoolHealth = async ({
   resolveDbPath = resolveOpenCodeDbPath,
   loadPlanStore = readPlanStore,
   loadPoolPlanLinks = readPoolPlanLinks,
+  telemetryLocal = true,
   hours: requestedHours,
   activeMinutes: requestedActiveMinutes,
   now = Date.now(),
 } = {}) => {
-  const hours = Math.min(336, positiveOr(requestedHours, 24));
+  // The same bounds the attempt query samples with, so the rate divides by the hours it read.
+  const hours = Math.min(336, Math.max(0.1, positiveOr(requestedHours, 24)));
   const activeMinutes = Math.min(1440, positiveOr(requestedActiveMinutes, 15));
   const layers = readConfigLayers(null);
   const routes = readModelRoutes(layers.mergedConfig);
@@ -97,47 +102,51 @@ export const computePoolHealth = async ({
   }
   const planByID = new Map(plans.map((plan) => [plan.id, plan]));
 
-  let sessionRows = [];
-  let usageRows = [];
-  let statsAvailable = true;
+  // Each query settles on its own: a failed one costs only its own columns.
+  let sessionRows = null;
+  let usageRows = null;
   let statsReason;
-  try {
+  if (!telemetryLocal) {
+    statsReason = 'remote-opencode';
+  } else {
     const dbPath = resolveDbPath();
-    const [active, usage] = await Promise.all([
+    const [active, usage] = await Promise.allSettled([
       queryActiveSessionsPerTarget(dbPath, { minutes: activeMinutes, now }),
       queryAttemptCountsPerTarget(dbPath, { hours, now }),
     ]);
-    sessionRows = active.sessions;
-    usageRows = usage.targets;
-  } catch (error) {
-    statsAvailable = false;
-    statsReason = STATS_ERROR_CODES.has(error?.code) ? error.code : 'unknown';
+    if (active.status === 'fulfilled') sessionRows = active.value.sessions;
+    if (usage.status === 'fulfilled') usageRows = usage.value.targets;
+    const failure = [active, usage].find((result) => result.status === 'rejected');
+    if (failure) statsReason = STATS_ERROR_CODES.has(failure.reason?.code) ? failure.reason.code : 'unknown';
   }
+  const sessionsAvailable = sessionRows !== null;
+  const usageAvailable = usageRows !== null;
+  const statsAvailable = sessionsAvailable && usageAvailable;
 
   // A target may be a pattern (`openai/*`); OpenCode records the concrete
   // model it called, so a target covers every row its pattern names.
   const covers = (ref, row) => ref !== '' && keyNamesTarget(`${row.providerID}/${row.modelID}`, ref);
   const activeSessionsOf = (ref) => new Set(sessionRows.filter((row) => covers(ref, row)).map((row) => row.sessionID)).size;
-  const usageOf = (ref) => usageRows
-    .filter((row) => covers(ref, row))
-    .reduce((total, row) => ({ attempts: total.attempts + row.attempts, tokens: total.tokens + row.tokens }), { attempts: 0, tokens: 0 });
 
   // Targets sharing one plan id pool their recent usage, so a quota ratio
-  // reflects the plan's combined traffic, not one target's slice of it.
-  const usageForPlan = (planID) => Object.entries(links)
-    .filter(([, linkedPlanID]) => linkedPlanID === planID)
-    .map(([ref]) => usageOf(ref))
-    .reduce((total, usage) => ({ attempts: total.attempts + usage.attempts, tokens: total.tokens + usage.tokens }), { attempts: 0, tokens: 0 });
+  // reflects the plan's combined traffic. Each telemetry row counts once, even
+  // when overlapping links (`openai/*` and `openai/gpt-x`) both cover it.
+  const usageForPlan = (planID) => {
+    const refs = Object.entries(links).filter(([, linkedPlanID]) => linkedPlanID === planID).map(([ref]) => ref);
+    return usageRows
+      .filter((row) => refs.some((ref) => covers(ref, row)))
+      .reduce((total, row) => ({ attempts: total.attempts + row.attempts, tokens: total.tokens + row.tokens }), { attempts: 0, tokens: 0 });
+  };
 
   const pools = {};
   for (const [poolID, route] of Object.entries(routes)) {
     const selection = route.selection ?? 'ordered';
     const targets = (route.targets ?? []).map((target) => {
       const ref = targetRef(target);
-      const activeSessions = statsAvailable ? activeSessionsOf(ref) : null;
+      const activeSessions = sessionsAvailable ? activeSessionsOf(ref) : null;
       const planID = links[ref];
       const plan = planID ? planByID.get(planID) : undefined;
-      const projection = statsAvailable && plan ? tightestProjection(plan.quotas, usageForPlan(planID), hours) : null;
+      const projection = usageAvailable && plan ? tightestProjection(plan.quotas, usageForPlan(planID), hours) : null;
       const planInfo = plan
         ? {
             id: plan.id,
@@ -150,7 +159,11 @@ export const computePoolHealth = async ({
       // A link to a plan that is gone (or unreadable) is reported so it can be cleared.
       const missingPlanID = planID && !plan && planError === null ? planID : null;
       const blastRadius = activeSessions !== null && activeSessions >= 2;
-      const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && (route.targets?.length ?? 0) > 1 && projection.status !== 'ok'
+      // Both selections draw by weight (OpenCode's round-robin is smooth weighted round
+      // robin). A weight already at the floor the button halves to has nothing left to give.
+      const weight = route.weights?.[ref] ?? 1;
+      const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && (route.targets?.length ?? 0) > 1
+        && projection.status !== 'ok' && weight > MIN_WEIGHT
         ? 'lower-weight'
         : null;
       return { ref, activeSessions, plan: planInfo, missingPlanID, blastRadius, suggestion };
@@ -158,11 +171,26 @@ export const computePoolHealth = async ({
     pools[poolID] = { selection, targets };
   }
 
-  return { available: true, statsAvailable, statsReason, planError, linksError, generatedAt: now, pools };
+  return { available: true, statsAvailable, sessionsAvailable, usageAvailable, statsReason, planError, linksError, generatedAt: now, pools };
+};
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+/**
+ * Whether OpenCode runs on this machine, so its database here is the one it
+ * writes. An OpenCode on another host (`OPENCODE_HOST`) keeps its telemetry
+ * there; a local file could be a stale one from another install.
+ */
+export const isLocalOpenCode = (buildOpenCodeUrl) => {
+  try {
+    return LOOPBACK_HOSTS.has(new URL(buildOpenCodeUrl('/', '')).hostname);
+  } catch {
+    return false;
+  }
 };
 
 export const registerPoolHealthRoutes = (app, dependencies) => {
-  const { readConfigLayers, openchamberDataDir } = dependencies;
+  const { readConfigLayers, openchamberDataDir, isOpenCodeLocal = () => true } = dependencies;
 
   app.get('/api/model-routes/health', async (req, res) => {
     try {
@@ -170,6 +198,7 @@ export const registerPoolHealthRoutes = (app, dependencies) => {
         await computePoolHealth({
           readConfigLayers,
           openchamberDataDir,
+          telemetryLocal: isOpenCodeLocal(),
           hours: req.query?.hours ? Number(req.query.hours) : undefined,
           activeMinutes: req.query?.activeMinutes ? Number(req.query.activeMinutes) : undefined,
         }),

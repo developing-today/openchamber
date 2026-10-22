@@ -4,7 +4,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 
-import { computePoolHealth } from './pool-health.js';
+import { computePoolHealth, isLocalOpenCode } from './pool-health.js';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pool-health-'));
 
@@ -182,6 +182,98 @@ describe('computePoolHealth', () => {
       ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, links: { 'openai/a': 'deleted-plan' } }),
     });
     expect(health.pools.pool1.targets[0]).toMatchObject({ plan: null, missingPlanID: 'deleted-plan' });
+  });
+
+  it('counts a session on the target of its latest attempt, not one it failed over from', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [
+      { time: now - 5 * 60_000, session: 's1', provider: 'openai', model: 'a' },
+      { time: now - 1 * 60_000, session: 's1', provider: 'anthropic', model: 'b' },
+      { time: now - 2 * 60_000, session: 's2', provider: 'openai', model: 'a' },
+    ]);
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a', 'anthropic/b'] } } }), now });
+    expect(health.pools.pool1.targets.map(({ ref, activeSessions }) => [ref, activeSessions])).toEqual([['openai/a', 1], ['anthropic/b', 1]]);
+  });
+
+  it('gives no projection for a window of zero or negative hours', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('broken', [{ name: 'none', unit: 'requests', limit: 10, windowHours: 0 }, { name: 'negative', unit: 'requests', limit: 10, windowHours: -5 }])];
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'broken' } }), now });
+    expect(health.pools.pool1.targets[0].plan.projection).toBeNull();
+  });
+
+  it('projects from the hours the query actually sampled when asked for less than its minimum', async () => {
+    const now = Date.now();
+    // One attempt 4 minutes ago: inside the 6-minute (0.1 h) minimum sample, outside 3 minutes.
+    const dbPath = seedDb(tempDir(), [{ time: now - 4 * 60_000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('openai-plus', [{ name: 'hourly', unit: 'requests', limit: 100, windowHours: 1 }])];
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-plus' } }), now, hours: 0.05 });
+    expect(health.pools.pool1.targets[0].plan.projection.projected).toBe(10);
+  });
+
+  it('offers no lower-weight suggestion once the weight is at its floor', async () => {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 0; i < 24; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'a' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const at = (weight) => computePoolHealth({
+      ...baseDeps(dbPath, {
+        routes: { pool1: { selection: 'round-robin', targets: ['openai/a', 'anthropic/b'], weights: { 'openai/a': weight } } },
+        plans,
+        links: { 'openai/a': 'openai-plus' },
+      }),
+      now,
+    });
+    expect((await at(0.2)).pools.pool1.targets[0].suggestion).toBe('lower-weight');
+    expect((await at(0.1)).pools.pool1.targets[0].suggestion).toBeNull();
+  });
+
+  it('counts each telemetry row once when overlapping links name the same plan', async () => {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 0; i < 6; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'gpt-x' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 100, windowHours: 24 }])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/*', 'openai/gpt-x'] } }, plans, links: { 'openai/*': 'openai-plus', 'openai/gpt-x': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    expect(health.pools.pool1.targets[0].plan.projection.projected).toBe(6);
+  });
+
+  it('keeps the session counts when only the usage query fails', async () => {
+    const now = Date.now();
+    const dbPath = path.join(tempDir(), 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    // An older table without the token columns: the usage query fails, the session query works.
+    db.exec('create table route_attempt (time_started integer, session_id text, route_id text, provider_id text, model_id text, outcome text)');
+    db.prepare('insert into route_attempt values (?, ?, ?, ?, ?, ?)').run(now - 1000, 's1', 'pool', 'openai', 'a', 'success');
+    db.prepare('insert into route_attempt values (?, ?, ?, ?, ?, ?)').run(now - 2000, 's2', 'pool', 'openai', 'a', 'success');
+    db.close();
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-plus' } }), now });
+    expect(health).toMatchObject({ statsAvailable: false, sessionsAvailable: true, usageAvailable: false });
+    expect(health.pools.pool1.targets[0]).toMatchObject({ activeSessions: 2, blastRadius: true });
+    expect(health.pools.pool1.targets[0].plan.projection).toBeNull();
+  });
+
+  it('reads no local telemetry for an OpenCode on another host', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a' }]);
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } } }), telemetryLocal: false, now });
+    expect(health).toMatchObject({ statsAvailable: false, statsReason: 'remote-opencode' });
+    expect(health.pools.pool1.targets[0].activeSessions).toBeNull();
+  });
+
+  it('treats only a loopback OpenCode as local', () => {
+    expect(isLocalOpenCode(() => 'http://127.0.0.1:4096/')).toBe(true);
+    expect(isLocalOpenCode(() => 'http://localhost:4096/')).toBe(true);
+    expect(isLocalOpenCode(() => 'http://[::1]:4096/')).toBe(true);
+    expect(isLocalOpenCode(() => 'http://seamus:4095/')).toBe(false);
+    expect(isLocalOpenCode(() => { throw new Error('not started'); })).toBe(false);
   });
 
   it('degrades to statsAvailable: false instead of throwing when the database is missing', async () => {
