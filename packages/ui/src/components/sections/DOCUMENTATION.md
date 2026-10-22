@@ -218,6 +218,9 @@ persisted all-on-one-page choice (`routing-page-view`), and the map from a
 Settings search result to its tab, which the Settings view applies before the
 result is highlighted. A result for a Routing item that is not in the map
 opens Auto. The tab itself is not saved; reopening the page starts on Auto.
+On desktop the tabs share the page's width; on a phone the strip scrolls
+sideways and each tab keeps its whole label, since five fitted tabs left a
+few letters of each.
 
 Pool targets never truncate: a target's full name wraps in the row, and the
 pool header carries its name as a hover title, so a long model id reads

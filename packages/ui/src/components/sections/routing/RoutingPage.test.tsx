@@ -168,4 +168,38 @@ describe('RoutingPage', () => {
     expect(sectionIds()).toEqual(['routing-auto', 'routing-rules', 'routing-pools', 'routing-plans', 'routing-categories']);
     useRoutingPageViewStore.setState({ tab: 'auto', showAllOnOnePage: false });
   });
+
+  // At a phone's width five fitted tabs were cut to "Auto …", "Rout…",
+  // "Mod…". There the strip scrolls and each tab keeps its whole label;
+  // desktop still fits them to the page.
+  test('the section tabs scroll on a phone and fit the width on desktop', async () => {
+    const dom = installDom();
+    const { createRoot } = await import('react-dom/client');
+    const { RoutingPage } = await import('./RoutingPage');
+    const { I18nProvider } = await import('@/lib/i18n');
+    const { useUIStore } = await import('@/stores/useUIStore');
+    const root = createRoot(dom.container);
+    mounted = { root, restore: dom.restore };
+    const wasMobile = useUIStore.getState().isMobile;
+    const tablistScrolls = () => dom.container.querySelector('[role="tablist"]')?.classList.contains('overflow-x-auto') ?? null;
+    try {
+      useUIStore.setState({ isMobile: true });
+      await act(async () => {
+        root.render(
+          <I18nProvider>
+            <RoutingPage />
+          </I18nProvider>,
+        );
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(tablistScrolls()).toBe(true);
+
+      await act(async () => useUIStore.setState({ isMobile: false }));
+      expect(tablistScrolls()).toBe(false);
+    } finally {
+      useUIStore.setState({ isMobile: wasMobile });
+    }
+  });
 });

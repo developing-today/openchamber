@@ -38,6 +38,7 @@ import { PlansSection } from '@/components/sections/routing/PlansSection';
 import { RouteRulesSection } from '@/components/sections/routing/RouteRulesSection';
 import { useRoutingPageViewStore, type RoutingTab } from '@/components/sections/routing/routingTabs';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
+import { useUIStore } from '@/stores/useUIStore';
 
 const DEFAULT_VARIANT_VALUE = '__default__';
 const SAVE_DEBOUNCE_MS = 500;
@@ -221,6 +222,9 @@ const RoutingSectionTabs: React.FC = () => {
   const setTab = useRoutingPageViewStore((state) => state.setTab);
   const showAllOnOnePage = useRoutingPageViewStore((state) => state.showAllOnOnePage);
   const setShowAllOnOnePage = useRoutingPageViewStore((state) => state.setShowAllOnOnePage);
+  // Five labels do not fit a phone's width, and fitting them cut each to a
+  // few letters, so there the strip scrolls with every label whole.
+  const isMobile = useUIStore((state) => state.isMobile);
   const items = React.useMemo<SortableTabsStripItem[]>(() => [
     { id: 'auto', label: t('settings.routing.auto.title') },
     { id: 'rules', label: t('settings.rules.title') },
@@ -242,7 +246,7 @@ const RoutingSectionTabs: React.FC = () => {
         items={items}
         activeId={tab}
         onSelect={onSelectTab}
-        layoutMode="fit"
+        layoutMode={isMobile ? 'scrollable' : 'fit'}
         variant="active-pill"
       />
       <SettingsCheckboxRow
