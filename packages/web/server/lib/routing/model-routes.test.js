@@ -39,6 +39,57 @@ describe('validateModelRoute', () => {
   });
 });
 
+describe('validateModelRoutes route references', () => {
+  it('refuses a target referencing a route that is not in the saved set', () => {
+    expect(validateModelRoutes({ mine: { targets: ['opencode-route/nope'] } })).toMatch(
+      /route "mine" target "opencode-route\/nope" references route "nope", which is not one of the saved routes/,
+    );
+    expect(validateModelRoutes({ mine: { targets: ['openai/gpt-x', 'opencode-route/nope'] } })).toMatch(/references route "nope"/);
+    expect(validateModelRoutes({ mine: { targets: [{ model: 'opencode-route/nope' }] } })).toMatch(/references route "nope"/);
+  });
+
+  it('refuses a route whose only target is itself', () => {
+    expect(validateModelRoutes({ mine: { targets: ['opencode-route/mine'] } })).toMatch(/route "mine" would expand to no models/);
+  });
+
+  it('refuses a reference cycle that reaches no concrete model target', () => {
+    expect(
+      validateModelRoutes({ a: { targets: ['opencode-route/b'] }, b: { targets: ['opencode-route/a'] } }),
+    ).toMatch(/would expand to no models/);
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'] },
+        b: { targets: ['opencode-route/c'] },
+        c: { targets: ['opencode-route/b'] },
+      }),
+    ).toMatch(/would expand to no models/);
+  });
+
+  it('accepts references to routes in the set, including cycles that reach a concrete target', () => {
+    expect(
+      validateModelRoutes({ a: { targets: ['opencode-route/b'] }, b: { targets: ['openai/gpt-x'] } }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b', 'openai/gpt-x'] },
+        b: { targets: ['opencode-route/a'] },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'] },
+        b: { targets: ['opencode-route/a', 'openai/gpt-x'] },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({ a: { targets: ['opencode-route/b#high'] }, b: { targets: ['openai/gpt-x'] } }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({ a: { targets: [{ model: 'opencode-route/b' }] }, b: { targets: ['openai/gpt-x'] } }),
+    ).toBeNull();
+  });
+});
+
 describe('validateModelRoute advanced fields', () => {
   const base = { targets: ['a/b'] };
 
