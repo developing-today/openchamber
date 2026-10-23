@@ -71,6 +71,9 @@ type ReporterDeps<T> = {
  */
 export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface, schedule, cancel, debounceMs = 2_000 }: ReporterDeps<T>) => {
   let delivered: string | null = null;
+  // The revision of the report `delivered` came from. A send that finishes
+  // after a newer one must not replace it with its older snapshot.
+  let deliveredRevision = 0;
   let timer: number | null = null;
   // Bumped when another server takes over: a reply to a report sent to the
   // previous one must not mark the new one as told.
@@ -78,7 +81,11 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
   // Starts from the clock and only grows within this page, whose id is new.
   let revision = 0;
 
-  // One send at a time: a slow earlier report must not land after a newer one.
+  // Sends go one at a time, except a closing send (see flush): a slow earlier
+  // report must not take effect after a newer one. The revisions carry that
+  // rule where the sends themselves overlap: the server ignores a report
+  // older than the one it holds, and `deliveredRevision` keeps this page's
+  // own record on the newest report.
   let inFlight: Promise<void> = Promise.resolve();
 
   const sendLatest = async (closing: boolean): Promise<void> => {
@@ -87,13 +94,19 @@ export const createDeviceSettingsReporter = <T>({ read, send, deviceId, surface,
     if (snapshot === delivered) return;
     const sentFor = generation;
     revision = Math.max(Date.now(), revision + 1);
-    if (await send({ deviceId, surface, values, revision }, closing) && sentFor === generation) delivered = snapshot;
+    const sentRevision = revision;
+    if (await send({ deviceId, surface, values, revision: sentRevision }, closing) && sentFor === generation && sentRevision > deliveredRevision) {
+      delivered = snapshot;
+      deliveredRevision = sentRevision;
+    }
   };
 
   const flush = (closing = false): Promise<void> => {
     if (timer !== null) cancel(timer);
     timer = null;
-    // A closing window cannot wait for an earlier send; it goes out at once.
+    // A closing window cannot wait for an earlier send; it goes out at once,
+    // alongside the one still in flight. The revisions keep the overlap from
+    // leaving either side on the older report.
     inFlight = closing ? sendLatest(true) : inFlight.then(() => sendLatest(false));
     return inFlight;
   };
