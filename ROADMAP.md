@@ -163,3 +163,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #274 completion                          | 2026-10-23 | #279, #346                 |
 | Pool budget keys must name a route target                         | 2026-10-23 | #347, #348                 |
 | Pool schedule targets must match a route target                   | 2026-10-23 | #349, #350                 |
+| Pool weights and budgets on a fixed route rejected                | 2026-10-23 | #359, #360                 |
