@@ -112,5 +112,7 @@ describe('resolveOpenCodeDbPath', () => {
     expect(resolveOpenCodeDbPath({ OPENCODE_DB: '/tmp/custom.db' })).toBe('/tmp/custom.db');
     expect(resolveOpenCodeDbPath({ OPENCODE_DB: ':memory:' })).toMatch(/opencode\.db$/);
     expect(resolveOpenCodeDbPath({})).toMatch(/opencode\.db$/);
+    expect(resolveOpenCodeDbPath({ XDG_DATA_HOME: '/srv/data' })).toBe('/srv/data/opencode/opencode.db');
+    expect(resolveOpenCodeDbPath({ XDG_DATA_HOME: '/srv/data', OPENCODE_DB: 'other.db' })).toBe('/srv/data/opencode/other.db');
   });
 });
