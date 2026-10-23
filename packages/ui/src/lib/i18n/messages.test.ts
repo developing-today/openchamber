@@ -15,6 +15,7 @@ import { dict as zhTwDict } from './messages/zh-TW';
 import { dict as trDict } from './messages/tr';
 import { dict as arDict } from './messages/ar';
 import { dict as heDict } from './messages/he';
+import { routingI18n } from './messages/routing.i18n';
 
 const localeDictionaries = {
   en: enDict,
@@ -87,6 +88,29 @@ describe('i18n dictionaries', () => {
       for (const parameter of ['input', 'output', 'reasoning']) {
         expect(dictionary['chat.workStatus.telemetry.tokensDescription']).toContain(`{${parameter}}`);
       }
+    }
+  });
+
+  // Issue #299: 222 routing strings shipped in English in the ar and he blocks.
+  test('routing strings are translated in Arabic and Hebrew and keep their placeholders', () => {
+    const english = new Map<string, string>(Object.entries(routingI18n.en));
+    expect(english.size > 300).toBe(true);
+    const placeholders = (text: string | undefined) => (text?.match(/\{[a-zA-Z]+\}/g) ?? []).sort();
+    for (const locale of ['ar', 'he'] as const) {
+      const translated = new Map<string, string>(Object.entries(routingI18n[locale]));
+      expect([...translated.keys()].sort()).toEqual([...english.keys()].sort());
+      const untranslated = [...english].filter(([key, text]) => translated.get(key) === text).map(([key]) => key);
+      expect(untranslated).toEqual([]);
+      for (const [key, text] of english) {
+        expect(placeholders(translated.get(key))).toEqual(placeholders(text));
+      }
+    }
+  });
+
+  test('routing telemetry target column is translated in every locale', () => {
+    const key = 'settings.pools.telemetry.target';
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      if (locale !== 'en') expect(dictionary[key]).not.toBe(enDict[key]);
     }
   });
 
