@@ -184,7 +184,7 @@ const validateScheduleWindow = (id, label, window) => {
 /** A route's `schedules`: time-bound weight changes, as OpenCode's Schedule schema defines them.
  * A schedule with nothing to change, or with both changes, is refused: OpenCode drops the first
  * kind without a word and applies only the weight of the second, ignoring its factor. */
-const validateSchedules = (id, schedules) => {
+const validateSchedules = (id, schedules, targets) => {
   if (!Array.isArray(schedules)) return `route "${id}" schedules must be a list of schedule objects`;
   for (const [index, schedule] of schedules.entries()) {
     const label = `schedule ${index + 1}`;
@@ -198,6 +198,11 @@ const validateSchedules = (id, schedules) => {
     if (schedule.targets !== undefined) {
       if (!Array.isArray(schedule.targets) || schedule.targets.some((target) => !isString(target) || target.trim() === ""))
         return `route "${id}" ${label} targets must be a list of non-empty target references`;
+      if (schedule.targets.length === 0)
+        return `route "${id}" ${label} targets must not be empty: OpenCode applies a schedule with an empty targets list to every target in the route, so leave the key out for every target`;
+      for (const entry of schedule.targets)
+        if (!targets.some((target) => keyNamesTarget(entry, target) || keyNamesTarget(referenceOf(target), entry)))
+          return `route "${id}" ${label} target "${entry}" matches no target in the route`;
     }
     if (!isRecord(schedule.when)) return `route "${id}" ${label} needs a when window object`;
     const windowProblem = validateScheduleWindow(id, label, schedule.when);
@@ -293,7 +298,7 @@ export const validateModelRoute = (id, route) => {
     if (problem) return problem;
   }
   if (route.schedules !== undefined) {
-    const problem = validateSchedules(id, route.schedules);
+    const problem = validateSchedules(id, route.schedules, route.targets);
     if (problem) return problem;
   }
   return null;
