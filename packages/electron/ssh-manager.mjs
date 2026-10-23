@@ -407,12 +407,14 @@ const parseVersionToken = (raw) => {
 // when the connection failed) or the literal 0/200 fallbacks, so the value is
 // judged whole and in its canonical shape: parseInt alone would accept
 // '200junk' or '200.9' as 200, and a digit string of any other length is a
-// leading-zero spelling ('0200', '000200') the script never emits. A
+// leading-zero spelling ('0200', '000200') the script never emits. Padding
+// counts too: the script prints no spaces or tabs around the value, so a
+// padded spelling (' 200', '200 ') is judged as written, with no trim. A
 // login-shell banner line carrying such a value must not fake a healthy
 // server or an accepted password.
 const parseProbeStatusLine = (line, prefix) => {
   if (!line || !line.startsWith(prefix)) return null;
-  const raw = line.slice(prefix.length).trim();
+  const raw = line.slice(prefix.length);
   if (raw !== '0' && !/^\d{3}$/.test(raw)) return null;
   const value = Number.parseInt(raw, 10);
   return value === 0 || (value >= 100 && value <= 599) ? value : null;
@@ -423,10 +425,13 @@ const parseProbeStatusLine = (line, prefix) => {
 // remote command runs through a login shell, whose banner/profile output can
 // precede that line and contain arbitrary numbers, so the port must be read
 // from an anchored whole-line match — never the first number in the output —
-// and range-checked like any other port.
+// and range-checked like any other port. The match also requires the
+// canonical spelling: serve prints the port with no leading zeros, so a
+// leading-zero line ('080', '04096') can only be banner output, the same
+// canonical-shape rule parseProbeStatusLine applies to probe statuses.
 const parseServedPortLine = (output) => {
   for (const line of String(output ?? '').split('\n')) {
-    const match = line.trim().match(/^(\d{1,5})(?:\s+pass:\S+)?$/);
+    const match = line.trim().match(/^([1-9]\d{0,4})(?:\s+pass:\S+)?$/);
     if (!match) continue;
     const value = Number.parseInt(match[1], 10);
     if (value >= 1 && value <= 65535) return value;
@@ -454,6 +459,12 @@ const parseRemoteOs = (output) => {
 // its own: a banner sentence can start with '/' and read as a path with
 // spaces, so resolveRemoteTool adds position and ending checks there.
 const isRemotePathLine = (value) => value.startsWith('/');
+
+// A stored port is only a port when it is an integer in 1-65535: a finite
+// number alone lets 99999, -1 or 8080.9 through the sanitizers and into an
+// ssh -L/-R spec or a remote `serve --port`, where it fails opaquely. The
+// same range check guards discovered servers in listRemoteServers.
+const validPort = (value) => (Number.isInteger(value) && value >= 1 && value <= 65535 ? value : null);
 
 const isAuthHttpStatus = (status) => status === 401 || status === 403;
 const isLivenessHttpStatus = (status) => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
@@ -871,9 +882,9 @@ export class ElectronSshManager {
       enabled: forward?.enabled !== false,
       type,
       ...(forward?.localHost ? { localHost: sanitizeBindHost(forward.localHost) } : {}),
-      ...(Number.isFinite(forward?.localPort) ? { localPort: Number(forward.localPort) } : {}),
+      ...(validPort(forward?.localPort) !== null ? { localPort: Number(forward.localPort) } : {}),
       ...(forward?.remoteHost ? { remoteHost: String(forward.remoteHost).trim() || '127.0.0.1' } : {}),
-      ...(Number.isFinite(forward?.remotePort) ? { remotePort: Number(forward.remotePort) } : {}),
+      ...(validPort(forward?.remotePort) !== null ? { remotePort: Number(forward.remotePort) } : {}),
     };
 
     if (type === 'local' || type === 'remote') {
@@ -916,7 +927,7 @@ export class ElectronSshManager {
       remoteOpenchamber: {
         mode: instance?.remoteOpenchamber?.mode === 'external' ? 'external' : 'managed',
         keepRunning: instance?.remoteOpenchamber?.keepRunning !== false,
-        ...(Number.isFinite(instance?.remoteOpenchamber?.preferredPort) ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
+        ...(validPort(instance?.remoteOpenchamber?.preferredPort) !== null ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
         installMethod: ['auto', 'npm', 'bun'].includes(instance?.remoteOpenchamber?.installMethod)
           ? instance.remoteOpenchamber.installMethod
           : 'auto',
@@ -925,7 +936,7 @@ export class ElectronSshManager {
       },
       localForward: {
         bindHost: sanitizeBindHost(instance?.localForward?.bindHost),
-        ...(Number.isFinite(instance?.localForward?.preferredLocalPort) ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
+        ...(validPort(instance?.localForward?.preferredLocalPort) !== null ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
       },
       auth: {
         ...(this.sanitizeStoredSecret(instance?.auth?.sshPassword) ? { sshPassword: this.sanitizeStoredSecret(instance.auth.sshPassword) } : {}),
@@ -1366,7 +1377,7 @@ export class ElectronSshManager {
     }
     if (!payload) throw firstError ?? new Error('Remote OpenChamber status output held no server registry');
     return payload.instances
-      .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port))
+      .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port) && entry.port >= 1 && entry.port <= 65535)
       .map((entry) => ({
         port: entry.port,
         launchMode: entry.launchMode,
