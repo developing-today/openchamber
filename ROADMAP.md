@@ -157,3 +157,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Dev-server listener ports and pids reject trailing junk           | 2026-10-22 | #264, #265                 |
 | ROADMAP Done records the #178, #207 and #264 completions          | 2026-10-22 | #266, #267                 |
 | Vault read status tied to the reference it came from              | 2026-10-22 | #268, #271                 |
+| Queued-goal applyGoalChoice extracted and pinned by tests         | 2026-10-23 | #282, #333                 |
