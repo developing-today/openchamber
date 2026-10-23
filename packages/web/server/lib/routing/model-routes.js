@@ -93,9 +93,11 @@ const validateHealth = (id, health) => {
 
 const BUDGET_LIMITS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay"];
 
-const validateBudgets = (id, budgets) => {
+const validateBudgets = (id, budgets, targets) => {
   if (!isRecord(budgets)) return `route "${id}" budgets must map target references to allowances`;
   for (const [target, budget] of Object.entries(budgets)) {
+    if (!targets.some((candidate) => keyNamesTarget(target, candidate)))
+      return `route "${id}" budget for "${target}" matches no target in the route`;
     if (!isRecord(budget)) return `route "${id}" budget for "${target}" must be an object`;
     const unknown = unknownKeysProblem(budget, BUDGET_KEYS);
     if (unknown) return `route "${id}" budget for "${target}" has ${unknown}`;
@@ -287,7 +289,7 @@ export const validateModelRoute = (id, route) => {
     if (problem) return problem;
   }
   if (route.budgets !== undefined) {
-    const problem = validateBudgets(id, route.budgets);
+    const problem = validateBudgets(id, route.budgets, route.targets);
     if (problem) return problem;
   }
   if (route.schedules !== undefined) {
