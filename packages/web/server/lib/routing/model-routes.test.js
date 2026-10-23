@@ -73,6 +73,14 @@ describe('validateModelRoute advanced fields', () => {
     expect(validateModelRoute('x', { ...base, health: { minOutputTokensPerSecond: 0 } })).toMatch(/minOutputTokensPerSecond/);
   });
 
+  it('refuses non-finite weights and health rates, which OpenCode requires to be finite', () => {
+    expect(validateModelRoute('x', { ...base, weights: { 'a/b': Infinity } })).toMatch(/weight for "a\/b" must be a positive number/);
+    // The realistic spelling: an overflowing JSON number parses to Infinity.
+    expect(validateModelRoute('x', { ...base, weights: { 'a/b': JSON.parse('1e999') } })).toMatch(/positive number/);
+    expect(validateModelRoute('x', { ...base, health: { minOutputTokensPerSecond: Infinity } })).toMatch(/minOutputTokensPerSecond must be a positive number/);
+    expect(validateModelRoute('x', { ...base, weights: { 'a/b': 2 }, health: { minOutputTokensPerSecond: 12.5 } })).toBeNull();
+  });
+
   it('rejects malformed budgets', () => {
     expect(validateModelRoute('x', { ...base, budgets: { 'a/b': { requestsPerDay: -5 } } })).toMatch(/requestsPerDay/);
     expect(validateModelRoute('x', { ...base, budgets: { 'a/b': { softLimit: 1.5 } } })).toMatch(/softLimit/);
