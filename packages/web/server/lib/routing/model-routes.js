@@ -116,11 +116,16 @@ const isPositiveNumber = (value) => Number.isFinite(value) && value > 0;
 
 // A window time as OpenCode's schedule parser reads it (`minutesOf` in
 // model-route-schedule.ts): "9:30", "09:30" or "9:30:15", hours to 23, minutes to 59.
-const isWindowTime = (value) => {
-  if (!isString(value)) return false;
+// The parser compares minutes since midnight and rounds seconds down, so two
+// spellings of one minute are the same time to it.
+const windowTimeMinutes = (value) => {
+  if (!isString(value)) return undefined;
   const match = /^(\d{1,2}):(\d{1,2})(?::\d{2})?$/.exec(value.trim());
-  return match !== null && Number(match[1]) <= 23 && Number(match[2]) <= 59;
+  if (match === null || Number(match[1]) > 23 || Number(match[2]) > 59) return undefined;
+  return Number(match[1]) * 60 + Number(match[2]);
 };
+
+const isWindowTime = (value) => windowTimeMinutes(value) !== undefined;
 
 const isKnownTimezone = (value) => {
   if (!isString(value)) return false;
@@ -158,6 +163,12 @@ const validateScheduleWindow = (id, label, window) => {
   for (const key of ["start", "end"])
     if (window[key] !== undefined && !isWindowTime(window[key]))
       return `route "${id}" ${label} window.${key} must be a local time like "09:00"`;
+  if (
+    window.start !== undefined &&
+    window.end !== undefined &&
+    windowTimeMinutes(window.start) === windowTimeMinutes(window.end)
+  )
+    return `route "${id}" ${label} window.start and window.end must not be the same time: OpenCode treats an equal start and end as an empty window that can never apply`;
   if (window.timezone !== undefined && !isKnownTimezone(window.timezone))
     return `route "${id}" ${label} window.timezone must be an IANA timezone name OpenCode can resolve`;
   for (const key of ["from", "until"])

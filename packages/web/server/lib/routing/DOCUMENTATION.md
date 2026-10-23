@@ -287,10 +287,12 @@ makes that visible so the user can spread them.
   `when` window (weekday names or 0 to 6, days of month or -1, `start`/`end`
   local times, `timezone`, `from`/`until`), and one of `factor` or `weight`.
   Values OpenCode would drop or silently ignore are refused with the reason:
-  a window its parser cannot read, an empty day list, a schedule with neither
-  change, and one with both, where the weight would win and the factor would
-  be ignored. Cross-pool schedules (`experimental.model_route_schedules`) are
-  not OpenChamber's to save yet; #297 covers their editor.
+  a window its parser cannot read, an empty day list, a window whose start
+  and end are the same time (OpenCode treats that as an empty window that
+  never applies), a schedule with neither change, and one with both, where
+  the weight would win and the factor would be ignored. Cross-pool schedules
+  (`experimental.model_route_schedules`) are not OpenChamber's to save yet;
+  #297 covers their editor.
 - `pool-plan-links.js` keeps `pool-plan-links.json` in the OpenChamber data
   directory: a map from a target reference (`provider/model`, or a `*`
   pattern) to a plan id from the plan store. Two targets linked to one plan
