@@ -186,10 +186,21 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ zone: 'UTC' })).toMatch(/window has unknown key "zone"/);
   });
 
+  it('refuses a window whose start and end are the same time, which OpenCode treats as an empty window', () => {
+    const withWindow = (when) => validateModelRoute('x', { ...base, schedules: [{ when, factor: 0.5 }] });
+    expect(withWindow({ start: '09:00', end: '09:00' })).toMatch(/window\.start and window\.end must not be the same time/);
+    expect(withWindow({ start: '00:00', end: '00:00' })).toMatch(/empty window that can never apply/);
+    expect(withWindow({ start: '9:00', end: '09:00' })).toMatch(/must not be the same time/);
+    expect(withWindow({ start: '09:00:15', end: '09:00:45' })).toMatch(/must not be the same time/);
+  });
+
   it('accepts day numbers, single-digit times and a start past its end, which OpenCode runs past midnight', () => {
     const withWindow = (when) => validateModelRoute('x', { ...base, schedules: [{ when, factor: 0.5 }] });
     expect(withWindow({ daysOfWeek: [0, 6], daysOfMonth: [-1] })).toBeNull();
     expect(withWindow({ start: '22:00', end: '06:00' })).toBeNull();
+    expect(withWindow({ start: '09:00' })).toBeNull();
+    expect(withWindow({ end: '17:00' })).toBeNull();
+    expect(withWindow({ start: '09:00', end: '09:01' })).toBeNull();
     expect(withWindow({ timezone: 'UTC', from: 1000, until: 2000 })).toBeNull();
   });
 });
