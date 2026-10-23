@@ -247,11 +247,35 @@ describe('validateModelRoute schedules', () => {
     expect(withTargets(['openai/*-luna'], 'openai/gpt-*')).toBeNull();
     expect(withTargets(['openai/gpt-*'], 'openai/*-luna')).toBeNull();
     expect(withTargets([{ model: 'openai/*-luna' }], 'openai/gpt-*')).toBeNull();
-    expect(withTargets(['openai/*-luna'], 'openai/gpt-*#high')).toBeNull();
     expect(withTargets(['openai/gpt-*-luna'], 'openai/*-6-*')).toBeNull();
     expect(withTargets(['anthropic/*'], 'openai/gpt-*')).toMatch(/schedule 1 target "openai\/gpt-\*" matches no target in the route/);
     expect(withTargets(['openai/claude-*'], 'openai/gpt-*')).toMatch(/matches no target in the route/);
     expect(withTargets(['openai/*-luna'], 'openai/*-sol')).toMatch(/matches no target in the route/);
+  });
+
+  it('refuses a schedule target carrying a #variant, and judges letter case the way OpenCode does', () => {
+    const withEntry = (targets, entry) =>
+      validateModelRoute('x', { targets, schedules: [{ when: {}, factor: 2, targets: [entry] }] });
+    const route = ['openai/gpt-6-luna', 'anthropic/claude-1'];
+    // A variant-suffixed entry is refused even when its model is in the route:
+    // OpenCode's schedule reference has no variant, so it could never match.
+    expect(withEntry(route, 'openai/gpt-6-luna#high')).toMatch(
+      /schedule 1 target "openai\/gpt-6-luna#high" carries a "#variant" suffix: OpenCode matches schedule targets against provider\/model references without a variant/,
+    );
+    expect(withEntry(route, 'openai/*#high')).toMatch(/carries a "#variant" suffix/);
+    expect(withEntry(route, 'anthropic/claude-1#x')).toMatch(/carries a "#variant" suffix/);
+    expect(withEntry(['openai/*-luna'], 'openai/gpt-*#high')).toMatch(/carries a "#variant" suffix/);
+    // OpenCode's schedule matcher is case-insensitive, so a case-only
+    // difference validates: exact, pattern-over-concrete, and overlapping
+    // patterns in either direction.
+    expect(withEntry(route, 'OpenAI/gpt-6-luna')).toBeNull();
+    expect(withEntry(route, 'OPENAI/*')).toBeNull();
+    expect(withEntry(route, 'OPENAI/GPT-*')).toBeNull();
+    expect(withEntry(['OpenAI/*-LUNA'], 'openai/gpt-*')).toBeNull();
+    expect(withEntry(['openai/*-luna'], 'OPENAI/GPT-*')).toBeNull();
+    // Case-insensitivity does not rescue an entry that names nothing.
+    expect(withEntry(route, 'OpenAI/claude-1')).toMatch(/schedule 1 target "OpenAI\/claude-1" matches no target in the route/);
+    expect(withEntry(['openai/*-luna'], 'OPENAI/*-SOL')).toMatch(/matches no target in the route/);
   });
 
   it('refuses a schedule with no window, no change, or both changes', () => {

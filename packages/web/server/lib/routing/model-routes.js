@@ -232,10 +232,18 @@ const validateSchedules = (id, schedules, targets) => {
       if (schedule.targets.length === 0)
         return `route "${id}" ${label} targets must not be empty: OpenCode applies a schedule with an empty targets list to every target in the route, so leave the key out for every target`;
       for (const entry of schedule.targets) {
-        const entryReference = referenceOf(entry);
+        // OpenCode matches a schedule entry against a `provider/model`
+        // reference, which carries no variant, so an entry spelled with the
+        // `#variant` suffix targets use everywhere else can never match.
+        if (entry.includes("#"))
+          return `route "${id}" ${label} target "${entry}" carries a "#variant" suffix: OpenCode matches schedule targets against provider/model references without a variant, so the entry would never apply`;
+        // OpenCode's schedule matcher is case-insensitive (its glob is built
+        // with the `i` flag), so the entry and the targets are compared in
+        // lower case: a case-only difference still applies there.
+        const entryReference = referenceOf(entry).toLowerCase();
         const matches = targets.some((target) => {
-          const targetReference = referenceOf(target);
-          if (keyNamesTarget(entry, target) || keyNamesTarget(targetReference, entry)) return true;
+          const targetReference = referenceOf(target).toLowerCase();
+          if (keyNamesTarget(entryReference, targetReference) || keyNamesTarget(targetReference, entryReference)) return true;
           // Two patterns can cover a model together even when neither covers
           // the other, so a partly overlapping pair counts as a match too.
           return entryReference.includes("*") && targetReference.includes("*") && patternsOverlap(entryReference, targetReference);

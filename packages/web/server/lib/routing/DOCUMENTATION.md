@@ -296,7 +296,11 @@ makes that visible so the user can spread them.
   to, so a pattern key would never apply), a schedule target whose
   pattern shares no model with any target in the route (two patterns
   count as sharing when one model matches both, even if each covers
-  models the other does not), an empty schedule `targets` list
+  models the other does not; entries are judged in lower case, the way
+  OpenCode's case-insensitive schedule matcher reads them), a schedule
+  target carrying a `#variant` suffix (OpenCode matches schedule
+  targets against `provider/model` references without a variant, so
+  the entry could never apply), an empty schedule `targets` list
   (OpenCode applies a schedule with no target filter to every target in
   the route, so the key is left out for that), a schedule with neither
   change, and one with both, where
