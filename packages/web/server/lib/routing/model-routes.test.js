@@ -165,6 +165,30 @@ describe('validateModelRoute schedules', () => {
     expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 1, targets: ['  '] }] })).toMatch(/non-empty target references/);
   });
 
+  it('refuses a schedule target that matches no target in the route, and an empty targets list', () => {
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: ['anthropic/claude-sonnet-4-6'] }] })).toMatch(
+      /schedule 1 target "anthropic\/claude-sonnet-4-6" matches no target in the route/,
+    );
+    expect(
+      validateModelRoute('x', {
+        ...base,
+        schedules: [
+          { when: {}, factor: 2, targets: ['deepseek/v4'] },
+          { when: {}, factor: 2, targets: ['openai/y'] },
+        ],
+      }),
+    ).toMatch(/schedule 2 target "openai\/y" matches no target in the route/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [] }] })).toMatch(
+      /targets must not be empty: OpenCode applies a schedule with an empty targets list to every target/,
+    );
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: ['deepseek/v4'] }] })).toBeNull();
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: ['deepseek/*'] }] })).toBeNull();
+    expect(
+      validateModelRoute('x', { targets: ['openai/gpt-*'], schedules: [{ when: {}, factor: 2, targets: ['openai/gpt-6-luna'] }] }),
+    ).toBeNull();
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2 }] })).toBeNull();
+  });
+
   it('refuses a schedule with no window, no change, or both changes', () => {
     expect(validateModelRoute('x', { ...base, schedules: [{ factor: 0.5 }] })).toMatch(/needs a when window/);
     expect(validateModelRoute('x', { ...base, schedules: [{ when: 'weekdays' }] })).toMatch(/needs a when window/);
