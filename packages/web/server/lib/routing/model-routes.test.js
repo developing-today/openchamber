@@ -411,6 +411,14 @@ describe('validateModelRoute strictness', () => {
     expect(validateModelRoute('x', { ...base, budgets: { 'a/b': { requestsPerDayy: 5 } } })).toMatch(/budget for "a\/b" has unknown key "requestsPerDayy"/);
   });
 
+  it('refuses a budget for a target the route does not have', () => {
+    expect(validateModelRoute('x', { targets: ['a/b', 'c/d'], budgets: { 'a/b': { requestsPerDay: 5 }, 'c/d': { tokensPerDay: 5 } } })).toBeNull();
+    expect(validateModelRoute('x', { ...base, budgets: { 'c/d': { requestsPerDay: 5 } } })).toMatch(/budget for "c\/d" matches no target/);
+    expect(validateModelRoute('x', { targets: ['a/b#high'], budgets: { 'a/b': { requestsPerDay: 5 } } })).toBeNull();
+    expect(validateModelRoute('x', { targets: ['openai/gpt-*'], budgets: { 'openai/gpt-6-luna': { requestsPerDay: 5 } } })).toBeNull();
+    expect(validateModelRoute('x', { targets: ['openai/gpt-*'], budgets: { 'anthropic/gpt-6-luna': { requestsPerDay: 5 } } })).toMatch(/budget for "anthropic\/gpt-6-luna" matches no target/);
+  });
+
   it('refuses a weight for a target the route does not have', () => {
     expect(validateModelRoute('x', { targets: ['a/b', 'c/d'], weights: { 'a/b': 2, 'c/d': 1 } })).toBeNull();
     expect(validateModelRoute('x', { ...base, weights: { 'c/d': 2 } })).toMatch(/weight for "c\/d" matches no target/);
