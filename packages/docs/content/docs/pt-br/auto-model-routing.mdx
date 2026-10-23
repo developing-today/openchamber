@@ -33,6 +33,8 @@ Para cada categoria, você pode definir:
 - **Raciocínio:** o nível de raciocínio desse modelo
 - **Agente:** o agente que executa essas tarefas; vazio mantém o agente que o campo de mensagem usaria
 
+Os agendamentos mudam os pesos dos destinos em dias ou horários definidos, por exemplo para mandar menos tráfego a um provedor nos horários de pico dele. Os agendamentos de um pool ficam nas opções avançadas dele, em **Configurações → Roteamento → Pools de modelos**, e **Agendamentos para todos os pools**, abaixo da lista de pools, altera os destinos correspondentes em todos os pools, ou só nos pools que você listar. Cada agendamento recebe dias da semana, dias do mês, um horário de início e de fim, um fuso horário e, ou um fator que multiplica o peso, ou um peso que o substitui. Fora da janela, valem os pesos configurados. O OpenCode também aplica agendamentos dos outros arquivos de configuração dele, como o `opencode.json` de um projeto. As configurações mostram esses agendamentos somente para leitura, sob o nome do arquivo em que você os edita.
+
 O Jev classifica os prompts lendo os nomes e as descrições das categorias, então as descrições funcionam como instruções. Escreva o que pertence à categoria e o que não pertence. Você pode editar, desativar, remover ou adicionar categorias, e restaurar uma das prontas se mudar de ideia. O Auto precisa de pelo menos duas categorias ativadas.
 
 ## O que acontece ao enviar

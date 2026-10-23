@@ -33,6 +33,8 @@ Para cada categoría puedes definir:
 - **Razonamiento:** el nivel de razonamiento de ese modelo
 - **Agente:** el agente que ejecuta estas tareas; vacío mantiene el agente que usaría el campo de mensaje
 
+Los horarios cambian los pesos de los destinos en días u horas concretos, por ejemplo para mandar menos tráfico a un proveedor en sus horas punta. Los horarios propios de un pool están en sus opciones avanzadas, en **Configuración → Enrutamiento → Pools de modelos**, y **Horarios para todos los pools**, debajo de la lista de pools, cambia los destinos que coincidan en cada pool o solo en los pools que indiques. Cada horario admite días de la semana, días del mes, una hora de inicio y de fin, una zona horaria y, o bien un factor que multiplica el peso, o bien un peso que lo sustituye. Fuera de su franja se aplican los pesos configurados. OpenCode también aplica los horarios de sus otros archivos de configuración, como el `opencode.json` de un proyecto. La configuración los muestra en solo lectura, bajo el nombre del archivo donde se editan.
+
 Jev clasifica los prompts leyendo los nombres y las descripciones de las categorías, así que las descripciones funcionan como instrucciones. Escribe qué entra en la categoría y qué no. Puedes editar, desactivar, quitar o añadir categorías, y restaurar una integrada si cambias de idea. Auto necesita al menos dos categorías activadas.
 
 ## Qué pasa al enviar
