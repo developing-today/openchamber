@@ -25,11 +25,18 @@ const MAX_COUNT = 50;
 
 // The keys each object may carry, as OpenCode's schema defines them. OpenCode
 // reads only these, so any other key would be saved and silently ignored.
-const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights"];
+const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules"];
 const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
 const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
+const SCHEDULE_KEYS = ["id", "targets", "when", "factor", "weight", "note"];
+const WINDOW_KEYS = ["daysOfWeek", "daysOfMonth", "start", "end", "timezone", "from", "until"];
+// The weekday spellings OpenCode's schema accepts, beside a whole number from 0 (Sunday) to 6.
+const DAY_OF_WEEK_NAMES = [
+  "sun", "sunday", "mon", "monday", "tue", "tuesday", "tues", "wed", "wednesday",
+  "thu", "thursday", "thur", "thurs", "fri", "friday", "sat", "saturday",
+];
 
 // OpenCode's defaults for the health window (model-route.ts).
 const DEFAULT_SAMPLE_WINDOW = 5;
@@ -98,6 +105,98 @@ const validateBudgets = (id, budgets) => {
     }
     if (budget.softLimit !== undefined && !(typeof budget.softLimit === "number" && budget.softLimit >= 0.125 && budget.softLimit <= 1))
       return `route "${id}" budget for "${target}" softLimit must be between 0.125 and 1`;
+  }
+  return null;
+};
+
+// Only a string is equal to its own String(), so this is a plain value check (the tuning-notes one).
+const isString = (value) => String(value) === value;
+
+const isPositiveNumber = (value) => Number.isFinite(value) && value > 0;
+
+// A window time as OpenCode's schedule parser reads it (`minutesOf` in
+// model-route-schedule.ts): "9:30", "09:30" or "9:30:15", hours to 23, minutes to 59.
+const isWindowTime = (value) => {
+  if (!isString(value)) return false;
+  const match = /^(\d{1,2}):(\d{1,2})(?::\d{2})?$/.exec(value.trim());
+  return match !== null && Number(match[1]) <= 23 && Number(match[2]) <= 59;
+};
+
+const isKnownTimezone = (value) => {
+  if (!isString(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value.trim() });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** A schedule's `when` window, judged the way OpenCode judges it: its schema first, then the
+ * schedule parser, which drops a window it cannot read and takes the whole schedule with it. */
+const validateScheduleWindow = (id, label, window) => {
+  const unknown = unknownKeysProblem(window, WINDOW_KEYS);
+  if (unknown) return `route "${id}" ${label} window has ${unknown}`;
+  if (window.daysOfWeek !== undefined) {
+    if (!Array.isArray(window.daysOfWeek))
+      return `route "${id}" ${label} window.daysOfWeek must be a list of weekday names or whole numbers from 0 to 6`;
+    if (window.daysOfWeek.length === 0)
+      return `route "${id}" ${label} window.daysOfWeek must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
+    for (const day of window.daysOfWeek)
+      if (!DAY_OF_WEEK_NAMES.includes(day) && !isWhole(day, 0, 6))
+        return `route "${id}" ${label} window.daysOfWeek entry "${String(day)}" is not a weekday name or a whole number from 0 to 6`;
+  }
+  if (window.daysOfMonth !== undefined) {
+    if (!Array.isArray(window.daysOfMonth))
+      return `route "${id}" ${label} window.daysOfMonth must be a list of whole numbers from 1 to 31, or -1 for the last day`;
+    if (window.daysOfMonth.length === 0)
+      return `route "${id}" ${label} window.daysOfMonth must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
+    for (const day of window.daysOfMonth)
+      if (day !== -1 && !isWhole(day, 1, 31))
+        return `route "${id}" ${label} window.daysOfMonth entry "${String(day)}" is not a whole number from 1 to 31 or -1`;
+  }
+  for (const key of ["start", "end"])
+    if (window[key] !== undefined && !isWindowTime(window[key]))
+      return `route "${id}" ${label} window.${key} must be a local time like "09:00"`;
+  if (window.timezone !== undefined && !isKnownTimezone(window.timezone))
+    return `route "${id}" ${label} window.timezone must be an IANA timezone name OpenCode can resolve`;
+  for (const key of ["from", "until"])
+    if (window[key] !== undefined && !isWhole(window[key], 1, Number.MAX_SAFE_INTEGER))
+      return `route "${id}" ${label} window.${key} must be a positive epoch-millisecond time`;
+  if (window.from !== undefined && window.until !== undefined && window.from >= window.until)
+    return `route "${id}" ${label} window.from must be before window.until: OpenCode drops a window that can never apply`;
+  return null;
+};
+
+/** A route's `schedules`: time-bound weight changes, as OpenCode's Schedule schema defines them.
+ * A schedule with nothing to change, or with both changes, is refused: OpenCode drops the first
+ * kind without a word and applies only the weight of the second, ignoring its factor. */
+const validateSchedules = (id, schedules) => {
+  if (!Array.isArray(schedules)) return `route "${id}" schedules must be a list of schedule objects`;
+  for (const [index, schedule] of schedules.entries()) {
+    const label = `schedule ${index + 1}`;
+    if (!isRecord(schedule)) return `route "${id}" ${label} must be an object`;
+    const unknown = unknownKeysProblem(schedule, SCHEDULE_KEYS);
+    if (unknown) return `route "${id}" ${label} has ${unknown}`;
+    if (schedule.id !== undefined && !isString(schedule.id))
+      return `route "${id}" ${label} id must be a string`;
+    if (schedule.note !== undefined && !isString(schedule.note))
+      return `route "${id}" ${label} note must be a string`;
+    if (schedule.targets !== undefined) {
+      if (!Array.isArray(schedule.targets) || schedule.targets.some((target) => !isString(target) || target.trim() === ""))
+        return `route "${id}" ${label} targets must be a list of non-empty target references`;
+    }
+    if (!isRecord(schedule.when)) return `route "${id}" ${label} needs a when window object`;
+    const windowProblem = validateScheduleWindow(id, label, schedule.when);
+    if (windowProblem) return windowProblem;
+    if (schedule.factor !== undefined && schedule.weight !== undefined)
+      return `route "${id}" ${label} gives both factor and weight: OpenCode uses the weight and ignores the factor, so give one of them`;
+    if (schedule.factor === undefined && schedule.weight === undefined)
+      return `route "${id}" ${label} needs a factor or a weight: OpenCode drops a schedule with neither`;
+    if (schedule.factor !== undefined && !isPositiveNumber(schedule.factor))
+      return `route "${id}" ${label} factor must be a positive number`;
+    if (schedule.weight !== undefined && !isPositiveNumber(schedule.weight))
+      return `route "${id}" ${label} weight must be a positive number`;
   }
   return null;
 };
@@ -178,6 +277,10 @@ export const validateModelRoute = (id, route) => {
   }
   if (route.budgets !== undefined) {
     const problem = validateBudgets(id, route.budgets);
+    if (problem) return problem;
+  }
+  if (route.schedules !== undefined) {
+    const problem = validateSchedules(id, route.schedules);
     if (problem) return problem;
   }
   return null;
