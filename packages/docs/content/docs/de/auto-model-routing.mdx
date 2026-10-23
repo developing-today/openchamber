@@ -35,6 +35,12 @@ Für jede Kategorie kannst du festlegen:
 
 Jev ordnet Prompts anhand der Namen und Beschreibungen der Kategorien ein, die Beschreibungen wirken also wie Anweisungen. Schreib hinein, was in die Kategorie gehört und was nicht. Du kannst Kategorien bearbeiten, ausschalten, entfernen oder hinzufügen und eine eingebaute wiederherstellen, wenn du es dir anders überlegst. Auto braucht mindestens zwei eingeschaltete Kategorien.
 
+### Sehen, welche Sitzungen sich ein Ziel teilen
+
+Ist der Plan eines Ziels aufgebraucht, wechseln alle Sitzungen auf diesem Ziel gleichzeitig zum nächsten, und jede beginnt mit einem kalten Prompt-Cache von vorn. **Einstellungen → Routing → Modellpools → Pool-Gesundheit** zeigt für jedes Ziel in jedem Pool, wie viele Sitzungen es in den letzten 15 Minuten genutzt haben, und warnt, wenn sich zwei oder mehr ein Ziel teilen.
+
+Verknüpfe dort ein Ziel mit einem deiner Pläne, um eine Projektion zu sehen: seine letzte Nutzung, zusammen mit jedem anderen Ziel, das mit demselben Plan verknüpft ist, hochgerechnet auf das Kontingentfenster des Plans. Fenster, die Anfragen, Nachrichten oder Tokens zählen, bekommen eine Projektion, Fenster in Dollar oder Prozent nicht. Die Zahl ist eine Schätzung aus den letzten 24 Stunden OpenCode-Verkehr und sieht keine Nutzung außerhalb von OpenCode. In einem gewichteten Pool oder einem Pool im Rundlauf bekommt ein Ziel ab 70 % seines Fensters die Schaltfläche **Gewicht senken**. Sie halbiert sein Gewicht, sodass neue Sitzungen eher zu den anderen Zielen tendieren.
+
 ## Was beim Senden passiert
 
 1. OpenChamber schickt deine Nachricht und einen kurzen Auszug der letzten Züge an Jev.

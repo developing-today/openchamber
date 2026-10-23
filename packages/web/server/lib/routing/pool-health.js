@@ -25,6 +25,7 @@ import {
 } from './model-route-stats.js';
 
 const STATS_ERROR_CODES = new Set(['no-database', 'no-tables', 'no-sqlite']);
+const ROUTE_PROVIDER_ID = 'opencode-route';
 
 // A pool target is `provider/model[#variant]` or `{ model, ... }`; the reference drops the variant.
 const targetRefSchema = z.union([z.string(), z.object({ model: z.string() }).transform((target) => target.model)]);
@@ -128,21 +129,32 @@ export const computePoolHealth = async ({
   const covers = (ref, row) => ref !== '' && keyNamesTarget(`${row.providerID}/${row.modelID}`, ref);
   const activeSessionsOf = (ref) => new Set(sessionRows.filter((row) => covers(ref, row)).map((row) => row.sessionID)).size;
 
-  // Targets sharing one plan id pool their recent usage, so a quota ratio
-  // reflects the plan's combined traffic. Each telemetry row counts once, even
-  // when overlapping links (`openai/*` and `openai/gpt-x`) both cover it.
-  const usageForPlan = (planID) => {
-    const refs = Object.entries(links).filter(([, linkedPlanID]) => linkedPlanID === planID).map(([ref]) => ref);
-    return usageRows
-      .filter((row) => refs.some((ref) => covers(ref, row)))
-      .reduce((total, row) => ({ attempts: total.attempts + row.attempts, tokens: total.tokens + row.tokens }), { attempts: 0, tokens: 0 });
+  // A telemetry row belongs to the most specific link that covers it: an exact
+  // reference beats a pattern, a longer pattern a shorter one. So a row counts
+  // once, toward one plan, even when `openai/*` and `openai/gpt-x` are linked
+  // to the same plan or to different ones.
+  const specificity = (ref) => (ref.includes('*') ? ref.replace(/\*/g, '').length : Number.MAX_SAFE_INTEGER);
+  const owningPlan = (row) => {
+    let best = null;
+    for (const [ref, planID] of Object.entries(links)) {
+      if (!covers(ref, row)) continue;
+      if (best === null || specificity(ref) > specificity(best.ref)) best = { ref, planID };
+    }
+    return best?.planID ?? null;
   };
+  // Targets sharing one plan id pool their recent usage, so a quota ratio
+  // reflects the plan's combined traffic, not one target's slice of it.
+  const usageForPlan = (planID) => usageRows
+    .filter((row) => owningPlan(row) === planID)
+    .reduce((total, row) => ({ attempts: total.attempts + row.attempts, tokens: total.tokens + row.tokens }), { attempts: 0, tokens: 0 });
 
   const pools = {};
   for (const [poolID, route] of Object.entries(routes)) {
     const selection = route.selection ?? 'ordered';
-    const targets = (route.targets ?? []).map((target) => {
-      const ref = targetRef(target);
+    // A nested pool (`opencode-route/<id>`) is listed as its own pool with its
+    // real targets; as a target here it matches no telemetry row.
+    const refs = (route.targets ?? []).map(targetRef).filter((ref) => ref !== '' && !ref.startsWith(`${ROUTE_PROVIDER_ID}/`));
+    const targets = refs.map((ref) => {
       const activeSessions = sessionsAvailable ? activeSessionsOf(ref) : null;
       const planID = links[ref];
       const plan = planID ? planByID.get(planID) : undefined;
@@ -162,7 +174,9 @@ export const computePoolHealth = async ({
       // Both selections draw by weight (OpenCode's round-robin is smooth weighted round
       // robin). A weight already at the floor the button halves to has nothing left to give.
       const weight = route.weights?.[ref] ?? 1;
-      const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && (route.targets?.length ?? 0) > 1
+      // Shifting weight only helps when traffic can go to a target on another quota.
+      const elsewhere = refs.some((other) => other !== ref && links[other] !== planID);
+      const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && elsewhere
         && projection.status !== 'ok' && weight > MIN_WEIGHT
         ? 'lower-weight'
         : null;

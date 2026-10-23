@@ -75,7 +75,8 @@ describe('computePoolHealth', () => {
     const routes = {
       pool1: {
         selection: 'weighted',
-        targets: ['openai/a', 'openai/a-secondary'],
+        // anthropic/b is on no plan, so lowering an openai target's weight sends traffic off that quota.
+        targets: ['openai/a', 'openai/a-secondary', 'anthropic/b'],
         weights: { 'openai/a': 1, 'openai/a-secondary': 1 },
       },
     };
@@ -274,6 +275,50 @@ describe('computePoolHealth', () => {
     expect(isLocalOpenCode(() => 'http://[::1]:4096/')).toBe(true);
     expect(isLocalOpenCode(() => 'http://seamus:4095/')).toBe(false);
     expect(isLocalOpenCode(() => { throw new Error('not started'); })).toBe(false);
+  });
+
+  it('offers no lower-weight suggestion when every other target draws on the same plan', async () => {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 0; i < 24; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'a' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, {
+        routes: { pool1: { selection: 'weighted', targets: ['openai/a', 'openai/a2'] } },
+        plans,
+        links: { 'openai/a': 'openai-plus', 'openai/a2': 'openai-plus' },
+      }),
+      now,
+    });
+    expect(health.pools.pool1.targets.map(({ suggestion }) => suggestion)).toEqual([null, null]);
+  });
+
+  it('gives a request to the most specific link when overlapping links name different plans', async () => {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 0; i < 4; i += 1) rows.push({ time: now - i * 3_600_000, session: `x${i}`, provider: 'openai', model: 'gpt-x' });
+    for (let i = 0; i < 2; i += 1) rows.push({ time: now - i * 3_600_000, session: `y${i}`, provider: 'openai', model: 'gpt-y' });
+    const dbPath = seedDb(tempDir(), rows);
+    const window = [{ name: 'daily', unit: 'requests', limit: 100, windowHours: 24 }];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, {
+        routes: { pool1: { targets: ['openai/*', 'openai/gpt-x'] } },
+        plans: [plan('wide', window), plan('exact', window)],
+        links: { 'openai/*': 'wide', 'openai/gpt-x': 'exact' },
+      }),
+      now,
+      hours: 24,
+    });
+    const [wide, exact] = health.pools.pool1.targets;
+    expect(wide.plan.projection.projected).toBe(2);
+    expect(exact.plan.projection.projected).toBe(4);
+  });
+
+  it('leaves nested pools out of the target list', async () => {
+    const dbPath = seedDb(tempDir(), []);
+    const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { outer: { targets: ['openai/a', 'opencode-route/inner'] } } }) });
+    expect(health.pools.outer.targets.map(({ ref }) => ref)).toEqual(['openai/a']);
   });
 
   it('degrades to statsAvailable: false instead of throwing when the database is missing', async () => {
