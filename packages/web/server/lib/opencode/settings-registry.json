@@ -627,6 +627,9 @@
         "mobile"
       ]
     },
+    "activeRunModelChangeBehavior": {
+      "scope": "profile"
+    },
     "sessionGoalEnabled": {
       "scope": "profile"
     },

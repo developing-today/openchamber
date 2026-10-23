@@ -14,7 +14,7 @@
 
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
-import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
+import { isSameModelRef, toModelRef, type FilePart, type Metadata, type ModelRef, type ModelSelection, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import type { PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
@@ -25,7 +25,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
-import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from "@/lib/sessionKnowledgeApi"
+import { fetchSessionKnowledge, reportSessionKnowledgeDelivered, SESSION_KNOWLEDGE_HEADER } from "@/lib/sessionKnowledgeApi"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
@@ -508,6 +508,8 @@ export type SessionUIState = {
   unarchiveSessions: (ids: string[], options?: UnarchiveSessionsOptions) => Promise<{ restoredIds: string[]; failedIds: string[] }>
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
   revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
+  /** Replay a stored user prompt with its original attachments and synthetic context. */
+  retryMessage: (sessionId: string, messageId: string | null, model: ModelSelection) => Promise<void>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   forkAfterMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
@@ -2102,6 +2104,84 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // marker. Reverted UI is derived from session.revert + stored messages.
     await refetchSessionMessages(sessionId)
     await revertToMessageAction(sessionId, messageId)
+  },
+
+  // ---------------------------------------------------------------------------
+  // retryMessage — stage the original prompt out, then resend its captured payload
+  // ---------------------------------------------------------------------------
+  retryMessage: async (sessionId, messageId, model) => {
+    const directory = get().getDirectoryForSession(sessionId) ?? undefined
+    await refetchSessionMessages(sessionId)
+    const messages = getSyncMessages(sessionId, directory)
+    const target = messageId
+      ? messages.find((message) => message.id === messageId)
+      : [...messages].reverse().find((message) => message.role === "user")
+    if (!target || target.role !== "user") {
+      throw new Error("The prompt to retry is no longer available")
+    }
+
+    const targetIndex = messages.findIndex((message) => message.id === target.id)
+    const promptParts = getSyncParts(target.id, directory)
+    const content = promptParts
+      .filter((part): part is TextPart => part.type === "text")
+      .map((part) => part.text)
+      .join("\n")
+    const attachments: AttachedFile[] = promptParts
+      .filter((part): part is FilePart => part.type === "file")
+      .map((part, index) => ({
+        id: `retry-${target.id}-${index}`,
+        file: new File([], part.filename ?? "attachment", { type: part.mime }),
+        dataUrl: part.url,
+        mimeType: part.mime,
+        filename: part.filename ?? "attachment",
+        size: 0,
+        source: "local",
+        serverPath: part.url,
+      }))
+
+    // Synthetic records immediately before a user message are the exact
+    // context/instructions admitted with it. Session knowledge is rebuilt by
+    // sendMessage after revert, so do not replay that server-managed block.
+    let firstSyntheticIndex = targetIndex
+    while (firstSyntheticIndex > 0 && messages[firstSyntheticIndex - 1]?.role === "synthetic") {
+      firstSyntheticIndex -= 1
+    }
+    const syntheticParts = messages
+      .slice(firstSyntheticIndex, Math.max(0, targetIndex))
+      .filter((message): message is Extract<typeof message, { role: "synthetic" }> => (
+        message.role === "synthetic" && !message.text.startsWith(SESSION_KNOWLEDGE_HEADER)
+      ))
+      .map((message) => ({
+        text: message.text,
+        synthetic: true,
+        // OpenCode persists the metadata we originally attached. Keep it with
+        // the replay so context cards and provider-specific annotations round-trip.
+        metadata: message.metadata as ContextPartMetadata | undefined,
+      }))
+
+    const session = getSyncSessions(directory).find((candidate) => candidate.id === sessionId)
+    const agent = useSelectionStore.getState().getSessionAgentSelection(sessionId) ?? session?.agent
+
+    await revertToMessageAction(sessionId, target.id, { restorePromptToComposer: false })
+    try {
+      await get().sendMessage(
+        content,
+        model.providerID,
+        model.id,
+        agent,
+        attachments,
+        undefined,
+        syntheticParts.length > 0 ? syntheticParts : undefined,
+        model.variant,
+        "normal",
+        { sessionId, directory, userInitiated: true },
+      )
+    } catch (error) {
+      // Do not leave the prompt hidden with no visible way to continue if the
+      // new send is rejected. The staged transcript remains available too.
+      await revertToMessageAction(sessionId, target.id)
+      throw error
+    }
   },
 
   // ---------------------------------------------------------------------------

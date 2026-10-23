@@ -1,5 +1,6 @@
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import React from 'react';
+import { toast } from '@/components/ui';
 import { useChatColumnActions } from './chatColumnSession';
 import { MobileModelButton } from './MobileModelButton';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
@@ -38,7 +39,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore, isStaleAutoSelection, selectKnownAgent, selectKnownCatalogModel } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useSessionMessagesSelector, useSessionRenderable, useSessionSelector } from '@/sync/sync-context';
+import { useSessionForms, useSessionMessagesSelector, useSessionPermissions, useSessionRenderable, useSessionSelector, useSessionStatus } from '@/sync/sync-context';
 import type { State } from '@/sync/types';
 import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
@@ -756,6 +757,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const restoredSessionSelectionRef = React.useRef<string | null>(null);
 
     const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
+    const activeRunStatus = useSessionStatus(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const activePermissions = useSessionPermissions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const activeForms = useSessionForms(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const activeRunModelChangeBehavior = useUIStore((state) => state.activeRunModelChangeBehavior);
+    const restartCurrentRunRef = React.useRef(false);
+    const isCurrentRunActive = (activeRunStatus?.type === 'busy' || activeRunStatus?.type === 'retry')
+        && activePermissions.length === 0
+        && activeForms.length === 0;
     const hasRenderableCurrentSessionSnapshot = useSessionRenderable(
         currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
@@ -1538,6 +1547,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         options?: { applyVariant?: boolean; variant?: string | undefined; agentName?: string | null },
     ) => {
         try {
+            const modelChanged = currentProviderId !== providerId || currentModelId !== modelId;
             const effectiveAgentName = options?.agentName ?? resolveLiveAgentName() ?? undefined;
             // `applyVariant` is only set when the user adjusted the effort in
             // the model picker, so no effort means an explicit "Default".
@@ -1560,6 +1570,26 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 // A new session starts on this pick when nothing configured names a
                 // model. Only a person's pick writes it, never a session restore.
                 setLastSelectedModel(providerId, modelId);
+            }
+            if (
+                !selection
+                && modelChanged
+                && currentSessionId
+                && isCurrentRunActive
+                && activeRunModelChangeBehavior === 'restart'
+                && !restartCurrentRunRef.current
+            ) {
+                restartCurrentRunRef.current = true;
+                void useSessionUIStore.getState().retryMessage(currentSessionId, null, {
+                    providerID: providerId,
+                    id: modelId,
+                    variant: options?.applyVariant ? options.variant ?? null : undefined,
+                }).catch((error) => {
+                    console.error('[ModelControls] Failed to restart the active run with the selected model:', error);
+                    toast.error(t('chat.sessionErrorRecovery.failed'));
+                }).finally(() => {
+                    restartCurrentRunRef.current = false;
+                });
             }
             setAgentMenuOpen(false);
             if (isCompact) {

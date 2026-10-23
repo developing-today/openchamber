@@ -2578,7 +2578,11 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
  * 4. Call the runtime revert endpoint and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
-export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+export async function revertToMessage(
+  sessionId: string,
+  messageId: string,
+  options: { restorePromptToComposer?: boolean } = {},
+): Promise<void> {
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
@@ -2633,8 +2637,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     store.setState({ session: sessions })
   }
 
-  // Save input store state before mutations — if the API fails we need to
-  // roll back both text and attachments to their previous values.
+  // Recovery replays the captured message directly and must leave the user's
+  // current composer draft alone. Ordinary reverts restore the prompt to the
+  // composer and roll it back if staging fails.
+  const restorePromptToComposer = options.restorePromptToComposer !== false
   const prevInputAttachments = [...useInputStore.getState().attachedFiles]
   const prevInputText = useInputStore.getState().pendingInputText
   const prevInputMode = useInputStore.getState().pendingInputMode
@@ -2644,7 +2650,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
 
   // Restore reverted message text and file attachments to input
-  if (messageText) {
+  if (restorePromptToComposer && messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
@@ -2656,7 +2662,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // must not carry over, even when the current message has no files.
   // Only a prompt goes back to the composer: reverting a subagent run report
   // leaves whatever the user is typing alone.
-  if (targetMsg?.role === "user") {
+  if (restorePromptToComposer && targetMsg?.role === "user") {
     restoreFilePartsToInput(submittedFileParts)
     if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
   }
@@ -2699,15 +2705,17 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     store.setState({
       session: rollback,
     })
-    // Rollback input store: restore previous text and attachments
-    useInputStore.setState({
-      pendingInputText: prevInputText,
-      pendingInputMode: prevInputMode,
-      attachedFiles: prevInputAttachments,
-    })
-    if (draftTarget) {
-      useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
-      useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
+    if (restorePromptToComposer) {
+      // Rollback input store: restore previous text and attachments
+      useInputStore.setState({
+        pendingInputText: prevInputText,
+        pendingInputMode: prevInputMode,
+        attachedFiles: prevInputAttachments,
+      })
+      if (draftTarget) {
+        useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
+        useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
+      }
     }
     throw err
   }

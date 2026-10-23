@@ -21,6 +21,7 @@ import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { useInputStore } from './input-store';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -2298,5 +2299,103 @@ describe('send does not wait for session knowledge before showing the message', 
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(delivered).toEqual([{ directory: '/repo', sessionId: 'session-knowledge', signature: 'sig-1' }]);
+  });
+});
+
+describe('retryMessage replay', () => {
+  let originalGetSessionMessages;
+  let originalGetSession;
+  let originalStageRevert;
+  let originalSendMessage;
+
+  afterEach(() => {
+    opencodeClient.getSessionMessages = originalGetSessionMessages;
+    opencodeClient.getSession = originalGetSession;
+    opencodeClient.stageRevert = originalStageRevert;
+    useSessionUIStore.setState({ sendMessage: originalSendMessage });
+    setSyncRefs({}, new ChildStoreManager(), '');
+    setActionRefs(new ChildStoreManager(), () => '');
+    setOptimisticRefs(() => {}, () => {});
+  });
+
+  test('replays prompt text, files, and attached context with the chosen model without replacing the draft', async () => {
+    originalGetSessionMessages = opencodeClient.getSessionMessages;
+    originalGetSession = opencodeClient.getSession;
+    originalStageRevert = opencodeClient.stageRevert;
+    originalSendMessage = useSessionUIStore.getState().sendMessage;
+
+    const directory = '/retry/project';
+    const sessionId = 'session-retry';
+    const session = {
+      id: sessionId,
+      title: 'Retry test',
+      directory,
+      projectID: 'project',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+      agent: 'build',
+    };
+    const context = createContextPart({
+      kind: 'file-quote',
+      fileLabel: 'src/app.ts',
+      quote: 'old code',
+      text: 'change this',
+    });
+    const contextMessage = {
+      id: 'context-1',
+      sessionID: sessionId,
+      role: 'synthetic',
+      time: { created: 1 },
+      text: context.text,
+      metadata: context.metadata,
+    };
+    const prompt = { id: 'prompt-1', sessionID: sessionId, role: 'user', time: { created: 2 } };
+    const childStores = new ChildStoreManager();
+    childStores.ensureChild(directory, { bootstrap: false }).setState({
+      session: [session],
+      message: { [sessionId]: [contextMessage, prompt] },
+      part: {
+        [prompt.id]: [
+          { id: 'text-1', sessionID: sessionId, messageID: prompt.id, type: 'text', text: 'please update the file' },
+          { id: 'file-1', sessionID: sessionId, messageID: prompt.id, type: 'file', mime: 'image/png', filename: 'screen.png', url: 'data:image/png;base64,aGVsbG8=' },
+        ],
+      },
+      session_status: {},
+    });
+    setSyncRefs({}, childStores, directory);
+    setActionRefs(childStores, () => directory);
+    setOptimisticRefs(() => {}, () => {});
+    useSessionUIStore.setState({
+      currentSessionId: sessionId,
+      currentSessionDirectory: directory,
+      sendMessage: async (...args) => { sent.push(args); },
+    });
+    useInputStore.setState({ pendingInputText: 'keep this unrelated draft', pendingInputMode: 'replace' });
+
+    const sent = [];
+    const staged = [];
+    opencodeClient.getSessionMessages = async () => ({ items: [] });
+    opencodeClient.stageRevert = async (...args) => { staged.push(args); };
+    opencodeClient.getSession = async () => ({ ...session, revert: { messageID: 'context-1' } });
+
+    await useSessionUIStore.getState().retryMessage(sessionId, prompt.id, {
+      providerID: 'provider-b',
+      id: 'model-b',
+      variant: 'high',
+    });
+
+    expect(staged).toHaveLength(1);
+    expect(useInputStore.getState().pendingInputText).toBe('keep this unrelated draft');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].slice(0, 4)).toEqual(['please update the file', 'provider-b', 'model-b', 'build']);
+    expect(sent[0][4].map(({ dataUrl, mimeType, filename }) => ({ dataUrl, mimeType, filename }))).toEqual([{
+      dataUrl: 'data:image/png;base64,aGVsbG8=',
+      mimeType: 'image/png',
+      filename: 'screen.png',
+    }]);
+    expect(sent[0][6]).toEqual([{ text: context.text, synthetic: true, metadata: context.metadata }]);
+    expect(sent[0][7]).toBe('high');
+    expect(sent[0][9]).toMatchObject({ sessionId, directory, userInitiated: true });
   });
 });

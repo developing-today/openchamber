@@ -69,9 +69,11 @@ export type SessionGoalChecker = 'classifier' | 'small-model';
 export type SessionGoalWriterSendMode = 'with-message' | 'goal-as-message';
 /** Whether a session without a goal turns the next message into one: never, after review, or straight away. */
 export type SessionGoalAutoCreate = 'off' | 'review' | 'auto';
+export type ActiveRunModelChangeBehavior = 'next-message' | 'restart';
 
 const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 const DEFAULT_AGENT_TERMINALS_PLACEMENT: AgentTerminalsPlacement = 'terminal-panel';
+const DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR: ActiveRunModelChangeBehavior = 'next-message';
 
 const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
   if (value === 'attach' || value === 'inline' || value === 'ask' || value === 'inline-double-paste') {
@@ -82,6 +84,10 @@ const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior
 
 const normalizeAgentTerminalsPlacement = (value: unknown): AgentTerminalsPlacement => (
   value === 'sidebar' ? 'sidebar' : DEFAULT_AGENT_TERMINALS_PLACEMENT
+);
+
+const normalizeActiveRunModelChangeBehavior = (value: unknown): ActiveRunModelChangeBehavior => (
+  value === 'restart' ? 'restart' : DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR
 );
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
@@ -971,6 +977,8 @@ interface UIStore {
   sessionGoalWriterSendMode: SessionGoalWriterSendMode;
   /** Every goal objective, from any entry point, goes through the goal writer. */
   sessionGoalRewriteAll: boolean;
+  /** Whether a model pick during a run waits for the next prompt or restarts the current one. */
+  activeRunModelChangeBehavior: ActiveRunModelChangeBehavior;
   sessionGoalAutoCreate: SessionGoalAutoCreate;
   collapsibleThinkingBlocks: boolean;
   /** A collapsible reasoning block opens while its model thinks. Off: it stays folded to its header. */
@@ -1258,6 +1266,7 @@ interface UIStore {
   setSessionGoalWriterReview: (value: boolean) => void;
   setSessionGoalWriterSendMode: (value: SessionGoalWriterSendMode) => void;
   setSessionGoalRewriteAll: (value: boolean) => void;
+  setActiveRunModelChangeBehavior: (value: ActiveRunModelChangeBehavior) => void;
   setSessionGoalAutoCreate: (value: SessionGoalAutoCreate) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setExpandReasoningWhileStreaming: (value: boolean) => void;
@@ -1488,6 +1497,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalWriterReview: true,
         sessionGoalWriterSendMode: 'with-message',
         sessionGoalRewriteAll: false,
+        activeRunModelChangeBehavior: DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR,
         sessionGoalAutoCreate: 'off',
         collapsibleThinkingBlocks: true,
         expandReasoningWhileStreaming: false,
@@ -2553,6 +2563,10 @@ export const useUIStore = create<UIStore>()(
           set({ sessionGoalRewriteAll: value });
         },
 
+        setActiveRunModelChangeBehavior: (value) => {
+          set({ activeRunModelChangeBehavior: normalizeActiveRunModelChangeBehavior(value) });
+        },
+
         setSessionGoalAutoCreate: (value) => {
           set({ sessionGoalAutoCreate: value });
         },
@@ -3547,6 +3561,7 @@ export const useUIStore = create<UIStore>()(
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
           state.agentTerminalsPlacement = normalizeAgentTerminalsPlacement(state.agentTerminalsPlacement);
+          state.activeRunModelChangeBehavior = normalizeActiveRunModelChangeBehavior(state.activeRunModelChangeBehavior);
 
           if (state.toolJsonViewMode !== 'summary'
             && state.toolJsonViewMode !== 'formatted'
@@ -3613,6 +3628,7 @@ export const useUIStore = create<UIStore>()(
           sessionGoalWriterReview: state.sessionGoalWriterReview,
           sessionGoalWriterSendMode: state.sessionGoalWriterSendMode,
           sessionGoalRewriteAll: state.sessionGoalRewriteAll,
+          activeRunModelChangeBehavior: state.activeRunModelChangeBehavior,
           sessionGoalAutoCreate: state.sessionGoalAutoCreate,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           expandReasoningWhileStreaming: state.expandReasoningWhileStreaming,

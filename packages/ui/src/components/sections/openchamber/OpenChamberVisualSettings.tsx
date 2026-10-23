@@ -5,7 +5,7 @@ import { MessageSearchSettings } from './MessageSearchSettings';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
-import { useUIStore, type AgentTerminalsPlacement, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { useUIStore, type ActiveRunModelChangeBehavior, type AgentTerminalsPlacement, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
@@ -310,11 +310,22 @@ const INPUT_HISTORY_SCOPE_OPTIONS: Option<InputHistoryScope>[] = [
     },
 ];
 
+const ACTIVE_RUN_MODEL_CHANGE_OPTIONS: Option<ActiveRunModelChangeBehavior>[] = [
+    {
+        id: 'next-message',
+        labelKey: 'settings.openchamber.visual.option.activeRunModelChange.nextMessage.label',
+    },
+    {
+        id: 'restart',
+        labelKey: 'settings.openchamber.visual.option.activeRunModelChange.restart.label',
+    },
+];
+
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'confirmFileTreeMove' | 'sessionTabs' | 'animatedActivityIndicators' | 'layoutAnimations' | 'openLinksInBrowserPanel' | 'openTrackerLinksOnBoard' | 'fileTreeSide' | 'agentTerminalsPlacement';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'activeRunModelChange' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'confirmFileTreeMove' | 'sessionTabs' | 'animatedActivityIndicators' | 'layoutAnimations' | 'openLinksInBrowserPanel' | 'openTrackerLinksOnBoard' | 'fileTreeSide' | 'agentTerminalsPlacement';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -446,6 +457,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
     const largeTextPasteBehavior = useUIStore(state => state.largeTextPasteBehavior);
     const setLargeTextPasteBehavior = useUIStore(state => state.setLargeTextPasteBehavior);
+    const activeRunModelChangeBehavior = useUIStore(state => state.activeRunModelChangeBehavior);
+    const setActiveRunModelChangeBehavior = useUIStore(state => state.setActiveRunModelChangeBehavior);
     const enterToSend = useUIStore(state => state.enterToSend);
     const setEnterToSend = useUIStore(state => state.setEnterToSend);
     const enterToSendConfigured = useUIStore(state => state.enterToSendConfigured);
@@ -2160,7 +2173,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </SettingsSection>
                                 )}
 
-                                {(shouldShow('persistDraft') || shouldShow('largeTextPaste') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('enterToSend')) && (
+                                {(shouldShow('persistDraft') || shouldShow('largeTextPaste') || shouldShow('activeRunModelChange') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('enterToSend')) && (
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.composer')}
                                     settingsItem="chat.composer"
@@ -2208,6 +2221,25 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             ))}
                                         </SettingsRadioGroup>
                                      </SettingsControlGroup>
+                                )}
+                                {shouldShow('activeRunModelChange') && (
+                                    <SettingsControlGroup
+                                        title={t('settings.openchamber.visual.field.activeRunModelChange')}
+                                        info={t('settings.openchamber.visual.field.activeRunModelChangeInfo')}
+                                        settingsItem="chat.active-run-model-change"
+                                    >
+                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.activeRunModelChange')}>
+                                            {ACTIVE_RUN_MODEL_CHANGE_OPTIONS.map((option) => (
+                                                <SettingsRadioOption
+                                                    key={option.id}
+                                                    selected={activeRunModelChangeBehavior === option.id}
+                                                    onSelect={() => setActiveRunModelChangeBehavior(option.id)}
+                                                    label={tUnsafe(option.labelKey)}
+                                                    ariaLabel={tUnsafe(option.labelKey)}
+                                                />
+                                            ))}
+                                        </SettingsRadioGroup>
+                                    </SettingsControlGroup>
                                 )}
                                 {shouldShow('enterToSend') && (
                                     <SettingsControlGroup

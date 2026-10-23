@@ -21,6 +21,7 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { LongErrorText } from '../LongErrorText';
+import { MessageRecoveryActions } from '../MessageRecoveryActions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatSessionSelection } from '../chatColumnSession';
 import { useUIStore } from '@/stores/useUIStore';
@@ -2167,6 +2168,7 @@ const AssistantMessageBody = React.memo(({
                                     </div>
                                 </div>
                                 {errorResponseBody ? <ErrorResponseDetails body={errorResponseBody} className="mt-1 ps-7" /> : null}
+                                {sessionId ? <MessageRecoveryActions sessionId={sessionId} directory={effectiveDirectory} anchorMessageId={messageId} /> : null}
                             </div>
                         </FadeInOnReveal>
                     )}
