@@ -304,11 +304,14 @@ makes that visible so the user can spread them.
   (OpenCode applies a schedule with no target filter to every target in
   the route, so the key is left out for that), a schedule with neither
   change, and one with both, where
-  the weight would win and the factor would be ignored, and — judged against
-  the whole saved set, not one route at a time — a target that references a
-  route the set does not contain, or a route whose targets only chase
-  references in a cycle that reaches no concrete model target (OpenCode
-  drops both silently, and the second would expand to no models). Cross-pool schedules
+  the weight would win and the factor would be ignored, `weights` or
+  `budgets` on a `fixed` route (selection modes, weights and budgets are
+  rules-level in OpenCode, so a fixed route replaces every weight with 1
+  and never collects its budgets), and — judged against the whole saved
+  set, not one route at a time — a target that references a route the set
+  does not contain, or a route whose targets only chase references in a
+  cycle that reaches no concrete model target (OpenCode drops both
+  silently, and the second would expand to no models). Cross-pool schedules
   (`experimental.model_route_schedules`) are not OpenChamber's to save yet;
   #297 covers their editor.
 - `pool-plan-links.js` keeps `pool-plan-links.json` in the OpenChamber data

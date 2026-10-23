@@ -562,6 +562,14 @@ describe('validateModelRoute strictness', () => {
     expect(validateModelRoute('x', { ...base, selection: 'weighted', weights: { 'a/b': 2 } })).toBeNull();
   });
 
+  it('refuses weights and budgets that a fixed route would ignore', () => {
+    expect(validateModelRoute('x', { ...base, autonomy: 'fixed', weights: { 'a/b': 2 } })).toMatch(/is fixed.*weights need autonomy rules/);
+    expect(validateModelRoute('x', { ...base, autonomy: 'fixed', budgets: { 'a/b': { requestsPerDay: 10 } } })).toMatch(/is fixed.*budgets need autonomy rules/);
+    expect(validateModelRoute('x', { ...base, autonomy: 'rules', weights: { 'a/b': 2 } })).toBeNull();
+    expect(validateModelRoute('x', { ...base, autonomy: 'rules', budgets: { 'a/b': { requestsPerDay: 10 } } })).toBeNull();
+    expect(validateModelRoute('x', { ...base, weights: { 'a/b': 2 }, budgets: { 'a/b': { requestsPerDay: 10 } } })).toBeNull();
+  });
+
   it('refuses a slow threshold larger than the window, using OpenCode defaults for unset values', () => {
     expect(validateModelRoute('x', { ...base, health: { sampleWindow: 2, slowThreshold: 3 } })).toMatch(/slowThreshold \(3\) cannot exceed health\.sampleWindow \(2\)/);
     expect(validateModelRoute('x', { ...base, health: { sampleWindow: 2 } })).toMatch(/slowThreshold \(3\) cannot exceed/);
