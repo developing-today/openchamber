@@ -189,6 +189,20 @@ describe('validateModelRoute schedules', () => {
     expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2 }] })).toBeNull();
   });
 
+  it('accepts a schedule target pattern that partly overlaps a route target pattern, and refuses disjoint patterns', () => {
+    const withTargets = (targets, entry) =>
+      validateModelRoute('x', { targets, schedules: [{ when: {}, factor: 2, targets: [entry] }] });
+    // openai/gpt-6-luna matches both patterns, so the schedule can apply.
+    expect(withTargets(['openai/*-luna'], 'openai/gpt-*')).toBeNull();
+    expect(withTargets(['openai/gpt-*'], 'openai/*-luna')).toBeNull();
+    expect(withTargets([{ model: 'openai/*-luna' }], 'openai/gpt-*')).toBeNull();
+    expect(withTargets(['openai/*-luna'], 'openai/gpt-*#high')).toBeNull();
+    expect(withTargets(['openai/gpt-*-luna'], 'openai/*-6-*')).toBeNull();
+    expect(withTargets(['anthropic/*'], 'openai/gpt-*')).toMatch(/schedule 1 target "openai\/gpt-\*" matches no target in the route/);
+    expect(withTargets(['openai/claude-*'], 'openai/gpt-*')).toMatch(/matches no target in the route/);
+    expect(withTargets(['openai/*-luna'], 'openai/*-sol')).toMatch(/matches no target in the route/);
+  });
+
   it('refuses a schedule with no window, no change, or both changes', () => {
     expect(validateModelRoute('x', { ...base, schedules: [{ factor: 0.5 }] })).toMatch(/needs a when window/);
     expect(validateModelRoute('x', { ...base, schedules: [{ when: 'weekdays' }] })).toMatch(/needs a when window/);
