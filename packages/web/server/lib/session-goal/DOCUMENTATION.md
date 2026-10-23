@@ -31,10 +31,13 @@ the web server and survives UI disconnects.
 
 The UI writes goals (create/edit/pause/resume/clear) by patching this
 metadata; the runtime never creates a goal on its own. Goal creation happens
-at send time via the arm store (`useSessionGoalArmStore`): the composer
-target button arms "the next prompt is the objective", and the run-as-goal
-flows (fork-from-answer dialog, plan implement dialog) arm the same way —
-the plan flow additionally supplies an objective OVERRIDE carrying the plan
+at send time through an arm (`useSessionGoalArmStore`): the composer target
+button arms "the next prompt is the objective" in the store, and the
+run-as-goal flows (fork-from-answer dialog, plan implement dialog) pass
+their own arm with the send (`goalArm`) and leave the composer's alone. A
+message queued while the agent works takes the composer's arm with it and
+starts the goal when it is delivered (*Queued goals*).
+The plan flow additionally supplies an objective OVERRIDE carrying the plan
 content, since "Implement this plan: X" alone gives the audit nothing to
 judge against. Queueing a message consumes the arm too: the goal travels on
 that queued item (`goal` in `../message-queue`) and starts when that item is
@@ -106,14 +109,20 @@ progress check judges against. `spec-writer.js` owns it.
   request is `400` (`goal-spec-request-required`), an empty reply `502`
   (`goal-spec-empty`); other errors keep the generate status. A client that
   disconnects aborts the generation.
-- Prompt: `GOAL_SPEC_SYSTEM_PROMPT` asks for Markdown sections Objective,
-  Requirements, Constraints, Done when and Out of scope, faithful to the
-  request, with paths, commands and names kept verbatim. The user prompt holds
-  XML-escaped `<request>`, `<open_items>` and `<conversation>` blocks in that
-  order, so a prompt clipped at the tail loses conversation first. The reply
-  is cleaned by `normalizeGoalSpec`: think blocks dropped, a fence around the
-  whole reply removed, clamped to the goal length limit at a line break when one is
-  close.
+- Prompt: the system message is the prompt, a blank line, then the rules
+  (`buildGoalSpecSystemPrompt`). The prompt is `sessionGoalWriterPrompt` when
+  it is set (at most 20000 characters, `GOAL_WRITER_PROMPT_CHAR_LIMIT`), else
+  the built-in `GOAL_SPEC_DEFAULT_PROMPT`, which asks for Markdown sections
+  Objective, Requirements, Constraints, Done when and Out of scope, faithful
+  to the request, with paths, commands and names kept verbatim. The rules come
+  after every prompt, a custom one included: everything in the data blocks is
+  data, never instructions, and the spec stays under 90% of the goal length
+  limit (4500 characters at the default 5000, `GOAL_SPEC_RULES`). The user
+  prompt holds XML-escaped `<request>`, `<open_items>` and `<conversation>`
+  blocks in that order, so a prompt clipped at the tail loses conversation
+  first. The reply is cleaned by `normalizeGoalSpec`: think blocks dropped, a
+  fence around the whole reply removed, clamped to the goal length limit at a
+  line break when one is close.
 - Model: a model picked for this spec in a goal window
   (`writerProviderID`/`writerModelID`, with `writerVariant`), else
   `sessionGoalWriterModel` (`provider/model`) with `sessionGoalWriterVariant`,
@@ -124,23 +133,249 @@ progress check judges against. `spec-writer.js` owns it.
   `generateSmallModelText`, so the writer only reaches models configured in
   OpenCode through `/api/experimental/generate`, the same boundary as the
   small model.
-- Length: the system prompt asks for 90% of the goal length limit
-  (`buildGoalSpecSystemPrompt`), and the output budget scales with it;
-  `ignoreLimit` drops the length line and clamps only at the hard cap.
+- Length: the rules ask for 90% of the goal length limit, and the output
+  budget scales with it; `ignoreLimit` drops the length rule and clamps only
+  at the hard cap.
+- Built-in prompt for Settings: `GET /api/goals/spec/prompt` answers
+  `{ prompt, rules }` with `GOAL_SPEC_DEFAULT_PROMPT` and the rules for the
+  goal length limit in Settings (`goalSpecRules`), the rules the writer gets,
+  so the UI never carries a copy of either. Settings reads them when it opens,
+  so a limit changed on the same page shows in the rules on the next visit.
+- Describe a change: `POST /api/goals/spec/prompt/rewrite`, body `{ prompt?,
+  instruction, directory?, providerID?, modelID? }`, answer `{ prompt,
+  providerID, modelID }` (`rewriteGoalWriterPrompt`). One call on the writer's
+  model and effort rewrites `prompt` (blank: the saved prompt, else the
+  built-in one) as the instruction says and returns only the new prompt, think
+  blocks and a whole-reply fence removed. Both texts go in unescaped: they are
+  the user's own, and escaped markup would come back as entities. A blank
+  instruction is `400` (`goal-prompt-change-required`), an empty reply `502`
+  (`goal-prompt-empty`), a reply over the 20000 character limit `502`
+  (`goal-prompt-too-long`); an input too large for the model is `413` instead
+  of a clipped prompt. Enterprise mode leaves it open exactly as it leaves the
+  writer: it sends no conversation content and reaches only models configured
+  in OpenCode; `routes.test.js` holds the two routes to the same answer.
 - Rewrite all: with `sessionGoalRewriteAll` on, `createSessionGoal` runs every
   server-created objective (scheduled tasks, CLI `--goal`, the agent tool's
   `goalAction: set`) through the writer before fitting it. A failed rewrite
   logs a warning and keeps the objective as written. `settled: true` skips
-  the rewrite, and `ignoreLimit: true` keeps the objective unfitted, tells the
-  writer to drop its length line, and stores `ignoreObjectiveLimit: true`; a
-  queued message passes both from the composer. `createSessionGoal`
-  returns `{ goal, spec }`; scheduled tasks, queued messages and the sessions route pass the
+  the rewrite. With `ignoreLimit: true` (a goal writer job whose card switched
+  the limit off, or a queued message whose composer had it off) the objective
+  is kept whole up to the hard cap instead of being condensed to the goal
+  length limit, the writer is told to drop its length line, and the record
+  says `ignoreObjectiveLimit: true`; the inline fallback, used only when the
+  objective file cannot be written, is still cut to the length limit, since
+  every goal update broadcasts it. A queued message passes both flags from
+  the composer. `createSessionGoal` returns `{ goal, spec }`; scheduled tasks,
+  queued messages and the sessions route pass the
   spec to `buildGoalIntroText(tokenBudget, spec)`, whose reminder then
   carries it in an escaped `<goal-spec>` block. A slash command normally gets
   no reminder; with a rewritten spec the reminder is admitted with
   `resume: false` before the command, since the spec is not the command's own
   text. The UI builds the same text for goals it arms, so the wording must
   stay identical on both sides.
+
+## Goal writer jobs
+
+A composer send that goes through the goal writer is a job this server owns
+(`spec-jobs.js`), so the write survives a switch to another thread, a reload
+and a closed window. Structural template: the message queue (server state,
+persisted, revisioned, broadcast).
+
+- Job: `{ id, sessionId, directory, status, trigger, review, sendMode,
+  tokenBudget, message, composerOnly, spec, writer, sendConfig, error,
+  failedStep, warning, sending, waiting, claimId, messageId, newSession,
+  outcome, attempt, createdAt, updatedAt }`. `status` is `writing`, `ready`, `failed`, `sent` or
+  `cancelled`; `trigger` is `armed` or `auto-create`. `message` is the
+  captured composer message in the queue item's form (`content` as typed,
+  `text` to deliver, `agentMention`, `attachments`, `context`); `sendConfig`
+  is the composer's model, agent and effort when the job started, and
+  `review`, `sendMode` and `tokenBudget` are the settings of that moment.
+  `writer` names who writes: `picked` (the model and effort picked on the
+  card for this spec), `settings` (the writer model picked in Settings and
+  its effort), `session` (the session's model at its default) or
+  `small-model` (a session on Auto); after a write it names the model that
+  answered. `writerChoice` is the card's pick (`{ providerID, modelID,
+  variant }`, null for the Settings default) and `ignoreLimit` the card's
+  switch that turns the goal length limit off for this spec and its goal. A
+  job starts with neither, Write again and a send set them, and a file from
+  before the fields reads as the defaults. `outcome`
+  says how a sent job went out: `{ kind: 'spec', sendMode }` or `{ kind:
+  'original', withGoal }`. `error` is why an open job stopped and
+  `failedStep` the step it came from, `write` or `send`. A send of the
+  message as typed that fails while the spec is being written leaves a job
+  without a spec, so its status is `failed` although the write never failed.
+  `warning` is set on a sent job whose goal reminder could not be sent; the
+  message went out without it. `messageId` is the id of the user message a
+  sent job sent: the id OpenCode answered the prompt with (it names the inbox
+  item, and the message keeps it), or the one the composer reports in
+  `settle`; null for a job sent before the field existed or a composer that
+  named none. `newSession` says the composer made the session from a
+  new-session draft for this job (false in a file from before the field).
+  `sending` is a send under way, `waiting` a send held until the agent's
+  turn ends (below), and `claimId` the claim of the composer sending it,
+  while that claim waits or is under way. `writerInput` (conversation and
+  open items for a goal from the next message) and the attachment payloads
+  stay on the server: projections carry attachment names and a context
+  count.
+- One job per session. A new job replaces the session's job: an open one is
+  cancelled (a waiting send with it) and its write stopped, a sent card
+  removed. While that job's message is being sent (by the server, or by a
+  composer that claimed it) a new job is `409`. A new job is accepted only
+  once it is on file: the composer lets go of the message on that answer, and
+  a job held in memory alone would be gone after a restart. A start whose
+  write fails is `500` and leaves no job, so the composer gives the message
+  back. A sent card stays until it is
+  dismissed, the session starts another job, or a day has passed; an hourly
+  sweep removes it. Open jobs have no time limit. At most 50 jobs: the sent
+  card that changed longest ago makes room, else the open job that changed
+  longest ago is cancelled; a job being sent never is, and with 50 of them a
+  new job is `409`.
+- Writing: `writeGoalSpec` on the writer settings read when the write starts,
+  with the job's text, writer input, the session model and the job's current
+  directory, and the card's choices: the picked writer and effort win over
+  Settings (`writerProviderID`, `writerModelID`, `writerVariant`), and
+  `ignoreLimit` drops the length rule. A failure is `failed` with the reason and `failedStep: 'write'`.
+  Every redo, send of the original, claim of the original, move of the
+  session to another directory, cancel and stop
+  aborts the running write first, so an answer arriving after that is
+  dropped.
+- Sending by the server: with review off, a written spec goes out at once;
+  `send` does the same for the user's choice on the card. Auto is resolved
+  first (`resolveAutoSelection`, as the OpenChamber session service does; a
+  job on Auto with no resolver fails before any request), then the session is
+  switched onto the model and agent, the session's project knowledge is
+  written into its instruction entries (`sessionKnowledgeRuntime.sync`, which
+  never fails the send), and only then is the goal saved
+  (objective file and the goal record through `persistSessionGoal`, on the
+  resolved model, `rewriteAll` off since the writer or the user settled the
+  objective, and the goal length limit in Settings, the one the writer wrote
+  within, unless the job's `ignoreLimit` keeps the objective whole). The session service saves its goal before the switch; here a
+  failed switch leaves no goal. Then come the instructions derived from the
+  text and the goal reminder
+  (`buildGoalIntroText`, carrying the spec only when the message went out as
+  typed next to it), each a synthetic message that starts no turn (`resume:
+  false`), and last the prompt with the agent mention. The prompt starts one
+  turn that reads them all, as a send from the composer does; a reminder sent
+  after the prompt reached the agent in the middle of that turn and got a
+  second reply. The prompt counts as sent only when OpenCode answers with the
+  queued item's id.
+  "Send original" stops a running write; an armed goal then keeps the message
+  as its objective, a goal from the next message sends without one.
+- A send into a session whose agent is still working follows the user's
+  follow-up setting (`followUpBehavior`, read from the settings file when the
+  send is decided), as a message from the composer does. `steer` sends at
+  once, and the message joins the running turn. `queue`, the default, keeps
+  the choice on the job (`waiting: { choice, since }`, written to the file)
+  and sends it once the turn is over; nothing reaches the session before
+  that, the goal included. A composer's claim waits the same way (below). The
+  turn is over by the message queue's test (`../message-queue/DOCUMENTATION.md`,
+  *Delivery loop*): OpenCode does not list the session as running, its newest
+  record is not a reply still streaming (one begun before this server started
+  does not count), and no subagent of it runs
+  (`../opencode/session-activity.js`). The answer is asked for when the send
+  is decided, and again when the session goes idle (after 500 ms), when a
+  reply finishes with no look pending, on every hub `connect`, after 5 s
+  while a subagent works, and after 2 s doubling to 60 s while OpenCode does
+  not answer, which is never taken as over. The wait ends in the record that
+  starts the send (`delivery`), so it goes out once; a composer's late report
+  that the message went out ends it too. While it waits, Back to edit takes
+  the message back; send, redo and claim are `409`.
+- A failure before OpenCode queued the prompt leaves the job open with the
+  reason, `failedStep: 'send'` and review on, so nothing goes out again until
+  the user picks; a goal saved before the failure stays, as for any send that
+  fails after its goal. A goal reminder that cannot be sent does not stop the
+  message: the prompt goes out without it, and the job is `sent` with the
+  reason in `warning`. Once OpenCode has queued the prompt the job is `sent`,
+  and a second send is `409`.
+- Sending through the composer: the server sends text, the agent mention and
+  derived instructions only. A message with attachments or attached context
+  (`composerOnly`) waits on the card even with review off; `claim` hands its
+  full message to the composer with the claim's id (`claimId`), and `settle`
+  records the outcome, or releases the job with the reason when the send
+  failed. A claim follows the follow-up setting as a server send does: with
+  `steer`, or once the turn is over, it is handed over at once and the job
+  shows it is being sent (`delivery: { by: 'composer', claimId }`). With
+  `queue` and the agent working, the claim waits on the job (`waiting: {
+  claimId, since }`) and is handed over when the turn is over; the composer
+  keeps the message meanwhile and sends it when the job shows that claim
+  being sent. Only the claim the job names is sent, so a composer that missed
+  its hand-over never sends a later claim's message. A claim nobody settles
+  expires two minutes after it was handed over, never while it waits. The job
+  then waits for the user with review on and a reason that says the window
+  sending the message did not report back, so it may have been sent and the
+  session needs a look before it is sent again: a window that switched to
+  another runtime mid-send can no longer report to this server. A composer
+  reports under the
+  claim it sent with (`settle` carries `claimId`): while a composer's claim is
+  being sent, a report under any other claim, or under none, is `409`, so a
+  window whose claim expired never settles the claim another window now
+  holds. A composer's report that the message went out is taken for any open
+  job no send is under way for, so a send that finished after its claim
+  expired, or after a restart, still lands.
+- A sent job keeps what its card shows: the text, the attachment names, the
+  context count (`contextCount` in the file) and the instructions derived
+  from the text. The attachment bytes, the attached context and the writer
+  input are dropped when it is sent.
+- Back to edit: `edit` cancels an open job, stops its write and answers the
+  full message for the composer once the file no longer holds the job. When
+  that write fails, the job is put back as it was, a stopped write starts
+  again and a waiting send looks at the session again, and the answer is
+  `500` without the message, since a job left on file would come back after
+  a restart and offer the message a second time. An open job ends only
+  through a send, an edit, a new job in its session, its session ending, or
+  the cap.
+- Sessions: a session deleted in OpenCode (`session.deleted`) or archived in
+  OpenChamber (the `openchamber:session-archived` broadcast, which
+  `server/index.js` hands to `processPayload`; an unarchive ends nothing) ends
+  its job. A `session.updated` carrying `info.directory` moves an open job to
+  that directory, so the writer, the goal, Auto routing and the knowledge use
+  the session's current one; a write under way when the session moves starts
+  again in the new directory, and the old write's answer is dropped.
+- Restart: jobs live in `<data-dir>/goal-spec-jobs.json`, mode 0600, written
+  through `writeFileAtomic` (`../opencode/atomic-write.js`). A file that is
+  not JSON, has an unknown `version`, or whose `jobs` is not a list is moved
+  aside (`.corrupt-<time>`) and the jobs start empty. A file with jobs that
+  fail validation is moved aside the same way, its valid jobs are kept and
+  written back. A read failure, or a move that fails, fails the load, and
+  every change is refused until a load succeeds, so the file is never
+  overwritten from an empty list.
+- A send in flight is written to the file (`delivery: { by: 'server' |
+  'composer', startedAt, claimId? }`) before anything goes out; a claim
+  whose record cannot be written is refused. A job loaded with a `delivery`
+  may have gone out, so it goes back to review with the reason "the server
+  restarted while the message was being sent". Writes the restart cut off
+  start again, a written spec that sends itself goes out, and a send or claim
+  waiting for the turn to end (nothing of it went out) looks at the session,
+  once the event stream is connected: at load when the hub already is, else
+  on its next `connect`, and on every later `connect`. A job being sent is
+  never resumed or sent again.
+  `stop` aborts running writes, ends the waits and the sweep, and answers once
+  the last file write has finished; shutdown waits for it.
+- Routes (`/api/goals/spec-jobs`, before the generic proxy, JSON through the
+  `/api/goals` family): `GET` the snapshot `{ revision, jobs }`; `POST` start
+  `{ sessionId, directory, trigger, review, sendMode, tokenBudget?,
+  writerInput?, newSession?, message, sendConfig }`; `POST /:jobId/send` with `{ kind:
+  'spec', sendMode, spec, ignoreLimit? }` (the spec as edited) or `{ kind:
+  'original', ignoreLimit? }`, `ignoreLimit` setting the job's switch for the
+  goal the send starts; `POST /:jobId/redo` with `{ writerChoice?, ignoreLimit?
+  }`, the card's choices for this write and the goal, a choice left out
+  keeping the job's; `POST /:jobId/edit`; `POST /:jobId/claim` with `{ kind
+  }`; `POST /:jobId/settle` with `{ outcome, spec?, messageId?, error?,
+  claimId? }`; `DELETE
+  /:jobId` dismisses a sent job (an open one is `409`). Mutations answer `{
+  revision, job }`, and `edit` and `claim` add the full `message`; a send or
+  claim held for the agent's turn answers the job with `waiting: true`.
+  Refusals are `400` (an invalid body, a `tokenBudget` other than a positive
+  integer or null, a `writerInput` other than `{ conversation?, openItems? }`
+  strings, a `message.scheduledTask`, which only the server's scheduled sends
+  carry, a `writerChoice` without a provider and model), `404` and `409`; a failed send is `502`, and a
+  start that cannot be written to the file is `500`.
+- Every change broadcasts `openchamber:goal-spec-job.updated` with `{
+  revision, sessionId, job }` on the control stream (`job` is null once a sent
+  job is removed). The revision is global and monotonic, as the queue's.
+- Enterprise mode leaves the jobs open on the same terms as the writer route:
+  the writer reaches only models configured in OpenCode, and the job file
+  stays on this machine.
 
 ## Flow
 
@@ -300,6 +535,11 @@ sees only that final turn, so the report is its evidence.
   slash command or mention in it is sent as typed text.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
+  A send that brings its own goal (`SendMessageOptions.goalArm`, built with
+  `createGoalArm`: the goal writer card, Plan "Run as goal", fork as goal)
+  neither reads nor clears the flag, and a goal it fails to save is not put
+  back on it. A queued message takes the flag when it is queued (*Queued
+  goals*).
   Armed slash commands resolve their authoritative command template and apply
   OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
   implicit argument suffix) for the audit objective before goal metadata is
@@ -315,8 +555,9 @@ sees only that final turn, so the report is its evidence.
   this goal" under its more-options menu). On desktop it resizes from its
   corner; the mobile sheet does not.
 - `components/chat/GoalWriterPicker.tsx` — the writer model and effort in a
-  goal window. A pick applies to that window; Remember, or
-  `sessionGoalWriterRememberChoice`, saves it as the Settings default.
+  goal window and on the goal writer card. A pick applies to that window or
+  that spec; Remember, or `sessionGoalWriterRememberChoice`, saves it as the
+  Settings default.
 - Sidebar glyph next to the date in `SessionNodeItem`.
 - `components/sections/openchamber/SessionGoalCheckerField.tsx` — Settings →
   Chat → Goal: Jev or the small model checks progress
@@ -330,53 +571,224 @@ sees only that final turn, so the report is its evidence.
 - `lib/goalWriter.ts` — `requestGoalSpec` (the route above; a failure comes
   back with its reason, never as an empty spec), `planGoalWriter` (whether a
   send stops for the writer), `buildGoalIntroReminder` (the goal-mode reminder,
-  byte-identical to `buildGoalIntroText`), and the context formatting for
-  "goal from next message".
+  byte-identical to `buildGoalIntroText`), the context formatting for
+  "goal from next message", and for Settings `fetchGoalWriterBuiltinPrompt`
+  and `requestGoalWriterPromptRewrite`, which fail with their reason too.
 - `components/chat/SessionGoalButton.tsx` — `SessionGoalWriterButton`, the
   sparkle switch right of the target (`sessionGoalWriterEnabled`, on by
   default). It shows only while the session has no goal and a progress check
   can run, and reads as on and locked while `sessionGoalRewriteAll` is on.
 - `components/chat/ChatInput.tsx` — `handleSubmit` asks `planGoalWriter`
-  before anything is taken from the composer. Eligible sends are plain text
-  in normal mode: no slash command, shell input, side question, queue flush,
-  or a send that auto-review would queue. Two triggers:
+  once the send has a model and passed the space checks, before anything is
+  taken from the composer. Eligible sends are plain text in normal mode on a
+  session with a known directory or a new-session draft: no slash command,
+  shell input, side question, queue flush, or a send that auto-review would
+  queue. A message queued while the agent works with the target armed is
+  asked the same way (*Queued goals*). Two triggers:
   - `armed`: the target is armed and the switch or rewrite-all is on. The
     writer reads the message only.
-  - `auto-create`: the session has no goal at all, it is idle, and
-    `sessionGoalAutoCreate` is `review` or `auto`. The writer also gets
+  - `auto-create`: the session has no goal at all, no goal writer job still
+    open (writing, ready or failed), it is idle, and `sessionGoalAutoCreate`
+    is `review` or `auto`. The writer also gets
     `components/chat/goalWriterContext.ts`: the first request and the newest
     turns of the loaded history, open project todos, session-pinned and
     project-pinned plans whose checklist is not done, queued messages and
     running subagent sessions. Every source is best effort; the message alone
     still makes a goal.
-- `components/chat/GoalSpecDialog.tsx` — writes the spec (the session's
-  composer model is sent as the fallback model), then shows it for approval
-  when `sessionGoalWriterReview` is on (armed) or `sessionGoalAutoCreate` is
-  `review`. Choices: send the message with the spec as its goal, send the spec
-  as the message (`sessionGoalWriterSendMode` picks the primary one and the
-  one used without review), write again, or skip: an armed goal keeps the
-  message as typed, an automatic one sends without a goal. A failed write
-  always waits for the user, review or not. Closing the dialog leaves the
-  composer, queue and pending prompts untouched: the choice submits again with
-  a `goal` option, and only then is the arm set, right before `sendMessage`.
-- `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
-  produced or the user kept over it, so rewrite-all leaves it alone;
-  `briefAgent` puts the spec into the reminder when the message itself is not
-  the spec.
+  With a plan, the message leaves the composer as a queued message does
+  (`takeComposerMessage`, shared with queueing: mentions, file mentions,
+  snippets and the skill instruction resolved now, the attached chips and
+  files taken along) and becomes a job: `POST /api/goals/spec-jobs` with the
+  trigger, review (`sessionGoalWriterReview` for armed, `sessionGoalAutoCreate`
+  for automatic), `sessionGoalWriterSendMode`, the default token budget, the
+  writer input and the composer's model, agent and effort. A new-session draft
+  becomes a session first (`materializeOpenDraftSession`, with the automatic
+  worktree when it is on, and the draft's synthetic context added to the
+  message), since a job belongs to a session; the start then says so
+  (`newSession: true`). The draft is made on the runtime the composer took the
+  message on: after a switch away from it, nothing is made, neither the
+  worktree nor the session, and the message goes back to the composer. A
+  session's first message also
+  carries the response style as a derived instruction, as a direct send does.
+  An armed target is disarmed when the job is planned (the server writes the
+  goal), so a message sent while the job starts is not this goal, and the
+  prompt joins the session's input history once the job starts; a start the
+  server refuses gives everything back to the composer, to the new session's
+  composer when one was created, and arms the target again. The composer never
+  sends the message itself.
 - Rewrite all in the UI: `setSessionGoal` takes `rewrite` with the session's
   model and returns `rewrittenSpec`. `sendMessage` passes it for unsettled
   armed goals (Plan "Run as goal", fork as goal), and `SessionGoalDialog` when
   the typed objective changed. A failed rewrite keeps the user's text and says
   so in a toast. `sendMessage` builds the goal reminder only after the goal is
   saved, so a rewritten spec reaches the agent in the same message.
-- A writer request belongs to the composer it came from: switching the
-  composer to another session or draft closes the dialog, and a late choice is
-  dropped.
+- `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
+  produced or the user kept over it, so rewrite-all leaves it alone;
+  `briefAgent` puts the spec into the reminder when the message itself is not
+  the spec. The card's send from this window passes both with its own goal.
+- `stores/goalSpecJobStore.ts` follows the goal writer jobs above (snapshot on
+  load and on every control-stream connection, then updates in revision order;
+  `stores/DOCUMENTATION.md` has the ordering rules).
+- `components/chat/GoalSpecJobCard.tsx` shows a session's job: the last row of
+  its transcript (the list footer in `ChatContainer`, after
+  `SessionErrorNotice`), or above the composer while the session has no
+  transcript yet. A chat that takes no prompts (`ChatColumnTakesPromptsContext`:
+  a read-only surface, a deleted space's archived chat, a subagent's session
+  unless prompting those is allowed) shows no card, since it has no composer to
+  send the message from or take it back to. It names the writer (the picked model with its effort, the
+  session's model at its default effort, or the small model until the model
+  that answered is known) and the state: writing (with "sent as soon as it is
+  written" when review is off), ready with the spec in an editable field (edits
+  stay per write attempt in the store), failed with the reason under a title
+  that names the step that failed (the write, or the send of the message),
+  queued until the agent finishes its turn (`waiting`, where only Back to
+  edit acts), sending, or sent with how it went and a dismiss button
+  (`DELETE`). A sent card in the transcript hides once the user sends another
+  message in that session (`components/chat/goalSpecJobOvertaken.ts`): a user
+  message after the job's own one, found by `messageId`; while that message is
+  not in the loaded transcript, or the job names none, a user message newer
+  than the send. Its own message can reach the session after the job is marked
+  sent, so time alone would hide the card at once. Every open job shows, in
+  the same place whatever its state, the writer row (`GoalWriterPicker`,
+  starting on the job's pick, else the Settings default, else the session's
+  model; a session on Auto names none) and a more-options menu with "No
+  length limit for this goal". Both apply to this spec only: the store keeps
+  them per job (`choiceEdits`) until Write again hands them to the server,
+  which writes with them and keeps them on the job, and every send carries
+  the switch. While the job is being sent or waits for the agent's turn, the
+  writer row and the menu stay on screen but take no choice: the writer's
+  model menu (`ModelSelector`'s `disabled`) and effort do not open, and a
+  model menu open when the job locks closes and does not come back by itself.
+  The spec field takes any length: past the goal length limit
+  its counter turns to the warning color and the line kept under it says
+  saving condenses the spec; with the limit off the counter shows the length
+  alone and the line says the goal is saved whole. Actions on an open job:
+  send in the default send mode or the
+  other one, send the message as typed (also while writing, which stops the
+  writer; an armed goal keeps the message as its objective, an automatic one
+  goes without a goal), write again (ready, or after a failed write), try
+  again after a failed send of a job without a spec (the message as typed,
+  the only send such a job can have made), and back to edit. A
+  message the server cannot send (`composerOnly`: attachments or attached
+  context) says it waits for the user until it is queued or being sent.
+  `components/chat/goalSpecJobSend.ts` sends it from this window: `claim`, then
+  `sendMessage` with the full message assembled as a taken queued message
+  (`buildOutgoingMessage`) and the goal passed with that send (`goalArm`, with
+  the card's length limit switch as `ignoreLimit`),
+  then `settle` under the claim's id with the outcome and the id of the user
+  message the send created (`onMessageID` on the send), or with the reason
+  when the send failed. A send at once uses the job as the claim answered
+  it, so a session that moved to another directory meanwhile gets the
+  message in its new one.
+  A claim the server holds for the agent's turn (queue, the agent working)
+  returns at once with the message, so the card shows it queued with Back to
+  edit open; the window keeps the message by claim id and sends it once the
+  job shows that claim being sent, and only then. A claim the job no longer
+  names (taken back, released, or another window's claim since) is dropped,
+  and so is every held claim on a runtime switch. A window that closes or
+  reloads while its claim waits sends nothing: the hand-over expires after
+  two minutes and the job waits for the user again. The claim, the send and
+  the report belong to the runtime the claim was made on. A claim answered
+  after the user switched to another runtime is not sent, and a send that
+  ends after such a switch reports nothing, since this window reaches only
+  the active runtime. The server that holds the claim releases it when it
+  expires, as for a window that closed. The composer's arm store
+  stays out of it: a send held while OpenCode starts waits behind any send
+  made before it, and an armed goal there would go to whichever of them
+  consumes the store first. Back to edit (`components/chat/goalSpecJobEdit.ts`)
+  ends the job (`edit`), hands the full message to that session's composer
+  through `input-store.pendingComposerEdits`, and arms the goal again for an
+  armed job while the runtime it was taken back on is still active. The arm
+  store belongs to no runtime, so after a switch it would make the next send
+  on the other runtime a goal. A new chat's job (`newSession`) shown in the
+  main chat goes back to a new chat instead, while nothing was sent in its
+  session: no message in
+  this window's store and none in OpenCode's list (`limit: 1`), so the
+  session is removed (`deleteSession`) and a new-session draft opens for the
+  session's directory (another chat for a chat), and the message goes to that
+  draft's composer by its draft id. A session with any message, a list
+  OpenCode does not answer, or a removal that fails keeps the session, and
+  the message goes to its composer. The window is checked again once OpenCode
+  answers the list: a message sent from it meanwhile, or a switch to another
+  session or runtime, keeps the session as well. A message another window
+  sends between that check and the removal is not covered, since OpenCode has
+  no removal that holds only for an empty session. The new draft starts on
+  the default model and agent, as any new draft does.
+  The job is the server's, so switching threads changes nothing.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
   the server only, so it lives in the settings file like the walkthrough
-  model), review, send mode, rewrite all, and goal from next message. None of
-  it exists in VS Code, which has no goal loop.
+  model), its effort, the prompt, review, send mode, rewrite all, and goal
+  from next message. None of it exists in VS Code, which has no goal loop.
+  - Model: with no pick, the line under the label names the model that writes
+    then, the composer's (`Session model: provider/model`). On Auto it says
+    the small model writes, since the small-model chain treats Auto as no model.
+  - Effort: `sessionGoalWriterVariant` in `useUIStore`, a picker of the picked
+    model's levels from the provider catalog plus "Model default" (empty).
+    Picking another model clears it; it is disabled while no model with levels
+    is picked, unless a saved level needs clearing.
+  - Prompt: `sessionGoalWriterPrompt` in `useUIStore`, saved as the user types.
+    `GoalWriterPromptEditor.tsx` shows the prompt in use, the built-in one
+    (from `GET /api/goals/spec/prompt`) while the setting is empty, and saves
+    empty when the text is empty or equals the built-in prompt, so a newer
+    release's prompt applies. Reset to default shows while the text differs
+    from it. The rules the server adds after every prompt are shown under the
+    field. "Describe a change" asks the rewrite route with the composer's model
+    as the fallback, in the directory the app works in (none while the app does
+    not know it yet). It sends the prompt it will show as the current one: the
+    text in the field, or the built-in prompt while the field is empty, so
+    Rewrite stays off until that has loaded and never sends an empty prompt.
+    The answer is shown next to the current prompt (stacked on a narrow pane)
+    until Apply, which puts it in the field and saves it, or Discard. The field
+    stays editable while the answer is written. When the prompt changed after
+    the rewrite was asked for, by an edit or a save from another window, the
+    proposal is shown next to the prompt as it is now with a note that it came
+    from the earlier one, and Apply replaces only the prompt it is shown
+    against: a prompt saved after the proposal showed is kept, and the proposal
+    is shown against it for another decision. A failure keeps the field and
+    shows its reason.
+
+### Queued goals
+
+A message sent while the agent works joins the message queue: Enter with the
+follow-up setting on `queue` (the default) or the queue button
+(`handleQueueMessage`), and, from `handleSubmit`, a send while auto-review runs
+or one that dismissed a permission or form. An armed goal goes the way it goes
+for any send. `handleQueueMessage` hands an armed message to `handleSubmit`
+(`queue`), which asks `planGoalWriter` before it queues anything.
+
+- When `planGoalWriter` gives an armed plan, the message becomes a goal writer
+  job, which holds it until the agent's turn is over (*Goal writer jobs*). The
+  job follows the follow-up setting. With the setting on `steer`, a message
+  from the queue button goes into the running turn when the job sends it.
+- Otherwise the queue item carries the goal (`goal: { tokenBudget }`, the
+  default budget captured when it was queued, with `objective` when the arm
+  named one). The server's queue saves the
+  goal and sends its reminder right before the message when it delivers it
+  (`../message-queue/DOCUMENTATION.md`, *Delivery loop*). A message queued
+  while auto-review runs goes this way even with the writer on, because the
+  review holds the session's queue and a goal writer job does not wait for
+  that hold.
+
+The composer takes the arm with the message, before any request, so a message
+sent before the queue or the job answers is plain. A refusal gives the message
+back to the composer and arms the target again. As for a send, only text typed
+in normal mode takes the arm; a message whose text is empty after its agent
+mention leaves the target armed. An arm names an objective of its own only
+when it comes back from a queued message whose goal had one; otherwise the
+message text is the objective.
+
+A queued goal message the composer takes back keeps its goal. A composer send
+that takes it ("send" on its row, or a send that takes the queue along) passes
+it with that send (`queuedGoal`, with the budget and objective it was queued
+with), and when the composer's own text goes along the composer's arm is taken
+into the same goal and given back if the send fails. A send of queued messages
+alone that carry no goal passes `queuedGoal: null`, so it never takes the arm
+that belongs to the composer's text. "Edit" arms the target again, with the
+goal's objective when it has one. Removing the message removes its goal. VS
+Code's local queue passes the goal from its auto-send the same way, though VS
+Code never arms one (it runs no goal loop). A server older than the `goal`
+field drops it and queues the message plain.
 
 ## Scheduled goals
 

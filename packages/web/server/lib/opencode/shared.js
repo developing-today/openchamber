@@ -425,6 +425,9 @@ function getConfigForPath(layers, targetPath) {
   return layers.userConfig;
 }
 
+// Equal as JSON, which is the form the write boundary normalizes to: a JSONC
+// number JSON cannot carry, such as `1e999` read as Infinity, arrives in the
+// desired config as null and still matches the file, so its text is kept.
 function deepEqualJsonValue(a, b) {
   if (a === b) {
     return true;
@@ -437,7 +440,8 @@ function deepEqualJsonValue(a, b) {
     return keys.length === Object.keys(b).length
       && keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqualJsonValue(a[key], b[key]));
   }
-  return false;
+  return !isPlainObject(a) && !isPlainObject(b) && !Array.isArray(a) && !Array.isArray(b)
+    && JSON.stringify(a) === JSON.stringify(b);
 }
 
 // Structural diff between the parsed on-disk config and the desired config.

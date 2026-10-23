@@ -7,6 +7,7 @@ import { create } from "zustand"
 import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
+import type { QueuedContextPart } from "@/stores/messageQueueStore"
 import { prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 
@@ -134,6 +135,29 @@ export type VSCodeActiveEditorFile = {
   selection: { startLine: number; endLine: number; text: string } | null
 }
 
+/**
+ * A message handed back to a composer to edit: a goal writer job taken back.
+ * It goes to one session's composer, or to one new-session draft's (a new
+ * chat's job whose session was removed), bound to that draft's id.
+ */
+type PendingComposerEdit = {
+  runtimeKey: string
+  target: ComposerEditTarget
+  /** The text as typed. */
+  content: string
+  attachments: AttachedFile[]
+  /** The chips it was sent with; the composer puts the attached ones back. */
+  context: QueuedContextPart[]
+}
+
+export type ComposerEditTarget = { kind: "session"; sessionId: string } | { kind: "draft"; draftId: number }
+
+export const isSameComposerEditTarget = (left: ComposerEditTarget, right: ComposerEditTarget): boolean => (
+  left.kind === "session"
+    ? right.kind === "session" && left.sessionId === right.sessionId
+    : right.kind === "draft" && left.draftId === right.draftId
+)
+
 export type InputState = {
   pendingComposerRestore: {
     target: ChatDraftIdentity
@@ -141,6 +165,15 @@ export type InputState = {
     files: Array<{ url: string; mimeType: string; filename: string }>
   } | null
   consumePendingComposerRestore: (target: ChatDraftIdentity | null) => InputState["pendingComposerRestore"]
+  /**
+   * Messages handed back to the composer of their session or draft, oldest
+   * first. A composer takes only its own, and none replaces another, so
+   * nothing is lost while that composer is not on screen.
+   */
+  pendingComposerEdits: PendingComposerEdit[]
+  requestComposerEdit: (edit: PendingComposerEdit) => void
+  /** Takes the oldest message waiting for this session's composer, or this draft's. */
+  consumePendingComposerEdit: (runtimeKey: string, target: ComposerEditTarget) => PendingComposerEdit | null
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
   /**
@@ -167,6 +200,14 @@ export type InputState = {
    * finds a different draft open drops it.
    */
   pendingDraftSubmit: { draftId: number; text: string } | null
+  /**
+   * Text to send in one chat's session, asked for from its transcript (a
+   * question answered again from its tool row). `target` names the composer
+   * like `pendingInputTarget`: null for the main chat, the session id for a
+   * chat pinned in the side panel. That composer sends it only while it shows
+   * `sessionId`, and drops it otherwise; other composers leave it alone.
+   */
+  pendingSessionSubmit: { target: string | null; sessionId: string; text: string } | null
   /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
@@ -186,6 +227,9 @@ export type InputState = {
   requestDraftSubmit: (draftId: number, text: string) => void
   /** Takes the pending text when it belongs to this draft; any other pending request is dropped. */
   consumePendingDraftSubmit: (draftId: number | null) => string | null
+  requestSessionSubmit: (request: { target: string | null; sessionId: string; text: string }) => void
+  /** Takes the pending text when it is for this composer and session; a request for this composer and another session is dropped. */
+  consumePendingSessionSubmit: (target: string | null, sessionId: string | null) => string | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
@@ -212,6 +256,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
     set({ pendingComposerRestore: null })
     return pending
   },
+  pendingComposerEdits: [],
+  requestComposerEdit: (edit) => set((state) => ({ pendingComposerEdits: [...state.pendingComposerEdits, edit] })),
+  consumePendingComposerEdit: (runtimeKey, target) => {
+    const edits = get().pendingComposerEdits
+    const index = edits.findIndex((edit) => edit.runtimeKey === runtimeKey && isSameComposerEditTarget(edit.target, target))
+    if (index === -1) return null
+    set({ pendingComposerEdits: edits.filter((_, position) => position !== index) })
+    return edits[index]
+  },
   pendingInputText: null,
   pendingInputMode: "replace",
   pendingInputTarget: null,
@@ -219,6 +272,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pinnedSyntheticParts: new Map(),
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
+  pendingSessionSubmit: null,
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -285,6 +339,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (pendingDraftSubmit === null) return null
     set({ pendingDraftSubmit: null })
     return pendingDraftSubmit.draftId === draftId ? pendingDraftSubmit.text : null
+  },
+
+  requestSessionSubmit: (request) => set({ pendingSessionSubmit: request }),
+
+  consumePendingSessionSubmit: (target, sessionId) => {
+    const { pendingSessionSubmit } = get()
+    if (pendingSessionSubmit === null || pendingSessionSubmit.target !== target) return null
+    set({ pendingSessionSubmit: null })
+    return pendingSessionSubmit.sessionId === sessionId ? pendingSessionSubmit.text : null
   },
 
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),

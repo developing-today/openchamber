@@ -1364,6 +1364,10 @@ export interface ProjectEntry {
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;
+  /** Keeps this project's sessions out of the In work zone. Absent means shown. */
+  hiddenFromWork?: boolean;
+  /** Keeps this project out of the List view's All sessions. Absent means shown. */
+  hiddenFromAllSessions?: boolean;
 }
 
 /**

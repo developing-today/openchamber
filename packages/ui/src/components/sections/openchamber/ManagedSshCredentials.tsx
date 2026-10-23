@@ -160,7 +160,9 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
   // The editor draws the field's label; this is the control column of its row.
   return <div className="flex min-w-0 flex-1 flex-col gap-2">
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <Select value={selection.value} onValueChange={selection.onChange} disabled={disabled || state.status !== 'ready'}>
+      {/* Until the list names the saved key the field reads as empty; the
+          select would otherwise show the opaque reference itself. */}
+      <Select value={selectedCredential ? selection.value : ''} onValueChange={selection.onChange} disabled={disabled || state.status !== 'ready'}>
         <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.sourceControl.ssh.title')}>
           <SelectValue placeholder={t('settings.sourceControl.ssh.title')}>
             {/* The value is an opaque reference; only the safe label may be shown. */}

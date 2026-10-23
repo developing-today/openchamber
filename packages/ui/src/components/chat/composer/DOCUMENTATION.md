@@ -50,6 +50,29 @@ oldest pending form and counts the rest in its header. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
+For an agent's `question` call, both also record the answers in progress
+under the call (`questionAnswers.ts`, memory only, newest 50 calls), since a
+dismissal, a stopped turn or an error ends the form and drops the dock's own
+draft. The call's transcript row then offers to answer again starting from
+them when the call returned no answers; answers the call did return come
+first, since the call may have been answered in another window while this
+dock still held its untouched starting values. Its answers come back to the composer as a request in the input store
+(`requestSessionSubmit`, naming the composer like `pendingInputTarget` and the
+session): the composer showing that session sends the text like a typed
+message, so a busy session queues or steers it, waits while a BTW holds the
+composer, and appends the text without sending when the composer already
+holds something. A composer showing another session drops the request. The
+row offers this only in a chat that takes prompts, as ChatContainer decides
+(`ChatColumnTakesPromptsContext`), since a read-only chat mounts no composer.
+
+Text the composer did not get from its own editor (these answers, a preset
+chip, a Shortcuts first message) always goes out as a message
+(`SubmitOptions.inputMode`). Sent in shell mode it would run as a command, and
+an answer's text comes from options the agent wrote. An empty composer left in
+shell mode after a command returns to normal mode for it. While a shell command
+is being typed, the answers and the Shortcuts message wait until the command is
+sent or the composer leaves shell mode, so they never join the command.
+
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,
 a `when` clause reads only the answers of active earlier fields (an
@@ -98,6 +121,33 @@ the "looks done" hint or the review offer, the suggestion
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
 
+`CurrentModelIndicator`, the real model of the session's last turn, is a pill
+of the composer column above the box on desktop and a line of the model and
+agent row inside the box on mobile; `ChatInput` mounts both. Keep it out of
+`ChatContainer`'s composer slot: the slot lays its children out in a row, and
+the line mounted there sat to the left of the box, cut off, and made the box
+narrower. On desktop the pill is outside the box's opaque surface but over the
+scrolling transcript, so it has the same opaque surface and light
+(`oc-surface-floating oc-glass-floating`), as the status pills do; as a bare
+line it let the transcript's text show through.
+
+A session with no transcript yet (a new chat whose first message went to the
+goal writer) shows its goal writer card (`GoalSpecJobCard`) above the composer
+box, inside the form: `ChatContainer` passes `goalSpecCardAboveInput` while it
+shows the empty surface, and once the transcript has a row the card is that
+transcript's last row, until a sent card is followed by another message of the
+user. A send the goal writer takes leaves the composer as a
+queued message does (`takeComposerMessage`, which queueing shares) and starts
+the server's job; a new-session draft becomes a session for it first. The
+rules are in `packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Goal
+writer in the UI*. A goal writer job taken back for editing returns through
+`input-store.pendingComposerEdits`, addressed to a session's composer or, for
+a new chat whose empty session was removed, to one new-session draft by its
+id. The composer showing that session or draft takes it
+(a `/btw` composer leaves it waiting), appends its text after anything typed
+since (`restoreDraft`), restores its files and puts its attached chips back,
+as editing a queued message does.
+
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
 which clears the revert and puts the messages and the agent's file changes
@@ -113,7 +163,10 @@ state is one persisted preference in `useUIStore` (`messageQueueExpanded`,
 collapsed by default), shared by every session and surviving session switches
 and reloads. It receives the composer's main-session queue target instead of
 resolving the global selection, so a chat pinned in the side panel addresses
-its own queue. It stays visible under the form and permission docks.
+its own queue. It stays visible under the form and permission docks. A message
+queued with the goal target armed takes the goal with it, or goes to the goal
+writer as a send would; editing it arms the target again (*Queued goals* in
+`packages/web/server/lib/session-goal/DOCUMENTATION.md`).
 
 `selectComposerQueue` in the submission builder excludes server-scheduled items
 before the composer counts manual content or reads captured send configuration.

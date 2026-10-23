@@ -935,12 +935,13 @@ describe('openchamber session routes', () => {
     }));
     expect(createSessionGoal.mock.invocationCallOrder[0])
       .toBeLessThan(sessionPromptMock.mock.invocationCallOrder[0]);
-    // v2 cannot append to a message, so the goal reminder follows the prompt as
-    // its own synthetic message.
+    // v2 cannot append to a message, so the goal reminder is its own synthetic
+    // message, admitted before the prompt: after it, the reminder reaches the
+    // running turn and the agent answers a second time.
     expect(sessionPromptMock).toHaveBeenCalledWith({ sessionID: 'ses_123', text: 'Finish and verify the migration' });
     expect(sessionSyntheticMock).toHaveBeenCalledWith(expect.objectContaining({ sessionID: 'ses_123', resume: false }));
-    expect(sessionPromptMock.mock.invocationCallOrder[0])
-      .toBeLessThan(sessionSyntheticMock.mock.invocationCallOrder[0]);
+    expect(sessionSyntheticMock.mock.invocationCallOrder.at(-1))
+      .toBeLessThan(sessionPromptMock.mock.invocationCallOrder[0]);
     expect(response.body).toMatchObject({ goalEnabled: true, goalTokenBudget: 200000, promptDispatched: true });
   });
 
@@ -953,7 +954,7 @@ describe('openchamber session routes', () => {
       .expect(200);
 
     const [{ text }] = sessionSyntheticMock.mock.calls.at(-1);
-    expect(text).toContain('The goal spec below was written from the user message above.');
+    expect(text).toContain('The goal spec below was written from the user message that follows.');
     expect(text).toContain('<goal-spec>\n## Objective\nMigrate &lt;all&gt; tables\n</goal-spec>');
   });
 

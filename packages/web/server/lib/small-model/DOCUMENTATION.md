@@ -95,6 +95,9 @@ Five things are decided here, in order:
    takes the caller's own model (`preferredModelID`) — `source:
    'session-model'`: costlier than a small model elsewhere, but never another
    provider's subscription. OpenCode's titles end the same way.
+   A caller on Auto (`openchamber/auto`, OpenChamber's own choice, which no
+   provider runs) names no provider or model here: a request for Auto, or a
+   session on Auto, gets what a caller naming nothing gets, never Auto itself.
 5. Otherwise `GET /api/model/default` — `source: 'default'`. This is
    OpenCode's default chat model, not a small one; it is the last resort, and
    only for a caller that named no provider or whose provider it is on. With
@@ -158,6 +161,15 @@ is ~4x headroom that also absorbs the answer decode and one structured-output
 retry. A blown deadline (not caller cancellation) throws `504` with
 `code: 'generation-timeout'`, naming the model and the budget; the route maps it
 to that message instead of the generic "choose another model" text.
+
+`variant` is a thinking level (OpenCode's model variant) of the explicit
+request `model`, sent as `model.variant` on `/api/experimental/generate`.
+OpenCode resolves it the way it does for a chat turn (`ModelResolver.resolve`
+applies the variant's settings, headers and body) and refuses a level the
+model does not list with `Variant unavailable for provider/model: level`. It is
+dropped whenever the model came from anywhere but the request, since a level
+picked for one model means nothing to another. The goal writer is the only
+caller today.
 
 OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
 plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode

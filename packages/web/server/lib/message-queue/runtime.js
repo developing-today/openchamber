@@ -83,14 +83,20 @@ const parseSendConfig = (value) => {
   return sendConfig;
 };
 
-// "Run as goal" captured with the message: `objective` only when the arming
-// flow supplied its own (the plan flow), otherwise the delivered text is it.
+/**
+ * The goal a message starts when it goes out: the composer's armed goal
+ * ("Run as goal"), taken when the message was queued, with the token budget of
+ * that moment. `objective` only when the arming flow supplied its own (the
+ * plan flow); otherwise the delivered text is the objective. Null for a
+ * message without one; anything else is refused.
+ */
 const parseGoal = (value) => {
-  if (value === undefined) return null;
+  if (value === undefined || value === null) return null;
   const raw = asRecord(value);
-  if (!raw) throw new TypeError('invalid goal');
-  const tokenBudget = raw.tokenBudget ?? null;
-  if (tokenBudget !== null && !(Number.isInteger(tokenBudget) && tokenBudget > 0)) throw new TypeError('invalid goal tokenBudget');
+  const tokenBudget = raw?.tokenBudget ?? null;
+  if (!raw || (tokenBudget !== null && !(Number.isInteger(tokenBudget) && tokenBudget > 0))) {
+    throw new TypeError('item goal needs a tokenBudget that is a positive integer or null');
+  }
   const goal = { tokenBudget };
   const objective = asNonEmptyString(raw.objective);
   if (objective) goal.objective = objective;
@@ -155,14 +161,15 @@ export const parseQueuedItemInput = (value) => {
   if (!text.trim() && attachments.length === 0 && context.length === 0) {
     throw new TypeError('item needs text, attachments, or context');
   }
+  // The text is the goal's objective, so a goal without it could never start.
+  const goal = parseGoal(raw.goal);
+  if (goal && !text.trim()) throw new TypeError('item goal needs the message text');
   const sendConfig = parseSendConfig(raw.sendConfig);
   const provenance = asRecord(raw.scheduledTask);
   const projectId = asNonEmptyString(provenance?.projectId);
   const taskId = asNonEmptyString(provenance?.taskId);
   if (provenance && (!projectId || !taskId)) throw new TypeError('invalid scheduledTask provenance');
   if (!sendConfig && !provenance) throw new TypeError('item sendConfig with providerID and modelID is required');
-  const goal = parseGoal(raw.goal);
-  if (goal && !text.trim()) throw new TypeError('a goal needs message text');
   const item = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
@@ -271,8 +278,10 @@ export function createMessageQueueRuntime({
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
   resolveAutoSelection = null,
-  // Saves the goal record of a message queued as a goal (the session metadata store).
+  // Saves the goal a queued message carries, as every server-created goal is
+  // saved: the goal record goes to the session metadata store.
   persistSessionGoal = null,
+  createGoal = createSessionGoal,
   dataDir,
   fetchImpl = fetch,
   now = Date.now,
@@ -580,12 +589,12 @@ export function createMessageQueueRuntime({
     // a UI send does it; a failed write sends without it rather than not at all.
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
 
-    // A message queued as a goal starts it now, as a direct send would. The
-    // goal is saved before anything is admitted, so a failed save leaves
-    // nothing in the session for the retry to duplicate.
-    let goalSpec = null;
-    if (item.goal) {
-      ({ spec: goalSpec } = await createSessionGoal({
+    // A message queued as a goal starts it now, as a direct send would. It is
+    // saved as every server-created goal is, on the model the message goes out
+    // on, and before anything is admitted: a save that fails fails the send
+    // with nothing in the session for the retry to duplicate.
+    const goal = item.goal
+      ? await createGoal({
         persistSessionGoal,
         sessionID: sessionId,
         directory,
@@ -596,8 +605,8 @@ export function createMessageQueueRuntime({
         settled: item.goal.settled === true,
         ignoreLimit: item.goal.ignoreLimit === true,
         onWarning: (message, error) => console.warn(`[message-queue] ${message}:`, error?.message || error),
-      }));
-    }
+      })
+      : null;
 
     // Same order as a UI send: everything attached to the message is admitted
     // before the message itself, so the model reads it as background. This
@@ -613,13 +622,14 @@ export function createMessageQueueRuntime({
     }
 
     // The goal briefing goes last, right before the message the goal is about.
-    if (item.goal) {
+    // A spec "rewrite every goal" wrote rides along.
+    if (goal) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
         // As a UI send: the spec the user approved when they asked to brief the
         // agent with it, otherwise the one the writer just produced, if any.
-        body: { text: buildGoalIntroText(item.goal.tokenBudget, item.goal.briefAgent ? (item.goal.objective ?? item.text) : goalSpec), resume: false },
+        body: { text: buildGoalIntroText(item.goal.tokenBudget, item.goal.briefAgent ? (item.goal.objective ?? item.text) : goal.spec), resume: false },
       });
     }
 

@@ -64,10 +64,12 @@ export interface QueuedMessageSendConfig {
 }
 
 /**
- * "Run as goal" captured with a queued message: the goal starts when this
- * message is delivered, never with whichever message happens to go out first.
- * `objective` is present only when the arming flow supplied one (the plan
- * flow); otherwise the delivered text is the objective.
+ * "Run as goal" captured with a queued message: the composer's armed goal,
+ * taken off the composer when the message was queued, with the token budget of
+ * that moment. The goal starts when this message is delivered, never with
+ * whichever message happens to go out first. `objective` is present only when
+ * the arming flow supplied one (the plan flow); otherwise the delivered text is
+ * the objective.
  */
 export interface QueuedMessageGoal {
     objective?: string;
@@ -128,7 +130,7 @@ export interface QueuedMessage {
     scheduledTask?: z.infer<typeof scheduledTaskSchema>;
 }
 
-interface QueuedMessageInput {
+export interface QueuedMessageInput {
     content: string;
     /** Defaults to `content`. */
     text?: string;
@@ -185,7 +187,7 @@ const serverGoalSchema = z.object({
     ignoreLimit: z.boolean().optional(),
 });
 
-const serverAttachmentSchema = z.object({
+export const serverAttachmentSchema = z.object({
     id: z.string(),
     filename: z.string(),
     mimeType: z.string(),
@@ -196,7 +198,7 @@ const serverAttachmentSchema = z.object({
     dataUrl: z.string().optional(),
 });
 
-const serverContextPartSchema = z.discriminatedUnion('kind', [
+export const serverContextPartSchema = z.discriminatedUnion('kind', [
     z.object({
         kind: z.literal('context'),
         text: z.string(),
@@ -276,7 +278,7 @@ const decodeDataUrl = (dataUrl: string): ArrayBuffer | null => {
 };
 
 /** A taken item carries its payload; a projection item has an empty file. */
-const toAttachedFile = (attachment: ServerQueueAttachment): AttachedFile => {
+export const toAttachedFile = (attachment: ServerQueueAttachment): AttachedFile => {
     const dataUrl = attachment.dataUrl ?? '';
     const bytes = dataUrl ? decodeDataUrl(dataUrl) : null;
     const file: AttachedFile = {
@@ -341,7 +343,7 @@ const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInpu
     return input;
 };
 
-const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessageSendConfig): ServerQueueItemInput => {
+export const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessageSendConfig): ServerQueueItemInput => {
     const item: ServerQueueItemInput = {
         content: message.content,
         text: message.text ?? message.content,

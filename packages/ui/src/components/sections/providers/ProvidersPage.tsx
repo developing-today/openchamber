@@ -1,4 +1,3 @@
-import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -8,30 +7,26 @@ import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigS
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import type { IconName } from "@/components/icon/icons";
 import { cn } from '@/lib/utils';
-import { useDeviceInfo } from '@/lib/device';
-import type { ModelMetadata } from '@/types';
 import { useI18n } from '@/lib/i18n';
-import { formatCompactNumber } from '@/lib/numberFormat';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
 import { loadIntegrationCatalog, peekIntegrationCatalog, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
-import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { requiresProviderAuth } from './providerAvailability';
 import { listConnectableProviders } from './connectableProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
+  findIntegrationForProvider,
+  isRouteProvider,
   providerHasCredentials,
+  ROUTE_PROVIDER_NAME_KEY,
   shouldAutoOpenAuthPanel,
   shouldShowApiKeyAuth,
   shouldShowModelsSection,
   usesMachineCredentials,
-  findIntegrationForProvider,
   getCredentialConnections,
   getKeyMethod,
   getSignInMethods,
@@ -41,6 +36,7 @@ import {
   type CredentialConnection,
 } from './providerAuth';
 import { ProviderGrid } from './ProviderGrid';
+import { ProviderModelsSection } from './ProviderModelsSection';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
@@ -64,17 +60,6 @@ import {
   type StoredProviderEntry,
 } from './custom-provider-form';
 
-const formatTokens = (value?: number | null) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return null;
-  }
-  if (value === 0) {
-    return '0';
-  }
-  const formatted = formatCompactNumber(value);
-  return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-};
-
 // OpenCode owns the credential and announces the catalog change itself
 // (`credential.updated` → catalog refresh); nothing to reload after it.
 const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<void> => {
@@ -84,6 +69,24 @@ const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<vo
 const ADD_PROVIDER_ID = '__add_provider__';
 /** Not an OpenCode provider id: the page for OpenChamber's own classification providers (Jev). */
 const CLASSIFICATION_PAGE_ID = '__classification__';
+
+/**
+ * Says a provider is off. Nothing under it is locked: the model choices shown
+ * under it can still be changed, and they apply again once the provider is
+ * back on. A provider shown with no models (`hasModels` false) says only what
+ * brings them back.
+ */
+const DisabledNotice: React.FC<{ hasModels: boolean }> = ({ hasModels }) => {
+  const { t } = useI18n();
+  return (
+    <div className="oc-tile mb-6 flex items-start gap-2 rounded-lg p-3">
+      <Icon name="pause" className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <p className="typography-meta text-foreground">
+        {hasModels ? t('settings.providers.disabled.banner') : t('settings.providers.disabled.bannerNoModels')}
+      </p>
+    </div>
+  );
+};
 
 interface ProviderSourceInfo {
   exists: boolean;
@@ -98,7 +101,6 @@ interface ProviderSources {
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
@@ -130,13 +132,8 @@ export const ProvidersPage: React.FC = () => {
     setSelectedProvider(openRequested);
     setOpenRequested(null);
   }, [openRequested, setOpenRequested]);
-  const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
-  const hiddenModels = useUIStore((state) => state.hiddenModels);
   const customProviderIcons = useUIStore((state) => state.customProviderIcons);
   const setCustomProviderIcon = useUIStore((state) => state.setCustomProviderIcon);
-  const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
-  const hideAllModels = useUIStore((state) => state.hideAllModels);
-  const showAllModels = useUIStore((state) => state.showAllModels);
 
   // The app only loads providers for the project it is on; Settings has to ask
   // for the one it is looking at. Without a project that is the app's own.
@@ -150,27 +147,24 @@ export const ProvidersPage: React.FC = () => {
   const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog());
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
-  // Null until read, and where the runtime has no OpenChamber server (VS Code).
-  const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(null);
+  // The store's list, read again on every visit: null until read, and where
+  // the runtime has no OpenChamber server (VS Code).
+  const disabledProviders = useConfigStore((state) => state.disabledProviderIds);
+  const loadDisabledProviders = useConfigStore((state) => state.loadDisabledProviders);
+  const setProviderDisabled = useConfigStore((state) => state.setProviderDisabled);
   React.useEffect(() => {
-    let active = true;
-    fetchDisabledProviders()
-      .then((list) => { if (active) setDisabledProviders(list); })
-      .catch((error) => { console.warn('[providers] could not read disabled providers:', error); });
-    return () => { active = false; };
-  }, []);
+    void loadDisabledProviders();
+  }, [loadDisabledProviders]);
   const handleProviderDisabled = React.useCallback(async (providerId: string, disabled: boolean) => {
     try {
-      setDisabledProviders(await setProviderDisabledRequest(providerId, disabled));
-      if (disabled) setSelectedProvider('');
+      await setProviderDisabled(providerId, disabled, [settingsDirectory]);
       toast.success(disabled
         ? t('settings.providers.disabled.toast.disabled', { provider: providerId })
         : t('settings.providers.disabled.toast.enabled', { provider: providerId }));
-      void loadProviders({ directory: settingsDirectory, source: 'settings:providers', fresh: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [loadProviders, setSelectedProvider, settingsDirectory, t]);
+  }, [setProviderDisabled, settingsDirectory, t]);
   // Only the first read blocks the credential forms; a re-read keeps showing
   // the methods already known.
   const authLoading = catalog === null && !integrationsLoadFailed;
@@ -289,6 +283,10 @@ export const ProvidersPage: React.FC = () => {
   // auth panel instead of a false "Connected" summary. Respect an explicit Hide.
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
+      return;
+    }
+    // The routes provider signs in to nothing, so it never opens the auth panel.
+    if (isRouteProvider(selectedProviderId)) {
       return;
     }
     const sources = providerSources[selectedProviderId];
@@ -688,18 +686,70 @@ export const ProvidersPage: React.FC = () => {
     );
   }
 
+  const selectedDisabled = selectedProviderId !== '' && (disabledProviders?.includes(selectedProviderId) ?? false);
+  // Off and on live in one list, so this button, the card and the list at the
+  // bottom of the grid always agree. Models stay editable while a provider is off.
+  const disableToggle = disabledProviders !== null && selectedProviderId !== '' && !isAddMode && selectedProviderId !== CLASSIFICATION_PAGE_ID ? (
+    <Button
+      variant="outline"
+      size="xs"
+      className="!font-normal"
+      title={selectedDisabled ? undefined : t('settings.providers.disabled.disableHint')}
+      onClick={() => void handleProviderDisabled(selectedProviderId, !selectedDisabled)}
+    >
+      {selectedDisabled ? t('settings.providers.disabled.enable') : t('settings.providers.disabled.disable')}
+    </Button>
+  ) : null;
+
   if (!selectedProvider) {
+    // A turned-off provider is in no catalog, since the store leaves it out
+    // while OpenCode still lists it, yet it keeps its own page, so its card and
+    // the list at the bottom lead somewhere that says it is off.
+    if (!selectedDisabled) {
+      return (
+        <ProviderGrid
+          providers={providers}
+          integrations={integrations}
+          directory={settingsDirectory}
+          onSelect={setSelectedProvider}
+          onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
+          onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
+          disabledProviders={disabledProviders}
+          onSetProviderDisabled={(providerId, disabled) => void handleProviderDisabled(providerId, disabled)}
+        />
+      );
+    }
+    const unlistedName = findIntegrationForProvider(integrations ?? [], selectedProviderId)?.name || selectedProviderId;
+    // OpenCode drops a turned-off provider's models from its catalog with the
+    // provider, so the models its OpenCode config entry names are the ones whose
+    // show and hide choice can still be changed here. A provider whose entry
+    // names none shows the notice alone, saying what brings its models back.
+    const configuredModels = Object.entries(storedProviderConfigs[selectedProviderId]?.models ?? {})
+      .map(([id, model]) => ({ id, name: model.name?.trim() || id }));
     return (
-      <ProviderGrid
-        providers={providers}
-        integrations={integrations}
-        directory={settingsDirectory}
-        onSelect={setSelectedProvider}
-        onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
-        onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
-        disabledProviders={disabledProviders}
-        onEnableProvider={(providerId) => void handleProviderDisabled(providerId, false)}
-      />
+      <SettingsPageLayout
+        title={unlistedName}
+        titleLeading={(
+          <span className="flex items-center gap-2">
+            {backButton}
+            <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
+          </span>
+        )}
+        description={<span className="typography-settings-description font-mono text-muted-foreground">{selectedProviderId}</span>}
+        headerEnd={disableToggle}
+        showSaveStatus={false}
+      >
+        <DisabledNotice hasModels={configuredModels.length > 0} />
+        {configuredModels.length > 0 ? (
+          <ProviderModelsSection
+            providerId={selectedProviderId}
+            models={configuredModels}
+            title={t('settings.providers.page.models.title')}
+            query={modelQuery}
+            onQueryChange={setModelQuery}
+          />
+        ) : null}
+      </SettingsPageLayout>
     );
   }
 
@@ -719,12 +769,15 @@ export const ProvidersPage: React.FC = () => {
     machineCredentials: usesMachineCredentials(selectedProvider),
   });
   const authStatusIncomplete = requiresProviderAuth(integrationsLoaded, hasCredentials, isEditableCustomProvider);
-  const showModelsSection = shouldShowModelsSection({
-    modelCount: providerModels.length,
-    integrationsLoaded,
-    hasCredentials,
-    isEditableCustomProvider,
-  });
+  const routeProvider = isRouteProvider(selectedProvider.id);
+  const showModelsSection = routeProvider
+    ? providerModels.length > 0
+    : shouldShowModelsSection({
+      modelCount: providerModels.length,
+      integrationsLoaded,
+      hasCredentials,
+      isEditableCustomProvider,
+    });
   const providerConnections = getProviderConnections(integrations ?? [], selectedProvider.id) ?? [];
   // Requests go through one integration only: the provider's own, or the one it
   // is bound to (OpenCode Go moves to the Console once you are signed in there).
@@ -760,17 +813,13 @@ export const ProvidersPage: React.FC = () => {
     </span>
   );
 
-  const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
-    typeof model?.name === 'string' ? model.name : '',
-    typeof model?.id === 'string' ? model.id : '',
-  ]);
-
   if (isCustomEditMode && isEditableCustomProvider && editingCustomFormInitial) {
     return (
       <SettingsPageLayout
         title={selectedProvider.name || selectedProvider.id}
         titleLeading={providerTitleLeading}
         description={providerDescription}
+        headerEnd={disableToggle}
         showSaveStatus={false}
       >
         <CustomProviderForm
@@ -796,11 +845,13 @@ export const ProvidersPage: React.FC = () => {
 
   return (
     <SettingsPageLayout
-      title={selectedProvider.name || selectedProvider.id}
+      title={routeProvider ? t(ROUTE_PROVIDER_NAME_KEY) : selectedProvider.name || selectedProvider.id}
       titleLeading={providerTitleLeading}
       description={providerDescription}
+      headerEnd={disableToggle}
       showSaveStatus={false}
     >
+      {routeProvider ? null : (
       <SettingsSection
         title={t('settings.providers.accounts.title')}
         info={t('settings.providers.accounts.info')}
@@ -824,17 +875,6 @@ export const ProvidersPage: React.FC = () => {
                 }}
               >
                 {t('settings.providers.page.actions.edit')}
-              </Button>
-            ) : null}
-            {disabledProviders !== null ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                title={t('settings.providers.disabled.disableHint')}
-                onClick={() => void handleProviderDisabled(selectedProvider.id, true)}
-              >
-                {t('settings.providers.disabled.disable')}
               </Button>
             ) : null}
             {enterpriseLocked ? null : (
@@ -918,144 +958,17 @@ export const ProvidersPage: React.FC = () => {
           </div>
         )}
       </SettingsSection>
+      )}
 
       {showModelsSection ? (
-      <SettingsSection
-        title={t('settings.providers.page.models.title')}
-        titleAccessory={
-          <span className="typography-micro text-muted-foreground font-normal">
-            ({providerModels.length})
-          </span>
-        }
-        headerAction={(
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={() => {
-                const allIds = providerModels
-                  .map((model) => (typeof model?.id === 'string' ? model.id : ''))
-                  .filter((id) => id.length > 0);
-                hideAllModels(selectedProvider.id, allIds);
-              }}
-            >
-              {t('settings.providers.page.actions.hideAll')}
-            </Button>
-            <Button
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={() => showAllModels(selectedProvider.id)}
-            >
-              {t('settings.providers.page.actions.showAll')}
-            </Button>
-          </div>
-        )}
-        settingsItem="providers.models"
-      >
-            <div className="relative mb-2">
-              <Icon name="search" className="absolute inset-s-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={modelQuery}
-                onChange={(event) => setModelQuery(event.target.value)}
-                placeholder={t('settings.providers.page.models.filterPlaceholder')}
-                className="h-7 ps-8 w-full"
-              />
-            </div>
-
-            {filteredModels.length === 0 ? (
-              <p className="typography-meta text-muted-foreground py-4 text-center">{t('settings.providers.page.models.noModelsMatchFilter')}</p>
-            ) : (
-              <div className="divide-y divide-[var(--surface-subtle)]">
-                {filteredModels.map((model) => {
-                  const modelId = typeof model?.id === 'string' ? model.id : '';
-                  const modelName = typeof model?.name === 'string' ? model.name : modelId;
-                  const metadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
-                  const isHidden = hiddenModels.some(
-                    (item) => item.providerID === selectedProvider.id && item.modelID === modelId
-                  );
-
-                  const contextTokens = formatTokens(metadata?.limit?.context);
-                  const outputTokens = formatTokens(metadata?.limit?.output);
-                  const tokenSummary = [
-                    contextTokens ? `${contextTokens} ${t('settings.providers.page.models.tokenBadge.context')}` : null,
-                    outputTokens ? `${outputTokens} ${t('settings.providers.page.models.tokenBadge.output')}` : null,
-                  ].filter(Boolean).join(' · ');
-
-                  const capabilityIcons: Array<{ key: string; icon: IconName; label: string }> = [];
-                  if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
-                  if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: "brain-ai-3", label: t('settings.providers.page.models.capability.reasoning') });
-                  if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: "file-image", label: t('settings.providers.page.models.capability.imageInput') });
-
-                  return (
-                    <div key={modelId} className="py-1.5">
-                      <div
-                        className={cn(
-                          "flex items-center gap-3",
-                          isHidden && 'opacity-50',
-                        )}
-                      >
-                      <span className="typography-meta font-medium text-foreground truncate flex-1 min-w-0">
-                        {modelName}
-                      </span>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {isMobile ? (
-                          // A phone row has room for the name only; the limits
-                          // and capabilities move behind a tap.
-                          (tokenSummary || capabilityIcons.length > 0) ? (
-                            <SettingsInfoHint className="h-6 w-6">
-                              <div className="space-y-1.5">
-                                {tokenSummary ? <div className="font-medium">{tokenSummary}</div> : null}
-                                {capabilityIcons.map(({ key, icon: iconName, label }) => (
-                                  <div key={key} className="flex items-center gap-1.5">
-                                    <Icon name={iconName} className="h-3.5 w-3.5" />
-                                    {label}
-                                  </div>
-                                ))}
-                              </div>
-                            </SettingsInfoHint>
-                          ) : null
-                        ) : (
-                          <>
-                        {tokenSummary ? (
-                          <span className="typography-micro text-muted-foreground flex-shrink-0 oc-tile-inset px-1.5 py-0.5 rounded">
-                            {tokenSummary}
-                          </span>
-                        ) : null}
-                        {capabilityIcons.length > 0 && (
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {capabilityIcons.map(({ key, icon: iconName, label }) => (
-                              <span
-                                key={key}
-                                className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground oc-tile-inset"
-                                title={label}
-                                aria-label={label}
-                              >
-                                <Icon name={iconName} className="h-3 w-3" />
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
-                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50"
-                          title={isHidden ? t('settings.providers.page.models.actions.showModelInSelectors') : t('settings.providers.page.models.actions.hideModelFromSelectors')}
-                          aria-label={isHidden ? t('settings.providers.page.models.actions.showModel') : t('settings.providers.page.models.actions.hideModel')}
-                        >
-                          {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-      </SettingsSection>
+        <ProviderModelsSection
+          providerId={selectedProvider.id}
+          models={providerModels}
+          title={routeProvider ? t('settings.providers.routes.poolsTitle') : t('settings.providers.page.models.title')}
+          info={routeProvider ? t('settings.providers.routes.poolsInfo') : undefined}
+          query={modelQuery}
+          onQueryChange={setModelQuery}
+        />
       ) : null}
     </SettingsPageLayout>
   );

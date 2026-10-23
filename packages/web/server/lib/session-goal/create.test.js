@@ -81,6 +81,36 @@ describe('session goal creation', () => {
     })).rejects.toThrow(/needs a session metadata store/);
   });
 
+  it('keeps an objective over the limit whole when the goal has its limit switched off, and says so', async () => {
+    const persistSessionGoal = vi.fn(async () => undefined);
+    const long = 'Ship it. '.repeat(1_000);
+
+    const condensed = await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: long,
+      persistSessionGoal,
+      goalWriterSettings: { ...WRITER_OFF, charLimit: 5_000 },
+    });
+    // With the limit on, a longer objective goes to the small model to be condensed.
+    expect(generateSmallModelTextMock).toHaveBeenCalledTimes(1);
+    expect(condensed.goal.ignoreObjectiveLimit).toBe(false);
+
+    generateSmallModelTextMock.mockClear();
+    writeObjectiveMock.mockClear();
+    const whole = await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: long,
+      ignoreLimit: true,
+      persistSessionGoal,
+      goalWriterSettings: { ...WRITER_OFF, charLimit: 5_000 },
+    });
+    expect(generateSmallModelTextMock).not.toHaveBeenCalled();
+    expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', long.trim());
+    expect(whole.goal.ignoreObjectiveLimit).toBe(true);
+  });
+
   it('rewrites every objective into a spec when rewrite-all is on', async () => {
     const persistSessionGoal = vi.fn(async () => undefined);
     const writeSpec = vi.fn(async () => ({ spec: '## Objective\nShip it.', providerID: 'openai', modelID: 'gpt-5.5' }));
@@ -107,6 +137,24 @@ describe('session goal creation', () => {
     });
     expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', '## Objective\nShip it.');
     expect(result.spec).toBe('## Objective\nShip it.');
+  });
+
+  it('asks the writer for a spec without the length rule when the goal has its limit switched off', async () => {
+    const writeSpec = vi.fn(async () => ({ spec: '## Objective\nShip it.', providerID: 'openai', modelID: 'gpt-5.5' }));
+
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'ship it',
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+      ignoreLimit: true,
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: { model: 'anthropic/claude', rewriteAll: true },
+      writeSpec,
+    });
+
+    expect(writeSpec).toHaveBeenCalledWith(expect.objectContaining({ ignoreLimit: true }));
   });
 
   it('keeps the objective as written when the rewrite fails', async () => {
@@ -216,7 +264,7 @@ describe('session goal creation', () => {
   it('carries the escaped spec and the budget in the intro', () => {
     const intro = buildGoalIntroText(200_000, '## Objective\nKeep <b> & ship');
     expect(intro).toBe('<system-reminder>\n'
-      + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+      + 'Goal mode is active for this session. The goal spec below was written from the user message that follows. '
       + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
       + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
       + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'

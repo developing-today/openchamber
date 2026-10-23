@@ -27,6 +27,13 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - A subagent call is an ordinary tool row, rendered through `SubagentToolPartContent`: shine and a live duration while it runs, the final duration (red on failure) once settled, and an open action that shows the child session. Expanded, it shows the prompt and the result. The row never reads the child session's messages; the child's own chat is where its work is shown.
   - While the child runs, foreground or background, the row has a stop action. OpenCode 2.0.23 has no route that cancels a subagent job; interrupting the child ends the job as cancelled, which the agent reads as a failed subagent and tends to restart. `opencodeClient.stopSubagent` therefore first admits a non-resuming synthetic note (`subagentCancellationNote` in `@/lib/opencode/subagent-run`) that explains the cancellation as the user's stop without forbidding the work, and interrupts the child only once the note is in. A foreground call the note names reads `stopped` instead of failed (`toStoppedSubagentPart`). Drop the note once OpenCode reports a user cancel itself.
 
+- `QuestionToolDetails.tsx` and `QuestionToolDetailsView.tsx`
+  - The expanded row of a `question` call shows every question it asked, with all options and their descriptions, in every state: waiting, answered, dismissed, stopped or failed. A dismissed or failed call also says why it went unanswered. `questionRowContent` in `@/lib/opencode/question` decides what the row shows. A call recorded before OpenCode returned `metadata.answers` still shows the pairs parsed from its text result.
+  - Once the call has ended, **Answer** (or **Answer again** after an answered call) opens the questions as a form built field for field like OpenCode's own (`questionFormFields`). It starts from what the row's form kept on Cancel or sent after the call ended, else the answers the call returned, else what the question dock or the inline form card recorded while the call waited (`components/chat/questionAnswers.ts`, `startingQuestionAnswers`, memory only). A dock's record never wins over returned answers: the dock records its starting values before anyone picks, and the call may have been answered in another window. The view reads them in the click that opens the form, because the React Compiler caches a read made during render on the getter's identity and would give a second opening the first one's answers. The call itself is over, so the answers go to the agent as a new user message in OpenCode's `"question"="answer"` shape: the row asks the composer of its chat through `requestSessionSubmit` in the input store (see the composer's DOCUMENTATION.md).
+  - The action is offered only in the chat showing the call's session, and only when that chat takes prompts, as its ChatContainer decides (`ChatColumnTakesPromptsContext` in `chatColumnSession.ts`): a read-only surface, a deleted space's archived chat and a subagent's session, unless prompting those is allowed, mount no composer to send the answers. Outside a chat column it is never offered.
+  - The row's scroll box, capped at 60% of the window's height, holds only the questions: the list with its "Not answered" line, or the form's fields with its note on sending. The buttons sit under the box, so Answer, Cancel and Send answers stay in reach on a phone however long the questions are. `ToolPart` passes the box in as `renderScrollBox`.
+  - `QuestionToolDetailsView.tsx` holds the view and reads no app store; `QuestionToolDetails.tsx` reads the stores and passes in what it needs.
+
 - `taskToolModel.ts`
   - Owns subagent output preparation and child identity parsing. `ToolPart.tsx` resolves the call's child identity.
   - A subagent's `state.metadata.sessionID` is the preferred child identity from progress/result updates. Legacy part metadata and output IDs remain readable, then a non-empty `state.input.sessionID` identifies a resumed child when those IDs are absent.
@@ -243,6 +250,17 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   Markdown preview opts into rendering raw HTML (`allowRawHtml`, see
   `components/views/files/DOCUMENTATION.md`). Safe custom application links go through the
   app-link confirmation flow in every supported renderer, including VS Code.
+- A user's own message in Markdown mode reaches the renderer as Markdown
+  source, never escaped as HTML first: Markdown shows code spans, code blocks,
+  autolinks and math character for character, so an entity written into the
+  source showed up in them (`{ &quot;ok&quot;: true }`). `UserTextPart`
+  renders with `literalHtml` (`literal` in `markdownCore.ts`): the parser
+  reads no HTML at all, so a typed tag or character reference shows as typed,
+  lines of tags keep their breaks and the Markdown between them renders, and
+  a typed `<details>` stays text. A typed message renders as one block, since
+  the block split reads HTML blocks that typed text does not have. A line
+  starting with an HTML block tag (`<div>`, `<p>`, `<script>`) still ends the
+  paragraph above it, as CommonMark has it, so it opens a new paragraph.
 - File references become links only once the file is confirmed
   (`MarkdownRendererImpl` `useFileReferenceInteractions`): inline code, links
   and path-like tokens inside code blocks are probed through the bounded,

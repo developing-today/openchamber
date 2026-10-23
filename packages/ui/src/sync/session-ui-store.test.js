@@ -12,6 +12,8 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { sendGoalSpecJob } from '@/components/chat/goalSpecJobSend';
+import { useOpenCodeStartupStore } from './opencode-startup-gate';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from './selection-store';
@@ -21,6 +23,7 @@ import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { composeForkSessionMessage } from '@/lib/messages/executionMeta';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -1943,6 +1946,241 @@ describe('goal objective directory scoping', () => {
     } finally {
       useUIStore.setState({ sessionGoalRewriteAll: false });
     }
+  });
+
+  // A goal writer card sends a message with attachments through `sendMessage`
+  // (goalSpecJobSend.ts). Its goal used to ride the composer's shared arm,
+  // where a send held at startup lost it to a composer's send.
+  describe('a goal writer card send held while OpenCode starts', () => {
+    const cardJob = {
+      id: 'job-card',
+      sessionId: 'session-worktree',
+      directory: '/repo/worktree',
+      status: 'ready',
+      trigger: 'armed',
+      review: true,
+      sendMode: 'with-message',
+      tokenBudget: null,
+      message: { content: 'See the mock', text: 'See the mock', attachments: [], contextCount: 1 },
+      composerOnly: true,
+      spec: 'Card spec',
+      writer: { source: 'session', providerID: 'provider-a', modelID: 'model-a', variant: null },
+      sendConfig: { providerID: 'provider-a', modelID: 'model-a' },
+      error: null,
+      sending: false,
+      outcome: null,
+      attempt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const specChoice = { kind: 'spec', sendMode: 'with-message', spec: 'Card spec' };
+    let previousConnection;
+    let previousGlobalSessions;
+    let failGoalSave;
+
+    beforeEach(() => {
+      failGoalSave = false;
+      const { isConnected, hasEverConnected } = useConfigStore.getState();
+      previousConnection = { isConnected, hasEverConnected };
+      // The card's send is user-initiated, so it reads the session's archive
+      // time; the outer block's session record has none.
+      previousGlobalSessions = useGlobalSessionsStore.getState();
+      useGlobalSessionsStore.setState({ entityById: new Map() });
+      opencodeClient.getSession = async (sessionId) => ({ id: sessionId, metadata: {}, time: { created: 1, updated: 1 } });
+      const metadataFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith('/api/goals/spec-jobs/job-card/claim')) {
+          return Response.json({
+            revision: 2,
+            job: { ...cardJob, sending: true },
+            message: { content: 'See the mock', text: 'See the mock', attachments: [], context: [{ kind: 'synthetic', text: 'Resolve the conflict' }] },
+          });
+        }
+        if (url.endsWith('/api/goals/spec-jobs/job-card/settle')) {
+          return Response.json({ revision: 3, job: { ...cardJob, status: 'sent', outcome: { kind: 'spec', sendMode: 'with-message' } } });
+        }
+        if (failGoalSave && url.endsWith('/metadata')) return new Response('', { status: 500 });
+        return metadataFetch(input, init);
+      };
+      // OpenCode has not connected yet: every send waits for it.
+      useConfigStore.setState({ isConnected: false, hasEverConnected: false });
+    });
+
+    afterEach(() => {
+      useConfigStore.setState(previousConnection);
+      useGlobalSessionsStore.setState(previousGlobalSessions, true);
+    });
+
+    const untilHeld = async (count) => {
+      for (let turn = 0; turn < 50 && useOpenCodeStartupStore.getState().waitingSends < count; turn += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(useOpenCodeStartupStore.getState().waitingSends).toBe(count);
+    };
+    const connect = () => useConfigStore.setState({ isConnected: true, hasEverConnected: true });
+    const savedGoals = () => metadataWrites.map((write) => [write.sessionId, write.patch.openchamber.goal.objective]);
+
+    test('a send from a composer made before it cannot take its goal', async () => {
+      // The composer's own arm (set in the outer beforeEach) has no override,
+      // so its goal is the composer's text.
+      const composerSend = useSessionUIStore.getState().sendMessage(
+        'fix the tests',
+        'provider-a',
+        'model-a',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'normal',
+        { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-other', directory: '/repo' } },
+      );
+      const cardSend = sendGoalSpecJob(cardJob, specChoice);
+      await untilHeld(2);
+      connect();
+      await Promise.all([composerSend, cardSend]);
+
+      expect(savedGoals()).toEqual([
+        ['session-other', 'fix the tests'],
+        ['session-worktree', 'Card spec'],
+      ]);
+    });
+
+    test('an arm the user sets while it waits stays the user\'s', async () => {
+      useSessionGoalArmStore.getState().setArmed(false, null);
+      const cardSend = sendGoalSpecJob(cardJob, specChoice);
+      await untilHeld(1);
+      // The composer's target shows the user's arm, never the card's goal.
+      expect(useSessionGoalArmStore.getState().armed).toBe(false);
+      useSessionGoalArmStore.getState().setArmed(true, 'Next goal');
+      connect();
+      await cardSend;
+
+      expect(savedGoals()).toEqual([['session-worktree', 'Card spec']]);
+      expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: true, objectiveOverride: 'Next goal' });
+    });
+
+    test('a goal it cannot save never lands on the composer\'s arm', async () => {
+      useSessionGoalArmStore.getState().setArmed(false, null);
+      failGoalSave = true;
+      connect();
+
+      await expect(sendGoalSpecJob(cardJob, specChoice)).rejects.toThrow();
+
+      expect(savedGoals()).toEqual([]);
+      // The composer's next message must not inherit the card's spec.
+      expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: false, objectiveOverride: null });
+    });
+
+    test('a spec sent with its length limit switched off saves a goal without one', async () => {
+      connect();
+
+      await sendGoalSpecJob(cardJob, { ...specChoice, ignoreLimit: true });
+
+      expect(metadataWrites.map((write) => write.patch.openchamber.goal.ignoreObjectiveLimit)).toEqual([true]);
+    });
+
+    test('its settle names the user message the send created, so the sent card knows which one is its own', async () => {
+      const prompts = [];
+      opencodeClient.sendMessage = async (params) => {
+        prompts.push(params);
+        return params.messageId;
+      };
+      const settles = [];
+      const cardFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith('/api/goals/spec-jobs/job-card/settle')) settles.push(JSON.parse(init.body));
+        return cardFetch(input, init);
+      };
+      connect();
+
+      await sendGoalSpecJob(cardJob, specChoice);
+
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].messageId).toMatch(/^msg_/);
+      expect(settles).toEqual([{ outcome: { kind: 'spec', sendMode: 'with-message' }, spec: 'Card spec', messageId: prompts[0].messageId }]);
+    });
+  });
+
+  // Forking an answer "as a goal" used to put its goal on the composer's
+  // shared arm right before its send, as the card did: a composer send made
+  // before it took the goal, and a fork without a goal cleared the arm the
+  // user had set.
+  describe('a fork from an answer', () => {
+    const source = { sessionId: 'session-worktree', directory: '/repo/worktree', text: 'Ship dark mode in three steps.' };
+    const execution = (runAsGoal) => ({ providerID: 'provider-a', modelID: 'model-a', variant: '', agent: '', instructions: 'Follow the answer', runAsGoal });
+    const forkMessage = composeForkSessionMessage('Follow the answer', 'Ship dark mode in three steps.');
+    let previousConnection;
+    let originalCreateSession;
+
+    beforeEach(() => {
+      const { isConnected, hasEverConnected } = useConfigStore.getState();
+      previousConnection = { isConnected, hasEverConnected };
+      originalCreateSession = useSessionUIStore.getState().createSession;
+      useSessionUIStore.setState({
+        createSession: async (_title, directory) => ({
+          id: 'session-fork',
+          projectID: 'project',
+          directory: directory ?? '',
+          title: 'Fork',
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 1 },
+        }),
+      });
+    });
+
+    afterEach(() => {
+      useConfigStore.setState(previousConnection);
+      useSessionUIStore.setState({ createSession: originalCreateSession });
+    });
+
+    const savedGoals = () => metadataWrites.map((write) => [write.sessionId, write.patch.openchamber.goal.objective]);
+
+    test('run as goal keeps its goal from a composer send made before it while OpenCode starts', async () => {
+      // OpenCode has not connected yet: every send waits for it.
+      useConfigStore.setState({ isConnected: false, hasEverConnected: false });
+      // The composer's own arm (set in the outer beforeEach) has no override,
+      // so its goal is the composer's text.
+      const composerSend = useSessionUIStore.getState().sendMessage(
+        'fix the tests',
+        'provider-a',
+        'model-a',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'normal',
+        { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-other', directory: '/repo' } },
+      );
+      const forkSend = useSessionUIStore.getState().createSessionFromAssistantMessage(source, execution(true));
+      for (let turn = 0; turn < 50 && useOpenCodeStartupStore.getState().waitingSends < 2; turn += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(useOpenCodeStartupStore.getState().waitingSends).toBe(2);
+      useConfigStore.setState({ isConnected: true, hasEverConnected: true });
+      await Promise.all([composerSend, forkSend]);
+
+      expect(savedGoals()).toEqual([
+        ['session-other', 'fix the tests'],
+        ['session-fork', forkMessage],
+      ]);
+    });
+
+    test('leaves the goal the user armed in the composer, with a goal of its own or without', async () => {
+      useSessionGoalArmStore.getState().setArmed(true, 'Next goal');
+
+      await useSessionUIStore.getState().createSessionFromAssistantMessage(source, execution(false));
+      expect(savedGoals()).toEqual([]);
+      expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: true, objectiveOverride: 'Next goal' });
+
+      await useSessionUIStore.getState().createSessionFromAssistantMessage(source, execution(true));
+      expect(savedGoals()).toEqual([['session-fork', forkMessage]]);
+      expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: true, objectiveOverride: 'Next goal' });
+    });
   });
 
   const sendQueued = (content, queuedGoal) => useSessionUIStore.getState().sendMessage(

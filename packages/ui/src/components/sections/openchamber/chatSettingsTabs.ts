@@ -61,6 +61,8 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.session-goal-writer', 'assistance'],
   ['chat.session-goal-writer-model', 'assistance'],
   ['chat.session-goal-writer-remember', 'assistance'],
+  ['chat.session-goal-writer-effort', 'assistance'],
+  ['chat.session-goal-writer-prompt', 'assistance'],
   ['chat.session-goal-writer-review', 'assistance'],
   ['chat.session-goal-writer-send-mode', 'assistance'],
   ['chat.session-goal-rewrite-all', 'assistance'],

@@ -55,10 +55,13 @@ const isRemoteMarkdownImageSource = (source: string): boolean => /^(?:https?:)?\
 
 /**
  * `escape` keeps raw HTML visible as text (assistant output and every other
- * untrusted surface). `sanitize` renders it through a GitHub-like allowlist and
- * is for documents a user opens to read, such as a README in the Files preview.
+ * untrusted surface). `literal` is for text a person typed: the parser reads no
+ * HTML at all, so tags and character references show as typed, and lines of
+ * tags keep their breaks and the Markdown between them. `sanitize` renders it
+ * through a GitHub-like allowlist and is for documents a user opens to read,
+ * such as a README in the Files preview.
  */
-export type MarkdownRawHtmlMode = 'escape' | 'sanitize';
+export type MarkdownRawHtmlMode = 'escape' | 'literal' | 'sanitize';
 
 const isLocalMarkdownImageSource = (source: string): boolean => {
   if (/^\/\//.test(source) || !LOCAL_IMAGE_EXTENSION_RE.test(source)) return false;
@@ -443,8 +446,10 @@ const streamBlocks = (
 ): MarkdownBlock[] => {
   if (isInvisibleText(text)) return [];
   // Raw HTML of a document may open in one block and close in another; the
-  // allowlist pass must see it whole.
-  if (!live && rawHtml === 'sanitize') return [{ raw: text, src: text, mode: 'full', highlight: true }];
+  // allowlist pass must see it whole. Typed text renders whole as well: the
+  // split below reads HTML blocks, and a typed `<example>` line followed by a
+  // fence with a blank line in it would cut that fence in two.
+  if (!live && rawHtml !== 'escape') return [{ raw: text, src: text, mode: 'full', highlight: true }];
 
   const split = live ? splitText(text, true) : settledSplit(text);
   if (split.kind === 'whole') {
@@ -719,17 +724,39 @@ const boundedLinkify = (): MarkedExtension => ({
   }),
 });
 
+// Text a person typed holds no HTML. Without the two HTML tokenizers a tag is
+// read as ordinary characters, so lines of tags stay lines of a paragraph and
+// the Markdown between them renders. Text is escaped whole, so a typed
+// character reference such as `&amp;` shows as those five characters. Code
+// spans, code blocks, autolinks and math keep the exact characters typed.
+const literalHtmlExtension: MarkedExtension = {
+  tokenizer: {
+    html: () => undefined,
+    tag: () => undefined,
+  },
+  renderer: {
+    text(token) {
+      // A tight list item's text renders its inline children.
+      if (token.type === 'text' && token.tokens) return false;
+      return escapeRawMarkdownHtml(token.text);
+    },
+  },
+};
+
 // Before any parser lexes: see markedAnchoredRules.ts.
 pinMarkedAnchoredRules();
 
 const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
   const renderMath = rawHtml === 'sanitize' ? renderMathPlaceholder : renderKatex;
-  return new Marked().use(
+  const extensions: TokenizerAndRendererExtension[] = [createInlineMathExtension(renderMath), createBlockMathExtension(renderMath)];
+  // A typed `<details>` is text too.
+  if (rawHtml !== 'literal') extensions.push(detailsExtension);
+  const parser = new Marked().use(
     boundedLinkify(),
     {
       gfm: true,
       breaks: false,
-      extensions: [createInlineMathExtension(renderMath), createBlockMathExtension(renderMath), detailsExtension],
+      extensions,
       renderer: {
         // Assistant output is untrusted. Markdown constructs still render as
         // HTML, but raw HTML must remain visible text so it cannot introduce
@@ -788,15 +815,20 @@ const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode
       },
     },
   );
+  return rawHtml === 'literal' ? parser.use(literalHtmlExtension) : parser;
 };
 
 const inlineImageParser = createParser('inline', 'escape');
 const imageLabelParser = createParser('label', 'escape');
 const localImageParser = createParser('local', 'escape');
 const documentParser = createParser('inline', 'sanitize');
+// Typed text draws images as tool output does: its own files in place, a
+// remote image as a link.
+const typedTextParser = createParser('local', 'literal');
 
 const parserFor = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
   if (rawHtml === 'sanitize') return documentParser;
+  if (rawHtml === 'literal') return typedTextParser;
   if (imageMode === 'label') return imageLabelParser;
   return imageMode === 'local' ? localImageParser : inlineImageParser;
 };
@@ -1089,6 +1121,8 @@ const liveBlockCache = new HighlightResultCache<string>({
 const cacheFor = (block: MarkdownBlock): HighlightResultCache<string> =>
   (block.mode === 'live' ? liveBlockCache : fullBlockCache);
 
+const RAW_HTML_KEY_SUFFIX = { escape: '', literal: ':literal', sanitize: ':html' } satisfies Record<MarkdownRawHtmlMode, string>;
+
 /** Content-addressed cache key for a markdown block. */
 const markdownBlockCacheKey = (
   contentHash: string,
@@ -1096,7 +1130,7 @@ const markdownBlockCacheKey = (
   highlight: boolean,
   imageMode: MarkdownImageMode,
   rawHtml: MarkdownRawHtmlMode,
-): string => `${contentHash}:${mode}:${highlight ? 1 : 0}:${imageMode}${rawHtml === 'sanitize' ? ':html' : ''}`;
+): string => `${contentHash}:${mode}:${highlight ? 1 : 0}:${imageMode}${RAW_HTML_KEY_SUFFIX[rawHtml]}`;
 
 /** Test-only: clear the render HTML caches between cases. */
 export const resetMarkdownHtmlCacheForTests = (): void => {

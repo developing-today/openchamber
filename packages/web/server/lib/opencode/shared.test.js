@@ -634,6 +634,17 @@ describe('writeConfig preserves JSONC comments (issue #3587)', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe(COMMENTED_CONFIG);
   });
 
+  it('keeps a number JSON cannot carry, such as 1e999, as written while another value changes', () => {
+    // 1e999 reads as Infinity, which the JSON normalization at the write boundary turns into null.
+    const file = writeFixture('overflow.jsonc', '{\n  "weights": { "a/b": 1e999, "c/d": -0 },\n  "other": 1,\n}\n');
+
+    const config = readConfigFile(file);
+    config.other = 2;
+    writeConfig(config, file);
+
+    expect(fs.readFileSync(file, 'utf8')).toBe('{\n  "weights": { "a/b": 1e999, "c/d": -0 },\n  "other": 2,\n}\n');
+  });
+
   it('preserves CRLF line endings and comments', () => {
     const file = writeFixture('crlf.jsonc', [
       '{',

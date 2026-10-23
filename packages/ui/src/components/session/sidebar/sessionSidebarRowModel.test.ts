@@ -214,6 +214,20 @@ describe('buildSessionSidebarRowModel', () => {
     expect(sessions).toEqual(['timeline-mixed:working', 'timeline:working', 'timeline:other']);
   });
 
+  test('timeline leaves a project hidden from all sessions out of the list, header and rows', () => {
+    const input = args([project([group([])]), { project: { id: 'project-b', normalizedPath: '/other' }, groups: [] }]);
+    input.viewMode = 'timeline';
+    input.timelineItems = [timelineItem('shown'), timelineItem('hidden', { projectId: 'project-b' })];
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const headers = rows.flatMap((row) => (row.kind === 'project-header' ? [row.section.project.id] : []));
+    const sessions = rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+    expect(headers).toEqual(['project-a']);
+    expect(sessions).toEqual(['shown']);
+  });
+
   test('timeline reveals seven sessions per project, seven more per Show more', () => {
     const input = args([project([group([])])]);
     input.viewMode = 'timeline';
@@ -317,6 +331,20 @@ describe('buildSessionSidebarRowModel', () => {
     // A project with listed sessions needs no line, as under its own header.
     input.timelineItems = [timelineItem('a1')];
     expect(statusesOf()).toEqual(['loading:project-b:main', 'load-failed:project-c:main']);
+  });
+
+  test('the list by time shows no load line for a project hidden from all sessions', () => {
+    const hidden: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([], { directory: '/other' })] };
+    const input = args([project([group([])]), hidden]);
+    input.viewMode = 'timeline';
+    input.listGrouping = 'time';
+    input.timelineItems = [timelineItem('a1')];
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+    input.groupStatusByKey = new Map([
+      ['project-b:main', { state: 'load-failed' as const, directory: '/other', canGrantAccess: false }],
+    ]);
+
+    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'status')).toEqual([]);
   });
 
   test('Tree rows carry guide lines for an open worktree and session; List rows carry none', () => {

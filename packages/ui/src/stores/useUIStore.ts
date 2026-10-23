@@ -1001,6 +1001,10 @@ interface UIStore {
   sessionGoalDefaultBudget: number;
   /** A model writes the goal spec from the armed message (the composer's sparkle switch). */
   sessionGoalWriterEnabled: boolean;
+  /** The goal writer model's thinking level; empty is the model's default. */
+  sessionGoalWriterVariant: string;
+  /** The prompt the goal writer follows; empty is the built-in one the server holds. */
+  sessionGoalWriterPrompt: string;
   /** Show the written spec for approval before sending; off sends it straight away. */
   sessionGoalWriterReview: boolean;
   sessionGoalWriterSendMode: SessionGoalWriterSendMode;
@@ -1312,6 +1316,8 @@ interface UIStore {
   setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudget: (value: number) => void;
   setSessionGoalWriterEnabled: (value: boolean) => void;
+  setSessionGoalWriterVariant: (value: string) => void;
+  setSessionGoalWriterPrompt: (value: string) => void;
   setSessionGoalWriterReview: (value: boolean) => void;
   setSessionGoalWriterSendMode: (value: SessionGoalWriterSendMode) => void;
   setSessionGoalRewriteAll: (value: boolean) => void;
@@ -1564,6 +1570,8 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         sessionGoalWriterEnabled: true,
+        sessionGoalWriterVariant: '',
+        sessionGoalWriterPrompt: '',
         sessionGoalWriterReview: true,
         sessionGoalWriterSendMode: 'with-message',
         sessionGoalRewriteAll: false,
@@ -2680,6 +2688,14 @@ export const useUIStore = create<UIStore>()(
           set({ sessionGoalWriterEnabled: value });
         },
 
+        setSessionGoalWriterVariant: (value) => {
+          set({ sessionGoalWriterVariant: value });
+        },
+
+        setSessionGoalWriterPrompt: (value) => {
+          set({ sessionGoalWriterPrompt: value });
+        },
+
         setSessionGoalWriterReview: (value) => {
           set({ sessionGoalWriterReview: value });
         },
@@ -3779,6 +3795,8 @@ export const useUIStore = create<UIStore>()(
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           sessionGoalWriterEnabled: state.sessionGoalWriterEnabled,
+          sessionGoalWriterVariant: state.sessionGoalWriterVariant,
+          sessionGoalWriterPrompt: state.sessionGoalWriterPrompt,
           sessionGoalWriterReview: state.sessionGoalWriterReview,
           sessionGoalWriterSendMode: state.sessionGoalWriterSendMode,
           sessionGoalRewriteAll: state.sessionGoalRewriteAll,

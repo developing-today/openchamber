@@ -423,6 +423,22 @@ describe('buildQueuedAutoSendPayload', () => {
     ]);
   });
 
+  test('a message queued with a goal is sent with that goal, never the composer\'s arm', async () => {
+    const payload = buildQueuedAutoSendPayload([
+      { id: 'queued-goal', content: 'Add dark mode', text: 'Add dark mode', createdAt: 1, goal: { tokenBudget: null } },
+    ]);
+
+    expect(payload).not.toBeNull();
+    await sendQueuedAutoSendPayload({ runtimeKey: 'runtime-original', sessionId: 'session-original', directory: '/repo' }, payload!, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+    });
+
+    // The send carries the item's own goal, so sendMessage never reads the composer's arm.
+    expect(sendMessageCalls[0]?.[9]).toMatchObject({ queuedGoal: { tokenBudget: null } });
+    expect(sendMessageCalls[0]?.[9]).not.toHaveProperty('goalArm');
+  });
+
   test('a message queued as a goal is sent with that goal', async () => {
     const goal = { objective: 'the whole plan', tokenBudget: 5000 };
     const payload = buildQueuedAutoSendPayload([

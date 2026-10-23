@@ -147,4 +147,24 @@ describe('PoolTargetOptions', () => {
     await act(async () => buttonWith(container, 'Remove').click());
     expect(changes.at(-1)).toEqual('p/cheap');
   });
+
+  test('shows a level mapped to false as one the target sits out, and keeps it through other edits', async () => {
+    const container = await renderOptions({ model: 'p/cheap', variants: { low: 'high', max: false } }, onChange);
+    await act(async () => buttonWith(container, 'Options').click());
+    expect(container.textContent).toContain('Sits out max');
+    // Only the string remap has fields; the sit-out has none that could turn false into text.
+    expect([...container.querySelectorAll<HTMLInputElement>('input[aria-label="Target variant"]')].map((input) => input.value)).toEqual(['high', '']);
+    await typeInto(inputNamed(container, 'Default variant'), 'medium');
+    expect(changes.at(-1)).toEqual({ model: 'p/cheap', defaultVariant: 'medium', variants: { low: 'high', max: false } });
+  });
+
+  test('removes a sit-out with its own Remove button', async () => {
+    const container = await renderOptions({ model: 'p/cheap', variants: { low: 'high', max: false } }, onChange);
+    await act(async () => buttonWith(container, 'Options').click());
+    const row = [...container.querySelectorAll('div')].find((element) => element.firstElementChild?.textContent === 'Sits out max');
+    const remove = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.trim() === 'Remove');
+    if (!remove) throw new Error('no Remove button beside the sit-out');
+    await act(async () => remove.click());
+    expect(changes.at(-1)).toEqual({ model: 'p/cheap', variants: { low: 'high' } });
+  });
 });

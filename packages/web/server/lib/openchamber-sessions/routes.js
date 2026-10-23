@@ -811,17 +811,19 @@ export const createOpenChamberSessionService = (dependencies) => {
     } else {
       let landedMessageID = null;
       try {
-        const sent = await client.session.prompt({ sessionID, text: expandedPrompt });
-        landedMessageID = asNonEmptyString(sent?.id);
         if (goalInput.enabled) {
-          // Goal mode's reminder refers to "the user message above", so it is
-          // admitted after the prompt; v2 has no way to append to one message.
+          // v2 cannot append to a message, so the goal reminder is its own
+          // synthetic message, admitted before the prompt as the composer does
+          // (it names "the user message that follows"). Admitted after the
+          // prompt it reaches the running turn and is answered a second time.
           await client.session.synthetic({
             sessionID,
             text: buildGoalIntroText(goalInput.tokenBudget, goalSpec),
             resume: false,
           });
         }
+        const sent = await client.session.prompt({ sessionID, text: expandedPrompt });
+        landedMessageID = asNonEmptyString(sent?.id);
       } catch (error) {
         throw markGoalPartial(error);
       }

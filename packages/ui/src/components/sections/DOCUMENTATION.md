@@ -142,6 +142,56 @@ the list again on every visit and after every credential write, a read
 started earlier never replaces a later one, and a snapshot from another
 runtime is ignored.
 
+### Turning a provider off
+
+OpenChamber turns a provider off through OpenCode's `disabled_providers` list
+in the user config (`lib/disabledProviders.ts`, `api/provider/:id/disabled`).
+OpenCode can also turn one off through `policies` or `enabled_providers`; this
+page does not read those yet, so such a provider does not show as off here.
+OpenCode drops a turned-off provider from its catalog, so the page reads the list
+itself, on every visit, into the config store (`disabledProviderIds`), and
+every control reads that one list: the detail page's header
+button (Disable, or Enable while off), the card's footer button, and the
+"Disabled providers" list at the bottom of the grid. A card shows a Disabled
+pill beside its status and reads muted. A turned-off provider OpenCode no
+longer lists still gets a card, named by its integration, so the grid never
+hides that it is off.
+
+OpenCode does not watch `disabled_providers`: in a live run it still listed a
+provider 5 s after the write, offered its models in every picker, and a turn
+on one failed with `provider.no-route`, until `POST /api/location/reload`
+dropped it. So `setProviderDisabled` in the config store takes the server's
+answer as the list and takes the provider out of every catalog the store
+holds at once. A provider read leaves out every provider on the list, and so
+does the catalog a failed read keeps. It then has OpenCode reload the
+locations of the Settings project and of the app's directory and reads their
+catalogs again.
+Only those reload, since a read of any other location starts it with its MCP
+servers; the store's list keeps their pickers clean until OpenCode starts them
+again. VS Code has no list (`null`) and offers none of this.
+
+Turning a provider off keeps you on its page, and model
+show and hide stay editable there; the notice says those choices apply again
+once it is back on. A turned-off provider is in no catalog of the store, so
+its page is always the one for a provider OpenCode does not list: OpenCode
+leaves a turned-off provider's models out along
+with the provider; measured on OpenCode 2.0.30, `GET /api/provider` and
+`GET /api/model` both drop them. The page
+therefore lists the models the provider's OpenCode config entry names,
+`config.models` from `/api/provider/:id/source`, each with its show and hide
+switch from `providers/ProviderModelsSection.tsx`, which a listed provider's
+page uses too. Such a page shows no accounts or sign-in. A provider whose
+config entry names no models, such as a built-in one left at its defaults,
+shows the header button and the notice alone, and that notice says to turn
+the provider back on to see and choose its models, since no model choice is
+on the page to change.
+
+The routes provider (`opencode-route`, `isRouteProvider`) is OpenCode's list
+of model pools from `experimental.model_routes`. Its models are the pools, it
+needs no sign-in, and its card and page read "OpenCode Routes" (OpenCode's own
+name is lowercase). Its page has no Accounts or API key section and lists its
+pools as models; the pools themselves are edited on the Routing page.
+
 ### MCP OAuth
 
 A remote MCP server with OAuth enabled is registered by OpenCode as an
@@ -177,6 +227,24 @@ the MCP page also disables Connect and Test. A skill's id is its `SKILL.md`
 folder name, not its display name. Statements from a connected OpenCode
 Console workspace are not in `/api/config`, so a server blocked only there is
 not marked.
+
+## Routing page
+
+The Routing page keeps its five sections (Auto mode, Rules, Model pools, Plans
+and usage, Categories) in one of two shapes: a tab strip that shows one
+section, or every section on one page. The tabs jump to their section when
+everything is on one page. `routing/routingTabs.ts` owns the tab ids, the
+persisted all-on-one-page choice (`routing-page-view`), and the map from a
+Settings search result to its tab, which the Settings view applies before the
+result is highlighted. A result for a Routing item that is not in the map
+opens Auto. The tab itself is not saved; reopening the page starts on Auto.
+On desktop the tabs share the page's width; on a phone the strip scrolls
+sideways and each tab keeps its whole label, since five fitted tabs left a
+few letters of each.
+
+Pool targets never truncate: a target's full name wraps in the row, and the
+pool header carries its name as a hover title, so a long model id reads
+without a tooltip.
 
 ## Entity shapes: OpenCode 2 only
 
@@ -292,6 +360,38 @@ Project colours are six-digit hex from the same presets as agents
 (`iconBackgroundForProjectColor`). Projects saved by older builds may carry a
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
+
+## Model pools on the Routing page
+
+`routing/ModelPoolsSection.tsx` edits OpenCode's `experimental.model_routes`
+through `/api/model-routes`; the server side is in
+`packages/web/server/lib/routing/DOCUMENTATION.md`, section "Model pools".
+
+- Every pool in the config is listed. A pool the structured editor cannot
+  represent shows "JSON only"; expanded, it shows one line naming the value the
+  editor cannot show, and its Raw JSON view, which is its only editor.
+- A pool that picks models by pattern (`include`, `exclude`, `contains`,
+  `notContains`, `match`), declares `levels` or has `variantRules` opens in the
+  structured editor. Its row names each rule kind in words, such as
+  `Includes *luna*, *haiku* · Excludes *-5`, and leaves out the target count
+  when it has no `targets`. Expanded, it lists every rule, variant rules
+  included, and says they change in Raw JSON: the structured editor keeps them
+  as read and has no fields for them.
+- A target's level remapped to `false` reads "Sits out <level>" in its options,
+  with Remove; it has no fields, so an edit cannot turn it into a variant name.
+- A save sends every pool. Pools the user did not edit go back as they were
+  read; only the edited pool drops the weights of targets it no longer has. A
+  pool that takes models by pattern keeps every weight, since one may name a
+  model a pattern picks.
+- A new pool stays a local draft until it has a target, an `include` or
+  `contains` entry, or a `match`.
+- The problems the server finds stay visible under their pool, each saying
+  whether OpenCode skips the pool or loads it unchecked.
+- When the server refuses a save, the list rolls back to the last saved pools
+  and a notice names the problems, with Save anyway, which sends the same pools
+  again with `force`. The next edit replaces the notice.
+- Automatic review settings the client cannot read show a note in place of
+  their controls, so nothing here can overwrite them.
 
 ## The messaging page
 

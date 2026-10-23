@@ -27,6 +27,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -165,6 +166,7 @@ export const dict = {
   ...pluginsGridI18n.nl,
   ...integrationsCatalogI18n['nl'],
   ...sessionGoalWriterI18n['nl'],
+  ...questionAnswersI18n['nl'],
   ...diffFindI18n['nl'],
   'terminalView.actions.attachSelection': 'Geselecteerde uitvoer toevoegen',
   'terminalView.actions.copySelection': 'Geselecteerde uitvoer kopiëren',

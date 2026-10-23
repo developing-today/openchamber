@@ -1525,6 +1525,8 @@ const SimpleMarkdownRendererImpl: React.FC<{
   enableFileReferences?: boolean;
   /** Render the document's raw HTML through the allowlist; only for documents a user opens to read. */
   allowRawHtml?: boolean;
+  /** Text a person typed: tags and character references show as typed (see `literal` in `MarkdownRawHtmlMode`). */
+  literalHtml?: boolean;
 }> = ({
   content,
   className,
@@ -1536,6 +1538,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   allowMermaidWheelEvents = false,
   enableFileReferences = true,
   allowRawHtml = false,
+  literalHtml = false,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
   const currentTheme = useCurrentMermaidTheme();
@@ -1574,7 +1577,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     // A document a user opened (allowRawHtml) draws its images like GitHub
     // does; everything else here is written by a model or a tool.
     imageMode: 'local',
-    rawHtml: allowRawHtml ? 'sanitize' : 'escape',
+    rawHtml: allowRawHtml ? 'sanitize' : literalHtml ? 'literal' : 'escape',
     syntaxVars,
     ctx,
     tableLayoutSettled: true,
@@ -1604,5 +1607,6 @@ export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (pr
     && prevMermaidControls.showPanZoomControls === nextMermaidControls.showPanZoomControls
     && prev.allowMermaidWheelEvents === next.allowMermaidWheelEvents
     && prev.enableFileReferences === next.enableFileReferences
-    && prev.allowRawHtml === next.allowRawHtml;
+    && prev.allowRawHtml === next.allowRawHtml
+    && prev.literalHtml === next.literalHtml;
 });

@@ -14,7 +14,8 @@ UI-side queue and foreground auto-send hook.
 - `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
   dispatch loop, event handling) and `registerMessageQueueRoutes(app, runtime)`.
 - `runtime.test.js` — delivery, idleness gates, retries, holds, persistence,
-  concurrency with in-flight sends, slash commands, and project knowledge.
+  concurrency with in-flight sends, slash commands, project knowledge, and
+  queued goals.
 
 Wiring: created in `server/index.js` after the global event hub and the
 session-knowledge runtime; routes registered in
@@ -51,7 +52,7 @@ send never re-resolves mutable UI state:
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
   sendConfig: { providerID, modelID, agent?, variant? },  // required
-  goal?: { objective?, tokenBudget, settled?, briefAgent?, ignoreLimit? }  // queued with "run as goal" armed
+  goal?: { objective?, tokenBudget, settled?, briefAgent?, ignoreLimit? }  // the armed goal ("run as goal") taken when it was queued, started when the message goes out
 }
 ```
 
@@ -75,9 +76,23 @@ the context block back. The payload inside `metadata` is the UI's contract
 
 `parseQueuedItemInput` rejects anything the server could not deliver later
 (no text, attachments, or context; missing model; malformed attachment or
-context entry). Public snapshots and broadcasts strip the payloads —
+context entry; a `goal` whose `tokenBudget` is not a positive integer or null,
+or a goal on a message without text, since the text is its objective). Public
+snapshots and broadcasts strip the payloads —
 attachment `dataUrl` (megabytes of base64) and `context` (a PR diff, say) —
 so they do not ride every update; the only way to get them back is a `take`.
+They keep `goal`, so every client knows which queued message starts one.
+
+## Goals on queued messages
+
+A message the user queued with the composer's goal armed carries that goal
+(`goal`, the token budget captured when it was queued, and an `objective` when
+the arm named one). Nothing about the goal happens while the message waits. The
+send that delivers the message starts it, as the composer starts an armed goal
+with its send. The file keeps it, so a restart keeps it. A composer that takes
+the message back sends it with that goal (`queuedGoal`), and editing it arms
+the composer again; see
+`../session-goal/DOCUMENTATION.md`, *Queued goals*.
 
 Snapshots retain `contextPreview`, capped at 100 characters plus an ellipsis.
 It carries the attached comment or context label when `content` is empty and
@@ -156,19 +171,27 @@ persisted "sending" flag would strand a message forever.
    links, including idle intermediate subagents; a deeper chain counts as
    unrelated, as in the UI. Unreadable lineage, cycles and the shared fetch
    deadline keep the queue held with the existing retry policy. It does not scan historical child pages.
+   A goal writer job holds a send into a working session, the server's own
+   or a composer's claim, by the same test (`../session-goal/spec-jobs.js`,
+   `readTurn`); a change to one belongs in the other.
 5. The head is marked in flight (broadcast), then sent. The captured model and
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a
    captured `openchamber/auto` is resolved into a real pair by the routing
    runtime beforehand. The session's project knowledge is written into its
    instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
-   send). Then the captured context goes ahead as synthetic messages
+   send). A message with a `goal` then saves it after the command lookup and
+   before anything is admitted, through `createSessionGoal`
+   (`../session-goal/create.js`) with the goal's `objective` or else the text,
+   on the model the message goes out on, and the `persistSessionGoal` seam
+   `server/index.js` hands the runtime (the objective file and the goal record,
+   as every server-created goal; "rewrite every goal" applies). A save that
+   fails fails the send with nothing admitted, so the retry has nothing to
+   duplicate. Then the captured context goes ahead as synthetic messages
    (`POST /session/:id/synthetic` with `resume: false`, an attached item's
-   metadata riding along). An item with a `goal` starts it the way a
-   scheduled goal does: `createSessionGoal` (`../session-goal/create.js`)
-   saves the goal through the injected `persistSessionGoal` before anything is
-   admitted, so a failed save leaves nothing for the retry to duplicate, and
-   the goal briefing goes as the last synthetic message. Then the message itself:
+   metadata riding along), then the goal reminder as the last synthetic
+   message (`buildGoalIntroText`, carrying a spec "rewrite every goal" wrote),
+   and then the message itself:
    - text starting with `/` that names a command in OpenCode's `/command`
      list (skills included) goes to `POST /session/:id/command` (body fields
      `name` and `text` since OpenCode 2.0.8) with its file attachments. The
@@ -182,6 +205,9 @@ persisted "sending" flag would strand a message forever.
    Success removes the item, persists, broadcasts, and marks the user
    message sent for notifications. Failure keeps the item, backs off
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.
+   A failure after the goal was saved leaves that goal in place, as a failed
+   composer send does; the retry saves it again under a new id and admits the
+   context and the reminder again.
 6. The next item goes out after the next busy → idle cycle.
 
 A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.

@@ -112,6 +112,8 @@ export const sendQueuedAutoSendPayload = (
   payload: QueuedAutoSendPayload,
   resolved: ResolvedQueuedSendConfig,
 ) => {
+  // The goal it was queued with goes with this send (`queuedGoal`, null
+  // without one), so the composer's arm stays with the composer's text.
   return useSessionUIStore.getState().sendMessage(
     payload.primaryText,
     resolved.providerID,

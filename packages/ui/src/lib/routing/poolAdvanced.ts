@@ -54,7 +54,7 @@ export const setTargetEntry = <T extends object>(
 
 export type TargetOptions = {
   defaultVariant?: string;
-  variants?: Record<string, string>;
+  variants?: Record<string, string | false>;
   until?: number;
 };
 
@@ -114,11 +114,24 @@ export const weightNamesTarget = (key: string, target: ModelRouteTarget): boolea
   return new RegExp(`^${pattern.join('/').split('*').map(escapeRegExp).join('.*')}$`).test(model.join('/'));
 };
 
-/** Drops the weights of targets the route no longer has, so a removed or edited target cannot block the save. */
+/** Whether the pool also takes models by pattern, through include, contains or match; OpenCode then picks them from the catalog. */
+const takesModelsByPattern = (route: ModelRoute): boolean =>
+  route.include !== undefined || route.contains !== undefined || route.match !== undefined;
+
+/** Whether the pool names somewhere to take models from: a target, an include or contains entry, or a match. */
+export const hasModelSource = (route: ModelRoute): boolean =>
+  (route.targets?.length ?? 0) > 0 || (route.include?.length ?? 0) > 0 || (route.contains?.length ?? 0) > 0 || route.match !== undefined;
+
+/**
+ * Drops the weights of targets the route no longer has, so a removed or edited
+ * target cannot block the save. A pool that takes models by pattern keeps every
+ * weight: one may name a model its patterns pick, which only OpenCode knows.
+ */
 export const withoutAbsentWeights = (route: ModelRoute): ModelRoute => {
-  if (!route.weights) return route;
+  if (!route.weights || takesModelsByPattern(route)) return route;
+  const targets = route.targets ?? [];
   const kept = Object.fromEntries(
-    Object.entries(route.weights).filter(([key]) => route.targets.some((target) => weightNamesTarget(key, target))),
+    Object.entries(route.weights).filter(([key]) => targets.some((target) => weightNamesTarget(key, target))),
   );
   return setRouteField(route, 'weights', pruneEmpty(kept));
 };

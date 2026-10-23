@@ -53,11 +53,11 @@ export const PoolTargetOptions: React.FC<{
 
   const save = (next: TargetOptions) => onChange(withTargetOptions(target, next));
 
-  const setRemaps = (variants: Record<string, string>) =>
+  const setRemaps = (variants: NonNullable<TargetOptions['variants']>) =>
     save({ ...options, variants: Object.keys(variants).length > 0 ? variants : undefined });
 
   const replaceRemap = (oldFrom: string, from: string, to: string) => {
-    const next: Record<string, string> = { ...(options.variants ?? {}) };
+    const next: Record<string, string | false> = { ...(options.variants ?? {}) };
     delete next[oldFrom];
     if (from && to) next[from] = to;
     setRemaps(next);
@@ -107,9 +107,16 @@ export const PoolTargetOptions: React.FC<{
             <p className="typography-ui-label font-medium text-foreground">{t('settings.pools.target.remaps')}</p>
             {remaps.map(([from, to]) => (
               <div key={from} className="flex min-w-0 items-center gap-2">
-                <CommitInput label={t('settings.pools.target.remapFrom')} value={from} onCommit={(next) => replaceRemap(from, next, to)} />
-                <span className={heading}>→</span>
-                <CommitInput label={t('settings.pools.target.remapTo')} value={to} onCommit={(next) => replaceRemap(from, from, next)} />
+                {to === false ? (
+                  // A level mapped to false: the target is never used at it. Changing that is done in the pool's JSON.
+                  <span className="typography-meta min-w-0 flex-1 truncate text-foreground">{t('settings.pools.target.sitsOut', { level: from })}</span>
+                ) : (
+                  <>
+                    <CommitInput label={t('settings.pools.target.remapFrom')} value={from} onCommit={(next) => replaceRemap(from, next, to)} />
+                    <span className={heading}>→</span>
+                    <CommitInput label={t('settings.pools.target.remapTo')} value={to} onCommit={(next) => replaceRemap(from, from, next)} />
+                  </>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => replaceRemap(from, '', '')}>
                   {t('settings.pools.target.removeRemap')}
                 </Button>

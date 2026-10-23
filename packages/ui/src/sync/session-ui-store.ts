@@ -85,7 +85,7 @@ import {
   type UnarchiveSessionsOptions,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
-import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { createGoalArm, useSessionGoalArmStore, type SessionGoalArm } from "@/stores/useSessionGoalArmStore"
 import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { buildGoalIntroReminder } from "@/lib/goalWriter"
@@ -193,6 +193,8 @@ export async function routeMessage(params: {
    * appears without waiting for it; only the request does. Never rejects.
    */
   knowledgeSync?: Promise<void>
+  /** Told the id a prompt's user message gets; a command or shell send has none. */
+  onMessageID?: (messageID: string) => void
 }): Promise<'command' | 'prompt' | 'shell'> {
   const requestDirectory = params.directory ?? undefined
   // The session carries its own model and agent server-side. Sending them on
@@ -319,6 +321,7 @@ export async function routeMessage(params: {
     context: contextItems,
     ready: params.knowledgeSync,
     appendSubmissions: params.appendSubmissions,
+    onMessageID: params.onMessageID,
     send: (messageID, context) => opencodeClient.sendMessage({
       runtimeKey: params.runtimeKey,
       id: params.sessionId,
@@ -357,10 +360,19 @@ type SendMessageOptions = {
   /** Skills named inline, attached to the prompt once the session exists. */
   skills?: SkillMentions
   /**
+   * This send's goal, from its caller. The composer's armed goal is neither
+   * read nor cleared, so while this send waits for OpenCode to start, a send
+   * from a composer cannot take this goal, and this send cannot take the
+   * composer's.
+   */
+  goalArm?: SessionGoalArm
+  /**
    * A queued message carries its own goal intent. Set (a goal or `null`), it
    * replaces the composer's armed goal, which belongs to the composer text.
    */
   queuedGoal?: QueuedMessageGoal | null
+  /** Told the id of the user message a prompt creates, before it is sent; a command or shell send has none. */
+  onMessageID?: (messageID: string) => void
 }
 
 type AssistantMessageSessionExecution = {
@@ -1058,6 +1070,7 @@ export async function materializeOpenDraftSession(selection: {
   const store = useSessionUIStore.getState()
   const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
+  const runtimeKey = getRuntimeKey()
   const draftPermissionMode = draft.permissionMode
 
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
@@ -1091,6 +1104,9 @@ export async function materializeOpenDraftSession(selection: {
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
   draftDirectoryOverride = await resolveDraftStartDirectory(draftDirectoryOverride, draftProjectId)
+  // The draft's worktree and folder are on the runtime it started on; after a
+  // switch while it waited for them, its session is not made on the one now active.
+  if (getRuntimeKey() !== runtimeKey) throw new Error("Message was not sent because the runtime changed.")
 
   const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
   // The draft already knows what the first turn runs on, so the session is
@@ -1861,15 +1877,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const queuedGoal = options?.queuedGoal
       const goalArm = inputMode === "shell" || content.trim().length === 0
         ? { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }
-        : queuedGoal !== undefined
-          ? {
-            armed: queuedGoal !== null,
-            objectiveOverride: queuedGoal?.objective ?? null,
-            settled: queuedGoal?.settled === true,
-            briefAgent: queuedGoal?.briefAgent === true,
-            ignoreLimit: queuedGoal?.ignoreLimit === true,
-          }
-          : useSessionGoalArmStore.getState().consume()
+        // A caller's own goal leaves the composer's arm where it is. A queued
+        // goal keeps the flags it was queued with: a settled spec is not
+        // rewritten, the briefing and the length choice hold.
+        : options?.goalArm
+          ?? (queuedGoal !== undefined
+            ? createGoalArm(queuedGoal !== null, queuedGoal?.objective ?? null, {
+              settled: queuedGoal?.settled,
+              briefAgent: queuedGoal?.briefAgent,
+              ignoreLimit: queuedGoal?.ignoreLimit,
+            })
+            : useSessionGoalArmStore.getState().consume())
       const goalArmed = goalArm.armed
       // A queued goal keeps the budget it was queued with.
       const goalUiState = useUIStore.getState()
@@ -1905,8 +1923,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           const saved = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite, ignoreLimit: goalArm.ignoreLimit }, null)
           rewrittenSpec = saved.outcome === 'saved' ? saved.rewrittenSpec : null
         } catch (error) {
-          // A queued message keeps its goal for the retry; only the composer's arm comes back.
-          if (queuedGoal === undefined) {
+          // The composer gets its arm back for the retry. A caller's own goal
+          // stays with the caller, which reports the failure, and a queued
+          // message keeps its goal for the retry.
+          if (!options?.goalArm && queuedGoal === undefined) {
             useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
               settled: goalArm.settled,
               briefAgent: goalArm.briefAgent,
@@ -1978,6 +1998,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           delivery: options?.delivery,
           skills: options?.skills,
           knowledgeSync: draftKnowledgeSync,
+          onMessageID: options?.onMessageID,
           additionalParts: draftParts.map((p) => ({
             text: p.text,
             synthetic: p.synthetic,
@@ -2093,6 +2114,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         delivery: options?.delivery,
         skills: options?.skills,
         knowledgeSync,
+        onMessageID: options?.onMessageID,
         additionalParts: additionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,
@@ -2337,13 +2359,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useDirectoryStore.getState().setDirectory(sessionDirectory, { showOverlay: false })
     }
 
-    // "Run as goal" rides the same arm mechanism as the composer target
-    // button: sendMessage consumes the flag, stamps the goal (objective =
-    // the composed fork message) and attaches the goal-mode intro part.
-    // Set explicitly either way so a stray armed flag cannot leak into a
-    // non-goal fork.
-    useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
-
+    // "Run as goal" goes with this send (`goalArm`): sendMessage stamps the
+    // goal (objective = the composed fork message) and attaches the
+    // goal-mode intro part. The composer's own arm is neither read nor
+    // cleared, so a composer send made while this one waits cannot take the
+    // fork's goal, and a goal the user armed in the composer stays theirs.
     await get().sendMessage(
       composeForkSessionMessage(execution.instructions, assistantPlanText),
       providerID,
@@ -2354,7 +2374,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       undefined,
       execution.variant || undefined,
       undefined,
-      { sessionId: session.id },
+      { sessionId: session.id, goalArm: createGoalArm(execution.runAsGoal === true) },
     )
   },
 

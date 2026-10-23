@@ -1,4 +1,4 @@
-import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
+import { GOAL_OBJECTIVE_CHAR_LIMIT, GOAL_OBJECTIVE_HARD_CAP, writeObjective } from './objectives.js';
 import { readGoalWriterSettings, writeGoalSpec } from './spec-writer.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
@@ -16,7 +16,7 @@ export const buildGoalIntroText = (tokenBudget, spec = null) => {
     : '';
   if (spec) {
     return '<system-reminder>\n'
-      + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+      + 'Goal mode is active for this session. The goal spec below was written from the user message that follows. '
       + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
       + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
       + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
@@ -26,7 +26,7 @@ export const buildGoalIntroText = (tokenBudget, spec = null) => {
       + '\n</goal-spec>\n</system-reminder>';
   }
   return '<system-reminder>\n'
-    + 'Goal mode is active for this session. The user message above defines the goal objective. '
+    + 'Goal mode is active for this session. The user message that follows defines the goal objective. '
     + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
     + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
     + budgetLine
@@ -75,13 +75,14 @@ export const createSessionGoal = async ({
   modelID,
   onWarning,
   persistSessionGoal,
+  // The user switched this goal's length limit off: its objective is kept
+  // whole, up to the hard cap, as the goal editor keeps it, and the goal
+  // records that it ignores the limit.
+  ignoreLimit = false,
   goalWriterSettings = readGoalWriterSettings(),
   writeSpec = writeGoalSpec,
   // The objective is final: "Rewrite every goal" leaves it as it is.
   settled = false,
-  // Keep the whole objective for the progress check instead of fitting it
-  // to the goal limit; the goal records that it ignores the limit.
-  ignoreLimit = false,
 }) => {
   const warn = (message, error) => {
     if (typeof onWarning === 'function') {
@@ -102,9 +103,11 @@ export const createSessionGoal = async ({
     }
   }
   const charLimit = goalWriterSettings?.charLimit ?? GOAL_OBJECTIVE_CHAR_LIMIT;
-  const objectiveText = ignoreLimit ? (spec ?? requested) : await fitObjective({
+  // A goal that ignores the length limit keeps its objective whole, up to the
+  // hard cap every objective has.
+  const objectiveText = await fitObjective({
     objective: spec ?? requested,
-    charLimit,
+    charLimit: ignoreLimit ? GOAL_OBJECTIVE_HARD_CAP : charLimit,
     directory,
     sessionID,
     providerID,
@@ -127,7 +130,8 @@ export const createSessionGoal = async ({
     // Inline only when the objective file could not be written, and then cut to
     // the limit even for a goal that ignores it: the inline objective rides in
     // the session metadata every goal update broadcasts to every window, so an
-    // unlimited one (up to 200,000 characters) would be resent on each update.
+    // unlimited one (up to GOAL_OBJECTIVE_HARD_CAP, a million characters) would
+    // be resent on each update.
     // The UI's setSessionGoal does the same; the full text still went out in
     // the chat message. Deliberate: see #207 and the review on #205.
     objective: objectiveFile ? '' : objectiveText.slice(0, charLimit),

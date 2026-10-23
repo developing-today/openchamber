@@ -205,6 +205,16 @@ describe('PoolAdvancedFields', () => {
     expect(changes.at(-1)).toEqual({ targets: ['p/cheap'] });
   });
 
+  test('the selection select shows the label of the mode the pool holds', async () => {
+    const container = await renderFields({ targets: ['p/cheap'], selection: 'round-robin' }, onChange);
+    expect(container.querySelector('[role="combobox"][aria-label="Selection"]')?.textContent).toBe('Round-robin');
+  });
+
+  test('the selection select shows the default\'s label when the pool sets no mode', async () => {
+    const container = await renderFields({ targets: ['p/cheap'] }, onChange);
+    expect(container.querySelector('[role="combobox"][aria-label="Selection"]')?.textContent).toBe('Default (ordered)');
+  });
+
   test('shows a weight per model target only when the selection is weighted, and saves it by reference', async () => {
     const plain = await renderFields({ targets: ['p/cheap'] }, onChange);
     expect(plain.querySelector('input[aria-label="Weight: p/cheap"]')).toBeNull();

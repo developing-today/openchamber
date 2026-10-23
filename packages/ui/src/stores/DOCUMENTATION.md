@@ -320,6 +320,11 @@ round-trips re-read instead of guessing. Empty legacy events without a directory
 clear all projections of their session in that runtime. Projection items carry
 attachment metadata only, so `popToInput()` and `takeForSend()` asynchronously
 remove the message on the server and retrieve its complete captured payload.
+An item queued with the composer's goal armed carries `goal` (`QueuedMessageGoal`:
+its token budget, and an `objective` when the arm named one) in the projection
+and in both owners; whoever delivers it starts
+the goal (`packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Queued
+goals*).
 
 `lib/messages/queuedMessagePreview.ts` derives the queue row from typed text,
 then attached comments/context, then the first filename. The store sends a
@@ -420,6 +425,8 @@ Provider and agent catalogs carry separate successful-load flags in directory sn
 
 Provider reads share one request per directory, both in `loadProviders` and in the client's `getProvidersForConfig`. A read prompted by a change (a catalog event, a provider mutation) passes `fresh`: it never joins a request already in flight, because that one can carry the catalog from before the change, say a worktree opened before OpenCode registered its plugin providers. It waits that request out and reads again. When every attempt for the active directory fails and it has never loaded, one delayed retry follows; without it nothing re-reads that directory until something unrelated, such as Settings → Providers, asks.
 
+`disabledProviderIds` is the list of providers turned off in the user's OpenCode config as the server last named it, read by Settings → Providers on every visit and set from the answer of every Disable or Enable (`setProviderDisabled`); it is `null` until read, in VS Code, and after a runtime switch. No catalog the store holds lists a provider on it: applying the list takes such providers out of `providers` and every directory snapshot at once, and a live read, a cached catalog shown at startup, and the catalog a failed read keeps leave them out too. OpenCode keeps listing a provider written into `disabled_providers` until its location reloads, so `setProviderDisabled` asks OpenCode to reload the locations of the Settings project and of the active directory (`opencodeClient.reloadLocation`) and reads their catalogs again with `fresh`; the list covers every other directory until OpenCode starts it again.
+
 OpenCode 2 does not wait for a directory to start before answering: the first provider read of a cold directory returns an empty or partial list, and the plugin providers arrive later with `provider.updated` for that directory. Since 2.0.27 the model routes do wait for the directory's plugins, so `getProvidersForConfig` asks for providers only after the models answered, and on those versions the first provider catalog is complete; for a folder inside an isolated space the providers come from the host project the space was made from, so that project's model route is read beside the space's for the same wait, and a catalog event in that project also takes the space's loaded folders out of the freshness window; agents still answer empty first. The catalog refresh re-reads only the active directory, so every catalog event also calls `markConfigCatalogStale(kind, directory)`, which takes that directory's providers or agents out of the 30-second freshness window (`null`, for a server-wide event such as a credential change, takes out all of them). Switching back to a worktree left mid-start therefore re-reads it instead of keeping the incomplete snapshot. Meanwhile the composer labels the selected model, its efforts and the agent with `selectKnownCatalogModel` / `selectKnownAgent`, which fall back to any other directory's snapshot, so a cold directory shows the name it already knows rather than a raw id or "Select agent". That fallback is display only: selection, effort resolution and validation read the active catalog, and a model or agent no catalog knows is shown as before.
 
 An effort picked in a project draft travels to another worktree of the same project (`activateDirectory` with `preserveManualModel`), also while the model is still the automatic one. `currentVariant` is what a send carries, so every loader that keeps a pick in `currentVariantSelection` also writes that pick to `currentVariant` (`variantAfterResolve`) instead of the default it resolved for the model; otherwise the picker showed the pick and the send used the default. Marks carry a revision, and a load that began before the latest mark for its directory does not make that directory fresh again.
@@ -439,6 +446,36 @@ Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sess
 Input history keeps both runtime-wide and runtime/directory/session buckets in one bounded browser-storage envelope. The per-bucket cap is configurable from 1 through 100 and defaults to 40. Recall defaults to the current session's bucket merged with the visible transcript's user prompts; the runtime-wide bucket is opt-in through the Chat setting. Lowering the limit trims older entries from every bucket at once and cannot restore what it discards. Every scope change, limit change, append, and session cleanup rereads the latest durable envelope before applying its mutation, so a stale tab preserves history written by another tab. A failed write retains bounded before/after snapshots. The next mutation applies that local delta to the latest durable data, preserving pending appends and session deletions together with unrelated changes from other tabs. A successful durable write clears the pending delta.
 
 Server-owned queue acceptance records the original prompt and restorable attachments against its captured runtime/directory/session identity. Rejection records nothing. Automatic delivery and manual take do not record the accepted item again. VS Code retains recording at dispatch, using the full messages actually taken for sending.
+
+`goalSpecJobStore.ts` follows the goal writer jobs the web server owns
+(`packages/web/server/lib/session-goal/DOCUMENTATION.md`, *Goal writer jobs*):
+one job per session, keyed by session id for the active runtime, nothing
+persisted. `hydrate()` reads `GET /api/goals/spec-jobs` on load and `resync()`
+reads it again on every connection of the control stream
+(`sync/goal-spec-job-sync.ts`), sharing one request; a reconnect during a read
+earns one trailing read. Updates arrive as
+`openchamber:goal-spec-job.updated` and every mutation answer carries the same
+`{ revision, job }`. The revision is the server's global counter: an update
+older than the one applied for its session is dropped, and a snapshot taken
+before a newer update arrived does not replace the job that update set. A
+failed read keeps the jobs shown; a failed action reads the server again and
+reports the server's reason. A cancelled job and a dismissed one (`job: null`)
+leave the store. A started job records its prompt in the session's input
+history, as an accepted queued message does. A start names the runtime the
+composer took its message on (`expectedRuntimeKey`) and is refused, with
+nothing posted, after a switch away from it, since its session id names a
+session on that runtime. `claimJob` and `editJob` return
+the full captured message with its files decoded (`toAttachedFile`);
+`claimJob` also answers the job as the server holds it after the claim,
+names the claim and says whether the server holds it until
+the agent's turn is over. Spec text edited on a card stays in `specEdits`
+per job and write attempt, so a thread switch keeps it. The writer and length
+limit chosen on a card stay in `choiceEdits` per job until `redoJob` sends
+them; the job the server answers holds them from then on
+(`goalSpecJobChoices` reads an edit, else the job's). Both leave with their
+job. A runtime switch
+clears the jobs and drops reads and answers started before it. VS Code never
+reads the route: it has no goal loop.
 
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 

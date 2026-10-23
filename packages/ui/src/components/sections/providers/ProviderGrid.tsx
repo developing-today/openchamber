@@ -17,7 +17,7 @@ import {
   SettingsCardSearch,
   type SettingsCardTone,
 } from '@/components/sections/shared/SettingsCards';
-import { findIntegrationForProvider, getProviderCardStatus, readProviderApiKeySetting, usesMachineCredentials, type ProviderCardStatus } from './providerAuth';
+import { findIntegrationForProvider, getProviderCardStatus, isRouteProvider, readProviderApiKeySetting, ROUTE_PROVIDER_NAME_KEY, usesMachineCredentials, type ProviderCardStatus } from './providerAuth';
 import { SETTINGS_CALLOUT_TITLE_CLASS, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -153,7 +153,21 @@ interface ProviderGridProps {
   onOpenClassification: () => void;
   /** Providers turned off in the user's config; null where the runtime cannot tell. */
   disabledProviders?: readonly string[] | null;
-  onEnableProvider?: (providerId: string) => void;
+  /** Turns a provider off or back on, from its card or the list at the bottom. */
+  onSetProviderDisabled?: (providerId: string, disabled: boolean) => void;
+}
+
+/**
+ * One card. A provider OpenCode lists has its provider; a turned-off provider
+ * OpenCode no longer lists still gets a card, named by its integration, so the
+ * grid never hides that it is off.
+ */
+interface GridCard {
+  id: string;
+  name: string;
+  /** Null for a turned-off provider OpenCode does not list: its models are unknown. */
+  models: readonly Model[] | null;
+  provider: GridProvider | null;
 }
 
 /**
@@ -212,15 +226,26 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
 };
 
 /** Browse view of the Providers page: one card per provider OpenCode reports. */
-export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider }) => {
+export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onSetProviderDisabled }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
+  const disabledIds = disabledProviders ?? [];
   // Alphabetical by name, so a card is found by scanning rather than in the
   // order the providers happened to be configured.
-  const alphabetical = React.useMemo(() => [...providers].sort((a, b) =>
-    (a.name || a.id).localeCompare(b.name || b.id, undefined, { sensitivity: 'base' })), [providers]);
-  const filtered = rankByQuery(alphabetical, query, (provider) => [provider.name || provider.id, provider.id]);
+  const cards = React.useMemo<GridCard[]>(() => {
+    const listed = providers.map((provider) => ({
+      id: provider.id,
+      name: isRouteProvider(provider.id) ? t(ROUTE_PROVIDER_NAME_KEY) : provider.name || provider.id,
+      models: provider.models,
+      provider,
+    }));
+    const unlisted = (disabledProviders ?? [])
+      .filter((id) => !providers.some((provider) => provider.id === id))
+      .map((id) => ({ id, name: findIntegrationForProvider(integrations ?? [], id)?.name || id, models: null, provider: null }));
+    return [...listed, ...unlisted].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }, [providers, disabledProviders, integrations, t]);
+  const filtered = rankByQuery(cards, query, (card) => [card.name, card.id]);
   const hasQuery = query.trim().length > 0;
   // The server refuses new providers and keys; this only keeps the way in hidden.
   const locked = useEnterpriseMode();
@@ -233,11 +258,11 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
       className="[&>section:first-of-type]:pt-8"
     >
       {locked ? <EnterpriseProvidersNotice directory={directory} integrations={integrations} /> : null}
-      {providers.length > 0 ? (
+      {cards.length > 0 ? (
         <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.providers.grid.searchPlaceholder')} />
       ) : null}
 
-      {providers.length === 0 ? (
+      {cards.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.providers.grid.empty')}</p>
       ) : filtered.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.providers.grid.noMatches', { query: query.trim() })}</p>
@@ -253,43 +278,62 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
           />
         )}
         {hasQuery ? null : <ClassificationCard onOpen={onOpenClassification} />}
-        {filtered.map((provider) => {
+        {filtered.map((card) => {
+          const disabled = disabledIds.includes(card.id);
           const status = getProviderCardStatus({
             integrations,
-            providerId: provider.id,
-            optionsApiKey: readProviderApiKeySetting(provider),
-            machineCredentials: usesMachineCredentials(provider),
+            providerId: card.id,
+            optionsApiKey: card.provider ? readProviderApiKeySetting(card.provider) : undefined,
+            machineCredentials: card.provider ? usesMachineCredentials(card.provider) : undefined,
           });
           return (
             <SettingsCard
-              key={provider.id}
-              icon={<ProviderLogo providerId={provider.id} className="size-5" />}
-              title={provider.name || provider.id}
-              badges={status ? <StatusPill status={status} /> : null}
-              footer={(
+              key={card.id}
+              icon={<ProviderLogo providerId={card.id} className="size-5" />}
+              title={card.name}
+              muted={disabled}
+              badges={(
                 <>
-                  <span className="inline-flex items-center gap-1" aria-label={t('settings.providers.card.models', { count: provider.models.length })}>
-                    <Icon name="stack" className="size-3.5 opacity-70" aria-hidden />
-                    <span className="tabular-nums">{provider.models.length}</span>
-                  </span>
-                  {projectIds.has(provider.id) ? <SettingsCardChip>{t('settings.providers.card.source.project')}</SettingsCardChip> : null}
+                  {status ? <StatusPill status={status} /> : null}
+                  {disabled ? <SettingsCardPill tone="neutral">{t('settings.providers.card.status.disabled')}</SettingsCardPill> : null}
                 </>
               )}
-              onOpen={() => onSelect(provider.id)}
+              footer={(
+                <>
+                  {card.models ? (
+                    <span className="inline-flex items-center gap-1" aria-label={t('settings.providers.card.models', { count: card.models.length })}>
+                      <Icon name="stack" className="size-3.5 opacity-70" aria-hidden />
+                      <span className="tabular-nums">{card.models.length}</span>
+                    </span>
+                  ) : null}
+                  {projectIds.has(card.id) ? <SettingsCardChip>{t('settings.providers.card.source.project')}</SettingsCardChip> : null}
+                </>
+              )}
+              footerAction={disabledProviders && onSetProviderDisabled ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="!font-normal"
+                  onClick={() => onSetProviderDisabled(card.id, !disabled)}
+                >
+                  {disabled ? t('settings.providers.disabled.enable') : t('settings.providers.disabled.disable')}
+                </Button>
+              ) : undefined}
+              onOpen={() => onSelect(card.id)}
             />
           );
         })}
       </div>
 
       {/* OpenCode drops a disabled provider from its list, so this is the only way back. */}
-      {disabledProviders && disabledProviders.length > 0 && onEnableProvider ? (
+      {disabledIds.length > 0 && onSetProviderDisabled ? (
         <SettingsSection title={t('settings.providers.disabled.title')} info={t('settings.providers.disabled.info')}>
           <div className="space-y-1">
-            {disabledProviders.map((providerId) => (
+            {disabledIds.map((providerId) => (
               <div key={providerId} className="flex items-center gap-2 py-1">
                 <ProviderLogo providerId={providerId} className="size-4 shrink-0 opacity-60" />
                 <span className="min-w-0 flex-1 truncate typography-ui-label text-muted-foreground">{providerId}</span>
-                <Button size="xs" variant="outline" className="!font-normal" onClick={() => onEnableProvider(providerId)}>
+                <Button size="xs" variant="outline" className="!font-normal" onClick={() => onSetProviderDisabled(providerId, false)}>
                   {t('settings.providers.disabled.enable')}
                 </Button>
               </div>

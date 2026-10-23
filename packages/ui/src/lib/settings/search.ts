@@ -378,6 +378,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'chat.session-goal-writer-effort',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.writer.effortLabel',
+    keywords: ['goal', 'spec', 'writer', 'effort', 'thinking', 'reasoning', 'variant'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.session-goal-writer-prompt',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.writer.promptLabel',
+    descriptionKey: 'settings.openchamber.visual.goal.writer.promptInfo',
+    keywords: ['goal', 'spec', 'writer', 'prompt', 'system prompt', 'instructions', 'rewrite', 'reset'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.session-goal-writer-review',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.goal.writer.reviewLabel',
@@ -1145,6 +1160,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectThinking',
     keywords: ['thinking', 'variant', 'reasoning', 'effort', 'model', 'project metadata'],
+  },
+  {
+    id: 'projects.sidebar.work',
+    page: 'projects',
+    titleKey: 'settings.projects.sidebar.showInWork',
+    keywords: ['work', 'hide', 'visibility', 'sidebar', 'project metadata'],
+    // ProjectGeneralTab leaves both visibility switches out in VS Code.
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'projects.sidebar.all',
+    page: 'projects',
+    titleKey: 'settings.projects.sidebar.showInAllSessions',
+    keywords: ['all sessions', 'hide', 'visibility', 'sidebar', 'project metadata'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'projects.icon',

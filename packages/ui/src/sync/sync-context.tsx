@@ -75,6 +75,8 @@ import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
+import { useGoalSpecJobStore } from "@/stores/goalSpecJobStore"
+import { subscribeGoalSpecJobSync } from "./goal-spec-job-sync"
 import { subscribeSessionWarmingSync } from "./session-warming-sync"
 import { subscribeSessionFoldersSync } from "./session-folders-sync"
 import { subscribeSpacePermissionModes } from "./permission-mode-sync"
@@ -2859,6 +2861,7 @@ export function SyncProvider(props: {
   useEffect(() => {
     void usePermissionStore.getState().hydrate().catch(() => undefined)
     void useMessageQueueStore.getState().hydrate().catch(() => undefined)
+    void useGoalSpecJobStore.getState().hydrate().catch(() => undefined)
   }, [props.sdk])
 
   useEffect(() => {
@@ -3085,6 +3088,7 @@ export function SyncProvider(props: {
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
     const unsubscribeQueueEvents = subscribeMessageQueueSync(runtimeKey)
+    const unsubscribeGoalSpecJobEvents = subscribeGoalSpecJobSync(runtimeKey)
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
     const unsubscribeFolderEvents = subscribeSessionFoldersSync(runtimeKey)
     const unsubscribeSpaceModes = subscribeSpacePermissionModes(runtimeKey)
@@ -3227,6 +3231,7 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
       unsubscribeQueueEvents()
+      unsubscribeGoalSpecJobEvents()
       unsubscribeSessionWarming()
       unsubscribeFolderEvents()
       unsubscribeSpaceModes()
