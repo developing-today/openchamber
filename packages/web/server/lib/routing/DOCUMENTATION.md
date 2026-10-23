@@ -291,7 +291,9 @@ makes that visible so the user can spread them.
   and end are the same time (OpenCode treats that as an empty window that
   never applies), a non-finite weight or health rate (an overflowing JSON
   number such as `1e999` parses to `Infinity`, which OpenCode requires to
-  be finite and which would save as `null`), a schedule target that
+  be finite and which would save as `null`), a budgets key that is a `*`
+  pattern (OpenCode reads a budget by the concrete model a target expands
+  to, so a pattern key would never apply), a schedule target that
   matches no target in the route, an empty schedule `targets` list
   (OpenCode applies a schedule with no target filter to every target in
   the route, so the key is left out for that), a schedule with neither

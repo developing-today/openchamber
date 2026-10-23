@@ -96,6 +96,10 @@ const BUDGET_LIMITS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute",
 const validateBudgets = (id, budgets, targets) => {
   if (!isRecord(budgets)) return `route "${id}" budgets must map target references to allowances`;
   for (const [target, budget] of Object.entries(budgets)) {
+    // OpenCode reads a budget by the concrete model a target expands to, so a
+    // pattern key matches no leaf and the allowance would never apply.
+    if (target.includes("*"))
+      return `route "${id}" budget for "${target}" is keyed by a pattern: OpenCode reads budgets by concrete model reference, so key the budget by a concrete target instead`;
     if (!targets.some((candidate) => keyNamesTarget(target, candidate)))
       return `route "${id}" budget for "${target}" matches no target in the route`;
     if (!isRecord(budget)) return `route "${id}" budget for "${target}" must be an object`;
