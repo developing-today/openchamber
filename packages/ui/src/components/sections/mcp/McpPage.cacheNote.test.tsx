@@ -21,6 +21,7 @@ const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { settingsDict } = await import('@/lib/i18n/messages/en.settings');
 const { useMcpConfigStore } = await import('@/stores/useMcpConfigStore');
+type McpDraft = import('@/stores/useMcpConfigStore').McpDraft;
 const { useMcpStore } = await import('@/stores/useMcpStore');
 const { McpPage } = await import('./McpPage');
 
@@ -32,9 +33,10 @@ afterAll(async () => { await act(async () => root.unmount()); fetchSpy.mockResto
 const enableNote = settingsDict['settings.mcp.page.server.enableCacheNote'];
 const codemodeNote = settingsDict['settings.mcp.page.advanced.codemodeCacheNote'];
 
-const showServer = async (server: { name: string; type: 'remote'; url: string; codemode?: boolean }) => {
+const showServer = async (server: { name: string; type: 'remote'; url: string; codemode?: boolean; disabled?: boolean }) => {
   useMcpStore.setState({ refresh: async () => {} });
   useMcpConfigStore.setState({
+    mcpDraft: null,
     selectedMcpName: server.name, serversByDirectory: { __default__: [server] },
     getMcpByName: () => useMcpConfigStore.getState().serversByDirectory.__default__?.[0] ?? null,
     updateMcp: async () => ({ ok: true }),
@@ -54,14 +56,51 @@ test('the Enabled row warns about the prompt cache only for a server with code m
   expect(container.textContent).not.toContain(enableNote);
 });
 
-test('the code mode selector carries the prompt cache note', async () => {
+test('the code mode selector of an enabled saved server carries the prompt cache note', async () => {
   await act(async () => { root.render(null); });
   await showServer({ name: 'catalog', type: 'remote', url: 'https://catalog.test' });
+  await openAdvanced();
+  expect(container.textContent).toContain(codemodeNote);
+});
+
+const openAdvanced = async () => {
   const trigger = [...container.querySelectorAll<HTMLElement>('button')]
     .find((button) => button.textContent?.includes(settingsDict['settings.mcp.page.advanced.configure']));
   if (!trigger) throw new Error('Missing advanced options trigger');
   await act(async () => { trigger.click(); });
-  const selector = container.querySelector(`[aria-label="${settingsDict['settings.mcp.page.advanced.codemode']}"]`);
-  expect(selector).not.toBeNull();
-  expect(container.textContent).toContain(codemodeNote);
+  // Positive control: the selector the note belongs to is on screen.
+  expect(container.querySelector(`[aria-label="${settingsDict['settings.mcp.page.advanced.codemode']}"]`)).not.toBeNull();
+};
+
+const draft = (overrides: Partial<McpDraft>): McpDraft => ({
+  name: 'fresh', scope: 'user', type: 'remote', command: [], url: 'https://fresh.test',
+  environment: [], headers: [], oauthEnabled: true, oauthClientId: '', oauthClientSecret: '',
+  oauthScope: '', oauthRedirectUri: '', oauthCallbackPort: '', oauthAuthServerMetadataUrl: '',
+  protocol: 'legacy', timeoutStartup: '', timeoutCatalog: '', timeoutExecution: '',
+  codemode: 'default', disabled: false, ...overrides,
+});
+
+// A new server's draft reaches OpenCode only on Create, so neither switch touches a
+// running session yet (PR #306 review 4354727385).
+test('a new server draft shows neither cache note', async () => {
+  await act(async () => { root.render(null); });
+  useMcpStore.setState({ refresh: async () => {} });
+  useMcpConfigStore.setState({
+    mcpDraft: draft({ codemode: 'off' }), selectedMcpName: 'fresh', serversByDirectory: { __default__: [] },
+    getMcpByName: () => undefined,
+  });
+  await act(async () => { root.render(<I18nProvider><McpPage /></I18nProvider>); });
+  expect(container.textContent).toContain(settingsDict['settings.mcp.page.server.enable']);
+  expect(container.textContent).not.toContain(enableNote);
+  await openAdvanced();
+  expect(container.textContent).not.toContain(codemodeNote);
+});
+
+// A disabled server has no tools in any session, so changing its code mode changes
+// nothing a running session sends (PR #306 review 4354727392).
+test('a disabled saved server shows no code mode cache note', async () => {
+  await act(async () => { root.render(null); });
+  await showServer({ name: 'off', type: 'remote', url: 'https://off.test', disabled: true });
+  await openAdvanced();
+  expect(container.textContent).not.toContain(codemodeNote);
 });

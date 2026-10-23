@@ -1332,8 +1332,9 @@ export const McpPage: React.FC = () => {
               ariaLabel={t('settings.mcp.page.server.enableAria')}
               // Only a server with code mode off puts its tools in the request's tool
               // list; with code mode on or left to OpenCode they sit in a catalog
-              // OpenCode appends as a message, which keeps the cached prefix.
-              description={codemode === 'off' ? t('settings.mcp.page.server.enableCacheNote') : undefined}
+              // OpenCode appends as a message, which keeps the cached prefix. A new
+              // server's draft reaches OpenCode only on Create, so it costs nothing yet.
+              description={!isNewServer && codemode === 'off' ? t('settings.mcp.page.server.enableCacheNote') : undefined}
             />
 
         </SettingsSection>
@@ -1540,10 +1541,14 @@ export const McpPage: React.FC = () => {
                           </SelectContent>
                         </Select>
                       </div>
-                      {/* Indented past the label column (w-56 plus gap-8) so it reads under the selector. */}
-                      <p className="typography-meta text-muted-foreground @xl:ps-64">
-                        {t('settings.mcp.page.advanced.codemodeCacheNote')}
-                      </p>
+                      {/* Only a saved, enabled server has tools in a running session: a draft
+                          waits for Create and a disabled server has none. Indented past the
+                          label column (w-56 plus gap-8) so it reads under the selector. */}
+                      {!isNewServer && enabled ? (
+                        <p className="typography-meta text-muted-foreground @xl:ps-64">
+                          {t('settings.mcp.page.advanced.codemodeCacheNote')}
+                        </p>
+                      ) : null}
                     </div>
 
                     {mcpType === 'remote' && (
