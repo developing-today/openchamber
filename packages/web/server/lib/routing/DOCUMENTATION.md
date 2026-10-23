@@ -281,6 +281,16 @@ and how close a target's plan looks to its quota window. Several sessions on
 one target lose their prompt cache together when its plan runs out; the panel
 makes that visible so the user can spread them.
 
+- `model-routes.js` validates a pool before Settings saves it, key by key
+  against OpenCode's `Config.ModelRoute` schema, `schedules` included: a
+  schedule carries an optional `id`, `targets` patterns and `note`, a required
+  `when` window (weekday names or 0 to 6, days of month or -1, `start`/`end`
+  local times, `timezone`, `from`/`until`), and one of `factor` or `weight`.
+  Values OpenCode would drop or silently ignore are refused with the reason:
+  a window its parser cannot read, an empty day list, a schedule with neither
+  change, and one with both, where the weight would win and the factor would
+  be ignored. Cross-pool schedules (`experimental.model_route_schedules`) are
+  not OpenChamber's to save yet; #297 covers their editor.
 - `pool-plan-links.js` keeps `pool-plan-links.json` in the OpenChamber data
   directory: a map from a target reference (`provider/model`, or a `*`
   pattern) to a plan id from the plan store. Two targets linked to one plan

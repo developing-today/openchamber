@@ -59,6 +59,7 @@ describe('validateModelRoute advanced fields', () => {
           quotaCooldownMs: 900000,
         },
         budgets: { 'a/b': { requestsPerMinute: 10, tokensPerDay: 1000000, softLimit: 0.9 } },
+        schedules: [{ when: { daysOfWeek: ['mon'], start: '09:00', end: '17:00' }, factor: 0.5 }],
       }),
     ).toBeNull();
   });
@@ -100,6 +101,96 @@ describe('validateModelRoute target options and display name', () => {
     expect(
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: 3 } }] }),
     ).toMatch(/remap "low" must be a string/);
+  });
+});
+
+describe('validateModelRoute schedules', () => {
+  const base = { targets: ['deepseek/v4', 'openai/x'] };
+
+  it('accepts the reported hand-written schedule beside a pool without one', () => {
+    expect(
+      validateModelRoutes({
+        other: { targets: ['openai/x'] },
+        peak: {
+          targets: ['deepseek/v4'],
+          schedules: [{ when: { daysOfWeek: ['mon'], start: '09:00', end: '17:00' }, factor: 0.5 }],
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it('accepts a full schedule: id, target patterns, a weight, a note and every window field', () => {
+    expect(
+      validateModelRoute('peak', {
+        ...base,
+        schedules: [
+          {
+            id: 'weekday-peak',
+            targets: ['deepseek/*'],
+            when: {
+              daysOfWeek: ['monday', 2, 'tues'],
+              daysOfMonth: [1, -1],
+              start: '9:00',
+              end: '17:00:30',
+              timezone: 'America/Chicago',
+              from: 1893456000000,
+              until: 1896134400000,
+            },
+            weight: 2.5,
+            note: 'deepseek is busy in the morning',
+          },
+          { when: {}, factor: 1 },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it('refuses a schedule that is not a list of objects, or carries an unknown key', () => {
+    expect(validateModelRoute('x', { ...base, schedules: { when: {} } })).toMatch(/schedules must be a list/);
+    expect(validateModelRoute('x', { ...base, schedules: ['peak'] })).toMatch(/schedule 1 must be an object/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 1, factr: 2 }] })).toMatch(
+      /schedule 1 has unknown key "factr" \(expected id, targets, when, factor, weight, note\)/,
+    );
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 1, id: 3 }] })).toMatch(/schedule 1 id must be a string/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 1, note: 3 }] })).toMatch(/schedule 1 note must be a string/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 1, targets: 'deepseek/*' }] })).toMatch(/targets must be a list/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 1, targets: ['  '] }] })).toMatch(/non-empty target references/);
+  });
+
+  it('refuses a schedule with no window, no change, or both changes', () => {
+    expect(validateModelRoute('x', { ...base, schedules: [{ factor: 0.5 }] })).toMatch(/needs a when window/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: 'weekdays' }] })).toMatch(/needs a when window/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {} }] })).toMatch(/needs a factor or a weight/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 0.5, weight: 2 }] })).toMatch(/both factor and weight/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 0 }] })).toMatch(/factor must be a positive number/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, weight: -1 }] })).toMatch(/weight must be a positive number/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: '0.5' }] })).toMatch(/factor must be a positive number/);
+  });
+
+  it('refuses window values OpenCode cannot read, because its parser drops the whole schedule', () => {
+    const withWindow = (when) => validateModelRoute('x', { ...base, schedules: [{ when, factor: 0.5 }] });
+    expect(withWindow({ daysOfWeek: ['funday'] })).toMatch(/daysOfWeek entry "funday"/);
+    expect(withWindow({ daysOfWeek: ['Mon'] })).toMatch(/daysOfWeek entry "Mon"/);
+    expect(withWindow({ daysOfWeek: [7] })).toMatch(/daysOfWeek entry "7"/);
+    expect(withWindow({ daysOfWeek: 'mon' })).toMatch(/daysOfWeek must be a list/);
+    expect(withWindow({ daysOfWeek: [] })).toMatch(/daysOfWeek must not be empty/);
+    expect(withWindow({ daysOfMonth: [0] })).toMatch(/daysOfMonth entry "0"/);
+    expect(withWindow({ daysOfMonth: [32] })).toMatch(/daysOfMonth entry "32"/);
+    expect(withWindow({ daysOfMonth: [] })).toMatch(/daysOfMonth must not be empty/);
+    expect(withWindow({ start: '9am' })).toMatch(/window\.start must be a local time/);
+    expect(withWindow({ start: '24:00' })).toMatch(/window\.start/);
+    expect(withWindow({ end: '17:60' })).toMatch(/window\.end/);
+    expect(withWindow({ timezone: 'Nowhere/Special' })).toMatch(/window\.timezone/);
+    expect(withWindow({ from: 0 })).toMatch(/window\.from must be a positive/);
+    expect(withWindow({ from: 2000, until: 1000 })).toMatch(/from must be before window\.until/);
+    expect(withWindow({ zone: 'UTC' })).toMatch(/window has unknown key "zone"/);
+  });
+
+  it('accepts day numbers, single-digit times and a start past its end, which OpenCode runs past midnight', () => {
+    const withWindow = (when) => validateModelRoute('x', { ...base, schedules: [{ when, factor: 0.5 }] });
+    expect(withWindow({ daysOfWeek: [0, 6], daysOfMonth: [-1] })).toBeNull();
+    expect(withWindow({ start: '22:00', end: '06:00' })).toBeNull();
+    expect(withWindow({ timezone: 'UTC', from: 1000, until: 2000 })).toBeNull();
   });
 });
 
@@ -259,6 +350,24 @@ describe('registerModelRouteRoutes', () => {
     expect(response.out.status).toBe(400);
     expect(response.out.body.error).toMatch(/unknown key "attmepts"/);
     expect(deps.writeConfig).not.toHaveBeenCalled();
+  });
+
+  it('PUT saves a pool with schedules as sent, beside a pool without one', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const sent = {
+      other: { targets: ['openai/x'] },
+      peak: {
+        targets: ['deepseek/v4'],
+        schedules: [{ when: { daysOfWeek: ['mon'], start: '09:00', end: '17:00' }, factor: 0.5 }],
+      },
+    };
+    const response = res();
+    await handler({ body: { routes: sent } }, response);
+    expect(response.out.status).toBeUndefined();
+    expect(targetConfig.experimental.model_routes).toEqual(sent);
+    expect(response.out.body.routes).toEqual(sent);
   });
 
   it('saves tuning notes as sent', async () => {
