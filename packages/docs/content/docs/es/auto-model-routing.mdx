@@ -35,6 +35,12 @@ Para cada categoría puedes definir:
 
 Jev clasifica los prompts leyendo los nombres y las descripciones de las categorías, así que las descripciones funcionan como instrucciones. Escribe qué entra en la categoría y qué no. Puedes editar, desactivar, quitar o añadir categorías, y restaurar una integrada si cambias de idea. Auto necesita al menos dos categorías activadas.
 
+### Ver qué sesiones comparten un destino
+
+Cuando se agota el plan de un destino, todas las sesiones en ese destino pasan al siguiente a la vez, y cada una vuelve a empezar con la caché de prompts fría. **Configuración → Enrutamiento → Pools de modelos → Estado de los pools** muestra, para cada destino de cada pool, cuántas sesiones lo usaron en los últimos 15 minutos, y avisa cuando lo comparten dos o más.
+
+Vincula ahí un destino a uno de tus planes para ver una proyección: su uso reciente, junto con el de todos los demás destinos vinculados al mismo plan, escalado a la ventana de cuota del plan. Las ventanas que cuentan peticiones, mensajes o tokens tienen proyección; las de dólares y porcentaje no. La cifra es una estimación a partir de las últimas 24 horas de tráfico de OpenCode y no ve el uso fuera de OpenCode. En un pool ponderado o por turnos, un destino al 70 % o más de su ventana muestra el botón **Reducir peso**, que reduce su peso a la mitad para que las sesiones nuevas se inclinen hacia los demás destinos.
+
 ## Qué pasa al enviar
 
 1. OpenChamber envía a Jev tu mensaje y un fragmento breve de los últimos turnos.

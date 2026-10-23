@@ -35,6 +35,12 @@ Per categorie kunt u instellen:
 
 Jev deelt prompts in op basis van de categorienamen en beschrijvingen. Die beschrijvingen werken dus als instructies: vermeld wat wel en niet bij een categorie hoort. U kunt categorieën bewerken, uitschakelen, verwijderen of toevoegen en ingebouwde categorieën herstellen. Auto heeft minstens twee ingeschakelde categorieën nodig.
 
+### Zien welke sessies een doel delen
+
+Als het abonnement van een doel op is, schakelen alle sessies op dat doel tegelijk over, en elke sessie begint opnieuw met een koude promptcache. **Instellingen → Routering → Modelpools → Poolstatus** toont voor elk doel in elke pool hoeveel sessies het in de laatste 15 minuten hebben gebruikt, en waarschuwt als twee of meer sessies het delen.
+
+Koppel daar een doel aan een van uw abonnementen om een inschatting te zien: het recente gebruik, samen met dat van elk ander doel dat aan hetzelfde abonnement is gekoppeld, omgerekend naar het quotavenster van het abonnement. Vensters die verzoeken, berichten of tokens tellen krijgen een inschatting, vensters in dollars of procenten niet. Het getal is een schatting op basis van de laatste 24 uur OpenCode-verkeer en ziet geen gebruik buiten OpenCode. In een gewogen pool of een pool die om en om kiest, krijgt een doel op 70% of meer van zijn venster de knop **Gewicht verlagen**. Die halveert het gewicht, zodat nieuwe sessies naar de andere doelen neigen.
+
 ## Wat gebeurt er bij het versturen?
 
 1. OpenChamber stuurt uw bericht en een kort fragment van de laatste beurten naar Jev.
