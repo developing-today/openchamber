@@ -161,6 +161,18 @@ describe('validateModelRoute target options and display name', () => {
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: 3 } }] }),
     ).toMatch(/remap "low" must be a string/);
   });
+
+  it('rejects empty variant settings, which OpenCode drops without a word', () => {
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: '' }] }),
+    ).toMatch(/defaultVariant must be a string and not empty/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: '' } }] }),
+    ).toMatch(/remap "low" must be a string and not empty/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { '': 'high' } }] }),
+    ).toMatch(/must not use an empty route variant as a key/);
+  });
 });
 
 describe('validateModelRoute schedules', () => {
