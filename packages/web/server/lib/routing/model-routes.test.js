@@ -39,6 +39,57 @@ describe('validateModelRoute', () => {
   });
 });
 
+describe('validateModelRoutes route references', () => {
+  it('refuses a target referencing a route that is not in the saved set', () => {
+    expect(validateModelRoutes({ mine: { targets: ['opencode-route/nope'] } })).toMatch(
+      /route "mine" target "opencode-route\/nope" references route "nope", which is not one of the saved routes/,
+    );
+    expect(validateModelRoutes({ mine: { targets: ['openai/gpt-x', 'opencode-route/nope'] } })).toMatch(/references route "nope"/);
+    expect(validateModelRoutes({ mine: { targets: [{ model: 'opencode-route/nope' }] } })).toMatch(/references route "nope"/);
+  });
+
+  it('refuses a route whose only target is itself', () => {
+    expect(validateModelRoutes({ mine: { targets: ['opencode-route/mine'] } })).toMatch(/route "mine" would expand to no models/);
+  });
+
+  it('refuses a reference cycle that reaches no concrete model target', () => {
+    expect(
+      validateModelRoutes({ a: { targets: ['opencode-route/b'] }, b: { targets: ['opencode-route/a'] } }),
+    ).toMatch(/would expand to no models/);
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'] },
+        b: { targets: ['opencode-route/c'] },
+        c: { targets: ['opencode-route/b'] },
+      }),
+    ).toMatch(/would expand to no models/);
+  });
+
+  it('accepts references to routes in the set, including cycles that reach a concrete target', () => {
+    expect(
+      validateModelRoutes({ a: { targets: ['opencode-route/b'] }, b: { targets: ['openai/gpt-x'] } }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b', 'openai/gpt-x'] },
+        b: { targets: ['opencode-route/a'] },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'] },
+        b: { targets: ['opencode-route/a', 'openai/gpt-x'] },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({ a: { targets: ['opencode-route/b#high'] }, b: { targets: ['openai/gpt-x'] } }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({ a: { targets: [{ model: 'opencode-route/b' }] }, b: { targets: ['openai/gpt-x'] } }),
+    ).toBeNull();
+  });
+});
+
 describe('validateModelRoute advanced fields', () => {
   const base = { targets: ['a/b'] };
 
@@ -196,11 +247,35 @@ describe('validateModelRoute schedules', () => {
     expect(withTargets(['openai/*-luna'], 'openai/gpt-*')).toBeNull();
     expect(withTargets(['openai/gpt-*'], 'openai/*-luna')).toBeNull();
     expect(withTargets([{ model: 'openai/*-luna' }], 'openai/gpt-*')).toBeNull();
-    expect(withTargets(['openai/*-luna'], 'openai/gpt-*#high')).toBeNull();
     expect(withTargets(['openai/gpt-*-luna'], 'openai/*-6-*')).toBeNull();
     expect(withTargets(['anthropic/*'], 'openai/gpt-*')).toMatch(/schedule 1 target "openai\/gpt-\*" matches no target in the route/);
     expect(withTargets(['openai/claude-*'], 'openai/gpt-*')).toMatch(/matches no target in the route/);
     expect(withTargets(['openai/*-luna'], 'openai/*-sol')).toMatch(/matches no target in the route/);
+  });
+
+  it('refuses a schedule target carrying a #variant, and judges letter case the way OpenCode does', () => {
+    const withEntry = (targets, entry) =>
+      validateModelRoute('x', { targets, schedules: [{ when: {}, factor: 2, targets: [entry] }] });
+    const route = ['openai/gpt-6-luna', 'anthropic/claude-1'];
+    // A variant-suffixed entry is refused even when its model is in the route:
+    // OpenCode's schedule reference has no variant, so it could never match.
+    expect(withEntry(route, 'openai/gpt-6-luna#high')).toMatch(
+      /schedule 1 target "openai\/gpt-6-luna#high" carries a "#variant" suffix: OpenCode matches schedule targets against provider\/model references without a variant/,
+    );
+    expect(withEntry(route, 'openai/*#high')).toMatch(/carries a "#variant" suffix/);
+    expect(withEntry(route, 'anthropic/claude-1#x')).toMatch(/carries a "#variant" suffix/);
+    expect(withEntry(['openai/*-luna'], 'openai/gpt-*#high')).toMatch(/carries a "#variant" suffix/);
+    // OpenCode's schedule matcher is case-insensitive, so a case-only
+    // difference validates: exact, pattern-over-concrete, and overlapping
+    // patterns in either direction.
+    expect(withEntry(route, 'OpenAI/gpt-6-luna')).toBeNull();
+    expect(withEntry(route, 'OPENAI/*')).toBeNull();
+    expect(withEntry(route, 'OPENAI/GPT-*')).toBeNull();
+    expect(withEntry(['OpenAI/*-LUNA'], 'openai/gpt-*')).toBeNull();
+    expect(withEntry(['openai/*-luna'], 'OPENAI/GPT-*')).toBeNull();
+    // Case-insensitivity does not rescue an entry that names nothing.
+    expect(withEntry(route, 'OpenAI/claude-1')).toMatch(/schedule 1 target "OpenAI\/claude-1" matches no target in the route/);
+    expect(withEntry(['openai/*-luna'], 'OPENAI/*-SOL')).toMatch(/matches no target in the route/);
   });
 
   it('refuses a schedule with no window, no change, or both changes', () => {

@@ -232,10 +232,18 @@ const validateSchedules = (id, schedules, targets) => {
       if (schedule.targets.length === 0)
         return `route "${id}" ${label} targets must not be empty: OpenCode applies a schedule with an empty targets list to every target in the route, so leave the key out for every target`;
       for (const entry of schedule.targets) {
-        const entryReference = referenceOf(entry);
+        // OpenCode matches a schedule entry against a `provider/model`
+        // reference, which carries no variant, so an entry spelled with the
+        // `#variant` suffix targets use everywhere else can never match.
+        if (entry.includes("#"))
+          return `route "${id}" ${label} target "${entry}" carries a "#variant" suffix: OpenCode matches schedule targets against provider/model references without a variant, so the entry would never apply`;
+        // OpenCode's schedule matcher is case-insensitive (its glob is built
+        // with the `i` flag), so the entry and the targets are compared in
+        // lower case: a case-only difference still applies there.
+        const entryReference = referenceOf(entry).toLowerCase();
         const matches = targets.some((target) => {
-          const targetReference = referenceOf(target);
-          if (keyNamesTarget(entry, target) || keyNamesTarget(targetReference, entry)) return true;
+          const targetReference = referenceOf(target).toLowerCase();
+          if (keyNamesTarget(entryReference, targetReference) || keyNamesTarget(targetReference, entryReference)) return true;
           // Two patterns can cover a model together even when neither covers
           // the other, so a partly overlapping pair counts as a match too.
           return entryReference.includes("*") && targetReference.includes("*") && patternsOverlap(entryReference, targetReference);
@@ -282,6 +290,15 @@ const validateTarget = (target) => {
 // `#variant` removed (core keys them that way). A `*` target also covers the
 // concrete models it matches, so those keys are accepted too.
 const referenceOf = (target) => (target.model ?? target).split("#")[0];
+
+const ROUTE_REFERENCE_PREFIX = "opencode-route/";
+
+/** The route id a target references (`opencode-route/<id>`), or null for a model target. */
+const routeReferenceOf = (target) => {
+  const reference = referenceOf(target);
+  return reference.startsWith(ROUTE_REFERENCE_PREFIX) ? reference.slice(ROUTE_REFERENCE_PREFIX.length) : null;
+};
+
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Whether a concrete `provider/model` key is the target or one its `*` pattern matches. */
@@ -355,6 +372,40 @@ export const validateModelRoutes = (routes) => {
     const problem = validateModelRoute(id, route);
     if (problem) return problem;
   }
+  // A target can reference another route in the set (`opencode-route/<id>`).
+  // OpenCode drops a reference it cannot visit — the named route is not in
+  // the set, or it is already on the trail (a cycle) — without a word, so a
+  // dead reference is refused here, the only place it can be named.
+  for (const [id, route] of Object.entries(routes)) {
+    for (const target of route.targets) {
+      const referenced = routeReferenceOf(target);
+      if (referenced !== null && !Object.hasOwn(routes, referenced))
+        return `route "${id}" target "${target.model ?? target}" references route "${referenced}", which is not one of the saved routes`;
+    }
+  }
+  // A route expands to models only through a concrete target, its own or one
+  // a referenced route reaches without revisiting a route (OpenCode's trail
+  // guard drops the revisits, and a simple path to a concrete target never
+  // revisits one). Seed the routes that name a concrete target, then grow
+  // through references until no route is added; what is left reaches none.
+  const expanding = new Set(
+    Object.entries(routes)
+      .filter(([, route]) => route.targets.some((target) => routeReferenceOf(target) === null))
+      .map(([id]) => id),
+  );
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [id, route] of Object.entries(routes)) {
+      if (expanding.has(id)) continue;
+      if (route.targets.some((target) => expanding.has(routeReferenceOf(target)))) {
+        expanding.add(id);
+        grew = true;
+      }
+    }
+  }
+  for (const id of Object.keys(routes))
+    if (!expanding.has(id))
+      return `route "${id}" would expand to no models: its targets only reference routes in a cycle that reaches no concrete model target`;
   return null;
 };
 
