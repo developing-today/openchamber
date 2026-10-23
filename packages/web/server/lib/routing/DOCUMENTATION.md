@@ -289,7 +289,10 @@ makes that visible so the user can spread them.
   Values OpenCode would drop or silently ignore are refused with the reason:
   a window its parser cannot read, an empty day list, a window whose start
   and end are the same time (OpenCode treats that as an empty window that
-  never applies), a schedule with neither change, and one with both, where
+  never applies), a non-finite weight or health rate (an overflowing JSON
+  number such as `1e999` parses to `Infinity`, which OpenCode requires to
+  be finite and which would save as `null`), a schedule with neither
+  change, and one with both, where
   the weight would win and the factor would be ignored. Cross-pool schedules
   (`experimental.model_route_schedules`) are not OpenChamber's to save yet;
   #297 covers their editor.

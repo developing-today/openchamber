@@ -80,7 +80,7 @@ const validateHealth = (id, health) => {
     if (key === "firstTokenTimeoutMs" && value === false) continue;
     if (!isWhole(value, 1, max)) return `route "${id}" health.${key} must be a whole number from 1 to ${max}`;
   }
-  if (health.minOutputTokensPerSecond !== undefined && !(typeof health.minOutputTokensPerSecond === "number" && health.minOutputTokensPerSecond > 0))
+  if (health.minOutputTokensPerSecond !== undefined && !isPositiveNumber(health.minOutputTokensPerSecond))
     return `route "${id}" health.minOutputTokensPerSecond must be a positive number`;
   // OpenCode clamps slowThreshold to the window without saying so; a window
   // that cannot hold that many slow requests is refused instead.
@@ -272,7 +272,7 @@ export const validateModelRoute = (id, route) => {
   if (route.weights !== undefined) {
     if (!isRecord(route.weights)) return `route "${id}" weights must map target references to numbers`;
     for (const [key, weight] of Object.entries(route.weights)) {
-      if (typeof weight !== "number" || !(weight > 0))
+      if (!isPositiveNumber(weight))
         return `route "${id}" weight for "${key}" must be a positive number`;
       if (!route.targets.some((target) => keyNamesTarget(key, target)))
         return `route "${id}" weight for "${key}" matches no target in the route`;
