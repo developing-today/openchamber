@@ -293,8 +293,10 @@ makes that visible so the user can spread them.
   number such as `1e999` parses to `Infinity`, which OpenCode requires to
   be finite and which would save as `null`), a budgets key that is a `*`
   pattern (OpenCode reads a budget by the concrete model a target expands
-  to, so a pattern key would never apply), a schedule target that
-  matches no target in the route, an empty schedule `targets` list
+  to, so a pattern key would never apply), a schedule target whose
+  pattern shares no model with any target in the route (two patterns
+  count as sharing when one model matches both, even if each covers
+  models the other does not), an empty schedule `targets` list
   (OpenCode applies a schedule with no target filter to every target in
   the route, so the key is left out for that), a schedule with neither
   change, and one with both, where

@@ -185,6 +185,33 @@ const validateScheduleWindow = (id, label, window) => {
   return null;
 };
 
+/**
+ * Whether two `*` patterns can match one reference at the same time. A star
+ * takes any run of characters, so the patterns share a reference when their
+ * fixed parts line up without a clash: `openai/gpt-*` and `openai/*-luna`
+ * share `openai/gpt-6-luna`, while `openai/gpt-*` and `openai/claude-*` share
+ * nothing. The walk visits pairs of pattern positions. A star either takes
+ * no characters, which moves past it, or takes the character the other
+ * pattern fixes next, which moves that pattern on.
+ */
+const patternsOverlap = (first, second) => {
+  const seen = new Set();
+  const stack = [[0, 0]];
+  while (stack.length > 0) {
+    const [i, j] = stack.pop();
+    const key = `${i},${j}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (i === first.length && j === second.length) return true;
+    if (first[i] === "*") stack.push([i + 1, j]);
+    if (second[j] === "*") stack.push([i, j + 1]);
+    if (first[i] === "*" && j < second.length && second[j] !== "*") stack.push([i, j + 1]);
+    else if (second[j] === "*" && i < first.length && first[i] !== "*") stack.push([i + 1, j]);
+    else if (first[i] !== undefined && first[i] === second[j]) stack.push([i + 1, j + 1]);
+  }
+  return false;
+};
+
 /** A route's `schedules`: time-bound weight changes, as OpenCode's Schedule schema defines them.
  * A schedule with nothing to change, or with both changes, is refused: OpenCode drops the first
  * kind without a word and applies only the weight of the second, ignoring its factor. */
@@ -204,9 +231,17 @@ const validateSchedules = (id, schedules, targets) => {
         return `route "${id}" ${label} targets must be a list of non-empty target references`;
       if (schedule.targets.length === 0)
         return `route "${id}" ${label} targets must not be empty: OpenCode applies a schedule with an empty targets list to every target in the route, so leave the key out for every target`;
-      for (const entry of schedule.targets)
-        if (!targets.some((target) => keyNamesTarget(entry, target) || keyNamesTarget(referenceOf(target), entry)))
-          return `route "${id}" ${label} target "${entry}" matches no target in the route`;
+      for (const entry of schedule.targets) {
+        const entryReference = referenceOf(entry);
+        const matches = targets.some((target) => {
+          const targetReference = referenceOf(target);
+          if (keyNamesTarget(entry, target) || keyNamesTarget(targetReference, entry)) return true;
+          // Two patterns can cover a model together even when neither covers
+          // the other, so a partly overlapping pair counts as a match too.
+          return entryReference.includes("*") && targetReference.includes("*") && patternsOverlap(entryReference, targetReference);
+        });
+        if (!matches) return `route "${id}" ${label} target "${entry}" matches no target in the route`;
+      }
     }
     if (!isRecord(schedule.when)) return `route "${id}" ${label} needs a when window object`;
     const windowProblem = validateScheduleWindow(id, label, schedule.when);
