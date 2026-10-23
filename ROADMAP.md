@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21 and 2026-10-22.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21, 2026-10-22 and 2026-10-23.
 
 ## Areas
 
@@ -158,3 +158,8 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #178, #207 and #264 completions          | 2026-10-22 | #266, #267                 |
 | Vault read status tied to the reference it came from              | 2026-10-22 | #268, #271                 |
 | Terminal preview ports are range-checked                          | 2026-10-22 | #274, #276                 |
+| Pool schedule windows with equal start and end rejected           | 2026-10-23 | #341, #343                 |
+| Non-finite pool weights and health rates rejected                 | 2026-10-23 | #344, #345                 |
+| ROADMAP Done records the #274 completion                          | 2026-10-23 | #279, #346                 |
+| Pool budget keys must name a route target                         | 2026-10-23 | #347, #348                 |
+| Pool schedule targets must match a route target                   | 2026-10-23 | #349, #350                 |
