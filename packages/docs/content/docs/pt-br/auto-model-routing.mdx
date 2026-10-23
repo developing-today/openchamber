@@ -37,6 +37,12 @@ Os agendamentos mudam os pesos dos destinos em dias ou horários definidos, por 
 
 O Jev classifica os prompts lendo os nomes e as descrições das categorias, então as descrições funcionam como instruções. Escreva o que pertence à categoria e o que não pertence. Você pode editar, desativar, remover ou adicionar categorias, e restaurar uma das prontas se mudar de ideia. O Auto precisa de pelo menos duas categorias ativadas.
 
+### Veja quais sessões compartilham um destino
+
+Quando o plano de um destino se esgota, todas as sessões nesse destino passam para o próximo ao mesmo tempo, e cada uma recomeça com o cache de prompts frio. **Configurações → Roteamento → Pools de modelos → Saúde dos pools** mostra, para cada destino de cada pool, quantas sessões o usaram nos últimos 15 minutos, e avisa quando duas ou mais o compartilham.
+
+Vincule ali um destino a um dos seus planos para ver uma projeção: o uso recente dele, junto com o de todos os outros destinos vinculados ao mesmo plano, escalado para a janela de cota do plano. Janelas que contam requisições, mensagens ou tokens recebem projeção; as de dólar e porcentagem, não. O número é uma estimativa das últimas 24 horas de tráfego do OpenCode e não enxerga o uso fora do OpenCode. Em um pool ponderado ou em rodízio, um destino com 70% ou mais da janela ganha o botão **Reduzir peso**, que corta o peso dele pela metade para que as novas sessões se inclinem para os outros destinos.
+
 ## O que acontece ao enviar
 
 1. O OpenChamber envia ao Jev a sua mensagem e um trecho curto dos últimos turnos.

@@ -69,6 +69,12 @@ describe('announced preview url', () => {
     expect(extractTerminalPreviewUrl('Local: http://localhost:0/')).toBeNull();
   });
 
+  test('keeps a valid address sharing a line with a port-0 address', () => {
+    expect(extractAnnouncedUrls('Local: http://localhost:0/ http://localhost:5173/')).toEqual(['http://localhost:5173/']);
+    expect(extractAnnouncedUrls('Local: http://localhost:0000/ http://localhost:5173/')).toEqual(['http://localhost:5173/']);
+    expect(extractAnnouncedUrls('Local: http://localhost/ http://localhost:0/')).toEqual(['http://localhost/']);
+  });
+
   test('rejects a Python server port of 0 reached through the URL on the same line', () => {
     expect(extractAnnouncedUrls('Serving HTTP on 0.0.0.0 port 0 (http://0.0.0.0:0/) ...')).toEqual([]);
   });

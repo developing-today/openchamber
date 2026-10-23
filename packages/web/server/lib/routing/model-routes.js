@@ -265,7 +265,8 @@ const validateTarget = (target) => {
 const referenceOf = (target) => (target.model ?? target).split("#")[0];
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const keyNamesTarget = (key, target) => {
+/** Whether a concrete `provider/model` key is the target or one its `*` pattern matches. */
+export const keyNamesTarget = (key, target) => {
   const reference = referenceOf(target);
   if (key === reference) return true;
   if (!reference.includes("*")) return false;

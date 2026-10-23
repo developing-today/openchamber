@@ -37,6 +37,12 @@ Harmonogramy zmieniają wagi celów w wybrane dni lub godziny, na przykład żeb
 
 Jev sortuje prompty, czytając nazwy i opisy kategorii, więc opisy działają jak instrukcje. Napisz, co należy do kategorii, a co nie. Kategorie możesz edytować, wyłączać, usuwać i dodawać, a wbudowaną przywrócić, jeśli zmienisz zdanie. Auto potrzebuje co najmniej dwóch włączonych kategorii.
 
+### Sprawdź, które sesje współdzielą cel
+
+Gdy plan celu się wyczerpie, wszystkie sesje na tym celu jednocześnie przełączają się dalej i każda zaczyna od nowa z zimną pamięcią podręczną promptów. **Ustawienia → Routing → Pule modeli → Stan puli** pokazuje dla każdego celu w każdej puli, ile sesji korzystało z niego w ostatnich 15 minutach, i ostrzega, gdy współdzielą go co najmniej dwie.
+
+Powiąż tam cel z jednym ze swoich planów, żeby zobaczyć prognozę: jego niedawne użycie razem z użyciem wszystkich innych celów powiązanych z tym samym planem, przeskalowane do okna limitu planu. Okna liczone w żądaniach, wiadomościach lub tokenach dostają prognozę, a okna w dolarach i procentach nie. Ta liczba to szacunek z ostatnich 24 godzin ruchu OpenCode i nie obejmuje użycia poza OpenCode. W puli ważonej lub rotacyjnej cel, który zużył 70% swojego okna lub więcej, dostaje przycisk **Zmniejsz wagę**. Zmniejsza on wagę celu o połowę, więc nowe sesje częściej trafiają do innych celów.
+
 ## Co się dzieje po wysłaniu
 
 1. OpenChamber wysyła do Jev Twoją wiadomość i krótki fragment kilku ostatnich tur.
