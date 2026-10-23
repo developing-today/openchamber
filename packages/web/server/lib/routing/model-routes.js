@@ -315,6 +315,12 @@ export const validateModelRoute = (id, route) => {
   // OpenCode keeps a fixed route in its configured order, so a selection mode there would be ignored.
   if (route.autonomy === "fixed" && route.selection !== undefined && route.selection !== "ordered")
     return `route "${id}" is fixed, so it keeps its configured order; selection "${route.selection}" needs autonomy rules or higher`;
+  // Weights and budgets are rules-level too: on a fixed route OpenCode replaces
+  // every weight with 1 and never collects the budgets, so both would be ignored.
+  if (route.autonomy === "fixed" && route.weights !== undefined)
+    return `route "${id}" is fixed, so OpenCode ignores its weights; weights need autonomy rules or higher`;
+  if (route.autonomy === "fixed" && route.budgets !== undefined)
+    return `route "${id}" is fixed, so OpenCode ignores its budgets; budgets need autonomy rules or higher`;
   if (route.weights !== undefined) {
     if (!isRecord(route.weights)) return `route "${id}" weights must map target references to numbers`;
     for (const [key, weight] of Object.entries(route.weights)) {
