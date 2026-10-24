@@ -74,20 +74,14 @@ describe('validateModelRoutes route references', () => {
     ).toMatch(/would expand to no models/);
   });
 
-  it('accepts references to routes in the set, including cycles that reach a concrete target', () => {
+  it('accepts references to routes in the set, including a cycle where each reference still reaches a model', () => {
     expect(
       validateModelRoutes({ a: { targets: ['opencode-route/b'] }, b: { targets: ['openai/gpt-x'] } }),
     ).toBeNull();
     expect(
       validateModelRoutes({
         a: { targets: ['opencode-route/b', 'openai/gpt-x'] },
-        b: { targets: ['opencode-route/a'] },
-      }),
-    ).toBeNull();
-    expect(
-      validateModelRoutes({
-        a: { targets: ['opencode-route/b'] },
-        b: { targets: ['opencode-route/a', 'openai/gpt-x'] },
+        b: { targets: ['opencode-route/a', 'openai/gpt-y'] },
       }),
     ).toBeNull();
     expect(
@@ -96,6 +90,56 @@ describe('validateModelRoutes route references', () => {
     expect(
       validateModelRoutes({ a: { targets: [{ model: 'opencode-route/b' }] }, b: { targets: ['openai/gpt-x'] } }),
     ).toBeNull();
+    // A diamond: both branches reach the same concrete route.
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b', 'opencode-route/c'] },
+        b: { targets: ['opencode-route/d'] },
+        c: { targets: ['opencode-route/d'] },
+        d: { targets: ['openai/gpt-x'] },
+      }),
+    ).toBeNull();
+    // A longer cycle where the closing reference still reaches a model
+    // through a route that is not on the trail.
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'] },
+        b: { targets: ['opencode-route/c'] },
+        c: { targets: ['opencode-route/d', 'openai/gpt-y'] },
+        d: { targets: ['openai/gpt-x'] },
+      }),
+    ).toBeNull();
+  });
+
+  it('refuses a route-reference target that is trail-dead in the referencing route', () => {
+    expect(
+      validateModelRoutes({
+        a: { targets: ['openai/gpt-x', 'opencode-route/b'] },
+        b: { targets: ['opencode-route/a'] },
+      }),
+    ).toMatch(/route "a" target "opencode-route\/b" can never serve a model in this route: route "b" reaches models only through route "a" itself/);
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'] },
+        b: { targets: ['opencode-route/a', 'openai/gpt-y'] },
+      }),
+    ).toMatch(/route "b" target "opencode-route\/a" can never serve a model in this route/);
+    // Object spelling of the same dead reference.
+    expect(
+      validateModelRoutes({
+        a: { targets: [{ model: 'opencode-route/b' }, 'openai/gpt-x'] },
+        b: { targets: ['opencode-route/a'] },
+      }),
+    ).toMatch(/route "a" target "opencode-route\/b" can never serve a model/);
+    // A longer cycle: c references a, and a reaches models only back
+    // through b and c, both on the trail from c.
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'] },
+        b: { targets: ['opencode-route/c'] },
+        c: { targets: ['opencode-route/a', 'openai/gpt-y'] },
+      }),
+    ).toMatch(/route "c" target "opencode-route\/a" can never serve a model in this route/);
   });
 
   it('refuses a budget keyed by a route reference, which OpenCode never looks up', () => {
@@ -132,7 +176,7 @@ describe('validateModelRoutes route references', () => {
     ).toBeNull();
     expect(
       validateModelRoutes({
-        a: { targets: ['opencode-route/b'], budgets: { 'openai/gpt-x': { requestsPerDay: 1 } } },
+        a: { targets: ['opencode-route/b', 'anthropic/claude-1'], budgets: { 'openai/gpt-x': { requestsPerDay: 1 } } },
         b: { targets: ['opencode-route/a', 'openai/gpt-x'] },
       }),
     ).toBeNull();
@@ -175,10 +219,10 @@ describe('validateModelRoutes route references', () => {
     // A pattern on the leaf side, and a pair that only partly overlaps.
     expect(withEntry({ b: { targets: ['openai/*'] } }, 'openai/gpt-x')).toBeNull();
     expect(withEntry({ b: { targets: ['openai/*-luna'] } }, 'openai/gpt-*')).toBeNull();
-    // A cycle that reaches a concrete target through another path still counts.
+    // A cycle where each reference still reaches a concrete target counts.
     expect(
       validateModelRoutes({
-        a: { targets: ['opencode-route/b'], schedules: [{ when: {}, factor: 2, targets: ['openai/gpt-x'] }] },
+        a: { targets: ['opencode-route/b', 'anthropic/claude-1'], schedules: [{ when: {}, factor: 2, targets: ['openai/gpt-x'] }] },
         b: { targets: ['opencode-route/a', 'openai/gpt-x'] },
       }),
     ).toBeNull();

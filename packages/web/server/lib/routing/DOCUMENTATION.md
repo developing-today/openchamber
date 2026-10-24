@@ -332,7 +332,11 @@ makes that visible so the user can spread them.
   set, not one route at a time — a target that references a route the set
   does not contain, a target that references its own route (a route is
   always on its own expansion trail, so OpenCode drops a self-reference
-  from every entry point, even beside targets that do serve models), or
+  from every entry point, even beside targets that do serve models), a
+  reference target that reaches models only back through the referencing
+  route (OpenCode will not revisit a route already on its expansion
+  trail, so that entry contributes no model to the referencing route,
+  even when every route in the set expands to a model some other way), or
   a route whose targets only chase references in a
   cycle that reaches no concrete model target (OpenCode drops both
   silently, and the second would expand to no models). Cross-pool schedules
