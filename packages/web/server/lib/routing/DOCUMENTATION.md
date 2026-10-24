@@ -315,7 +315,10 @@ makes that visible so the user can spread them.
   rules-level in OpenCode, so a fixed route replaces every weight with 1
   and never collects its budgets), and — judged against the whole saved
   set, not one route at a time — a target that references a route the set
-  does not contain, or a route whose targets only chase references in a
+  does not contain, a target that references its own route (a route is
+  always on its own expansion trail, so OpenCode drops a self-reference
+  from every entry point, even beside targets that do serve models), or
+  a route whose targets only chase references in a
   cycle that reaches no concrete model target (OpenCode drops both
   silently, and the second would expand to no models). Cross-pool schedules
   (`experimental.model_route_schedules`) are not OpenChamber's to save yet;

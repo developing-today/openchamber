@@ -425,6 +425,11 @@ export const validateModelRoutes = (routes) => {
   for (const [id, route] of Object.entries(routes)) {
     for (const target of route.targets) {
       const referenced = routeReferenceOf(target);
+      // A route is always on its own trail during expansion, so a target
+      // referencing the route itself is dropped from every entry point,
+      // even when the route also has targets that do serve models.
+      if (referenced === id)
+        return `route "${id}" target "${target.model ?? target}" references its own route: OpenCode drops a self-reference during expansion, so the target would never apply`;
       if (referenced !== null && !Object.hasOwn(routes, referenced))
         return `route "${id}" target "${target.model ?? target}" references route "${referenced}", which is not one of the saved routes`;
     }
