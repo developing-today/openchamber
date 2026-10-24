@@ -155,6 +155,67 @@ describe('validateModelRoutes route references', () => {
       }),
     ).toBeNull();
   });
+
+  it('accepts a schedule entry naming a concrete model the route reaches through references', () => {
+    const withEntry = (routes, entry) =>
+      validateModelRoutes({
+        ...routes,
+        a: { targets: ['opencode-route/b'], schedules: [{ when: {}, factor: 2, targets: [entry] }] },
+      });
+    expect(withEntry({ b: { targets: ['openai/gpt-x'] } }, 'openai/gpt-x')).toBeNull();
+    expect(withEntry({ b: { targets: ['openai/gpt-x'] } }, 'openai/*')).toBeNull();
+    // Transitive, three levels down.
+    expect(
+      validateModelRoutes({
+        c: { targets: ['openai/gpt-x'] },
+        b: { targets: ['opencode-route/c'] },
+        a: { targets: ['opencode-route/b'], schedules: [{ when: {}, factor: 2, targets: ['openai/gpt-x'] }] },
+      }),
+    ).toBeNull();
+    // A pattern on the leaf side, and a pair that only partly overlaps.
+    expect(withEntry({ b: { targets: ['openai/*'] } }, 'openai/gpt-x')).toBeNull();
+    expect(withEntry({ b: { targets: ['openai/*-luna'] } }, 'openai/gpt-*')).toBeNull();
+    // A cycle that reaches a concrete target through another path still counts.
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'], schedules: [{ when: {}, factor: 2, targets: ['openai/gpt-x'] }] },
+        b: { targets: ['opencode-route/a', 'openai/gpt-x'] },
+      }),
+    ).toBeNull();
+    // Case judging follows the schedule matcher through references too.
+    expect(withEntry({ b: { targets: ['openai/gpt-x'] } }, 'OpenAI/GPT-X')).toBeNull();
+  });
+
+  it('refuses a schedule entry naming a route reference, which no leaf can match', () => {
+    expect(
+      validateModelRoutes({
+        b: { targets: ['openai/gpt-x'] },
+        a: { targets: ['opencode-route/b'], schedules: [{ when: {}, factor: 2, targets: ['opencode-route/b'] }] },
+      }),
+    ).toMatch(
+      /route "a" schedule 1 target "opencode-route\/b" is a route reference: OpenCode matches schedule targets against concrete provider\/model references/,
+    );
+    // The single-route validator refuses the same entry: the refusal needs
+    // no expansion, only the entry's own shape.
+    expect(
+      validateModelRoute('x', { targets: ['opencode-route/other'], schedules: [{ when: {}, factor: 2, targets: ['opencode-route/other'] }] }),
+    ).toMatch(/schedule 1 target "opencode-route\/other" is a route reference/);
+  });
+
+  it('still refuses a schedule entry naming no leaf the route reaches through references', () => {
+    expect(
+      validateModelRoutes({
+        b: { targets: ['openai/gpt-x'] },
+        a: { targets: ['opencode-route/b'], schedules: [{ when: {}, factor: 2, targets: ['openai/other'] }] },
+      }),
+    ).toMatch(/route "a" schedule 1 target "openai\/other" matches no target in the route/);
+    expect(
+      validateModelRoutes({
+        b: { targets: ['openai/gpt-x'] },
+        a: { targets: ['opencode-route/b'], schedules: [{ when: {}, factor: 2, targets: ['OpenAI/other'] }] },
+      }),
+    ).toMatch(/matches no target in the route/);
+  });
 });
 
 describe('validateModelRoute advanced fields', () => {
