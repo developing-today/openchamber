@@ -169,3 +169,12 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Pool targets referencing nonexistent or cyclic routes refused     | 2026-10-23 | #356, #361                 |
 | Pool schedule targets judged as OpenCode applies them             | 2026-10-23 | #358, #362                 |
 | Pool weights and budgets on a fixed route rejected                | 2026-10-23 | #359, #360                 |
+| Pool budgets judged through route references                        | 2026-10-24 | #363, #376                 |
+| Pool schedule targets judged through route references               | 2026-10-24 | #364, #381                 |
+| ROADMAP Done records the #359 completion                            | 2026-10-24 | #367, #368                 |
+| Empty variant settings on a pool target rejected                    | 2026-10-24 | #369, #370                 |
+| Pattern weights keys in the pool rejected                           | 2026-10-24 | #371, #372                 |
+| Target until that can never apply rejected                          | 2026-10-24 | #373, #387                 |
+| Schedule windows that already ended rejected                        | 2026-10-24 | #374, #375                 |
+| Duplicate targets in one pool route rejected                        | 2026-10-24 | #377, #378                 |
+| Pool targets referencing their own route rejected                   | 2026-10-24 | #379, #380                 |
