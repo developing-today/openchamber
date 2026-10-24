@@ -402,6 +402,35 @@ describe('validateModelRoute target options and display name', () => {
     ).toMatch(/until is on a route reference/);
   });
 
+  it('refuses variant settings on a route reference, which OpenCode never reads', () => {
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child', defaultVariant: 'high' }] },
+      }),
+    ).toMatch(/defaultVariant is on a route reference/);
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child', variants: { low: 'high' } }] },
+      }),
+    ).toMatch(/variants are on a route reference/);
+    // A variant spelled on the reference itself is read: it becomes the
+    // inherited variant for the referenced route's targets.
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: ['opencode-route/child#high'] },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child#high' }] },
+      }),
+    ).toBeNull();
+  });
+
   it('rejects empty variant settings, which OpenCode drops without a word', () => {
     expect(
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: '' }] }),

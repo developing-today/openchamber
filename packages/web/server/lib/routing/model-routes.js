@@ -296,6 +296,10 @@ const validateTarget = (target) => {
     return "its until must be a positive epoch-millisecond time";
   if (target.until !== undefined && routeReferenceOf(target.model) !== null)
     return "its until is on a route reference: OpenCode includes the referenced route unconditionally and never reads until on a reference, so the until would never apply";
+  if (target.defaultVariant !== undefined && routeReferenceOf(target.model) !== null)
+    return "its defaultVariant is on a route reference: OpenCode expands the referenced route from its own targets and never reads a default variant on a reference, so the target would run at its own default";
+  if (target.variants !== undefined && routeReferenceOf(target.model) !== null)
+    return "its variants are on a route reference: OpenCode expands the referenced route from its own targets and never reads variant remaps on a reference, so the remap would never apply";
   if (target.until !== undefined && target.until <= Date.now())
     return "its until is already past: OpenCode drops a target whose until has passed, so the target would leave the route as soon as the config is saved";
   if (target.defaultVariant !== undefined && (typeof target.defaultVariant !== "string" || target.defaultVariant === ""))
