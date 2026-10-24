@@ -193,3 +193,9 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Schedule windows that already ended rejected                        | 2026-10-24 | #374, #375                 |
 | Duplicate targets in one pool route rejected                        | 2026-10-24 | #377, #378                 |
 | Pool targets referencing their own route rejected                   | 2026-10-24 | #379, #380                 |
+| Pool route-reference target that is trail-dead refused              | 2026-10-24 | #382, #392                 |
+| Variant settings on a route-reference target rejected               | 2026-10-24 | #395, #396                 |
+| Concrete target shadowed by an earlier pattern rejected             | 2026-10-24 | #383, #398                 |
+| ROADMAP Done records the #311, #313, #292, #316, #281 completions   | 2026-10-24 | #321, #408                 |
+| Pattern target covered by an earlier pattern rejected               | 2026-10-24 | #406, #407                 |
+| ROADMAP Done records the #299 and #294 completions                  | 2026-10-24 | #334, #409                 |
