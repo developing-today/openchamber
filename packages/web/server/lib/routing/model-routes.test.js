@@ -316,6 +316,48 @@ describe('validateModelRoute target options and display name', () => {
     expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna', 'openai/gpt-6-sol'] })).toBeNull();
   });
 
+  it('refuses a target until that is already past, which OpenCode drops on save', () => {
+    const past = Date.now() - 1000;
+    expect(validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', until: past }] })).toMatch(
+      /until is already past/,
+    );
+    expect(
+      validateModelRoute('luna', {
+        targets: ['openai/gpt-6-luna', { model: 'openai/gpt-6-sol', until: past }],
+      }),
+    ).toMatch(/until is already past/);
+    // A route whose concrete targets are all expired expands to no models.
+    expect(
+      validateModelRoutes({
+        luna: {
+          targets: [
+            { model: 'openai/gpt-6-luna', until: past },
+            { model: 'openai/gpt-6-sol', until: past },
+          ],
+        },
+      }),
+    ).toMatch(/until is already past/);
+    // A future until on a concrete target still validates.
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', until: Date.now() + 60000 }] }),
+    ).toBeNull();
+  });
+
+  it('refuses an until on a route reference, which OpenCode never reads', () => {
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child', until: Date.now() + 60000 }] },
+      }),
+    ).toMatch(/until is on a route reference/);
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child', until: Date.now() - 1000 }] },
+      }),
+    ).toMatch(/until is on a route reference/);
+  });
+
   it('rejects empty variant settings, which OpenCode drops without a word', () => {
     expect(
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: '' }] }),

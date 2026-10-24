@@ -294,7 +294,11 @@ makes that visible so the user can spread them.
   be finite and which would save as `null`), a target listed twice in one
   route (OpenCode attaches each target once, keyed by its full model
   reference, and silently drops the later entry, including its variant
-  settings), a budgets key that is a `*`
+  settings), a target whose `until` is already past (OpenCode drops a
+  target whose `until` has passed, so the target would leave the route as
+  soon as the config is saved), an `until` on a route-reference target
+  (OpenCode includes the referenced route unconditionally and never reads
+  `until` on a reference, so the time limit would never apply), a budgets key that is a `*`
   pattern (OpenCode reads a budget by the concrete model a target expands
   to, so a pattern key would never apply), a budgets key that names a
   route reference (OpenCode looks budgets up only by concrete model, so

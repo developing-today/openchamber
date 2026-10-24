@@ -294,6 +294,10 @@ const validateTarget = (target) => {
     return "its model must look like provider/model";
   if (target.until !== undefined && !(Number.isInteger(target.until) && target.until > 0))
     return "its until must be a positive epoch-millisecond time";
+  if (target.until !== undefined && routeReferenceOf(target.model) !== null)
+    return "its until is on a route reference: OpenCode includes the referenced route unconditionally and never reads until on a reference, so the until would never apply";
+  if (target.until !== undefined && target.until <= Date.now())
+    return "its until is already past: OpenCode drops a target whose until has passed, so the target would leave the route as soon as the config is saved";
   if (target.defaultVariant !== undefined && (typeof target.defaultVariant !== "string" || target.defaultVariant === ""))
     return "its defaultVariant must be a string and not empty: OpenCode drops an empty default variant, so the target would run at its own default";
   if (target.variants !== undefined) {
