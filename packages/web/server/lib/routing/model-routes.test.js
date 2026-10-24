@@ -220,6 +220,32 @@ describe('validateModelRoute target options and display name', () => {
     ).toMatch(/remap "low" must be a string/);
   });
 
+  it('rejects a target listed twice, which OpenCode attaches once and drops silently', () => {
+    expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna', 'openai/gpt-6-luna'] })).toMatch(
+      /lists target "openai\/gpt-6-luna" twice/,
+    );
+    expect(
+      validateModelRoute('luna', {
+        targets: [
+          { model: 'openai/gpt-6-luna', defaultVariant: 'low' },
+          { model: 'openai/gpt-6-luna', defaultVariant: 'high' },
+        ],
+      }),
+    ).toMatch(/lists target "openai\/gpt-6-luna" twice/);
+    expect(
+      validateModelRoute('luna', { targets: ['openai/gpt-6-luna', { model: 'openai/gpt-6-luna' }] }),
+    ).toMatch(/lists target "openai\/gpt-6-luna" twice/);
+    expect(
+      validateModelRoutes({
+        luna: { targets: ['opencode-route/sol', 'opencode-route/sol'] },
+        sol: { targets: ['openai/gpt-6-sol'] },
+      }),
+    ).toMatch(/lists target "opencode-route\/sol" twice/);
+    // Distinct #variant spellings are distinct leaves, and distinct models are fine.
+    expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna#low', 'openai/gpt-6-luna#high'] })).toBeNull();
+    expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna', 'openai/gpt-6-sol'] })).toBeNull();
+  });
+
   it('rejects empty variant settings, which OpenCode drops without a word', () => {
     expect(
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: '' }] }),

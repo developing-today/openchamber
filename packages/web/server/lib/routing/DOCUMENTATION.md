@@ -291,7 +291,10 @@ makes that visible so the user can spread them.
   and end are the same time (OpenCode treats that as an empty window that
   never applies), a non-finite weight or health rate (an overflowing JSON
   number such as `1e999` parses to `Infinity`, which OpenCode requires to
-  be finite and which would save as `null`), a budgets key that is a `*`
+  be finite and which would save as `null`), a target listed twice in one
+  route (OpenCode attaches each target once, keyed by its full model
+  reference, and silently drops the later entry, including its variant
+  settings), a budgets key that is a `*`
   pattern (OpenCode reads a budget by the concrete model a target expands
   to, so a pattern key would never apply), a budgets key that names a
   route reference (OpenCode looks budgets up only by concrete model, so
