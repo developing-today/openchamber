@@ -88,6 +88,64 @@ describe('validateModelRoutes route references', () => {
       validateModelRoutes({ a: { targets: [{ model: 'opencode-route/b' }] }, b: { targets: ['openai/gpt-x'] } }),
     ).toBeNull();
   });
+
+  it('refuses a budget keyed by a route reference, which OpenCode never looks up', () => {
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: ['opencode-route/child'], budgets: { 'opencode-route/child': { requestsPerDay: 10 } } },
+      }),
+    ).toMatch(/route "parent" budget for "opencode-route\/child" is keyed by a route reference/);
+    expect(
+      validateModelRoute('x', { targets: ['opencode-route/other'], budgets: { 'opencode-route/other': { requestsPerDay: 1 } } }),
+    ).toMatch(/budget for "opencode-route\/other" is keyed by a route reference/);
+  });
+
+  it('accepts a budget keyed by a concrete model the route reaches through references', () => {
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: ['opencode-route/child'], budgets: { 'openai/gpt-6-luna': { requestsPerDay: 10 } } },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        c: { targets: ['openai/gpt-6-luna'] },
+        b: { targets: ['opencode-route/c'] },
+        a: { targets: ['opencode-route/b'], budgets: { 'openai/gpt-6-luna': { requestsPerDay: 10 } } },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/*'] },
+        parent: { targets: ['opencode-route/child'], budgets: { 'openai/gpt-6-luna': { requestsPerDay: 10 } } },
+      }),
+    ).toBeNull();
+    expect(
+      validateModelRoutes({
+        a: { targets: ['opencode-route/b'], budgets: { 'openai/gpt-x': { requestsPerDay: 1 } } },
+        b: { targets: ['opencode-route/a', 'openai/gpt-x'] },
+      }),
+    ).toBeNull();
+  });
+
+  it('still refuses a budget keyed by a model no referenced route reaches', () => {
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: ['opencode-route/child'], budgets: { 'openai/other': { requestsPerDay: 10 } } },
+      }),
+    ).toMatch(/route "parent" budget for "openai\/other" matches no target in the route/);
+  });
+
+  it('keeps a weights key naming a route reference valid: a nested route attaches under that key', () => {
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: ['opencode-route/child'], weights: { 'opencode-route/child': 2 } },
+      }),
+    ).toBeNull();
+  });
 });
 
 describe('validateModelRoute advanced fields', () => {

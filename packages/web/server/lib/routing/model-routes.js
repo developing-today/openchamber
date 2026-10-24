@@ -100,6 +100,13 @@ const validateBudgets = (id, budgets, targets) => {
     // pattern key matches no leaf and the allowance would never apply.
     if (target.includes("*"))
       return `route "${id}" budget for "${target}" is keyed by a pattern: OpenCode reads budgets by concrete model reference, so key the budget by a concrete target instead`;
+    // A route reference is not a leaf either: OpenCode looks budgets up only
+    // by the concrete models a route expands to, never by `opencode-route/<id>`,
+    // so a budget keyed by the reference would never apply. (Weights differ:
+    // a nested route attaches under its `opencode-route/<id>` key, so a
+    // weights key naming the reference is live configuration.)
+    if (routeReferenceOf(target) !== null)
+      return `route "${id}" budget for "${target}" is keyed by a route reference: OpenCode reads budgets by concrete model reference, so key the budget by a concrete model the route expands to instead`;
     if (!targets.some((candidate) => keyNamesTarget(target, candidate)))
       return `route "${id}" budget for "${target}" matches no target in the route`;
     if (!isRecord(budget)) return `route "${id}" budget for "${target}" must be an object`;
@@ -315,7 +322,36 @@ export const keyNamesTarget = (key, target) => {
   return matcher.test(model.join("/"));
 };
 
-export const validateModelRoute = (id, route) => {
+/**
+ * The concrete targets a route expands to: its own model targets plus the
+ * ones reached through the routes its targets reference, transitively.
+ * OpenCode reads a route's budgets by the concrete model a target expands
+ * to, collecting them from every route on the trail, so a set-level check
+ * judges budget keys against this expanded set. The visited set keeps a
+ * reference cycle from looping; a cycle contributes the concrete targets
+ * its members name directly. Malformed targets are skipped here and
+ * reported by the single-route validation.
+ */
+const expandedTargetsOf = (routes, id) => {
+  const expanded = [];
+  const visited = new Set();
+  const walk = (routeId) => {
+    if (visited.has(routeId)) return;
+    visited.add(routeId);
+    const route = routes[routeId];
+    if (!isRecord(route) || !Array.isArray(route.targets)) return;
+    for (const target of route.targets) {
+      if (!isString(target) && !(isRecord(target) && isString(target.model))) continue;
+      const referenced = routeReferenceOf(target);
+      if (referenced === null) expanded.push(target);
+      else walk(referenced);
+    }
+  };
+  walk(id);
+  return expanded;
+};
+
+export const validateModelRoute = (id, route, budgetTargets) => {
   if (!ROUTE_ID_PATTERN.test(id)) return `invalid route id "${id}"`;
   if (!isRecord(route)) return `route "${id}" must be an object`;
   const unknown = unknownKeysProblem(route, ROUTE_KEYS);
@@ -363,7 +399,10 @@ export const validateModelRoute = (id, route) => {
     if (problem) return problem;
   }
   if (route.budgets !== undefined) {
-    const problem = validateBudgets(id, route.budgets, route.targets);
+    // The set-level caller passes the targets the route expands to through
+    // its route references; a single route judged alone can only be judged
+    // against its direct targets.
+    const problem = validateBudgets(id, route.budgets, budgetTargets ?? route.targets);
     if (problem) return problem;
   }
   if (route.schedules !== undefined) {
@@ -376,7 +415,7 @@ export const validateModelRoute = (id, route) => {
 export const validateModelRoutes = (routes) => {
   if (!isRecord(routes)) return "routes must be an object of route definitions";
   for (const [id, route] of Object.entries(routes)) {
-    const problem = validateModelRoute(id, route);
+    const problem = validateModelRoute(id, route, expandedTargetsOf(routes, id));
     if (problem) return problem;
   }
   // A target can reference another route in the set (`opencode-route/<id>`).
