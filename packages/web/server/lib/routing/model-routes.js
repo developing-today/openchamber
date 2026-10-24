@@ -347,11 +347,13 @@ export const keyNamesTarget = (key, target) => {
  * expanded set. The visited set keeps a
  * reference cycle from looping; a cycle contributes the concrete targets
  * its members name directly. Malformed targets are skipped here and
- * reported by the single-route validation.
+ * reported by the single-route validation. A caller can seed the visited
+ * set with a trail of routes OpenCode has already visited, so the expansion
+ * is judged the way it runs from a referencing route.
  */
-const expandedTargetsOf = (routes, id) => {
+const expandedTargetsOf = (routes, id, trail = []) => {
   const expanded = [];
-  const visited = new Set();
+  const visited = new Set(trail);
   const walk = (routeId) => {
     if (visited.has(routeId)) return;
     visited.add(routeId);
@@ -485,6 +487,19 @@ export const validateModelRoutes = (routes) => {
   for (const id of Object.keys(routes))
     if (!expanding.has(id))
       return `route "${id}" would expand to no models: its targets only reference routes in a cycle that reaches no concrete model target`;
+  // A reference can be dead in one route even when every route expands
+  // globally. Expanding the referenced route with the referencing route
+  // already on the trail is how OpenCode visits it from that route, so a
+  // reference that reaches no concrete target that way contributes no
+  // model to the referencing route and is refused per entry.
+  for (const [id, route] of Object.entries(routes)) {
+    for (const target of route.targets) {
+      const referenced = routeReferenceOf(target);
+      if (referenced === null || referenced === id) continue;
+      if (expandedTargetsOf(routes, referenced, [id]).length === 0)
+        return `route "${id}" target "${target.model ?? target}" can never serve a model in this route: route "${referenced}" reaches models only through route "${id}" itself, which OpenCode will not revisit during expansion`;
+    }
+  }
   return null;
 };
 
