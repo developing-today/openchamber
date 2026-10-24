@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21 and 2026-10-22.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21, 2026-10-22 and 2026-10-23.
 
 ## Areas
 
@@ -157,4 +157,28 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Dev-server listener ports and pids reject trailing junk           | 2026-10-22 | #264, #265                 |
 | ROADMAP Done records the #178, #207 and #264 completions          | 2026-10-22 | #266, #267                 |
 | Vault read status tied to the reference it came from              | 2026-10-22 | #268, #271                 |
+| Terminal preview ports are range-checked                          | 2026-10-22 | #274, #276                 |
+| Pool schedule windows with equal start and end rejected           | 2026-10-23 | #341, #343                 |
+| Non-finite pool weights and health rates rejected                 | 2026-10-23 | #344, #345                 |
+| ROADMAP Done records the #274 completion                          | 2026-10-23 | #279, #346                 |
+| Pool budget keys must name a route target                         | 2026-10-23 | #347, #348                 |
+| Pool schedule targets must match a route target                   | 2026-10-23 | #349, #350                 |
+| ROADMAP Done records the #351 completion                          | 2026-10-23 | #351, #352                 |
+| Pool schedule patterns partly overlapping a target accepted       | 2026-10-23 | #353, #357                 |
+| Pool budget keys must be concrete models, not patterns            | 2026-10-23 | #354, #355                 |
+| Pool targets referencing nonexistent or cyclic routes refused     | 2026-10-23 | #356, #361                 |
+| Pool schedule targets judged as OpenCode applies them             | 2026-10-23 | #358, #362                 |
+| Pool weights and budgets on a fixed route rejected                | 2026-10-23 | #359, #360                 |
+| Terminal preview port 0 is no longer announced                    | 2026-10-22 | #283, #284                 |
+| ROADMAP Done records the #266 and #268 completions                | 2026-10-22 | #277, #278                 |
+| SSH probe status parser rejects trailing junk                     | 2026-10-22 | #286, #287                 |
+| SSH probe statuses must use the canonical shape                   | 2026-10-22 | #288, #290                 |
+| Terminal preview port-0 URL no longer discards a sibling URL      | 2026-10-22 | #285, #309                 |
+| SSH served-port parser rejects leading-zero spellings             | 2026-10-22 | #311, #312                 |
+| SSH remote-server registry drops out-of-range ports               | 2026-10-22 | #313, #314                 |
+| SSH probe status parser rejects whitespace-padded spellings       | 2026-10-22 | #292, #315                 |
+| SSH instance sanitizers range-check ports (1-65535)               | 2026-10-22 | #316, #317                 |
+| Device-settings closing/hidden flush stays delivered              | 2026-10-22 | #281, #318                 |
+| Arabic and Hebrew routing strings and Target header translated    | 2026-10-23 | #299, #320                 |
+| Pool health panel lands; unused plan-links route removed          | 2026-10-23 | #294, #303                 |
 | Queued-goal applyGoalChoice extracted and pinned by tests         | 2026-10-23 | #282, #333                 |
