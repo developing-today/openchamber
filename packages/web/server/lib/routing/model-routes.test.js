@@ -322,7 +322,15 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '09:00' })).toBeNull();
     expect(withWindow({ end: '17:00' })).toBeNull();
     expect(withWindow({ start: '09:00', end: '09:01' })).toBeNull();
-    expect(withWindow({ timezone: 'UTC', from: 1000, until: 2000 })).toBeNull();
+    expect(withWindow({ timezone: 'UTC', from: 1000, until: 4102444800000 })).toBeNull();
+  });
+
+  it('refuses a window that has already ended, which OpenCode can never apply again', () => {
+    const withWindow = (when) => validateModelRoute('x', { ...base, schedules: [{ when, factor: 0.5 }] });
+    expect(withWindow({ until: 1000 })).toMatch(/window\.until is in the past/);
+    expect(withWindow({ from: 1000, until: 2000 })).toMatch(/window\.until is in the past/);
+    expect(withWindow({ until: Date.now() + 60000 })).toBeNull();
+    expect(withWindow({ from: 1000 })).toBeNull();
   });
 });
 
