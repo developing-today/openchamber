@@ -181,3 +181,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Device-settings closing/hidden flush stays delivered              | 2026-10-22 | #281, #318                 |
 | Arabic and Hebrew routing strings and Target header translated    | 2026-10-23 | #299, #320                 |
 | Pool health panel lands; unused plan-links route removed          | 2026-10-23 | #294, #303                 |
+| Queued-goal applyGoalChoice extracted and pinned by tests         | 2026-10-23 | #282, #333                 |
