@@ -205,6 +205,67 @@ const validateScheduleWindow = (id, label, window) => {
  * no characters, which moves past it, or takes the character the other
  * pattern fixes next, which moves that pattern on.
  */
+/**
+ * Whether every model reference the later pattern matches is also matched
+ * by the earlier pattern. Providers must be equal, because `keyNamesTarget`
+ * reads the provider literally. The model parts are `*` globs, and a glob
+ * inclusion check runs over position sets: a pair of position sets is a
+ * counterexample when the later pattern can end there and the earlier one
+ * cannot. The alphabet is the literal characters either pattern names plus
+ * one other character, because a glob transition only ever asks whether a
+ * character equals one of those literals or is taken by a `*`.
+ */
+const patternCoversPattern = (earlier, later) => {
+  const [earlierProvider, ...earlierParts] = earlier.split("/");
+  const [laterProvider, ...laterParts] = later.split("/");
+  if (earlierProvider !== laterProvider) return false;
+  const earlierModel = earlierParts.join("/");
+  const laterModel = laterParts.join("/");
+  const literals = new Set([...earlierModel, ...laterModel].filter((character) => character !== "*"));
+  let other = "\u0001";
+  while (literals.has(other)) other = String.fromCodePoint(other.codePointAt(0) + 1);
+  const alphabet = [...literals, other];
+  const closure = (pattern, positions) => {
+    const closed = new Set(positions);
+    const stack = [...positions];
+    while (stack.length > 0) {
+      const position = stack.pop();
+      if (pattern[position] === "*" && !closed.has(position + 1)) {
+        closed.add(position + 1);
+        stack.push(position + 1);
+      }
+    }
+    return closed;
+  };
+  const step = (pattern, positions, character) => {
+    const next = new Set();
+    for (const position of positions) {
+      if (pattern[position] === "*") next.add(position);
+      else if (pattern[position] === character) next.add(position + 1);
+    }
+    return closure(pattern, next);
+  };
+  const keyOf = (earlierPositions, laterPositions) =>
+    `${[...earlierPositions].sort((a, b) => a - b).join(",")}|${[...laterPositions].sort((a, b) => a - b).join(",")}`;
+  const start = [closure(earlierModel, new Set([0])), closure(laterModel, new Set([0]))];
+  const seen = new Set([keyOf(start[0], start[1])]);
+  const stack = [start];
+  while (stack.length > 0) {
+    const [earlierPositions, laterPositions] = stack.pop();
+    if (laterPositions.has(laterModel.length) && !earlierPositions.has(earlierModel.length)) return false;
+    for (const character of alphabet) {
+      const nextEarlier = step(earlierModel, earlierPositions, character);
+      const nextLater = step(laterModel, laterPositions, character);
+      if (nextLater.size === 0) continue;
+      const key = keyOf(nextEarlier, nextLater);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      stack.push([nextEarlier, nextLater]);
+    }
+  }
+  return true;
+};
+
 const patternsOverlap = (first, second) => {
   const seen = new Set();
   const stack = [[0, 0]];
@@ -298,6 +359,10 @@ const validateTarget = (target) => {
     return "its until is on a route reference: OpenCode includes the referenced route unconditionally and never reads until on a reference, so the until would never apply";
   if (target.until !== undefined && target.until <= Date.now())
     return "its until is already past: OpenCode drops a target whose until has passed, so the target would leave the route as soon as the config is saved";
+  if (target.defaultVariant !== undefined && routeReferenceOf(target.model) !== null)
+    return "its defaultVariant is on a route reference: OpenCode expands the referenced route from its own targets and never reads defaultVariant on a reference, so the default variant would never apply";
+  if (target.variants !== undefined && routeReferenceOf(target.model) !== null)
+    return "its variants are on a route reference: OpenCode expands the referenced route from its own targets and never reads variants on a reference, so the variant remaps would never apply";
   if (target.defaultVariant !== undefined && (typeof target.defaultVariant !== "string" || target.defaultVariant === ""))
     return "its defaultVariant must be a string and not empty: OpenCode drops an empty default variant, so the target would run at its own default";
   if (target.variants !== undefined) {
@@ -379,6 +444,7 @@ export const validateModelRoute = (id, route, expandedTargets) => {
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
   const seenTargets = new Set();
+  const earlierTargets = [];
   for (const target of route.targets) {
     const problem = validateTarget(target);
     if (problem) return `route "${id}" has a bad target: ${problem}`;
@@ -389,6 +455,32 @@ export const validateModelRoute = (id, route, expandedTargets) => {
     if (seenTargets.has(key))
       return `route "${id}" lists target "${key}" twice: OpenCode attaches each target once and silently drops the later entry, including its variant settings`;
     seenTargets.add(key);
+    // A pattern target attaches every model it covers under its own
+    // settings, so a later target it fully covers (with the same
+    // #variant, which is part of the attach key) never attaches at all.
+    // The later target can be concrete, judged with keyNamesTarget, or a
+    // pattern whose whole model set the earlier pattern covers, judged
+    // with patternCoversPattern. A partly overlapping pattern stays live.
+    // An earlier pattern with an until is carved out: it shadows only
+    // until it expires, and the later target applies after that, so
+    // the pair is a staging shape rather than a dead entry. Any until
+    // still present here is in the future — a past one is refused above.
+    const reference = referenceOf(key);
+    if (routeReferenceOf(reference) === null) {
+      const variant = key.split("#")[1] ?? "";
+      for (const earlier of earlierTargets) {
+        if (earlier.until !== undefined) continue;
+        const earlierReference = referenceOf(earlier.key);
+        if (!earlierReference.includes("*") || routeReferenceOf(earlierReference) !== null) continue;
+        if ((earlier.key.split("#")[1] ?? "") !== variant) continue;
+        const covered = reference.includes("*")
+          ? patternCoversPattern(earlierReference, reference)
+          : keyNamesTarget(reference, earlierReference);
+        if (covered)
+          return `route "${id}" target "${key}" is already covered by the earlier pattern target "${earlier.key}": OpenCode attaches each model once, so this entry and its variant settings would never apply`;
+      }
+    }
+    earlierTargets.push({ key, until: isRecord(target) ? target.until : undefined });
   }
   if (route.autonomy !== undefined && !AUTONOMY_LEVELS.includes(route.autonomy))
     return `route "${id}" has unknown autonomy "${route.autonomy}" (expected ${AUTONOMY_LEVELS.join(", ")})`;

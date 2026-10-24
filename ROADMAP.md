@@ -169,6 +169,21 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Pool targets referencing nonexistent or cyclic routes refused     | 2026-10-23 | #356, #361                 |
 | Pool schedule targets judged as OpenCode applies them             | 2026-10-23 | #358, #362                 |
 | Pool weights and budgets on a fixed route rejected                | 2026-10-23 | #359, #360                 |
+| Terminal preview port 0 is no longer announced                    | 2026-10-22 | #283, #284                 |
+| ROADMAP Done records the #266 and #268 completions                | 2026-10-22 | #277, #278                 |
+| SSH probe status parser rejects trailing junk                     | 2026-10-22 | #286, #287                 |
+| SSH probe statuses must use the canonical shape                   | 2026-10-22 | #288, #290                 |
+| Terminal preview port-0 URL no longer discards a sibling URL      | 2026-10-22 | #285, #309                 |
+| SSH served-port parser rejects leading-zero spellings             | 2026-10-22 | #311, #312                 |
+| SSH remote-server registry drops out-of-range ports               | 2026-10-22 | #313, #314                 |
+| SSH probe status parser rejects whitespace-padded spellings       | 2026-10-22 | #292, #315                 |
+| SSH instance sanitizers range-check ports (1-65535)               | 2026-10-22 | #316, #317                 |
+| Device-settings closing/hidden flush stays delivered              | 2026-10-22 | #281, #318                 |
+| Arabic and Hebrew routing strings and Target header translated    | 2026-10-23 | #299, #320                 |
+| Pool health panel lands; unused plan-links route removed          | 2026-10-23 | #294, #303                 |
+| Queued-goal applyGoalChoice extracted and pinned by tests         | 2026-10-23 | #282, #333                 |
+| Refused closing send overlap pinned in device settings tests        | 2026-10-23 | #335, #336                   |
+| Model pool validator accepts route schedules                        | 2026-10-23 | #298, #340                   |
 | Pool budgets judged through route references                        | 2026-10-24 | #363, #376                 |
 | Pool schedule targets judged through route references               | 2026-10-24 | #364, #381                 |
 | ROADMAP Done records the #359 completion                            | 2026-10-24 | #367, #368                 |

@@ -360,6 +360,62 @@ describe('validateModelRoute target options and display name', () => {
     expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna', 'openai/gpt-6-sol'] })).toBeNull();
   });
 
+  it('refuses a concrete target fully shadowed by an earlier pattern target', () => {
+    const future = Date.now() + 3600000;
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*', { model: 'openai/gpt-5', defaultVariant: 'high' }] }),
+    ).toMatch(/target "openai\/gpt-5" is already covered by the earlier pattern target "openai\/\*"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/gpt-*', { model: 'openai/gpt-5', until: future }] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/gpt-\*"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*#high', { model: 'openai/gpt-5#high', defaultVariant: 'low' }] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/\*#high"/);
+    // The #variant is part of the attach key, so a different variant is a distinct leaf.
+    expect(validateModelRoute('r1', { targets: ['openai/*#high', 'openai/gpt-5'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-5#high'] })).toBeNull();
+    // Disjoint targets, and a concrete target listed before the pattern, still attach.
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-*', 'anthropic/claude-1'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-5', 'openai/*'] })).toBeNull();
+    // An earlier pattern with a future until shadows only until it expires;
+    // the concrete target applies after that, so the pair stays accepted.
+    expect(
+      validateModelRoute('r1', { targets: [{ model: 'openai/*', until: future }, 'openai/gpt-5'] }),
+    ).toBeNull();
+  });
+
+  it('refuses a pattern target fully shadowed by an earlier pattern target', () => {
+    const future = Date.now() + 3600000;
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-*'] }),
+    ).toMatch(/target "openai\/gpt-\*" is already covered by the earlier pattern target "openai\/\*"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*#high', { model: 'openai/gpt-*#high', defaultVariant: 'low' }] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/\*#high"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/gpt-*', 'openai/gpt-5*'] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/gpt-\*"/);
+    // The judgement is about the model sets, not the spellings: a pattern
+    // that only adds fixed text inside the earlier pattern is covered too.
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*-luna', 'openai/gpt-*-luna'] }),
+    ).toMatch(/already covered by the earlier pattern target/);
+    // A partly overlapping pattern still attaches the models the earlier
+    // pattern does not cover, in either order.
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-*', 'openai/*'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/*-luna', 'openai/*-sol'] })).toBeNull();
+    // The #variant is part of the attach key, so a different variant is a distinct leaf.
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-*#high'] })).toBeNull();
+    // Disjoint providers, and a pattern listed after a concrete target, still attach.
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'anthropic/*'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-5', 'openai/gpt-*'] })).toBeNull();
+    // An earlier pattern with a future until shadows only until it expires;
+    // the later pattern applies after that, so the pair stays accepted.
+    expect(
+      validateModelRoute('r1', { targets: [{ model: 'openai/*', until: future }, 'openai/gpt-*'] }),
+    ).toBeNull();
+  });
+
   it('refuses a target until that is already past, which OpenCode drops on save', () => {
     const past = Date.now() - 1000;
     expect(validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', until: past }] })).toMatch(
@@ -400,6 +456,35 @@ describe('validateModelRoute target options and display name', () => {
         parent: { targets: [{ model: 'opencode-route/child', until: Date.now() - 1000 }] },
       }),
     ).toMatch(/until is on a route reference/);
+  });
+
+  it('refuses variant settings on a route reference, which OpenCode never reads', () => {
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child', defaultVariant: 'high' }] },
+      }),
+    ).toMatch(/defaultVariant is on a route reference/);
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child', variants: { low: 'high' } }] },
+      }),
+    ).toMatch(/variants are on a route reference/);
+    // A #variant suffix on the reference is read (it becomes the inherited
+    // variant during expansion), and a plain reference stays accepted.
+    expect(
+      validateModelRoutes({
+        child: { targets: ['openai/gpt-6-luna'] },
+        parent: { targets: [{ model: 'opencode-route/child#high' }, 'opencode-route/child'] },
+      }),
+    ).toBeNull();
+    // Variant settings on a concrete target still validate.
+    expect(
+      validateModelRoute('luna', {
+        targets: [{ model: 'openai/gpt-6-luna', defaultVariant: 'high', variants: { low: 'high' } }],
+      }),
+    ).toBeNull();
   });
 
   it('rejects empty variant settings, which OpenCode drops without a word', () => {

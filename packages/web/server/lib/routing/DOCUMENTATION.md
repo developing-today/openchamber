@@ -294,11 +294,25 @@ makes that visible so the user can spread them.
   be finite and which would save as `null`), a target listed twice in one
   route (OpenCode attaches each target once, keyed by its full model
   reference, and silently drops the later entry, including its variant
-  settings), a target whose `until` is already past (OpenCode drops a
+  settings), a concrete target fully covered by an earlier pattern
+  target in the same route with the same `#variant` (the pattern
+  attaches that model under its own settings, so the later entry and
+  its variant settings would never apply; an earlier pattern carrying
+  an `until` is left alone, because it shadows only until it expires
+  and the concrete target applies after that), a pattern target whose
+  whole model set an earlier pattern target in the same route with the
+  same `#variant` covers (every model the later pattern would attach is
+  already attached by the earlier one, so the later entry would never
+  apply; a partly overlapping pattern stays accepted, and the same
+  `until` carve-out applies), a target whose `until` is already past (OpenCode drops a
   target whose `until` has passed, so the target would leave the route as
   soon as the config is saved), an `until` on a route-reference target
   (OpenCode includes the referenced route unconditionally and never reads
-  `until` on a reference, so the time limit would never apply), a budgets key that is a `*`
+  `until` on a reference, so the time limit would never apply), a
+  `defaultVariant` or `variants` on a route-reference target (OpenCode
+  expands the referenced route from its own targets and never reads
+  variant settings on a reference, so they would never apply; a
+  `#variant` suffix on the reference itself is read and stays accepted), a budgets key that is a `*`
   pattern (OpenCode reads a budget by the concrete model a target expands
   to, so a pattern key would never apply), a budgets key that names a
   route reference (OpenCode looks budgets up only by concrete model, so
