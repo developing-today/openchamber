@@ -161,6 +161,18 @@ describe('validateModelRoute target options and display name', () => {
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: 3 } }] }),
     ).toMatch(/remap "low" must be a string/);
   });
+
+  it('rejects empty variant settings, which OpenCode drops without a word', () => {
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: '' }] }),
+    ).toMatch(/defaultVariant must be a string and not empty/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { low: '' } }] }),
+    ).toMatch(/remap "low" must be a string and not empty/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { '': 'high' } }] }),
+    ).toMatch(/must not use an empty route variant as a key/);
+  });
 });
 
 describe('validateModelRoute schedules', () => {
@@ -536,6 +548,13 @@ describe('validateModelRoute strictness', () => {
     expect(validateModelRoute('x', { targets: ['openai/*'], budgets: { 'openai/*': { requestsPerDay: 5 } } })).toMatch(/budget for "openai\/\*" is keyed by a pattern/);
     expect(validateModelRoute('x', { targets: ['openai/*'], budgets: { 'openai/gpt-*': { requestsPerDay: 5 } } })).toMatch(/budget for "openai\/gpt-\*" is keyed by a pattern/);
     expect(validateModelRoute('x', { targets: ['openai/*'], budgets: { 'openai/gpt-6-luna': { requestsPerDay: 5 } } })).toBeNull();
+  });
+
+  it('refuses a weight keyed by a pattern, which OpenCode never reads', () => {
+    expect(validateModelRoute('x', { targets: ['openai/*'], weights: { 'openai/*': 2 } })).toMatch(/weight for "openai\/\*" is keyed by a pattern/);
+    expect(validateModelRoute('x', { targets: ['openai/*'], weights: { 'openai/gpt-*': 2 } })).toMatch(/weight for "openai\/gpt-\*" is keyed by a pattern/);
+    expect(validateModelRoute('x', { targets: ['openai/*'], weights: { 'openai/gpt-6-luna': 2 } })).toBeNull();
+    expect(validateModelRoute('x', { targets: ['opencode-route/other'], weights: { 'opencode-route/other': 2 } })).toBeNull();
   });
 
   it('refuses a weight for a target the route does not have', () => {

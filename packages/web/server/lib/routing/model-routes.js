@@ -276,12 +276,14 @@ const validateTarget = (target) => {
     return "its model must look like provider/model";
   if (target.until !== undefined && !(Number.isInteger(target.until) && target.until > 0))
     return "its until must be a positive epoch-millisecond time";
-  if (target.defaultVariant !== undefined && typeof target.defaultVariant !== "string")
-    return "its defaultVariant must be a string";
+  if (target.defaultVariant !== undefined && (typeof target.defaultVariant !== "string" || target.defaultVariant === ""))
+    return "its defaultVariant must be a string and not empty: OpenCode drops an empty default variant, so the target would run at its own default";
   if (target.variants !== undefined) {
     if (!isRecord(target.variants)) return "its variants must map route variants to target variants";
-    for (const [from, to] of Object.entries(target.variants))
-      if (typeof to !== "string") return `its variant remap "${from}" must be a string`;
+    for (const [from, to] of Object.entries(target.variants)) {
+      if (from === "") return "its variants must not use an empty route variant as a key: no selected variant is ever empty, so the remap would never apply";
+      if (typeof to !== "string" || to === "") return `its variant remap "${from}" must be a string and not empty`;
+    }
   }
   return null;
 };
@@ -343,6 +345,11 @@ export const validateModelRoute = (id, route) => {
     for (const [key, weight] of Object.entries(route.weights)) {
       if (!isPositiveNumber(weight))
         return `route "${id}" weight for "${key}" must be a positive number`;
+      // OpenCode reads a weight by the concrete key a target attaches with
+      // (a leaf model or an `opencode-route/<id>` group), so a pattern key
+      // matches no attach key and the weight would never apply.
+      if (key.includes("*"))
+        return `route "${id}" weight for "${key}" is keyed by a pattern: OpenCode reads weights by concrete target reference, so key the weight by a concrete target instead`;
       if (!route.targets.some((target) => keyNamesTarget(key, target)))
         return `route "${id}" weight for "${key}" matches no target in the route`;
     }
