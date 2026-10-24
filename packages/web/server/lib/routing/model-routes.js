@@ -345,6 +345,11 @@ export const validateModelRoute = (id, route) => {
     for (const [key, weight] of Object.entries(route.weights)) {
       if (!isPositiveNumber(weight))
         return `route "${id}" weight for "${key}" must be a positive number`;
+      // OpenCode reads a weight by the concrete key a target attaches with
+      // (a leaf model or an `opencode-route/<id>` group), so a pattern key
+      // matches no attach key and the weight would never apply.
+      if (key.includes("*"))
+        return `route "${id}" weight for "${key}" is keyed by a pattern: OpenCode reads weights by concrete target reference, so key the weight by a concrete target instead`;
       if (!route.targets.some((target) => keyNamesTarget(key, target)))
         return `route "${id}" weight for "${key}" matches no target in the route`;
     }

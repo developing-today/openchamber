@@ -550,6 +550,13 @@ describe('validateModelRoute strictness', () => {
     expect(validateModelRoute('x', { targets: ['openai/*'], budgets: { 'openai/gpt-6-luna': { requestsPerDay: 5 } } })).toBeNull();
   });
 
+  it('refuses a weight keyed by a pattern, which OpenCode never reads', () => {
+    expect(validateModelRoute('x', { targets: ['openai/*'], weights: { 'openai/*': 2 } })).toMatch(/weight for "openai\/\*" is keyed by a pattern/);
+    expect(validateModelRoute('x', { targets: ['openai/*'], weights: { 'openai/gpt-*': 2 } })).toMatch(/weight for "openai\/gpt-\*" is keyed by a pattern/);
+    expect(validateModelRoute('x', { targets: ['openai/*'], weights: { 'openai/gpt-6-luna': 2 } })).toBeNull();
+    expect(validateModelRoute('x', { targets: ['opencode-route/other'], weights: { 'opencode-route/other': 2 } })).toBeNull();
+  });
+
   it('refuses a weight for a target the route does not have', () => {
     expect(validateModelRoute('x', { targets: ['a/b', 'c/d'], weights: { 'a/b': 2, 'c/d': 1 } })).toBeNull();
     expect(validateModelRoute('x', { ...base, weights: { 'c/d': 2 } })).toMatch(/weight for "c\/d" matches no target/);
