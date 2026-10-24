@@ -12,6 +12,8 @@ bundled copy of the web build; native capabilities are added via Capacitor plugi
 extensions.
 
 - App id / package: `com.openchamber.app`; app name `OpenChamber`.
+  The release build is a separate app, `today.developing.openchamber` labelled `OC`, so it installs
+  beside the default app (the id is set for the release variant only, in `build.gradle`).
 - Capacitor config: `capacitor.config.json`. It is JSON because the Capacitor CLI reads a
   `capacitor.config.ts` through the TypeScript JS API (`transpileModule`), which TypeScript 7 no
   longer ships. Why its values are what they are:

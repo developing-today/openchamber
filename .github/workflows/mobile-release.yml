@@ -160,15 +160,15 @@ jobs:
           OPENCHAMBER_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           bun run mobile:sync
-          ./packages/mobile/android/gradlew -p packages/mobile/android bundleRelease assembleRelease
+          ./packages/mobile/android/gradlew -p packages/mobile/android bundleForkRelease assembleForkRelease
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openchamber-android-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
           path: |
-            packages/mobile/android/app/build/outputs/bundle/release/*.aab
-            packages/mobile/android/app/build/outputs/apk/release/*.apk
+            packages/mobile/android/app/build/outputs/bundle/forkRelease/*.aab
+            packages/mobile/android/app/build/outputs/apk/fork/release/*.apk
           if-no-files-found: error
 
       - name: Upload Android artifacts to GitHub Release
@@ -182,11 +182,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp app/build/outputs/bundle/release/*.aab "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
-          cp app/build/outputs/apk/release/*.apk "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
+          cp app/build/outputs/bundle/forkRelease/*.aab "OC-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
+          cp app/build/outputs/apk/fork/release/*.apk "OC-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
           files=(
-            app/build/outputs/bundle/release/*.aab
-            app/build/outputs/apk/release/*.apk
+            app/build/outputs/bundle/forkRelease/*.aab
+            app/build/outputs/apk/fork/release/*.apk
             release-assets/*
           )
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"

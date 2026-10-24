@@ -152,6 +152,8 @@ type MobileSessionsSheetProps = {
     onOpenUsage: () => void;
     /** The issues and PRs board. */
     onOpenSourceBoard: () => void;
+    /** The integrations catalog; absent in enterprise mode, as on the desktop sidebar. */
+    onOpenIntegrations?: () => void;
     /** Present only while a server update is available (hosted web). */
     onOpenUpdate?: () => void;
   };
@@ -2524,6 +2526,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       {t('usageStats.openAction')}
                     </span>
                   </DropdownMenuItem>
+                  {footer.onOpenIntegrations ? (
+                    <DropdownMenuItem onClick={footer.onOpenIntegrations} className={MOBILE_MENU_ITEM_CLASS}>
+                      <span className="flex items-center gap-2">
+                        <Icon name="store-2" className="size-4" />
+                        {t('integrationsCatalog.sidebar.open')}
+                      </span>
+                    </DropdownMenuItem>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
