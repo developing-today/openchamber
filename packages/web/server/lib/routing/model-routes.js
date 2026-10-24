@@ -359,9 +359,17 @@ export const validateModelRoute = (id, route, budgetTargets) => {
   if (route.name !== undefined && typeof route.name !== "string") return `route "${id}" name must be a string`;
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
+  const seenTargets = new Set();
   for (const target of route.targets) {
     const problem = validateTarget(target);
     if (problem) return `route "${id}" has a bad target: ${problem}`;
+    // OpenCode attaches each target once, keyed by its full model reference
+    // (variant included, defaultVariant not), and silently drops a later
+    // entry with the same key — including that entry's variant settings.
+    const key = target.model ?? target;
+    if (seenTargets.has(key))
+      return `route "${id}" lists target "${key}" twice: OpenCode attaches each target once and silently drops the later entry, including its variant settings`;
+    seenTargets.add(key);
   }
   if (route.autonomy !== undefined && !AUTONOMY_LEVELS.includes(route.autonomy))
     return `route "${id}" has unknown autonomy "${route.autonomy}" (expected ${AUTONOMY_LEVELS.join(", ")})`;
