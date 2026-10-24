@@ -168,3 +168,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Pool budget keys must be concrete models, not patterns            | 2026-10-23 | #354, #355                 |
 | Pool targets referencing nonexistent or cyclic routes refused     | 2026-10-23 | #356, #361                 |
 | Pool schedule targets judged as OpenCode applies them             | 2026-10-23 | #358, #362                 |
+| Pool weights and budgets on a fixed route rejected                | 2026-10-23 | #359, #360                 |
