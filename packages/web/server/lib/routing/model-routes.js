@@ -189,6 +189,10 @@ const validateScheduleWindow = (id, label, window) => {
       return `route "${id}" ${label} window.${key} must be a positive epoch-millisecond time`;
   if (window.from !== undefined && window.until !== undefined && window.from >= window.until)
     return `route "${id}" ${label} window.from must be before window.until: OpenCode drops a window that can never apply`;
+  // A window that has already ended can never apply again: OpenCode's
+  // active() check is `now >= window.until` from the moment it passes.
+  if (window.until !== undefined && window.until <= Date.now())
+    return `route "${id}" ${label} window.until is in the past: the window has already ended, so the schedule can never apply`;
   return null;
 };
 
