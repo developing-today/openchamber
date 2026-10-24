@@ -174,3 +174,8 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | SSH probe status parser rejects trailing junk                     | 2026-10-22 | #286, #287                 |
 | SSH probe statuses must use the canonical shape                   | 2026-10-22 | #288, #290                 |
 | Terminal preview port-0 URL no longer discards a sibling URL      | 2026-10-22 | #285, #309                 |
+| SSH served-port parser rejects leading-zero spellings             | 2026-10-22 | #311, #312                 |
+| SSH remote-server registry drops out-of-range ports               | 2026-10-22 | #313, #314                 |
+| SSH probe status parser rejects whitespace-padded spellings       | 2026-10-22 | #292, #315                 |
+| SSH instance sanitizers range-check ports (1-65535)               | 2026-10-22 | #316, #317                 |
+| Device-settings closing/hidden flush stays delivered              | 2026-10-22 | #281, #318                 |
