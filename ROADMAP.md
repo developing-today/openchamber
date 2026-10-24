@@ -182,3 +182,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Arabic and Hebrew routing strings and Target header translated    | 2026-10-23 | #299, #320                 |
 | Pool health panel lands; unused plan-links route removed          | 2026-10-23 | #294, #303                 |
 | Queued-goal applyGoalChoice extracted and pinned by tests         | 2026-10-23 | #282, #333                 |
+| Refused closing send overlap pinned in device settings tests        | 2026-10-23 | #335, #336                   |
+| Model pool validator accepts route schedules                        | 2026-10-23 | #298, #340                   |
