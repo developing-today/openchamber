@@ -173,3 +173,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #266 and #268 completions                | 2026-10-22 | #277, #278                 |
 | SSH probe status parser rejects trailing junk                     | 2026-10-22 | #286, #287                 |
 | SSH probe statuses must use the canonical shape                   | 2026-10-22 | #288, #290                 |
+| Terminal preview port-0 URL no longer discards a sibling URL      | 2026-10-22 | #285, #309                 |
