@@ -293,7 +293,11 @@ makes that visible so the user can spread them.
   number such as `1e999` parses to `Infinity`, which OpenCode requires to
   be finite and which would save as `null`), a budgets key that is a `*`
   pattern (OpenCode reads a budget by the concrete model a target expands
-  to, so a pattern key would never apply), a weights key that is a `*`
+  to, so a pattern key would never apply), a budgets key that names a
+  route reference (OpenCode looks budgets up only by concrete model, so
+  that key would never apply either; a budget key naming a concrete model
+  the route reaches through its references does apply, and the set-level
+  check accepts it), a weights key that is a `*`
   pattern (OpenCode reads a weight by the concrete key a target attaches
   with, so a pattern key would never apply), a schedule target whose
   pattern shares no model with any target in the route (two patterns
