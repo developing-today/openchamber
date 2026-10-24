@@ -179,3 +179,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | SSH probe status parser rejects whitespace-padded spellings       | 2026-10-22 | #292, #315                 |
 | SSH instance sanitizers range-check ports (1-65535)               | 2026-10-22 | #316, #317                 |
 | Device-settings closing/hidden flush stays delivered              | 2026-10-22 | #281, #318                 |
+| Arabic and Hebrew routing strings and Target header translated    | 2026-10-23 | #299, #320                 |
+| Pool health panel lands; unused plan-links route removed          | 2026-10-23 | #294, #303                 |
