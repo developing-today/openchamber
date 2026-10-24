@@ -298,7 +298,11 @@ makes that visible so the user can spread them.
   target whose `until` has passed, so the target would leave the route as
   soon as the config is saved), an `until` on a route-reference target
   (OpenCode includes the referenced route unconditionally and never reads
-  `until` on a reference, so the time limit would never apply), a budgets key that is a `*`
+  `until` on a reference, so the time limit would never apply), a
+  `defaultVariant` or `variants` on a route-reference target (OpenCode
+  expands the referenced route from its own targets and never reads
+  variant settings on a reference, so they would never apply; a
+  `#variant` suffix on the reference itself is read and stays accepted), a budgets key that is a `*`
   pattern (OpenCode reads a budget by the concrete model a target expands
   to, so a pattern key would never apply), a budgets key that names a
   route reference (OpenCode looks budgets up only by concrete model, so
