@@ -384,6 +384,38 @@ describe('validateModelRoute target options and display name', () => {
     ).toBeNull();
   });
 
+  it('refuses a pattern target fully shadowed by an earlier pattern target', () => {
+    const future = Date.now() + 3600000;
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-*'] }),
+    ).toMatch(/target "openai\/gpt-\*" is already covered by the earlier pattern target "openai\/\*"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*#high', { model: 'openai/gpt-*#high', defaultVariant: 'low' }] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/\*#high"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/gpt-*', 'openai/gpt-5*'] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/gpt-\*"/);
+    // The judgement is about the model sets, not the spellings: a pattern
+    // that only adds fixed text inside the earlier pattern is covered too.
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*-luna', 'openai/gpt-*-luna'] }),
+    ).toMatch(/already covered by the earlier pattern target/);
+    // A partly overlapping pattern still attaches the models the earlier
+    // pattern does not cover, in either order.
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-*', 'openai/*'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/*-luna', 'openai/*-sol'] })).toBeNull();
+    // The #variant is part of the attach key, so a different variant is a distinct leaf.
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-*#high'] })).toBeNull();
+    // Disjoint providers, and a pattern listed after a concrete target, still attach.
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'anthropic/*'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-5', 'openai/gpt-*'] })).toBeNull();
+    // An earlier pattern with a future until shadows only until it expires;
+    // the later pattern applies after that, so the pair stays accepted.
+    expect(
+      validateModelRoute('r1', { targets: [{ model: 'openai/*', until: future }, 'openai/gpt-*'] }),
+    ).toBeNull();
+  });
+
   it('refuses a target until that is already past, which OpenCode drops on save', () => {
     const past = Date.now() - 1000;
     expect(validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', until: past }] })).toMatch(

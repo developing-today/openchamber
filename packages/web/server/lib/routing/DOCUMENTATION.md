@@ -299,7 +299,12 @@ makes that visible so the user can spread them.
   attaches that model under its own settings, so the later entry and
   its variant settings would never apply; an earlier pattern carrying
   an `until` is left alone, because it shadows only until it expires
-  and the concrete target applies after that), a target whose `until` is already past (OpenCode drops a
+  and the concrete target applies after that), a pattern target whose
+  whole model set an earlier pattern target in the same route with the
+  same `#variant` covers (every model the later pattern would attach is
+  already attached by the earlier one, so the later entry would never
+  apply; a partly overlapping pattern stays accepted, and the same
+  `until` carve-out applies), a target whose `until` is already past (OpenCode drops a
   target whose `until` has passed, so the target would leave the route as
   soon as the config is saved), an `until` on a route-reference target
   (OpenCode includes the referenced route unconditionally and never reads
