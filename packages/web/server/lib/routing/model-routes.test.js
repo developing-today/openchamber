@@ -48,8 +48,17 @@ describe('validateModelRoutes route references', () => {
     expect(validateModelRoutes({ mine: { targets: [{ model: 'opencode-route/nope' }] } })).toMatch(/references route "nope"/);
   });
 
+  it('refuses a target that references its own route, even beside a concrete target', () => {
+    expect(validateModelRoutes({ mine: { targets: ['openai/gpt-x', 'opencode-route/mine'] } })).toMatch(
+      /route "mine" target "opencode-route\/mine" references its own route/,
+    );
+    expect(validateModelRoutes({ mine: { targets: ['openai/gpt-x', { model: 'opencode-route/mine' }] } })).toMatch(
+      /references its own route/,
+    );
+  });
+
   it('refuses a route whose only target is itself', () => {
-    expect(validateModelRoutes({ mine: { targets: ['opencode-route/mine'] } })).toMatch(/route "mine" would expand to no models/);
+    expect(validateModelRoutes({ mine: { targets: ['opencode-route/mine'] } })).toMatch(/references its own route/);
   });
 
   it('refuses a reference cycle that reaches no concrete model target', () => {
