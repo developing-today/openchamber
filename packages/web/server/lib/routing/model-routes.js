@@ -248,6 +248,13 @@ const validateSchedules = (id, schedules, targets) => {
         // `#variant` suffix targets use everywhere else can never match.
         if (entry.includes("#"))
           return `route "${id}" ${label} target "${entry}" carries a "#variant" suffix: OpenCode matches schedule targets against provider/model references without a variant, so the entry would never apply`;
+        // OpenCode matches a schedule entry only against the concrete leaf
+        // references a route expands to, so an entry naming a route reference
+        // can never match a leaf. Weights differ here: a nested route
+        // attaches under its `opencode-route/<id>` key, so a weights key
+        // naming the reference is live configuration.
+        if (routeReferenceOf(entry) !== null)
+          return `route "${id}" ${label} target "${entry}" is a route reference: OpenCode matches schedule targets against concrete provider/model references, so the entry would never apply`;
         // OpenCode's schedule matcher is case-insensitive (its glob is built
         // with the `i` flag), so the entry and the targets are compared in
         // lower case: a case-only difference still applies there.
@@ -330,8 +337,10 @@ export const keyNamesTarget = (key, target) => {
  * The concrete targets a route expands to: its own model targets plus the
  * ones reached through the routes its targets reference, transitively.
  * OpenCode reads a route's budgets by the concrete model a target expands
- * to, collecting them from every route on the trail, so a set-level check
- * judges budget keys against this expanded set. The visited set keeps a
+ * to, collecting them from every route on the trail, and it matches a
+ * route's schedule entries against the same concrete leaves, so the
+ * set-level check judges budget keys and schedule entries against this
+ * expanded set. The visited set keeps a
  * reference cycle from looping; a cycle contributes the concrete targets
  * its members name directly. Malformed targets are skipped here and
  * reported by the single-route validation.
@@ -355,7 +364,7 @@ const expandedTargetsOf = (routes, id) => {
   return expanded;
 };
 
-export const validateModelRoute = (id, route, budgetTargets) => {
+export const validateModelRoute = (id, route, expandedTargets) => {
   if (!ROUTE_ID_PATTERN.test(id)) return `invalid route id "${id}"`;
   if (!isRecord(route)) return `route "${id}" must be an object`;
   const unknown = unknownKeysProblem(route, ROUTE_KEYS);
@@ -414,11 +423,14 @@ export const validateModelRoute = (id, route, budgetTargets) => {
     // The set-level caller passes the targets the route expands to through
     // its route references; a single route judged alone can only be judged
     // against its direct targets.
-    const problem = validateBudgets(id, route.budgets, budgetTargets ?? route.targets);
+    const problem = validateBudgets(id, route.budgets, expandedTargets ?? route.targets);
     if (problem) return problem;
   }
   if (route.schedules !== undefined) {
-    const problem = validateSchedules(id, route.schedules, route.targets);
+    // Schedules judge against the same expanded targets: OpenCode inherits
+    // a route's schedule rules into nested groups and matches them against
+    // each concrete leaf, so a leaf reached through a reference counts.
+    const problem = validateSchedules(id, route.schedules, expandedTargets ?? route.targets);
     if (problem) return problem;
   }
   return null;

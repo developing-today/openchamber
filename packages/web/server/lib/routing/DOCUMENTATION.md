@@ -303,10 +303,18 @@ makes that visible so the user can spread them.
   check accepts it), a weights key that is a `*`
   pattern (OpenCode reads a weight by the concrete key a target attaches
   with, so a pattern key would never apply), a schedule target whose
-  pattern shares no model with any target in the route (two patterns
-  count as sharing when one model matches both, even if each covers
-  models the other does not; entries are judged in lower case, the way
-  OpenCode's case-insensitive schedule matcher reads them), a schedule
+  pattern shares no model with any target the route expands to (two
+  patterns count as sharing when one model matches both, even if each
+  covers models the other does not; entries are judged in lower case,
+  the way OpenCode's case-insensitive schedule matcher reads them; the
+  set-level check judges entries against the concrete models the route
+  reaches through its route references, because OpenCode inherits a
+  route's schedule rules into nested groups and matches them against
+  each leaf), a schedule target that names a route reference (OpenCode
+  matches schedule targets against concrete `provider/model`
+  references, so the entry could never match a leaf; a weights key
+  naming the reference stays valid, because a nested route attaches
+  under that key), a schedule
   target carrying a `#variant` suffix (OpenCode matches schedule
   targets against `provider/model` references without a variant, so
   the entry could never apply), an empty schedule `targets` list
