@@ -383,6 +383,7 @@ export const validateModelRoute = (id, route, expandedTargets) => {
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
   const seenTargets = new Set();
+  const earlierTargets = [];
   for (const target of route.targets) {
     const problem = validateTarget(target);
     if (problem) return `route "${id}" has a bad target: ${problem}`;
@@ -393,6 +394,26 @@ export const validateModelRoute = (id, route, expandedTargets) => {
     if (seenTargets.has(key))
       return `route "${id}" lists target "${key}" twice: OpenCode attaches each target once and silently drops the later entry, including its variant settings`;
     seenTargets.add(key);
+    // A pattern target attaches every model it covers under its own
+    // settings, so a later concrete target it covers (with the same
+    // #variant, which is part of the attach key) never attaches at all.
+    // An earlier pattern with an until is carved out: it shadows only
+    // until it expires, and the concrete target applies after that, so
+    // the pair is a staging shape rather than a dead entry. Any until
+    // still present here is in the future — a past one is refused above.
+    const reference = referenceOf(key);
+    if (!reference.includes("*") && routeReferenceOf(reference) === null) {
+      const variant = key.split("#")[1] ?? "";
+      for (const earlier of earlierTargets) {
+        if (earlier.until !== undefined) continue;
+        const earlierReference = referenceOf(earlier.key);
+        if (!earlierReference.includes("*") || routeReferenceOf(earlierReference) !== null) continue;
+        if ((earlier.key.split("#")[1] ?? "") !== variant) continue;
+        if (keyNamesTarget(reference, earlierReference))
+          return `route "${id}" target "${key}" is already covered by the earlier pattern target "${earlier.key}": OpenCode attaches each model once, so this entry and its variant settings would never apply`;
+      }
+    }
+    earlierTargets.push({ key, until: isRecord(target) ? target.until : undefined });
   }
   if (route.autonomy !== undefined && !AUTONOMY_LEVELS.includes(route.autonomy))
     return `route "${id}" has unknown autonomy "${route.autonomy}" (expected ${AUTONOMY_LEVELS.join(", ")})`;
