@@ -172,3 +172,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Terminal preview port 0 is no longer announced                    | 2026-10-22 | #283, #284                 |
 | ROADMAP Done records the #266 and #268 completions                | 2026-10-22 | #277, #278                 |
 | SSH probe status parser rejects trailing junk                     | 2026-10-22 | #286, #287                 |
+| SSH probe statuses must use the canonical shape                   | 2026-10-22 | #288, #290                 |
