@@ -73,6 +73,16 @@ export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, f
   try {
     for await (const chunk of response.body) {
       received += chunk.length;
+      // The pinned size is known before the fetch, so an over-long body is
+      // refused the moment it passes that size instead of being written to
+      // disk in full and only then discarded: a broken or hostile endpoint
+      // could otherwise fill the cache disk without bound.
+      if (received > model.bytes) {
+        throw Object.assign(
+          new Error(`The model download was larger than the expected ${model.bytes} bytes, so it was discarded; try again`),
+          { status: 502 },
+        );
+      }
       digest.update(chunk);
       if (!out.write(chunk)) await new Promise((resolve) => out.once('drain', resolve));
       onProgress(received, model.bytes);
