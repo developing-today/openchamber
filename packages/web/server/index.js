@@ -425,6 +425,8 @@ const settingsHelpers = createSettingsHelpers({
   sanitizeModelRefs,
   sanitizeSkillCatalogs,
   sanitizeProjects,
+  // Called per settings response; the runtime is created at startup, so false until then.
+  areManagedToolsLive: () => managedConfigRuntime?.appliesLive() === true,
 });
 
 const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
@@ -2126,6 +2128,7 @@ async function main(options = {}) {
     agentToolRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
     isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
+    isManagedOpenCode: () => !ENV_SKIP_OPENCODE_START && !isExternalOpenCode,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 

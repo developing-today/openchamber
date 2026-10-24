@@ -3031,6 +3031,7 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.status.needsAuth": "Necesita autenticación",
   "mcpDropdown.status.needsRegistration": "Necesita registro: {error}",
   "mcpDropdown.empty.configureInConfig": "Configura los servidores MCP en Ajustes.",
+  "mcpDropdown.cacheNote": "Activar o desactivar un servidor con Code Mode apagado hace que el siguiente turno de una sesión en curso no use la caché del prompt.",
   "sessionAuth.error.rateLimitTitle": "Demasiados intentos",
   "sessionAuth.error.networkTitle": "No se puede alcanzar el servidor",
   "sessionAuth.error.rateLimitDescriptionSingle": "Por favor, espera {minutes} minuto antes de intentarlo de nuevo.",

@@ -3077,6 +3077,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Needs authentication',
   'mcpDropdown.status.needsRegistration': 'Needs registration: {error}',
   'mcpDropdown.empty.configureInConfig': 'Configure MCP servers in Settings.',
+  "mcpDropdown.cacheNote": "Switching a server with code mode off makes a running session's next turn skip the prompt cache.",
   'sessionAuth.error.rateLimitTitle': 'Too many attempts',
   'sessionAuth.error.networkTitle': 'Unable to reach server',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Please wait {minutes} minute before trying again.',

@@ -2792,6 +2792,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Authentifizierung erforderlich',
   'mcpDropdown.status.needsRegistration': 'Registrierung erforderlich: {error}',
   'mcpDropdown.empty.configureInConfig': 'Konfigurieren Sie MCP-Server in den Einstellungen.',
+  "mcpDropdown.cacheNote": "Wenn du einen Server mit ausgeschaltetem Code Mode umschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
   'sessionAuth.error.rateLimitTitle': 'Zu viele Versuche',
   'sessionAuth.error.networkTitle': 'Server nicht erreichbar',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Bitte warten Sie {minutes} Minute, bevor Sie es erneut versuchen.',

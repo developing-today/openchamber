@@ -194,6 +194,10 @@
       "scope": "instance",
       "computed": true
     },
+    "managedToolsApplyLive": {
+      "scope": "instance",
+      "computed": true
+    },
     "openCodeUpdateToastDismissedVersion": {
       "scope": "instance"
     },

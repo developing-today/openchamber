@@ -3031,6 +3031,7 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.status.needsAuth": "Потребує аутентифікації",
   "mcpDropdown.status.needsRegistration": "Потребує реєстрації: {error}",
   "mcpDropdown.empty.configureInConfig": "Налаштуйте сервери MCP у Налаштуваннях.",
+  "mcpDropdown.cacheNote": "Якщо перемкнути сервер із вимкненим Code Mode, наступний хід активної сесії не використає кеш промпту.",
   "sessionAuth.error.rateLimitTitle": "Забагато спроб",
   "sessionAuth.error.networkTitle": "Неможливо отримати доступ до сервера",
   "sessionAuth.error.rateLimitDescriptionSingle": "Зачекайте {minutes} хвилину перед повторною спробою.",

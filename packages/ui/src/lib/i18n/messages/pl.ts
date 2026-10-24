@@ -2960,6 +2960,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.actions.openAria': 'Serwery MCP',
   'mcpDropdown.actions.refreshAria': 'Odśwież',
   'mcpDropdown.empty.configureInConfig': 'Skonfiguruj serwery MCP w Ustawieniach.',
+  "mcpDropdown.cacheNote": "Przełączenie serwera z wyłączonym Code Mode sprawia, że następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
   'mcpDropdown.status.connected': 'Połączono',
   'mcpDropdown.status.failed': 'Błąd: {error}',
   'mcpDropdown.status.needsAuth': 'Wymaga uwierzytelnienia',
