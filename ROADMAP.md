@@ -199,3 +199,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #311, #313, #292, #316, #281 completions   | 2026-10-24 | #321, #408                 |
 | Pattern target covered by an earlier pattern rejected               | 2026-10-24 | #406, #407                 |
 | ROADMAP Done records the #299 and #294 completions                  | 2026-10-24 | #334, #409                 |
+| Local model download aborts once it passes the pinned size          | 2026-10-24 | #412, #413                 |
+| ROADMAP Done records the #382, #395, #383, #321, #406, #334 rows    | 2026-10-24 | #410, #414                 |
