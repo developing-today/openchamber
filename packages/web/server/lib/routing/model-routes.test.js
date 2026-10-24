@@ -360,6 +360,30 @@ describe('validateModelRoute target options and display name', () => {
     expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna', 'openai/gpt-6-sol'] })).toBeNull();
   });
 
+  it('refuses a concrete target fully shadowed by an earlier pattern target', () => {
+    const future = Date.now() + 3600000;
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*', { model: 'openai/gpt-5', defaultVariant: 'high' }] }),
+    ).toMatch(/target "openai\/gpt-5" is already covered by the earlier pattern target "openai\/\*"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/gpt-*', { model: 'openai/gpt-5', until: future }] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/gpt-\*"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*#high', { model: 'openai/gpt-5#high', defaultVariant: 'low' }] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/\*#high"/);
+    // The #variant is part of the attach key, so a different variant is a distinct leaf.
+    expect(validateModelRoute('r1', { targets: ['openai/*#high', 'openai/gpt-5'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-5#high'] })).toBeNull();
+    // Disjoint targets, and a concrete target listed before the pattern, still attach.
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-*', 'anthropic/claude-1'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-5', 'openai/*'] })).toBeNull();
+    // An earlier pattern with a future until shadows only until it expires;
+    // the concrete target applies after that, so the pair stays accepted.
+    expect(
+      validateModelRoute('r1', { targets: [{ model: 'openai/*', until: future }, 'openai/gpt-5'] }),
+    ).toBeNull();
+  });
+
   it('refuses a target until that is already past, which OpenCode drops on save', () => {
     const past = Date.now() - 1000;
     expect(validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', until: past }] })).toMatch(

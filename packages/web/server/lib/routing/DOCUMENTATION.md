@@ -294,7 +294,12 @@ makes that visible so the user can spread them.
   be finite and which would save as `null`), a target listed twice in one
   route (OpenCode attaches each target once, keyed by its full model
   reference, and silently drops the later entry, including its variant
-  settings), a target whose `until` is already past (OpenCode drops a
+  settings), a concrete target fully covered by an earlier pattern
+  target in the same route with the same `#variant` (the pattern
+  attaches that model under its own settings, so the later entry and
+  its variant settings would never apply; an earlier pattern carrying
+  an `until` is left alone, because it shadows only until it expires
+  and the concrete target applies after that), a target whose `until` is already past (OpenCode drops a
   target whose `until` has passed, so the target would leave the route as
   soon as the config is saved), an `until` on a route-reference target
   (OpenCode includes the referenced route unconditionally and never reads
