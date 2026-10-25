@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { describeTarFailure, downloadToFile } from './model-downloader.js';
+import { archiveMatchesPins, describeTarFailure, downloadToFile, ensureLocalSttModel } from './model-downloader.js';
 
 const CONTENT = Buffer.from('a fake model archive');
 const PINS = { bytes: CONTENT.length, sha256: createHash('sha256').update(CONTENT).digest('hex') };
@@ -97,5 +97,91 @@ describe('describeTarFailure', () => {
   it('keeps the exit code and the last tar message otherwise', () => {
     expect(describeTarFailure(2, 'tar: Unexpected EOF in archive\n')).toBe('tar exited with code 2: tar: Unexpected EOF in archive');
     expect(describeTarFailure(1, '')).toBe('tar exited with code 1');
+  });
+});
+
+describe('archiveMatchesPins', () => {
+  it('returns true when size and checksum both match the pins', async () => {
+    const file = tempFile();
+    fs.writeFileSync(file, CONTENT);
+    await expect(archiveMatchesPins(file, PINS)).resolves.toBe(true);
+  });
+
+  it('returns false when the size differs from the pin', async () => {
+    const file = tempFile();
+    fs.writeFileSync(file, CONTENT.subarray(0, 4));
+    await expect(archiveMatchesPins(file, PINS)).resolves.toBe(false);
+  });
+
+  it('returns false when the size matches but the checksum differs', async () => {
+    const file = tempFile();
+    fs.writeFileSync(file, Buffer.from('x'.repeat(CONTENT.length)));
+    await expect(archiveMatchesPins(file, PINS)).resolves.toBe(false);
+  });
+
+  it('returns false for a missing file', async () => {
+    const file = tempFile();
+    await expect(archiveMatchesPins(file, PINS)).resolves.toBe(false);
+  });
+});
+
+describe('ensureLocalSttModel cached archive', () => {
+  const FAKE_SPEC = {
+    archiveUrl: 'https://example.test/fake-model.tar.bz2',
+    extractedDir: 'fake-model',
+    requiredFiles: ['model.onnx'],
+    ...PINS,
+  };
+
+  function setup(cachedBytes) {
+    const modelsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'model-downloader-models-'));
+    const downloadsDir = path.join(modelsDir, '.downloads');
+    fs.mkdirSync(downloadsDir, { recursive: true });
+    if (cachedBytes) {
+      fs.writeFileSync(path.join(downloadsDir, 'fake-model.tar.bz2'), cachedBytes);
+    }
+    return modelsDir;
+  }
+
+  async function fakeExtract(_archivePath, destDir) {
+    const dir = path.join(destDir, FAKE_SPEC.extractedDir);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'model.onnx'), 'fake weights');
+  }
+
+  it('reuses a cached archive that matches the pins without fetching', async () => {
+    const modelsDir = setup(CONTENT);
+    let fetched = false;
+    const modelDir = await ensureLocalSttModel({
+      modelsDir,
+      modelId: 'fake-model',
+      spec: FAKE_SPEC,
+      extractImpl: fakeExtract,
+      fetchImpl: async () => {
+        fetched = true;
+        return new Response(CONTENT, { status: 200 });
+      },
+    });
+    expect(modelDir).toBe(path.join(modelsDir, 'fake-model'));
+    expect(fetched).toBe(false);
+    expect(fs.readFileSync(path.join(modelDir, 'model.onnx'), 'utf8')).toBe('fake weights');
+  });
+
+  it('discards a cached archive that fails the pins and re-downloads it', async () => {
+    const modelsDir = setup(Buffer.from('corrupt cached bytes'));
+    let fetched = false;
+    const modelDir = await ensureLocalSttModel({
+      modelsDir,
+      modelId: 'fake-model',
+      spec: FAKE_SPEC,
+      extractImpl: fakeExtract,
+      fetchImpl: async () => {
+        fetched = true;
+        return new Response(CONTENT, { status: 200 });
+      },
+    });
+    expect(modelDir).toBe(path.join(modelsDir, 'fake-model'));
+    expect(fetched).toBe(true);
+    expect(fs.readFileSync(path.join(modelDir, 'model.onnx'), 'utf8')).toBe('fake weights');
   });
 });
