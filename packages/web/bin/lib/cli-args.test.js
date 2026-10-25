@@ -33,6 +33,15 @@ describe('parseArgs ui password default', () => {
     expect(parseArgs(['status', '--limit', '25']).options.limit).toBe(25);
   });
 
+  it('rejects malformed --timeout values instead of reinterpreting them', () => {
+    for (const bad of ['10junk', '1e3', '10.9', 'abc', '-5', '0', '86401']) {
+      expect(() => parseArgs(['session', 'send', '--wait', '--timeout', bad])).toThrow(/Invalid timeout value/);
+    }
+    expect(parseArgs(['session', 'send', '--wait', '--timeout', '1']).options.timeout).toBe('1');
+    expect(parseArgs(['session', 'send', '--wait', '--timeout', '60']).options.timeout).toBe('60');
+    expect(parseArgs(['session', 'send', '--wait', '--timeout', '86400']).options.timeout).toBe('86400');
+  });
+
   it('ignores a password OpenChamber put into the shell', () => {
     delete process.env[INJECTED_ENV_KEY];
     delete process.env.OPENCHAMBER_UI_PASSWORD;
