@@ -207,3 +207,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Dictation model downloads pinned by size and SHA-256                | 2026-10-24 | #417, #424                 |
 | ROADMAP Done records the #418 and #419 completions                  | 2026-10-24 | #425, #426                 |
 | Stale x86_64-linux node_modules hash updated                        | 2026-10-24 | #422, #423                 |
+| Cached-archive pin re-verification covered by dictation tests       | 2026-10-24 | #428, #429                 |
+| ROADMAP Done records the #417, #425 and #422 completions            | 2026-10-24 | #430, #431                 |
