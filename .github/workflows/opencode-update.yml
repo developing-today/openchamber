@@ -1,0 +1,272 @@
+# Keeps the flake's opencode input current with developing-today/opencode.
+#
+# Daily (and on demand): update the opencode input, build the openchamber
+# package, and run the full test suite. If everything passes and flake.lock
+# moved, the change lands as a pull request that this workflow merges itself.
+#
+# Failures are tracked in ONE issue (title in FAILURE_ISSUE_TITLE below):
+# the first failure opens it, later failures edit it in place (attempt count,
+# first/last failure times, one history entry per attempt), and the next
+# success closes it — the successful update PR carries a "Fixes #<n>" line,
+# and the merge step comments the passing rev before closing. A failed run
+# never disables later runs: every scheduled run retries with the newest
+# opencode rev, and while a failure issue is open the build and tests run
+# even when the lockfile did not move, so a manual fix is picked up too.
+name: opencode-update
+
+on:
+  schedule:
+    # Daily at 06:23 UTC.
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: opencode-update
+  cancel-in-progress: false
+
+env:
+  FAILURE_ISSUE_TITLE: "chore(deps): automated opencode update failing"
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Find an open failure issue
+        id: failure-issue
+        run: |
+          gh issue list --state open --limit 100 --json number,title > "$RUNNER_TEMP/issues.json"
+          number=$(jq -r --arg title "$FAILURE_ISSUE_TITLE" \
+            '.[] | select(.title == $title) | .number' "$RUNNER_TEMP/issues.json" | head -n 1)
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          if [ -n "${number}" ]; then
+            echo "An open failure issue already exists: #${number}"
+          else
+            echo "No open failure issue."
+          fi
+
+      - name: Record the currently pinned opencode rev
+        id: before
+        run: |
+          echo "rev=$(jq -r '.nodes.opencode.locked.rev' flake.lock)" >> "$GITHUB_OUTPUT"
+
+      - name: Update the opencode input
+        id: update
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          nix flake update opencode 2>&1 | tee "$RUNNER_TEMP/update.log"
+
+      - name: Plan verification
+        id: plan
+        run: |
+          new_rev=$(jq -r '.nodes.opencode.locked.rev' flake.lock)
+          echo "new_rev=${new_rev}" >> "$GITHUB_OUTPUT"
+          if git diff --quiet -- flake.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          # Verify when the pin moved, and also while a failure issue is open
+          # (a manual fix elsewhere can make the same rev pass again).
+          if [ "${{ steps.update.outcome }}" != "success" ]; then
+            echo "verify=false" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet -- flake.lock || [ -n "${{ steps.failure-issue.outputs.number }}" ]; then
+            echo "verify=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verify=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.plan.outputs.verify == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Build the openchamber package
+        id: build
+        if: steps.plan.outputs.verify == 'true'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          nix build .#openchamber 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Run the full test suite
+        id: tests
+        if: steps.plan.outputs.verify == 'true' && steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bun run test 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      - name: Decide the outcome
+        id: outcome
+        if: always()
+        run: |
+          failed_step=""
+          error_log=""
+          if [ "${{ steps.update.outcome }}" = "failure" ]; then
+            failed_step="nix flake update opencode"
+            error_log="$RUNNER_TEMP/update.log"
+          elif [ "${{ steps.plan.outputs.verify }}" = "true" ] && [ "${{ steps.build.outcome }}" = "failure" ]; then
+            failed_step="nix build .#openchamber"
+            error_log="$RUNNER_TEMP/build.log"
+          elif [ "${{ steps.plan.outputs.verify }}" = "true" ] && [ "${{ steps.tests.outcome }}" = "failure" ]; then
+            failed_step="bun run test"
+            error_log="$RUNNER_TEMP/test.log"
+          fi
+          if [ -n "${failed_step}" ]; then
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "failed_step=${failed_step}" >> "$GITHUB_OUTPUT"
+            echo "error_log=${error_log}" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Record the failure on the tracking issue
+        if: steps.outcome.outputs.result == 'failure'
+        env:
+          FAILED_STEP: ${{ steps.outcome.outputs.failed_step }}
+          ERROR_LOG: ${{ steps.outcome.outputs.error_log }}
+          EXISTING_NUMBER: ${{ steps.failure-issue.outputs.number }}
+          NEW_REV: ${{ steps.plan.outputs.new_rev }}
+        run: |
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          attempts=1
+          first_failure="${now}"
+          history_file="$RUNNER_TEMP/history.md"
+          : > "${history_file}"
+          if [ -n "${EXISTING_NUMBER}" ]; then
+            gh issue view "${EXISTING_NUMBER}" --json body --jq .body > "$RUNNER_TEMP/old-body.md"
+            previous=$(grep -E '^Attempts: ' "$RUNNER_TEMP/old-body.md" | head -n 1 | grep -oE '[0-9]+' || true)
+            if [ -n "${previous}" ]; then
+              attempts=$((previous + 1))
+            fi
+            previous_first=$(sed -n 's/^First failure: //p' "$RUNNER_TEMP/old-body.md" | head -n 1)
+            if [ -n "${previous_first}" ]; then
+              first_failure="${previous_first}"
+            fi
+            awk '/^## Failure history/{found=1; next} found' "$RUNNER_TEMP/old-body.md" > "${history_file}"
+          fi
+          # Error excerpt: last lines of the failing step's log, capped, with
+          # code fences neutralized so the issue body stays valid Markdown.
+          tail -n 80 "${ERROR_LOG}" | sed 's/~~~/---/g' | head -c 5000 > "$RUNNER_TEMP/excerpt.txt" || true
+          entry_file="$RUNNER_TEMP/entry.md"
+          {
+            echo "### Attempt ${attempts} — ${now} — opencode \`${NEW_REV}\`"
+            echo "- Failed step: ${FAILED_STEP}"
+            echo "- Run: ${RUN_URL}"
+            echo "- Error excerpt (full log in the run linked above):"
+            echo
+            echo '~~~'
+            cat "$RUNNER_TEMP/excerpt.txt"
+            echo
+            echo '~~~'
+            echo
+          } > "${entry_file}"
+          body_file="$RUNNER_TEMP/issue-body.md"
+          {
+            echo "<!-- automated-failure-issue: opencode-update -->"
+            echo "Automated OpenCode updates are currently failing. This issue is maintained by the \`opencode-update\` workflow: one issue per workflow, edited in place on every failed attempt, and closed by the next successful update."
+            echo
+            echo "Attempts: ${attempts}"
+            echo "First failure: ${first_failure}"
+            echo "Last failure: ${now}"
+            echo "Latest attempted: opencode \`${NEW_REV}\`"
+            echo "Latest run: ${RUN_URL}"
+            echo
+            echo "## Failure history"
+            cat "${history_file}"
+            cat "${entry_file}"
+          } > "${body_file}"
+          if [ -n "${EXISTING_NUMBER}" ]; then
+            gh issue edit "${EXISTING_NUMBER}" --body-file "${body_file}"
+            echo "Updated failure issue #${EXISTING_NUMBER} (attempt ${attempts})."
+          else
+            gh issue create --title "${FAILURE_ISSUE_TITLE}" --body-file "${body_file}"
+            echo "Opened a new failure issue (attempt ${attempts})."
+          fi
+          exit 1
+
+      - name: Publish and merge the update
+        if: steps.outcome.outputs.result == 'success' && steps.plan.outputs.changed == 'true'
+        env:
+          OLD_REV: ${{ steps.before.outputs.rev }}
+          NEW_REV: ${{ steps.plan.outputs.new_rev }}
+          EXISTING_NUMBER: ${{ steps.failure-issue.outputs.number }}
+        run: |
+          branch="automation/opencode-update-$(date -u +%Y%m%d)-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${branch}"
+          git add flake.lock
+          git commit -m "chore(deps): update opencode to ${NEW_REV:0:12}"
+          git push origin "${branch}"
+          pr_body="$RUNNER_TEMP/pr-body.md"
+          {
+            echo "Automated update of the \`opencode\` flake input, produced by the \`opencode-update\` workflow."
+            echo
+            echo "- opencode: \`${OLD_REV}\` → \`${NEW_REV}\`"
+            echo "- Validation in this run: \`nix build .#openchamber\` and \`bun run test\` both passed."
+            echo "- Run: ${RUN_URL}"
+            if [ -n "${EXISTING_NUMBER}" ]; then
+              echo
+              echo "Fixes #${EXISTING_NUMBER}"
+            fi
+          } > "${pr_body}"
+          pr_url=$(gh pr create --base main --head "${branch}" \
+            --title "chore(deps): update opencode to ${NEW_REV:0:12}" \
+            --body-file "${pr_body}")
+          pr_number="${pr_url##*/}"
+          echo "Opened PR #${pr_number}: ${pr_url}"
+          merged="false"
+          if gh pr merge "${pr_number}" --merge; then
+            merged="true"
+            echo "PR #${pr_number} merged directly."
+          else
+            gh pr merge "${pr_number}" --auto --merge
+            echo "Direct merge was refused; auto-merge enabled for PR #${pr_number}."
+          fi
+          if [ -n "${EXISTING_NUMBER}" ]; then
+            if [ "${merged}" = "true" ]; then
+              merge_commit=$(gh pr view "${pr_number}" --json mergeCommit --jq .mergeCommit.oid)
+              state=$(gh issue view "${EXISTING_NUMBER}" --json state --jq .state)
+              if [ "${state}" = "OPEN" ]; then
+                gh issue comment "${EXISTING_NUMBER}" --body "Resolved: opencode \`${NEW_REV}\` builds and passes the full test suite. Merged in #${pr_number} (merge commit \`${merge_commit}\`). Run: ${RUN_URL}"
+                gh issue close "${EXISTING_NUMBER}" --reason completed
+              fi
+              echo "Failure issue #${EXISTING_NUMBER} closed."
+            else
+              gh issue comment "${EXISTING_NUMBER}" --body "Fixed by PR #${pr_number}: opencode \`${NEW_REV}\` builds and passes the full test suite (run: ${RUN_URL}). The PR carries a \`Fixes #${EXISTING_NUMBER}\` line and is set to auto-merge; this issue closes when it lands."
+              echo "Failure issue #${EXISTING_NUMBER} will close when PR #${pr_number} merges."
+            fi
+          fi
+
+      - name: Close the failure issue (pin already current)
+        if: steps.outcome.outputs.result == 'success' && steps.plan.outputs.changed == 'false' && steps.failure-issue.outputs.number != ''
+        env:
+          EXISTING_NUMBER: ${{ steps.failure-issue.outputs.number }}
+          NEW_REV: ${{ steps.plan.outputs.new_rev }}
+        run: |
+          gh issue comment "${EXISTING_NUMBER}" --body "Resolved without a new PR: main already pins opencode \`${NEW_REV}\`, and this run verified it builds (\`nix build .#openchamber\`) and passes the full test suite (\`bun run test\`). Run: ${RUN_URL}"
+          gh issue close "${EXISTING_NUMBER}" --reason completed
+          echo "Failure issue #${EXISTING_NUMBER} closed."
