@@ -28,6 +28,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -167,6 +168,7 @@ export const dict = {
   ...pluginsGridI18n.de,
   ...integrationsCatalogI18n['de'],
   ...sessionGoalWriterI18n['de'],
+  ...subsessionModelsI18n['de'],
   ...diffFindI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
