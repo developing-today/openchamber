@@ -217,3 +217,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Model-route targets refuse padded and empty-segment spellings       | 2026-10-25 | #439, #440, #444           |
 | Web CLI `--timeout` strict parsing                                  | 2026-10-25 | #446, #447                 |
 | Target references refuse whitespace inside a segment or variant     | 2026-10-25 | #453                       |
+| ROADMAP Done records five completions through #453                  | 2026-10-25 | #445, #454                 |
