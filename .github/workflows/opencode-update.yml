@@ -32,6 +32,9 @@ concurrency:
 env:
   FAILURE_ISSUE_TITLE: "chore(deps): automated opencode update failing"
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # This repository is a fork; without GH_REPO, gh defaults pull requests
+  # to the parent repository. Pin every gh call below to this repository.
+  GH_REPO: ${{ github.repository }}
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
