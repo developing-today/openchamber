@@ -350,14 +350,47 @@ const validateSchedules = (id, schedules, targets) => {
   return null;
 };
 
+/**
+ * The spelling problem in a target reference that already matches
+ * TARGET_PATTERN, or null. Provider, model and variant names contain no
+ * spaces and no empty `/`-joined segments, and OpenCode does not trim target
+ * references (trimming is specific to schedule entries), so a padded or
+ * empty-segment reference attaches under a key no real model ever has.
+ * Model IDs may contain `/` (`openrouter/anthropic/claude-sonnet-4`); every
+ * segment still has to be non-empty and unpadded.
+ */
+const targetReferenceSpellingProblem = (reference) => {
+  const hashIndex = reference.indexOf("#");
+  const modelPart = hashIndex < 0 ? reference : reference.slice(0, hashIndex);
+  const segments = modelPart.split("/");
+  for (const [index, segment] of segments.entries()) {
+    const name = index === 0 ? "provider" : "model";
+    if (segment === "")
+      return `target "${reference}" has an empty ${name} segment: OpenCode keys a target by its provider/model spelling, so a reference with an empty segment would never match a model`;
+    if (segment !== segment.trim())
+      return `target "${reference}" has a padded ${name} segment: OpenCode does not trim target references, so the padded spelling would never match a model`;
+  }
+  if (hashIndex >= 0) {
+    const variant = reference.slice(hashIndex + 1);
+    if (variant !== variant.trim())
+      return `target "${reference}" has a padded variant: OpenCode does not trim target references, so the padded spelling would never match a model`;
+  }
+  return null;
+};
+
 /** A single target: a `provider/model` string or `{ model, ... }` with variant overrides. */
 const validateTarget = (target) => {
-  if (typeof target === "string") return TARGET_PATTERN.test(target) ? null : "must look like provider/model";
+  if (typeof target === "string") {
+    if (!TARGET_PATTERN.test(target)) return "must look like provider/model";
+    return targetReferenceSpellingProblem(target);
+  }
   if (!isRecord(target)) return "must be a provider/model string or an object with a model field";
   const unknown = unknownKeysProblem(target, TARGET_KEYS);
   if (unknown) return unknown;
   if (typeof target.model !== "string" || !TARGET_PATTERN.test(target.model))
     return "its model must look like provider/model";
+  const spellingProblem = targetReferenceSpellingProblem(target.model);
+  if (spellingProblem) return spellingProblem;
   if (target.until !== undefined && !(Number.isInteger(target.until) && target.until > 0))
     return "its until must be a positive epoch-millisecond time";
   if (target.until !== undefined && routeReferenceOf(target.model) !== null)
@@ -370,11 +403,15 @@ const validateTarget = (target) => {
     return "its variants are on a route reference: OpenCode expands the referenced route from its own targets and never reads variants on a reference, so the variant remaps would never apply";
   if (target.defaultVariant !== undefined && (typeof target.defaultVariant !== "string" || target.defaultVariant === ""))
     return "its defaultVariant must be a string and not empty: OpenCode drops an empty default variant, so the target would run at its own default";
+  if (target.defaultVariant !== undefined && target.defaultVariant !== target.defaultVariant.trim())
+    return "its defaultVariant is padded with whitespace: OpenCode does not trim variant names, so the padded default variant would never apply";
   if (target.variants !== undefined) {
     if (!isRecord(target.variants)) return "its variants must map route variants to target variants";
     for (const [from, to] of Object.entries(target.variants)) {
       if (from === "") return "its variants must not use an empty route variant as a key: no selected variant is ever empty, so the remap would never apply";
+      if (from !== from.trim()) return "its variants must not use a padded route variant as a key: OpenCode does not trim variant names, so the remap would never apply";
       if (typeof to !== "string" || to === "") return `its variant remap "${from}" must be a string and not empty`;
+      if (to !== to.trim()) return `its variant remap "${from}" is padded with whitespace: OpenCode does not trim variant names, so the remap would never apply`;
     }
   }
   return null;
