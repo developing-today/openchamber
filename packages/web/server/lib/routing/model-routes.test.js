@@ -577,6 +577,22 @@ describe('validateModelRoute schedules', () => {
     expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2 }] })).toBeNull();
   });
 
+  it('judges a padded schedule target by its trimmed spelling, the way OpenCode trims before matching', () => {
+    // A padded entry that names a route target applies in OpenCode, plain or pattern.
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' deepseek/v4 '] }] })).toBeNull();
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: ['\tdeepseek/* '] }] })).toBeNull();
+    // Padded entries get the same specific verdicts as their unpadded spellings.
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' deepseek/v4#high '] }] })).toMatch(
+      /schedule 1 target "deepseek\/v4#high" carries a "#variant" suffix/,
+    );
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' opencode-route/b '] }] })).toMatch(
+      /schedule 1 target "opencode-route\/b" is a route reference/,
+    );
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' anthropic/claude-sonnet-4-6 '] }] })).toMatch(
+      /schedule 1 target "anthropic\/claude-sonnet-4-6" matches no target in the route/,
+    );
+  });
+
   it('accepts a schedule target pattern that partly overlaps a route target pattern, and refuses disjoint patterns', () => {
     const withTargets = (targets, entry) =>
       validateModelRoute('x', { targets, schedules: [{ when: {}, factor: 2, targets: [entry] }] });

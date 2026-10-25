@@ -303,7 +303,12 @@ const validateSchedules = (id, schedules, targets) => {
         return `route "${id}" ${label} targets must be a list of non-empty target references`;
       if (schedule.targets.length === 0)
         return `route "${id}" ${label} targets must not be empty: OpenCode applies a schedule with an empty targets list to every target in the route, so leave the key out for every target`;
-      for (const entry of schedule.targets) {
+      for (const rawEntry of schedule.targets) {
+        // OpenCode trims each schedule entry before matching it, so the
+        // entry is judged by its trimmed spelling: padding alone neither
+        // refuses an entry OpenCode would apply nor changes which of the
+        // specific verdicts below an entry gets.
+        const entry = rawEntry.trim();
         // OpenCode matches a schedule entry against a `provider/model`
         // reference, which carries no variant, so an entry spelled with the
         // `#variant` suffix targets use everywhere else can never match.
