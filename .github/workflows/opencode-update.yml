@@ -173,9 +173,17 @@ jobs:
             awk '/^## Failure history/{found=1; next} found' "$RUNNER_TEMP/old-body.md" > "${history_file}"
           fi
           # Error excerpt: last lines of the failing step's log with nix's
-          # "copying path" noise removed, capped, and code fences neutralized
-          # so the issue body stays valid Markdown.
-          grep -v "copying path" "${ERROR_LOG}" | tail -n 80 | sed 's/~~~/---/g' | head -c 5000 > "$RUNNER_TEMP/excerpt.txt" || true
+          # "copying path" fetch noise removed and code fences neutralized
+          # so the issue body stays valid Markdown. The cap keeps the END of
+          # the tail (where the error is): truncate from the start, and drop
+          # the partial first line the byte cut leaves behind, never the
+          # final lines.
+          grep -v "copying path" "${ERROR_LOG}" | tail -n 80 | sed 's/~~~/---/g' > "$RUNNER_TEMP/excerpt-full.txt" || true
+          if [ "$(wc -c < "$RUNNER_TEMP/excerpt-full.txt")" -gt 5000 ]; then
+            tail -c 5000 "$RUNNER_TEMP/excerpt-full.txt" | tail -n +2 > "$RUNNER_TEMP/excerpt.txt"
+          else
+            cp "$RUNNER_TEMP/excerpt-full.txt" "$RUNNER_TEMP/excerpt.txt"
+          fi
           entry_file="$RUNNER_TEMP/entry.md"
           {
             echo "### Attempt ${attempts} — ${now} — opencode \`${NEW_REV}\`"
