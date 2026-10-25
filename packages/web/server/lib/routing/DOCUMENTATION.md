@@ -324,7 +324,10 @@ makes that visible so the user can spread them.
   pattern shares no model with any target the route expands to (two
   patterns count as sharing when one model matches both, even if each
   covers models the other does not; entries are judged in lower case,
-  the way OpenCode's case-insensitive schedule matcher reads them; the
+  the way OpenCode's case-insensitive schedule matcher reads them, and
+  trimmed before every check, the way OpenCode trims them before
+  matching, so padding alone neither refuses an entry that would apply
+  nor changes which verdict it gets; the
   set-level check judges entries against the concrete models the route
   reaches through its route references, because OpenCode inherits a
   route's schedule rules into nested groups and matches them against
