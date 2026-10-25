@@ -202,3 +202,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Local model download aborts once it passes the pinned size          | 2026-10-24 | #412, #413                 |
 | ROADMAP Done records the #382, #395, #383, #321, #406, #334 rows    | 2026-10-24 | #410, #414                 |
 | ROADMAP Done records the #412, #413, #410, #414 completions         | 2026-10-24 | #415, #416                 |
+| SSH remote-server list filter reuses validPort                      | 2026-10-24 | #418, #420                 |
+| ROADMAP Done records the #415 completion                            | 2026-10-24 | #419, #421                 |
