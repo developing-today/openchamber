@@ -105,7 +105,7 @@ export async function downloadToFile(url, outputPath, onProgress, expected = {})
  * @param {{ bytes?: number, sha256?: string }} expected
  * @returns {Promise<boolean>}
  */
-async function archiveMatchesPins(archivePath, expected) {
+export async function archiveMatchesPins(archivePath, expected) {
   try {
     const s = await stat(archivePath);
     if (!s.isFile() || s.size !== expected.bytes) {
@@ -181,11 +181,16 @@ export async function isLocalSttModelInstalled(modelsDir, modelId) {
  * installed model forever ("Protobuf parsing failed" at load time).
  *
  * @param {{ modelsDir: string, modelId: string,
- *           onProgress?: (downloadedBytes: number, totalBytes: number | null) => void }} options
+ *           onProgress?: (downloadedBytes: number, totalBytes: number | null) => void,
+ *           fetchImpl?: typeof fetch, spec?: object,
+ *           extractImpl?: (archivePath: string, destDir: string) => Promise<void> }} options
+ *        `fetchImpl`, `spec` and `extractImpl` are test seams: production
+ *        callers omit them and get the global fetch, the catalog spec and
+ *        the system tar extraction.
  * @returns {Promise<string>}
  */
-export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
-  const spec = getLocalSttModelSpec(modelId);
+export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetchImpl, spec: specOverride, extractImpl = extractTarArchive }) {
+  const spec = specOverride ?? getLocalSttModelSpec(modelId);
   const modelDir = path.join(modelsDir, spec.extractedDir);
   if (await hasRequiredFiles(modelDir, spec.requiredFiles)) {
     return modelDir;
@@ -201,12 +206,12 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
 
   if (!(await archiveMatchesPins(archivePath, spec))) {
     await rm(archivePath, { force: true }).catch(() => undefined);
-    await downloadToFile(spec.archiveUrl, archivePath, onProgress, spec);
+    await downloadToFile(spec.archiveUrl, archivePath, onProgress, { ...spec, fetchImpl });
   }
 
   const stagingDir = path.join(modelsDir, `.staging-${spec.extractedDir}-${Date.now()}`);
   try {
-    await extractTarArchive(archivePath, stagingDir);
+    await extractImpl(archivePath, stagingDir);
 
     const stagedModelDir = path.join(stagingDir, spec.extractedDir);
     if (!(await hasRequiredFiles(stagedModelDir, spec.requiredFiles))) {
