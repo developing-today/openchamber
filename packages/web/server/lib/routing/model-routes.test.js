@@ -512,6 +512,19 @@ describe('validateModelRoute target options and display name', () => {
     expect(validateModelRoute('luna', { targets: [{ model: 'openrouter/anthropic/claude-sonnet-4' }] })).toBeNull();
   });
 
+  it('rejects target references with whitespace inside a segment or variant, which can never match a model', () => {
+    for (const spaced of ['open ai/gpt-6-luna', 'openai/gpt 6-luna', 'openai/gpt-6-luna#hi there', 'openai/gpt\t6-luna']) {
+      expect(validateModelRoute('luna', { targets: [spaced] })).toMatch(/containing whitespace/);
+      expect(validateModelRoute('luna', { targets: [{ model: spaced }] })).toMatch(/containing whitespace/);
+    }
+    expect(validateModelRoute('luna', { targets: ['open ai/gpt-6-luna'] })).toMatch(/provider segment containing whitespace/);
+    expect(validateModelRoute('luna', { targets: ['openai/gpt 6-luna'] })).toMatch(/model segment containing whitespace/);
+    expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna#hi there'] })).toMatch(/variant containing whitespace/);
+    // Whitespace-free references still validate, including `/`-containing model IDs and variants.
+    expect(validateModelRoute('luna', { targets: ['openrouter/anthropic/claude-sonnet-4'] })).toBeNull();
+    expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna#high'] })).toBeNull();
+  });
+
   it('rejects padded variant settings, which OpenCode never trims or applies', () => {
     expect(
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: ' high' }] }),
@@ -528,6 +541,18 @@ describe('validateModelRoute target options and display name', () => {
         targets: [{ model: 'openai/*', defaultVariant: 'high', variants: { low: 'high' } }],
       }),
     ).toBeNull();
+  });
+
+  it('rejects variant settings containing whitespace, which no variant name ever has', () => {
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: 'hi there' }] }),
+    ).toMatch(/defaultVariant contains whitespace/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { 'hi there': 'low' } }] }),
+    ).toMatch(/must not use a route variant containing whitespace as a key/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { high: 'lo w' } }] }),
+    ).toMatch(/remap "high" contains whitespace/);
   });
 });
 

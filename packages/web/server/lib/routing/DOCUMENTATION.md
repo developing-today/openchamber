@@ -295,12 +295,14 @@ makes that visible so the user can spread them.
   route (OpenCode attaches each target once, keyed by its full model
   reference, and silently drops the later entry, including its variant
   settings), a target reference with a padded provider, model or
-  `#variant` segment, an empty `/`-joined segment, or a padded
+  `#variant` segment, a segment or variant containing whitespace, an
+  empty `/`-joined segment, or a padded or whitespace-containing
   `defaultVariant`/`variants` setting (OpenCode does not trim target
   references or variant names — trimming is specific to schedule
-  entries — so the padded or empty spelling would never match a model;
+  entries — so the padded, whitespace-containing or empty spelling
+  would never match a model;
   model IDs containing `/` stay accepted while every segment is
-  non-empty and unpadded), a concrete target fully covered by an earlier pattern
+  non-empty, unpadded and free of whitespace), a concrete target fully covered by an earlier pattern
   target in the same route with the same `#variant` (the pattern
   attaches that model under its own settings, so the later entry and
   its variant settings would never apply; an earlier pattern carrying
