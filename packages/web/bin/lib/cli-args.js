@@ -453,7 +453,15 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'timeout': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.timeout = typeof value === 'string' ? value : options.timeout;
+        // Judged whole, like --port and --lines/--limit: Number(...) alone
+        // reads 'abc' as NaN, which serializes to null in the control
+        // request and the server then silently substitutes the 600-second
+        // default; '1.5' and '86401' pass here and fail only at the server.
+        const parsedTimeout = /^\d+$/.test((value ?? '').trim()) ? parseInt(value, 10) : NaN;
+        if (!(parsedTimeout >= 1 && parsedTimeout <= 86400)) {
+          throw new TunnelCliError('Invalid timeout value. Provide an integer number of seconds from 1 to 86400.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.timeout = value;
         break;
       }
       case 'with-status':
