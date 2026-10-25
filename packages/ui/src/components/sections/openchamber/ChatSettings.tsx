@@ -29,7 +29,11 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
-import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import {
+  useUIStore,
+  type ActiveRunModelChangeBehavior,
+  type LargeTextPasteBehavior,
+} from '@/stores/useUIStore';
 
 import { MessageSearchSettings } from './MessageSearchSettings';
 import { SessionGoalCheckerField, SessionGoalLengthFields, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
@@ -74,6 +78,11 @@ const LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS: ChipOption<LargeTextPasteBehavior>[] = 
   { id: 'attach', labelKey: 'settings.openchamber.visual.option.largeTextPaste.attach.label' },
   { id: 'inline', labelKey: 'settings.openchamber.visual.option.largeTextPaste.inline.label' },
   { id: 'inline-double-paste', labelKey: 'settings.openchamber.visual.option.largeTextPaste.inlineDoublePaste.label' },
+];
+
+const ACTIVE_RUN_MODEL_CHANGE_OPTIONS: ChipOption<ActiveRunModelChangeBehavior>[] = [
+  { id: 'next-message', labelKey: 'settings.openchamber.visual.option.activeRunModelChange.nextMessage.label' },
+  { id: 'restart', labelKey: 'settings.openchamber.visual.option.activeRunModelChange.restart.label' },
 ];
 
 /** A sub-option that only matters while the option above it is on. */
@@ -343,6 +352,8 @@ const ComposerTab: React.FC = () => {
   const setFollowUpBehavior = useMessageQueueStore((state) => state.setFollowUpBehavior);
   const largeTextPasteBehavior = useUIStore((state) => state.largeTextPasteBehavior);
   const setLargeTextPasteBehavior = useUIStore((state) => state.setLargeTextPasteBehavior);
+  const activeRunModelChangeBehavior = useUIStore((state) => state.activeRunModelChangeBehavior);
+  const setActiveRunModelChangeBehavior = useUIStore((state) => state.setActiveRunModelChangeBehavior);
   const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const setAllowPromptingSubagentSessions = useUIStore((state) => state.setAllowPromptingSubagentSessions);
   const savePastedImagesAsFiles = useUIStore((state) => state.savePastedImagesAsFiles);
@@ -421,6 +432,23 @@ const ComposerTab: React.FC = () => {
                 onSelect={() => setLargeTextPasteBehavior(option.id)}
                 label={t(option.labelKey)}
                 ariaLabel={t('settings.openchamber.visual.field.largeTextPasteOptionAria', { option: t(option.labelKey) })}
+              />
+            ))}
+          </SettingsRadioGroup>
+        </SettingsControlGroup>
+        <SettingsControlGroup
+          title={t('settings.openchamber.visual.field.activeRunModelChange')}
+          info={t('settings.openchamber.visual.field.activeRunModelChangeInfo')}
+          settingsItem="chat.active-run-model-change"
+        >
+          <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.activeRunModelChange')}>
+            {ACTIVE_RUN_MODEL_CHANGE_OPTIONS.map((option) => (
+              <SettingsRadioOption
+                key={option.id}
+                selected={activeRunModelChangeBehavior === option.id}
+                onSelect={() => setActiveRunModelChangeBehavior(option.id)}
+                label={t(option.labelKey)}
+                ariaLabel={t(option.labelKey)}
               />
             ))}
           </SettingsRadioGroup>
