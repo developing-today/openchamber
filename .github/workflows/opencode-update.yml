@@ -172,7 +172,15 @@ jobs:
           fi
           # Error excerpt: last lines of the failing step's log, capped, with
           # code fences neutralized so the issue body stays valid Markdown.
-          tail -n 80 "${ERROR_LOG}" | sed 's/~~~/---/g' | head -c 5000 > "$RUNNER_TEMP/excerpt.txt" || true
+          # The cap keeps the END of the tail (where the error is): truncate
+          # from the start, and drop the partial first line the byte cut
+          # leaves behind, never the final lines.
+          tail -n 80 "${ERROR_LOG}" | sed 's/~~~/---/g' > "$RUNNER_TEMP/excerpt-full.txt" || true
+          if [ "$(wc -c < "$RUNNER_TEMP/excerpt-full.txt")" -gt 5000 ]; then
+            tail -c 5000 "$RUNNER_TEMP/excerpt-full.txt" | tail -n +2 > "$RUNNER_TEMP/excerpt.txt"
+          else
+            cp "$RUNNER_TEMP/excerpt-full.txt" "$RUNNER_TEMP/excerpt.txt"
+          fi
           entry_file="$RUNNER_TEMP/entry.md"
           {
             echo "### Attempt ${attempts} — ${now} — opencode \`${NEW_REV}\`"
