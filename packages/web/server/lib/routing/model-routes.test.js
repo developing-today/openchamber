@@ -498,6 +498,37 @@ describe('validateModelRoute target options and display name', () => {
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { '': 'high' } }] }),
     ).toMatch(/must not use an empty route variant as a key/);
   });
+
+  it('rejects padded and empty-segment target references, which can never match a model', () => {
+    for (const padded of [' openai/gpt-6-luna', 'openai/gpt-6-luna ', 'openai/gpt-6-luna# high']) {
+      expect(validateModelRoute('luna', { targets: [padded] })).toMatch(/padded/);
+      expect(validateModelRoute('luna', { targets: [{ model: padded }] })).toMatch(/padded/);
+    }
+    expect(validateModelRoute('luna', { targets: ['openai/ gpt-6-luna'] })).toMatch(/padded model segment/);
+    expect(validateModelRoute('luna', { targets: ['openai//gpt-6-luna'] })).toMatch(/empty model segment/);
+    expect(validateModelRoute('luna', { targets: [{ model: 'openai//gpt-6-luna' }] })).toMatch(/empty model segment/);
+    // Model IDs containing `/` still validate, in both target forms.
+    expect(validateModelRoute('luna', { targets: ['openrouter/anthropic/claude-sonnet-4'] })).toBeNull();
+    expect(validateModelRoute('luna', { targets: [{ model: 'openrouter/anthropic/claude-sonnet-4' }] })).toBeNull();
+  });
+
+  it('rejects padded variant settings, which OpenCode never trims or applies', () => {
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: ' high' }] }),
+    ).toMatch(/defaultVariant is padded/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { ' high': 'low' } }] }),
+    ).toMatch(/must not use a padded route variant as a key/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { high: ' low' } }] }),
+    ).toMatch(/remap "high" is padded/);
+    // Unpadded variant settings still validate, including on pattern targets.
+    expect(
+      validateModelRoute('luna', {
+        targets: [{ model: 'openai/*', defaultVariant: 'high', variants: { low: 'high' } }],
+      }),
+    ).toBeNull();
+  });
 });
 
 describe('validateModelRoute schedules', () => {

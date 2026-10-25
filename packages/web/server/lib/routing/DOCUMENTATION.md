@@ -294,7 +294,13 @@ makes that visible so the user can spread them.
   be finite and which would save as `null`), a target listed twice in one
   route (OpenCode attaches each target once, keyed by its full model
   reference, and silently drops the later entry, including its variant
-  settings), a concrete target fully covered by an earlier pattern
+  settings), a target reference with a padded provider, model or
+  `#variant` segment, an empty `/`-joined segment, or a padded
+  `defaultVariant`/`variants` setting (OpenCode does not trim target
+  references or variant names — trimming is specific to schedule
+  entries — so the padded or empty spelling would never match a model;
+  model IDs containing `/` stay accepted while every segment is
+  non-empty and unpadded), a concrete target fully covered by an earlier pattern
   target in the same route with the same `#variant` (the pattern
   attaches that model under its own settings, so the later entry and
   its variant settings would never apply; an earlier pattern carrying
