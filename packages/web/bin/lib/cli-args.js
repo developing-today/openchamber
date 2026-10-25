@@ -474,20 +474,24 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'lines': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        const parsed = parseInt(value ?? '', 10);
-        if (Number.isFinite(parsed) && parsed > 0) {
-          options.lines = parsed;
+        // Judged whole, like --port: parseInt alone would read '10junk' as
+        // 10, '1e3' as 1 and '10.9' as 10, and a fully non-numeric value
+        // would silently keep the default instead of telling the user.
+        if (!/^\d+$/.test((value ?? '').trim()) || parseInt(value, 10) < 1) {
+          throw new TunnelCliError('Invalid lines value. Provide a positive integer.', EXIT_CODE.USAGE_ERROR);
         }
+        options.lines = parseInt(value, 10);
         break;
       }
       case 'limit': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        const parsed = parseInt(value ?? '', 10);
-        if (!Number.isFinite(parsed) || parsed < 1) {
+        // Judged whole, like --port: parseInt alone would read '10junk' as
+        // 10, '1e3' as 1 and '10.9' as 10 instead of reaching this error.
+        if (!/^\d+$/.test((value ?? '').trim()) || parseInt(value, 10) < 1) {
           throw new TunnelCliError('Invalid limit value. Provide a positive integer.', EXIT_CODE.USAGE_ERROR);
         }
-        options.limit = parsed;
+        options.limit = parseInt(value, 10);
         break;
       }
       case 'relay':
