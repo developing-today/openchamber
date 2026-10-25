@@ -211,3 +211,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #417, #425 and #422 completions            | 2026-10-24 | #430, #431                 |
 | ROADMAP Done records the #428 and #430 completions                  | 2026-10-25 | #435, #436                 |
 | Web CLI `--lines`/`--limit` strict parsing                          | 2026-10-25 | #433, #434                 |
+| Schedule targets judged by their trimmed spelling                   | 2026-10-25 | #432, #437                 |
