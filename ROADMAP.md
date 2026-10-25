@@ -219,3 +219,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | opencode-update failure excerpt keeps the error at the tail         | 2026-10-25 | #450, #451                 |
 | Target references refuse whitespace inside a segment or variant     | 2026-10-25 | #453                       |
 | ROADMAP Done records five completions through #453                  | 2026-10-25 | #445, #454                 |
+| ROADMAP Done records the #450 completion                            | 2026-10-25 | #455                       |
