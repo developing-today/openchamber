@@ -204,3 +204,6 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #412, #413, #410, #414 completions         | 2026-10-24 | #415, #416                 |
 | SSH remote-server list filter reuses validPort                      | 2026-10-24 | #418, #420                 |
 | ROADMAP Done records the #415 completion                            | 2026-10-24 | #419, #421                 |
+| Dictation model downloads pinned by size and SHA-256                | 2026-10-24 | #417, #424                 |
+| ROADMAP Done records the #418 and #419 completions                  | 2026-10-24 | #425, #426                 |
+| Stale x86_64-linux node_modules hash updated                        | 2026-10-24 | #422, #423                 |
