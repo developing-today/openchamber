@@ -86,6 +86,8 @@ import {
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { useSubsessionDraftStore } from "@/stores/useSubsessionDraftStore"
+import { subagentPolicyForCreate } from "@/lib/opencode/subagentPolicy"
 import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { buildGoalIntroReminder } from "@/lib/goalWriter"
@@ -1095,6 +1097,10 @@ export async function materializeOpenDraftSession(selection: {
   draftDirectoryOverride = await resolveDraftStartDirectory(draftDirectoryOverride, draftProjectId)
 
   const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
+  // The subsession models the draft's picker holds go on the create call;
+  // the store is cleared only once the session exists, so a failed create
+  // keeps the selection for the retry.
+  const draftSubagentPolicy = subagentPolicyForCreate(useSubsessionDraftStore.getState().models)
   // The draft already knows what the first turn runs on, so the session is
   // created on that model and agent instead of being switched by the first
   // send — a switch v2 would record in the transcript.
@@ -1108,8 +1114,10 @@ export async function materializeOpenDraftSession(selection: {
     {
       model: { providerID: selection.providerID, id: selection.modelID, variant: selection.variant },
       agent: trimmedAgent,
+      subagentPolicy: draftSubagentPolicy,
     },
   )
+  if (created?.id && draftSubagentPolicy) useSubsessionDraftStore.getState().consume()
   if (!created?.id) {
     if (isChatDraft && draftDirectoryOverride) {
       await deleteChatDirectory(draftDirectoryOverride).catch(() => undefined)

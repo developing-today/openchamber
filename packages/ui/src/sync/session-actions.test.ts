@@ -98,6 +98,11 @@ mock.module("@/lib/opencode/client", () => ({
       const record = sessionRecords.get(sessionId)
       if (record) sessionRecords.set(sessionId, { ...record, title })
     }),
+    updateSessionSubagentPolicy: mock(async (sessionId: string, subagentPolicy: SubagentPolicy, directory?: string | null) => {
+      replyCalls.push({ method: "session.subagentPolicy", params: { sessionID: sessionId, subagentPolicy, directory } })
+      const record = sessionRecords.get(sessionId)
+      if (record) sessionRecords.set(sessionId, { ...record, subagentPolicy })
+    }),
     moveSession: mock(async (sessionId: string, directory: string) => {
       replyCalls.push({ method: "session.move", params: { sessionID: sessionId, directory } })
       const error = sessionMoveErrorsById.get(sessionId)
@@ -387,7 +392,7 @@ mock.module("./sync-refs", () => ({
 
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import type { Message, Part, Session, SessionStatus, SubagentPolicy } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
@@ -1516,6 +1521,43 @@ describe("updateSessionTitle live state", () => {
     const renameCall = replyCalls.find((call) => call.method === "session.rename")
     expect(renameCall?.params.directory).toBe("/test/project/.worktrees/feature")
     globalActiveSessions = []
+  })
+})
+
+describe("updateSessionSubagentPolicy live state", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    sessionRecords.clear()
+  })
+
+  test("publishes the re-read policy to the global and live stores", async () => {
+    const oldSession = sessionFixture("session-a")
+    const sessionStore = createStore({}, { session: [oldSession] })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionRecords.set("session-a", oldSession)
+
+    const { setActionRefs, updateSessionSubagentPolicy } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    const subagentPolicy = {
+      models: ["opencode-go/*", "anthropic/claude-sonnet-5"],
+      excludedModels: ["openai/gpt-5"],
+      agentOverrides: { build: { models: ["anthropic/claude-sonnet-5"] } },
+    }
+    const session = await updateSessionSubagentPolicy("session-a", "/test/project", subagentPolicy)
+
+    const policyCall = replyCalls.find((call) => call.method === "session.subagentPolicy")
+    expect(policyCall?.params.sessionID).toBe("session-a")
+    expect(policyCall?.params.subagentPolicy).toEqual(subagentPolicy)
+    expect(policyCall?.params.directory).toBe("/test/project")
+    // The update answers with nothing, so the published record is the
+    // re-read session carrying the policy the server kept.
+    expect(session.subagentPolicy).toEqual(subagentPolicy)
+    // SAFETY: the store under test holds the Session records the action
+    // published; the mock's capture array is the same records untyped.
+    expect((globalUpsertedSessions[0] as Session)?.subagentPolicy).toEqual(subagentPolicy)
+    expect(sessionStore.getState().session[0].subagentPolicy).toEqual(subagentPolicy)
   })
 })
 
