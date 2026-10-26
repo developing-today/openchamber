@@ -1,8 +1,6 @@
-# THROWAWAY debug workflow (branch debug/fod-ci-capture): replicate the
-# opencode-update workflow's build context exactly (host `bun install` in the
-# checkout, then `nix build .#openchamber`) to reproduce the node_modules FOD
-# hash mismatch, then capture the produced tree's per-file manifest.
-# Delete with the branch.
+# THROWAWAY debug workflow (branch debug/fod-ci-capture): controlled A/B in a
+# single job — build the node_modules FOD standalone, then build the full
+# package, same checkout, same runner. Delete with the branch.
 name: fod-capture
 
 on:
@@ -25,35 +23,37 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Record environment
+      - name: Record environment and derivation paths
         run: |
           { nix --version; uname -a; nix config show; } > "$RUNNER_TEMP/env.txt" 2>&1 || true
+          {
+            echo "standalone fod drv: $(nix eval --raw .#packages.x86_64-linux.openchamber.node_modules.drvPath)"
+            echo "full package drv:   $(nix eval --raw .#packages.x86_64-linux.openchamber.drvPath)"
+          } | tee "$RUNNER_TEMP/drvs.txt"
 
-      - name: Build the openchamber package (clean checkout, no host install)
-        id: build
+      - name: B — build the full package (first, so its FOD build is fresh)
+        id: b
         continue-on-error: true
         run: |
           set -o pipefail
-          nix build .#openchamber 2>&1 | tee "$RUNNER_TEMP/build.log"
+          nix build .#openchamber 2>&1 | tee "$RUNNER_TEMP/b.log" || true
+          grep -m1 "got:" "$RUNNER_TEMP/b.log" || echo "B: no mismatch line"
 
-      - name: Rebuild FOD with the CI-observed hash and manifest it
-        if: always()
+      - name: A — build the FOD standalone (same drv, fresh: B registered nothing)
+        id: a
+        continue-on-error: true
         run: |
-          grep -m1 "got:" "$RUNNER_TEMP/build.log" || echo "no got: line (build outcome above)"
-          sed -i 's|sha256-UTeYcuNWiTMZiOHzLoGNmRj8L0Kf3CJcmr/nytukvtM=|sha256-l/YLyGlVTz60KAD9ylwVqKaN+DMxP+gAE2ba0ROvaIc=|' nix/hashes.json
-          OUT=$(nix build .#packages.x86_64-linux.openchamber.node_modules --no-link --print-out-paths)
-          echo "captured out: $OUT"
-          cd "$OUT"
-          find . -printf '%y %m %s %p %l\n' | LC_ALL=C sort > "$RUNNER_TEMP/structure.txt"
-          find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/files.sha256"
+          set -o pipefail
+          nix build .#packages.x86_64-linux.openchamber.node_modules --print-out-paths --no-link 2>&1 | tee "$RUNNER_TEMP/a.log"
+          echo "A outcome: ${PIPESTATUS[0]}"
 
-      - name: Upload manifest
+      - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fod-ci-manifest
           path: |
-            ${{ runner.temp }}/structure.txt
-            ${{ runner.temp }}/files.sha256
             ${{ runner.temp }}/env.txt
-            ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/drvs.txt
+            ${{ runner.temp }}/a.log
+            ${{ runner.temp }}/b.log
