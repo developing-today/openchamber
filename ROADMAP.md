@@ -215,8 +215,14 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #432 completion                            | 2026-10-25 | #441, #442                 |
 | ROADMAP Done records the #433 and #435 completions                  | 2026-10-25 | #438, #443                 |
 | Model-route targets refuse padded and empty-segment spellings       | 2026-10-25 | #439, #440, #444           |
+| Scheduled opencode-update workflow (daily bump, build, test)        | 2026-10-25 | #448                       |
 | Web CLI `--timeout` strict parsing                                  | 2026-10-25 | #446, #447                 |
 | opencode-update failure excerpt keeps the error at the tail         | 2026-10-25 | #450, #451                 |
 | Target references refuse whitespace inside a segment or variant     | 2026-10-25 | #453                       |
 | ROADMAP Done records five completions through #453                  | 2026-10-25 | #445, #454                 |
 | ROADMAP Done records the #450 completion                            | 2026-10-25 | #455                       |
+| opencode-update merge handoff for token refusals, cleaner excerpts  | 2026-10-25 | #452                       |
+| OpenCode updated to d7d6466f8342                                    | 2026-10-25 | #456                       |
+| Renovate kept off the workflow-owned opencode flake input           | 2026-10-25 | #459                       |
+| opencode-update install failures recorded on the tracking issue     | 2026-10-26 | #457, #460                 |
+| ROADMAP Done records the #448, #452, #456, #459, #460 completions   | 2026-10-26 | #458, #461                 |
