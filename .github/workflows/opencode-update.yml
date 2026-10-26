@@ -187,7 +187,16 @@ jobs:
           # final lines.
           grep -v "copying path" "${ERROR_LOG}" | tail -n 80 | sed 's/~~~/---/g' > "$RUNNER_TEMP/excerpt-full.txt" || true
           if [ "$(wc -c < "$RUNNER_TEMP/excerpt-full.txt")" -gt 5000 ]; then
-            tail -c 5000 "$RUNNER_TEMP/excerpt-full.txt" | tail -n +2 > "$RUNNER_TEMP/excerpt.txt"
+            tail -c 5000 "$RUNNER_TEMP/excerpt-full.txt" > "$RUNNER_TEMP/excerpt-chunk.txt"
+            # Drop the partial first line only when a second line exists:
+            # when the tail is a single long line (the shape nix errors
+            # take), dropping it would leave an empty excerpt, so the
+            # truncated line is kept whole instead.
+            if [ "$(awk 'END { print NR }' "$RUNNER_TEMP/excerpt-chunk.txt")" -ge 2 ]; then
+              tail -n +2 "$RUNNER_TEMP/excerpt-chunk.txt" > "$RUNNER_TEMP/excerpt.txt"
+            else
+              cp "$RUNNER_TEMP/excerpt-chunk.txt" "$RUNNER_TEMP/excerpt.txt"
+            fi
           else
             cp "$RUNNER_TEMP/excerpt-full.txt" "$RUNNER_TEMP/excerpt.txt"
           fi
