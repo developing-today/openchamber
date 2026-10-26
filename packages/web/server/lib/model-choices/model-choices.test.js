@@ -221,6 +221,16 @@ describe('model choice service', () => {
     const summary = await service.summary({ limit: 1 });
     expect(summary.events.map((event) => event.sessionModel)).toEqual(['p/second']);
   });
+
+  // Settings asks for limit=0: the count and notes, no events.
+  it('returns no events for a limit of 0, and the default for a missing limit', async () => {
+    const { service } = makeService({});
+    await service.record(choice({}));
+    const none = await service.summary({ limit: 0 });
+    expect(none.events).toEqual([]);
+    expect(none.total).toBe(1);
+    expect((await service.summary({ limit: undefined })).events).toHaveLength(1);
+  });
 });
 
 describe('model choice routes', () => {

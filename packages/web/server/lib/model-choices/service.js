@@ -37,7 +37,7 @@ export const createModelChoiceService = ({ store, readSettings, persistSettings 
   const summary = async ({ limit = DEFAULT_EVENT_LIMIT } = {}) => {
     const settings = await readSettings();
     const { events, decisions } = await store.snapshot();
-    const count = Math.min(Math.max(Math.trunc(limit) || DEFAULT_EVENT_LIMIT, 0), MAX_EVENT_LIMIT);
+    const count = Math.min(Math.max(Number.isFinite(limit) ? Math.trunc(limit) : DEFAULT_EVENT_LIMIT, 0), MAX_EVENT_LIMIT);
     return {
       enabled: isModelChoiceRecordingEnabled(settings),
       total: events.length,
