@@ -16,6 +16,7 @@ import { dict as trDict } from './messages/tr';
 import { dict as arDict } from './messages/ar';
 import { dict as heDict } from './messages/he';
 import { routingI18n } from './messages/routing.i18n';
+import { sessionErrorRecoveryI18n } from './messages/session-error-recovery.i18n';
 
 const localeDictionaries = {
   en: enDict,
@@ -67,6 +68,17 @@ describe('i18n dictionaries', () => {
 
     for (const dictionary of Object.values(localeDictionaries)) {
       expect(Object.keys(dictionary).sort()).toEqual(englishKeys);
+    }
+  });
+
+  test('session recovery controls are translated in every locale', () => {
+    const english = Object.entries(sessionErrorRecoveryI18n.en);
+    for (const [locale, dictionary] of Object.entries(sessionErrorRecoveryI18n)) {
+      expect(Object.keys(dictionary).sort()).toEqual(english.map(([key]) => key).sort());
+      for (const [key, englishText] of english) {
+        expect(dictionary[key as keyof typeof dictionary].trim()).toBeTruthy();
+        if (locale !== 'en') expect(dictionary[key as keyof typeof dictionary]).not.toBe(englishText);
+      }
     }
   });
 

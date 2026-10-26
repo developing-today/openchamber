@@ -29,6 +29,7 @@ import {
   type RouteTargetStats,
 } from '@/lib/routing/modelRoutesApi';
 import { PoolAdvancedFields } from '@/components/sections/routing/PoolAdvancedFields';
+import { PoolHealthSection } from '@/components/sections/routing/PoolHealthSection';
 import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/PoolTargetOptions';
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
@@ -450,6 +451,7 @@ export const ModelPoolsSection: React.FC = () => {
   const providers = useConfigStore((state) => state.providers);
   const decisions = useRoutingStore((state) => state.decisions);
   const [routes, setRoutes] = React.useState<Record<string, ModelRoute> | null>(null);
+  const [available, setAvailable] = React.useState(true);
   const [drafts, setDrafts] = React.useState<Record<string, ModelRoute>>({});
   const [tuning, setTuning] = React.useState<ModelRouteTuning | null>(null);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
@@ -462,11 +464,18 @@ export const ModelPoolsSection: React.FC = () => {
     let cancelled = false;
     fetchModelRoutes()
       .then((state) => {
-        if (!cancelled && state.available) {
-          lastSavedRef.current = state.routes;
-          setRoutes(state.routes);
-          setTuning(state.tuning ?? null);
+        if (cancelled) return;
+        // A server without /api/model-routes answers 404, which the API
+        // layer reports as available: false rather than throwing. Without
+        // this branch routes stays null and the section below shows its
+        // Loading text forever.
+        if (!state.available) {
+          setAvailable(false);
+          return;
         }
+        lastSavedRef.current = state.routes;
+        setRoutes(state.routes);
+        setTuning(state.tuning ?? null);
       })
       .catch((failure) => {
         if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure));
@@ -534,12 +543,26 @@ export const ModelPoolsSection: React.FC = () => {
     [decisions],
   );
 
+  // The health panel reads again whenever a pool's content changes.
+  const routesKey = React.useMemo(() => JSON.stringify(routes), [routes]);
+
+  const lowerTargetWeight = React.useCallback((poolID: string, targetRef: string) => {
+    if (!routes) return;
+    const route = routes[poolID];
+    if (!route) return;
+    const current = route.weights?.[targetRef] ?? 1;
+    const next = Math.max(0.1, Math.round((current / 2) * 100) / 100);
+    void persist({ ...routes, [poolID]: { ...route, weights: { ...route.weights, [targetRef]: next } } });
+  }, [routes, persist]);
+
   return (
     <SettingsSection title={t('settings.pools.title')}>
       <div className={SETTINGS_FIELDS_STACK_CLASS}>
         <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.description')}</p>
         {error ? <p className={SETTINGS_HELPER_CLASS}>{error}</p> : null}
-        {routes === null ? (
+        {!available ? (
+          <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.unavailable')}</p>
+        ) : routes === null ? (
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.loading')}</p>
         ) : (
           <>
@@ -602,6 +625,7 @@ export const ModelPoolsSection: React.FC = () => {
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.tuning.title')}</p>
               <RouteTuningFields tuning={tuning} onSave={(next) => void saveTuning(next)} />
             </div>
+            <PoolHealthSection onLowerWeight={lowerTargetWeight} reloadKey={routesKey} />
             <PoolTelemetry />
             {recentDecisions.length > 0 ? (
               <div className="space-y-1">

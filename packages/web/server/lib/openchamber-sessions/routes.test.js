@@ -647,6 +647,25 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('forwards subagentPolicy to the OpenCode create call and includes it in the result', async () => {
+    const { app } = createApp();
+    const subagentPolicy = {
+      models: ['anthropic/claude-sonnet-5'],
+      excludedModels: ['openai/gpt-5.5'],
+      agentOverrides: { build: { models: ['anthropic/claude-sonnet-5'] } },
+    };
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', subagentPolicy })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      subagentPolicy,
+    });
+    expect(response.body.subagentPolicy).toEqual(subagentPolicy);
+  });
+
   it('percent-encodes the directory header for non-ASCII checkout paths', async () => {
     const { app } = createApp();
     await request(app)

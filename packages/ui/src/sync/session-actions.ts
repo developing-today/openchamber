@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
+import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SubagentPolicy, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
@@ -998,7 +998,12 @@ function getRequestReplyDirectory(
  * what the first turn will run on pass it here, so the session is created on
  * that selection and the first prompt needs no switch at all.
  */
-export type SessionCreateSelection = { model?: ModelSelection; agent?: string }
+export type SessionCreateSelection = {
+  model?: ModelSelection
+  agent?: string
+  /** Models the new session's subsessions may run; sent on create when set. */
+  subagentPolicy?: SubagentPolicy
+}
 
 export async function createSession(
   title?: string,
@@ -1018,7 +1023,7 @@ export async function createSession(
     // wrong project (closes #1637, #2270).
     const effectiveDirectory = directoryOverride ?? dir()
     const session = await opencodeClient.createSession(
-      { title, metadata, model: selection?.model, agent: selection?.agent },
+      { title, metadata, model: selection?.model, agent: selection?.agent, subagentPolicy: selection?.subagentPolicy },
       effectiveDirectory,
     )
 
@@ -2009,6 +2014,25 @@ export async function updateSessionTitle(
   mirrorSessionIntoLiveStores(session, sessionDirectory)
 }
 
+/**
+ * Replaces a session's subsession model policy. The caller sends the whole
+ * policy (the picker preserves `excludedModels` and `agentOverrides` as
+ * loaded), and the saved state comes back from a re-read of the session
+ * record, the way `updateSessionTitle` settles a rename.
+ */
+export async function updateSessionSubagentPolicy(
+  sessionId: string,
+  directory: string | null | undefined,
+  subagentPolicy: SubagentPolicy,
+): Promise<Session> {
+  const sessionDirectory = directory ?? getSessionDirectory(sessionId)
+  await opencodeClient.updateSessionSubagentPolicy(sessionId, subagentPolicy, sessionDirectory)
+  const session = await opencodeClient.getSession(sessionId, sessionDirectory)
+  useGlobalSessionsStore.getState().upsertSession(session)
+  mirrorSessionIntoLiveStores(session, sessionDirectory)
+  return session
+}
+
 // ---------------------------------------------------------------------------
 // Optimistic message send — insert user message before API call, rollback on error
 // ---------------------------------------------------------------------------
@@ -2594,7 +2618,11 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
  * 4. Call the runtime revert endpoint and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
-export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+export async function revertToMessage(
+  sessionId: string,
+  messageId: string,
+  options: { restorePromptToComposer?: boolean } = {},
+): Promise<void> {
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
@@ -2649,8 +2677,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     store.setState({ session: sessions })
   }
 
-  // Save input store state before mutations — if the API fails we need to
-  // roll back both text and attachments to their previous values.
+  // Recovery replays the captured message directly and must leave the user's
+  // current composer draft alone. Ordinary reverts restore the prompt to the
+  // composer and roll it back if staging fails.
+  const restorePromptToComposer = options.restorePromptToComposer !== false
   const prevInputAttachments = [...useInputStore.getState().attachedFiles]
   const prevInputText = useInputStore.getState().pendingInputText
   const prevInputMode = useInputStore.getState().pendingInputMode
@@ -2660,7 +2690,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
 
   // Restore reverted message text and file attachments to input
-  if (messageText) {
+  if (restorePromptToComposer && messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
@@ -2672,7 +2702,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // must not carry over, even when the current message has no files.
   // Only a prompt goes back to the composer: reverting a subagent run report
   // leaves whatever the user is typing alone.
-  if (targetMsg?.role === "user") {
+  if (restorePromptToComposer && targetMsg?.role === "user") {
     restoreFilePartsToInput(submittedFileParts)
     if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
   }
@@ -2708,15 +2738,17 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     store.setState({
       session: rollback,
     })
-    // Rollback input store: restore previous text and attachments
-    useInputStore.setState({
-      pendingInputText: prevInputText,
-      pendingInputMode: prevInputMode,
-      attachedFiles: prevInputAttachments,
-    })
-    if (draftTarget) {
-      useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
-      useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
+    if (restorePromptToComposer) {
+      // Rollback input store: restore previous text and attachments
+      useInputStore.setState({
+        pendingInputText: prevInputText,
+        pendingInputMode: prevInputMode,
+        attachedFiles: prevInputAttachments,
+      })
+      if (draftTarget) {
+        useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
+        useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
+      }
     }
     throw err
   }

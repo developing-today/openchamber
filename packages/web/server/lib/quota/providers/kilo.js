@@ -13,7 +13,7 @@ import {
 
 export const providerId = 'kilo';
 export const providerName = 'Kilo Code';
-const aliases = ['kilo', 'kilocode', 'kilo-code'];
+export const aliases = ['kilo', 'kilocode', 'kilo-code'];
 const KILO_BALANCE_URL = 'https://api.kilo.ai/api/profile/balance';
 
 const getAuthEntryForKilo = (auth) => normalizeAuthEntry(getAuthEntry(auth, aliases));

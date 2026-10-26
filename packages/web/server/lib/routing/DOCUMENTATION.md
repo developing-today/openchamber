@@ -317,6 +317,146 @@ its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
   needs no telemetry, since it just compares the assistant messages' own
   `providerID`/`modelID`/`variant` (`packages/ui/src/components/chat/lib/turns/modelChange.ts`).
 
+## Pool health
+
+Settings, Routing, Model pools shows how many sessions share each pool target
+and how close a target's plan looks to its quota window. Several sessions on
+one target lose their prompt cache together when its plan runs out; the panel
+makes that visible so the user can spread them.
+
+- `model-routes.js` validates a pool before Settings saves it, key by key
+  against OpenCode's `Config.ModelRoute` schema, `schedules` included: a
+  schedule carries an optional `id`, `targets` patterns and `note`, a required
+  `when` window (weekday names or 0 to 6, days of month or -1, `start`/`end`
+  local times, `timezone`, `from`/`until`), and one of `factor` or `weight`.
+  Values OpenCode would drop or silently ignore are refused with the reason:
+  a window its parser cannot read, an empty day list, a window whose start
+  and end are the same time (OpenCode treats that as an empty window that
+  never applies), a non-finite weight or health rate (an overflowing JSON
+  number such as `1e999` parses to `Infinity`, which OpenCode requires to
+  be finite and which would save as `null`), a target listed twice in one
+  route (OpenCode attaches each target once, keyed by its full model
+  reference, and silently drops the later entry, including its variant
+  settings), a target reference with a padded provider, model or
+  `#variant` segment, a segment or variant containing whitespace, an
+  empty `/`-joined segment, or a padded or whitespace-containing
+  `defaultVariant`/`variants` setting (OpenCode does not trim target
+  references or variant names — trimming is specific to schedule
+  entries — so the padded, whitespace-containing or empty spelling
+  would never match a model;
+  model IDs containing `/` stay accepted while every segment is
+  non-empty, unpadded and free of whitespace), a concrete target fully covered by an earlier pattern
+  target in the same route with the same `#variant` (the pattern
+  attaches that model under its own settings, so the later entry and
+  its variant settings would never apply; an earlier pattern carrying
+  an `until` is left alone, because it shadows only until it expires
+  and the concrete target applies after that), a pattern target whose
+  whole model set an earlier pattern target in the same route with the
+  same `#variant` covers (every model the later pattern would attach is
+  already attached by the earlier one, so the later entry would never
+  apply; a partly overlapping pattern stays accepted, and the same
+  `until` carve-out applies), a target whose `until` is already past (OpenCode drops a
+  target whose `until` has passed, so the target would leave the route as
+  soon as the config is saved), an `until` on a route-reference target
+  (OpenCode includes the referenced route unconditionally and never reads
+  `until` on a reference, so the time limit would never apply), a
+  `defaultVariant` or `variants` on a route-reference target (OpenCode
+  expands the referenced route from its own targets and never reads
+  variant settings on a reference, so they would never apply; a
+  `#variant` suffix on the reference itself is read and stays accepted), a budgets key that is a `*`
+  pattern (OpenCode reads a budget by the concrete model a target expands
+  to, so a pattern key would never apply), a budgets key that names a
+  route reference (OpenCode looks budgets up only by concrete model, so
+  that key would never apply either; a budget key naming a concrete model
+  the route reaches through its references does apply, and the set-level
+  check accepts it), a weights key that is a `*`
+  pattern (OpenCode reads a weight by the concrete key a target attaches
+  with, so a pattern key would never apply), a schedule target whose
+  pattern shares no model with any target the route expands to (two
+  patterns count as sharing when one model matches both, even if each
+  covers models the other does not; entries are judged in lower case,
+  the way OpenCode's case-insensitive schedule matcher reads them, and
+  trimmed before every check, the way OpenCode trims them before
+  matching, so padding alone neither refuses an entry that would apply
+  nor changes which verdict it gets; the
+  set-level check judges entries against the concrete models the route
+  reaches through its route references, because OpenCode inherits a
+  route's schedule rules into nested groups and matches them against
+  each leaf), a schedule target that names a route reference (OpenCode
+  matches schedule targets against concrete `provider/model`
+  references, so the entry could never match a leaf; a weights key
+  naming the reference stays valid, because a nested route attaches
+  under that key), a schedule
+  target carrying a `#variant` suffix (OpenCode matches schedule
+  targets against `provider/model` references without a variant, so
+  the entry could never apply), an empty schedule `targets` list
+  (OpenCode applies a schedule with no target filter to every target in
+  the route, so the key is left out for that), a schedule with neither
+  change, and one with both, where
+  the weight would win and the factor would be ignored, `weights` or
+  `budgets` on a `fixed` route (selection modes, weights and budgets are
+  rules-level in OpenCode, so a fixed route replaces every weight with 1
+  and never collects its budgets), and — judged against the whole saved
+  set, not one route at a time — a target that references a route the set
+  does not contain, a target that references its own route (a route is
+  always on its own expansion trail, so OpenCode drops a self-reference
+  from every entry point, even beside targets that do serve models), a
+  reference target that reaches models only back through the referencing
+  route (OpenCode will not revisit a route already on its expansion
+  trail, so that entry contributes no model to the referencing route,
+  even when every route in the set expands to a model some other way), or
+  a route whose targets only chase references in a
+  cycle that reaches no concrete model target (OpenCode drops both
+  silently, and the second would expand to no models). Cross-pool schedules
+  (`experimental.model_route_schedules`) are not OpenChamber's to save yet;
+  #297 covers their editor.
+- `pool-plan-links.js` keeps `pool-plan-links.json` in the OpenChamber data
+  directory: a map from a target reference (`provider/model`, or a `*`
+  pattern) to a plan id from the plan store. Two targets linked to one plan
+  are siblings sharing one quota. `plans.json` already has
+  `models["provider/model"].coveredBy`, but that entry needs a cost tier
+  before it can exist and lists every plan whose price covers a model; a pool
+  link names the one quota a target draws on and needs no tier, so it lives
+  in OpenChamber's own file. A missing file reads as empty, a malformed one
+  answers 409. Only `PUT /api/model-routes/plan-links` (`{ target, planID }`,
+  `planID: null` clears) exists; it refuses a plan id the plan store does not
+  have, and clearing always works. Reads go through the health route.
+- `pool-health.js` answers `GET /api/model-routes/health` (`hours`, default 24,
+  and `activeMinutes`, default 15). Per pool target it reports the sessions
+  whose latest attempt in the last `activeMinutes` went to it (a session that
+  failed over or was moved counts where it is now), the linked plan and
+  its siblings, and a projection for the plan's tightest window: the recent
+  usage of every target linked to the plan, scaled to the window's length.
+  OpenCode records an attempt for every request, routed or direct, so direct
+  use of the same model counts too. A pattern target counts every concrete
+  model its pattern matches, each session once. `requests` and `messages`
+  windows count attempts; `tokens` windows count input, output and reasoning
+  tokens, as OpenCode's `model-usage.ts` meters plans. `usd`, `percent` and
+  `other` windows get no projection. The projection is an estimate from
+  recent traffic and cannot see usage outside OpenCode; a window of zero or
+  negative hours gets none. A weighted or round-robin pool (OpenCode's
+  round-robin is smooth weighted round robin, so both draw by weight) with a
+  target at 70 percent or more gets a `lower-weight` suggestion while the
+  target's weight is above 0.1, which the panel turns into a button that
+  halves that weight. Without the routing tables the route still answers, with
+  `statsAvailable: false` and no counts. The session and usage queries
+  settle separately (`sessionsAvailable`, `usageAvailable`), so one failing
+  costs only its own columns. Each telemetry row belongs to the most specific
+  link that covers it (an exact reference beats a pattern, a longer pattern a
+  shorter one), so it counts once, toward one plan, even when `openai/*` and
+  `openai/gpt-x` are both linked. Nested pools (`opencode-route/<id>`) are left
+  out of a pool's targets; they are listed as pools of their own. The
+  `lower-weight` suggestion also needs another target in the pool on a
+  different plan (or none): moving weight between siblings on one quota
+  changes nothing. When
+  OpenCode's base URL is not a loopback address (`OPENCODE_HOST` on another
+  machine), its database is not on this one, so the route reads no local file
+  and answers `statsReason: "remote-opencode"`; a local file could be a stale
+  one from another install. A damaged `plans.json` or links file
+  is reported as `planError` / `linksError` and costs only the plan columns;
+  a link to a plan that no longer exists is reported as `missingPlanID` so the
+  panel can clear it. The panel reads again whenever the pools change.
+
 ## Tests
 
 `model-routes.test.js` (route validation, pool description and details limits,

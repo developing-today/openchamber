@@ -114,3 +114,8 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
 - Model files live under `~/.config/openchamber/speech-models`.
+- Every catalog archive carries a pinned byte size and SHA-256
+  (`local/model-catalog.js`); the downloader aborts a stream the moment it
+  passes the pinned size, refuses a completed download whose digest differs,
+  and re-verifies a cached archive against the pins before reusing it. An
+  entry without pins is never downloaded.

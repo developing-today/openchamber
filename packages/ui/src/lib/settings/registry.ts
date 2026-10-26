@@ -565,6 +565,11 @@ export const SETTINGS_REGISTRY = {
   sessionSuggestionEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionSuggestionEnabled', (v) => useUIStore.getState().setSessionSuggestionEnabled(v)) }),
   sessionWorkEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionWorkEnabled', (v) => useUIStore.getState().setSessionWorkEnabled(v)) }),
   sessionReviewOfferEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('sessionReviewOfferEnabled', (v) => useUIStore.getState().setSessionReviewOfferEnabled(v)) }),
+  activeRunModelChangeBehavior: field({
+    scope: 'profile',
+    parse: parseOneOf(['next-message', 'restart'] as const),
+    ui: uiStore('activeRunModelChangeBehavior', (v) => useUIStore.getState().setActiveRunModelChangeBehavior(v)),
+  }),
   sessionGoalEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalEnabled', (v) => useUIStore.getState().setSessionGoalEnabled(v)) }),
   // Who checks goal progress. The goal loop runs on the OpenChamber server,
   // which VS Code does not have.

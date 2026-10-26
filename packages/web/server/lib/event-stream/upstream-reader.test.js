@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS, OPENCODE_SSE_HEARTBEAT_INTERVAL_MS } from './timeouts.js';
 import { createUpstreamSseReader } from './upstream-reader.js';
 
 function createSseResponse({ blocks = [], signal, holdOpen = false }) {
@@ -441,5 +442,69 @@ describe('createUpstreamSseReader', () => {
     // of the multiplier/cap. The reset on a healthy connect is also free in
     // this configuration.
     expect(recordedDelays).toEqual([0, 0, 0]);
+  });
+
+  describe('with OpenCode heartbeats on an idle stream', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    // An idle OpenCode stream carries nothing but a `: heartbeat` comment on a fixed interval. The
+    // response below writes one each `intervalMs` and otherwise stays open until aborted.
+    function createHeartbeatResponse({ signal, intervalMs }) {
+      const encoder = new TextEncoder();
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader() {
+            return {
+              read() {
+                return new Promise((resolve, reject) => {
+                  const timer = setTimeout(() => {
+                    signal.removeEventListener('abort', onAbort);
+                    resolve({ value: encoder.encode(': heartbeat\n\n'), done: false });
+                  }, intervalMs);
+                  const onAbort = () => {
+                    clearTimeout(timer);
+                    const error = new Error('Aborted');
+                    error.name = 'AbortError';
+                    reject(error);
+                  };
+                  signal.addEventListener('abort', onAbort, { once: true });
+                });
+              },
+            };
+          },
+        },
+      };
+    }
+
+    async function countFetchesOverFourMinutes(intervalMs) {
+      vi.useFakeTimers();
+      let fetches = 0;
+      const reader = createUpstreamSseReader({
+        buildUrl: () => 'http://127.0.0.1:4096/api/event',
+        // No stallTimeoutMs: this measures the default window against the heartbeat.
+        fetchImpl: async (_url, options) => {
+          fetches += 1;
+          return createHeartbeatResponse({ signal: options.signal, intervalMs });
+        },
+      });
+      const running = reader.start();
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+      reader.stop();
+      await vi.advanceTimersByTimeAsync(DEFAULT_UPSTREAM_STALL_TIMEOUT_MS);
+      await running;
+      return fetches;
+    }
+
+    it('keeps one connection open when OpenCode heartbeats every 15 s (dezren39/nix#668)', async () => {
+      expect(await countFetchesOverFourMinutes(OPENCODE_SSE_HEARTBEAT_INTERVAL_MS)).toBe(1);
+    });
+
+    it('reconnects when heartbeats are further apart than the stall window (positive control)', async () => {
+      expect(await countFetchesOverFourMinutes(DEFAULT_UPSTREAM_STALL_TIMEOUT_MS + 1_000)).toBeGreaterThan(1);
+    });
   });
 });
