@@ -231,3 +231,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #462 and #466 completions                  | 2026-10-26 | #467, #470                 |
 | Git log maxCount and diff context judged strictly everywhere        | 2026-10-26 | #463, #464, #465, #469     |
 | Subsession models picker sets a session's subsession policy         | 2026-10-26 | #468                       |
+| ROADMAP Done records the #469 and #468 completions                  | 2026-10-26 | #471, #472                 |
