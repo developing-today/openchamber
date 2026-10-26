@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
+const originalOpenCodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
 
 let root;
 let workspace;
@@ -35,6 +36,11 @@ const loadPools = async () => {
 beforeEach(() => {
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-pool-folders-')));
   process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+  // shared.js prefers OPENCODE_CONFIG_DIR over XDG_CONFIG_HOME and resolves
+  // it when the module loads, so pin it at the same temporary global folder
+  // before loadPools re-imports the module. A developer shell that exports
+  // it would otherwise point the global layer at the real config.
+  process.env.OPENCODE_CONFIG_DIR = path.join(root, 'xdg', 'opencode');
   delete process.env.OPENCODE_CONFIG;
   workspace = path.join(root, 'workspace');
   projectDir = path.join(workspace, 'packages', 'app');
@@ -47,6 +53,8 @@ afterEach(() => {
   else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
   if (originalOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
   else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
+  if (originalOpenCodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+  else process.env.OPENCODE_CONFIG_DIR = originalOpenCodeConfigDir;
 });
 
 describe('model pool descriptions from every config file OpenCode reads', () => {
