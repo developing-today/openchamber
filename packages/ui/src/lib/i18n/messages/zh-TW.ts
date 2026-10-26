@@ -3056,6 +3056,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '需要認證',
   'mcpDropdown.status.needsRegistration': '需要註冊：{error}',
   'mcpDropdown.empty.configureInConfig': '請在設定中設定 MCP 伺服器。',
+  "mcpDropdown.cacheNote": "切換關閉了 Code Mode 的伺服器後，執行中的工作階段下一輪不會使用提示快取。",
   'sessionAuth.error.rateLimitTitle': '嘗試次數過多',
   'sessionAuth.error.networkTitle': '無法連線伺服器',
   'sessionAuth.error.rateLimitDescriptionSingle': '請等待 {minutes} 分鐘後再試。',

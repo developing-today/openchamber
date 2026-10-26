@@ -2752,6 +2752,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Nécessite une authentification',
   'mcpDropdown.status.needsRegistration': 'Nécessite un enregistrement : {error}',
   'mcpDropdown.empty.configureInConfig': 'Configurez les serveurs MCP dans la configuration OpenCode.',
+  "mcpDropdown.cacheNote": "Activer ou désactiver un serveur dont le Code Mode est désactivé empêche le prochain tour d’une session en cours d’utiliser le cache du prompt.",
   'sessionAuth.error.rateLimitTitle': 'Trop de tentatives',
   'sessionAuth.error.networkTitle': 'Impossible d\'atteindre le serveur',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Veuillez attendre {minutes} minute avant de réessayer.',

@@ -2899,6 +2899,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Kimlik doğrulama gerekiyor',
   'mcpDropdown.status.needsRegistration': 'Kayıt gerekiyor: {error}',
   'mcpDropdown.empty.configureInConfig': 'MCP sunucularını Ayarlar\'dan yapılandırın.',
+  "mcpDropdown.cacheNote": "Code Mode kapalı bir sunucuyu açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
   'sessionAuth.error.rateLimitTitle': 'Çok fazla deneme',
   'sessionAuth.error.networkTitle': 'Sunucuya ulaşılamıyor',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Tekrar denemeden önce {minutes} dakika bekleyin.',
