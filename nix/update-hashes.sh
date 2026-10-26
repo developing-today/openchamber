@@ -92,7 +92,7 @@ log "$system: baked $got — verifying with a rebuild"
 nix build --no-link --rebuild ".#openchamber.node_modules" >/dev/null
 log "$system: verified"
 
-others=$(grep -oP '"nodeModules"' -A10 "$HASH_FILE" | grep -oP '^\s+"\K[a-z0-9_]+-[a-z0-9]+(?=":)' | grep -v "^$system$" || true)
+others=$(grep -oP '^\s+"\K[a-z0-9_]+-[a-z0-9]+(?=":)' "$HASH_FILE" | grep -v "^$system$" || true)
 if [[ -n "$others" ]]; then
   log "note: hashes for $(echo $others | tr '\n' ' ')were NOT re-measured — no builder for them here"
 fi
