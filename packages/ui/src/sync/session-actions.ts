@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
+import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SubagentPolicy, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
@@ -998,7 +998,12 @@ function getRequestReplyDirectory(
  * what the first turn will run on pass it here, so the session is created on
  * that selection and the first prompt needs no switch at all.
  */
-export type SessionCreateSelection = { model?: ModelSelection; agent?: string }
+export type SessionCreateSelection = {
+  model?: ModelSelection
+  agent?: string
+  /** Models the new session's subsessions may run; sent on create when set. */
+  subagentPolicy?: SubagentPolicy
+}
 
 export async function createSession(
   title?: string,
@@ -1018,7 +1023,7 @@ export async function createSession(
     // wrong project (closes #1637, #2270).
     const effectiveDirectory = directoryOverride ?? dir()
     const session = await opencodeClient.createSession(
-      { title, metadata, model: selection?.model, agent: selection?.agent },
+      { title, metadata, model: selection?.model, agent: selection?.agent, subagentPolicy: selection?.subagentPolicy },
       effectiveDirectory,
     )
 
@@ -2007,6 +2012,25 @@ export async function updateSessionTitle(
   options?.signal?.throwIfAborted()
   useGlobalSessionsStore.getState().upsertSession(session)
   mirrorSessionIntoLiveStores(session, sessionDirectory)
+}
+
+/**
+ * Replaces a session's subsession model policy. The caller sends the whole
+ * policy (the picker preserves `excludedModels` and `agentOverrides` as
+ * loaded), and the saved state comes back from a re-read of the session
+ * record, the way `updateSessionTitle` settles a rename.
+ */
+export async function updateSessionSubagentPolicy(
+  sessionId: string,
+  directory: string | null | undefined,
+  subagentPolicy: SubagentPolicy,
+): Promise<Session> {
+  const sessionDirectory = directory ?? getSessionDirectory(sessionId)
+  await opencodeClient.updateSessionSubagentPolicy(sessionId, subagentPolicy, sessionDirectory)
+  const session = await opencodeClient.getSession(sessionId, sessionDirectory)
+  useGlobalSessionsStore.getState().upsertSession(session)
+  mirrorSessionIntoLiveStores(session, sessionDirectory)
+  return session
 }
 
 // ---------------------------------------------------------------------------

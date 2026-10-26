@@ -27,6 +27,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -3840,6 +3841,7 @@ export const dict = {
   ...pluginsGridI18n.he,
   ...integrationsCatalogI18n['he'],
   ...sessionGoalWriterI18n['he'],
+  ...subsessionModelsI18n['he'],
   ...diffFindI18n['he'],
   'settings.usage.page.state.claudeSignedOutTitle': 'לא מחובר ל-Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'יש להריץ את הפקודה הזו במסוף:',

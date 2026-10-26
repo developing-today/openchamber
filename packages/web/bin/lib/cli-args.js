@@ -71,6 +71,7 @@ const COMMAND_OWNED_FLAGS = new Map([
   ['upstream', SESSION], ['no-upstream', SESSION], ['title', SESSION],
   ['session', SESSION_OR_SCHEDULE], ['message', SESSION_OR_SCHEDULE], ['prompt', SESSION_OR_SCHEDULE],
   ['model', SESSION_OR_SCHEDULE], ['agent', SESSION_OR_SCHEDULE], ['variant', SESSION_OR_SCHEDULE],
+  ['subagent-models', SESSION],
   ['goal', SESSION_OR_SCHEDULE], ['goal-token-budget', SESSION_OR_SCHEDULE], ['project', SESSION_OR_SCHEDULE],
   ['dir', SESSION_OR_SCHEDULE], ['directory', SESSION_OR_SCHEDULE],
   ['provider', TUNNEL], ['mode', TUNNEL], ['profile', TUNNEL], ['config', TUNNEL], ['token', TUNNEL],
@@ -134,6 +135,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     timezone: undefined,
     agent: undefined,
     variant: undefined,
+    subagentModels: undefined,
     disabled: false,
     goal: false,
     goalTokenBudget: undefined,
@@ -372,6 +374,13 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.variant = typeof value === 'string' ? value : options.variant;
+        break;
+      }
+      case 'subagent-models': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        // consumeValue yields a non-empty string or undefined, nothing else.
+        if (value !== undefined) options.subagentModels = value;
         break;
       }
       case 'disabled':

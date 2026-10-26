@@ -28,6 +28,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -167,6 +168,7 @@ export const dict = {
   ...pluginsGridI18n.fr,
   ...integrationsCatalogI18n['fr'],
   ...sessionGoalWriterI18n['fr'],
+  ...subsessionModelsI18n['fr'],
   ...diffFindI18n['fr'],
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',

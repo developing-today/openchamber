@@ -29,6 +29,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -168,6 +169,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-TW'],
   ...integrationsCatalogI18n['zh-TW'],
   ...sessionGoalWriterI18n['zh-TW'],
+  ...subsessionModelsI18n['zh-TW'],
   ...diffFindI18n['zh-TW'],
   'terminalView.actions.attachSelection': '附加所選輸出',
   'terminalView.actions.copySelection': '複製所選輸出',
