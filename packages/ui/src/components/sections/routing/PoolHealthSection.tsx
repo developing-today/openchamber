@@ -103,6 +103,8 @@ export const PoolHealthSection: React.FC<{
   const [error, setError] = React.useState<string | null>(null);
   const [planError, setPlanError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  // Refresh also reads the rotation history, which moves on its own while the panel is open.
+  const [refreshCount, setRefreshCount] = React.useState(0);
   // One save per target at a time, so an earlier pick cannot land after a later one.
   const [pendingLinks, setPendingLinks] = React.useState<ReadonlySet<string>>(new Set());
   // Only the newest read may land: a refresh and a link change can overlap.
@@ -156,7 +158,7 @@ export const PoolHealthSection: React.FC<{
       <div className="flex items-center gap-1.5">
         <p className="typography-ui-label font-medium text-foreground">{t('settings.pools.health.title')}</p>
         <SettingsInfoHint>{t('settings.pools.health.description')}</SettingsInfoHint>
-        <Button size="xs" variant="ghost" className="ms-auto !font-normal" onClick={load} disabled={loading}>
+        <Button size="xs" variant="ghost" className="ms-auto !font-normal" onClick={() => { setRefreshCount((count) => count + 1); load(); }} disabled={loading}>
           {t('settings.pools.health.refresh')}
         </Button>
       </div>
@@ -207,7 +209,7 @@ export const PoolHealthSection: React.FC<{
           </div>
         ))}
       </div>
-      <PoolRotationFields reloadKey={reloadKey} />
+      <PoolRotationFields reloadKey={`${reloadKey ?? ''}:${refreshCount}`} />
     </div>
   );
 };

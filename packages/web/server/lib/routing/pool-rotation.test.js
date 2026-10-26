@@ -52,6 +52,11 @@ const setup = ({
   reliability = [],
   switchModel = null,
   callTimeoutMs = 15_000,
+  // Sessions OpenCode lists as running (session.active); the running subagent by default.
+  active = new Set(['sub']),
+  activeFails = false,
+  projectRoutes = null,
+  getSession = null,
 } = {}) => {
   const data = dir();
   fs.writeFileSync(path.join(data, 'pool-rotation.json'), JSON.stringify({ enabled, intervalMinutes }));
@@ -60,13 +65,18 @@ const setup = ({
   const rotation = createPoolRotation({
     dataDir: data,
     computeHealth: async () => ({ available: true, statsAvailable, pools: { busy: { selection: 'ordered', targets } } }),
-    readRoutes: () => ({ busy: { targets: rawTargets } }),
+    // A project directory gets its own pool map when the test gives one.
+    readRoutes: (directory) => (directory && projectRoutes ? projectRoutes : { busy: { targets: rawTargets } }),
     // Like the database, this knows only the last attempts, not a model the session was switched to since.
     // An entry is on `openai/a` unless it names another target.
-    sessionsOnTarget: async ({ providerID, modelID }) => onTarget
-      .filter((entry) => (entry.target ?? 'openai/a') === `${providerID}/${modelID}`)
+    sessionsOnTarget: async ({ ref }) => onTarget
+      .filter((entry) => (entry.target ?? 'openai/a') === ref)
       .map(({ sessionID, lastAttempt }) => ({ sessionID, lastAttempt })),
-    getSession: async (sessionID) => sessions[sessionID],
+    activeSessionIDs: async () => {
+      if (activeFails) throw new Error('OpenCode is restarting');
+      return active;
+    },
+    getSession: getSession ?? (async (sessionID) => sessions[sessionID]),
     targetReliability: async () => reliability,
     switchModel: switchModel ?? (async (sessionID, model) => {
       switches.push({ sessionID, model });
@@ -161,10 +171,11 @@ describe('pool rotation', () => {
     expect(attempts).toEqual(['sub', 'primary-old']);
     expect(move).toMatchObject({ sessionID: 'primary-old' });
     ctx.clock.now += 5 * MINUTE;
-    // 'sub' is still running and first in line, but it failed and is skipped.
+    // 'sub' is still running and first in line, but it failed and is skipped; being
+    // live, it still counts on the target, so primary-new is not the last and moves.
     await ctx.rotation.tick();
-    expect(attempts).toEqual(['sub', 'primary-old']);
-    expect(ctx.rotation.recentMoves().map(({ sessionID }) => sessionID)).toEqual(['primary-old']);
+    expect(attempts).toEqual(['sub', 'primary-old', 'primary-new']);
+    expect(ctx.rotation.recentMoves().map(({ sessionID }) => sessionID)).toEqual(['primary-new', 'primary-old']);
   });
 
   it('does not throttle a pool when every switch failed', async () => {
@@ -235,12 +246,76 @@ describe('pool rotation', () => {
     expect(switches).toEqual([]);
   });
 
-  it('does not spend a move on a subagent that has finished', async () => {
+  it('moves a running subagent first even when its last request is minutes old', async () => {
+    // A subagent can sit in one long tool call; OpenCode still lists it as running.
     const { rotation, switches } = setup({
       onTarget: [
         { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
         { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
-        { sessionID: 'sub', lastAttempt: 6 * MINUTE },
+        { sessionID: 'sub', lastAttempt: 4 * MINUTE },
+      ],
+    });
+    await rotation.tick();
+    expect(switches.map(({ sessionID }) => sessionID)).toEqual(['sub']);
+  });
+
+  it('moves no subagent when the running list cannot be read', async () => {
+    const { rotation, switches } = setup({ activeFails: true });
+    await rotation.tick();
+    expect(switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old']);
+  });
+
+  it('never moves a session onto a target past its until', async () => {
+    const { rotation, switches } = setup({ rawTargets: ['openai/a', { model: 'anthropic/b', until: 10 * MINUTE - 1 }] });
+    expect(await rotation.tick()).toEqual([]);
+    expect(switches).toEqual([]);
+  });
+
+  it('moves a session only to a target its own project keeps in the pool', async () => {
+    const inProject = (model) => ({ model, location: { directory: '/p' } });
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const { rotation, switches } = setup({
+      // The project overrides the pool: anthropic/b is not in it.
+      projectRoutes: { busy: { targets: ['openai/a', 'other/c'] } },
+      sessions: {
+        'primary-old': inProject(pool),
+        'primary-new': { model: pool },
+        sub: { ...inProject(pool), parentID: 'primary-old' },
+      },
+    });
+    await rotation.tick();
+    expect(switches.map(({ sessionID }) => sessionID)).toEqual(['primary-new']);
+  });
+
+  it('leaves a session whose model changed while the others were being read', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const reads = new Map();
+    const sessions = {
+      'primary-old': { model: pool },
+      'primary-new': { model: pool },
+      sub: { parentID: 'primary-old', model: pool },
+    };
+    const { rotation, switches } = setup({
+      sessions,
+      // The second read of 'sub', just before the switch, finds the user's own pick.
+      getSession: async (sessionID) => {
+        const count = (reads.get(sessionID) ?? 0) + 1;
+        reads.set(sessionID, count);
+        return sessionID === 'sub' && count > 1 ? { ...sessions.sub, model: { providerID: 'openai', id: 'a' } } : sessions[sessionID];
+      },
+    });
+    await rotation.tick();
+    expect(switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old']);
+  });
+
+  it('does not spend a move on a subagent that has finished', async () => {
+    // OpenCode no longer lists it as running, however recent its last request.
+    const { rotation, switches } = setup({
+      active: new Set(),
+      onTarget: [
+        { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+        { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+        { sessionID: 'sub', lastAttempt: 9.9 * MINUTE },
       ],
     });
     await rotation.tick();
@@ -322,8 +397,11 @@ describe('querySessionsOnTarget', () => {
     insert.run(now - 2 * MINUTE, 'other-route', 'calm', 'openai', 'a');
     insert.run(now - 60 * MINUTE, 'stale', 'busy', 'openai', 'a');
     db.close();
-    const rows = await querySessionsOnTarget(dbPath, { routeID: 'busy', providerID: 'openai', modelID: 'a', minutes: 15, now });
+    const rows = await querySessionsOnTarget(dbPath, { routeID: 'busy', ref: 'openai/a', minutes: 15, now });
     expect(rows).toEqual([{ sessionID: 'stays', lastAttempt: now - 3 * MINUTE }]);
+    // A pattern source covers the concrete models OpenCode recorded under it.
+    const covered = await querySessionsOnTarget(dbPath, { routeID: 'busy', ref: 'openai/*', minutes: 15, now });
+    expect(covered).toEqual([{ sessionID: 'stays', lastAttempt: now - 3 * MINUTE }]);
   });
 });
 

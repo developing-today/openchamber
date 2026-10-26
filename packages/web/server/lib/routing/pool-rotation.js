@@ -79,8 +79,8 @@ const writeRotationSettings = (dataDir, settings) => {
 
 // A pool target is `provider/model[#variant]` or `{ model, defaultVariant }`.
 const rawTargetSchema = z.union([
-  z.string().transform((model) => ({ model, defaultVariant: undefined })),
-  z.object({ model: z.string(), defaultVariant: z.string().optional() }),
+  z.string().transform((model) => ({ model, defaultVariant: undefined, until: undefined })),
+  z.object({ model: z.string(), defaultVariant: z.string().optional(), until: z.number().optional() }),
 ]);
 
 /** `provider/model[#variant]` as a session model, or null for a pattern, a nested pool or a malformed entry. */
@@ -96,14 +96,11 @@ const concreteModel = (rawTarget) => {
   const model = { providerID, id };
   const variant = inlineVariant ?? parsed.data.defaultVariant;
   if (variant) model.variant = variant;
-  return { ref: reference, model };
+  return { ref: reference, model, until: parsed.data.until ?? null };
 };
 
 const NEAR_LIMIT = new Set(['warn', 'over']);
 
-// A subagent whose last request is older than this has finished; it will not
-// send again, so moving it would spend a move on nothing.
-const RUNNING_WITHIN_MS = 2 * 60_000;
 // A session whose switch failed (deleted directory, OpenCode refusing) is left
 // alone this long, so it does not block its pool every minute.
 const FAILED_SESSION_BACKOFF_MS = 30 * 60_000;
@@ -119,11 +116,12 @@ const failingNow = (reliability) => reliability !== undefined && reliability.fai
  * request failed is never chosen, and one with a recent success ranks before
  * one with no recent traffic; then the most plan headroom wins.
  */
-export const pickDestination = (poolHealth, rawTargets, source, reliabilityByRef = new Map()) => {
+export const pickDestination = (poolHealth, rawTargets, source, reliabilityByRef = new Map(), now = Date.now()) => {
   const sourcePlanID = source.plan?.id ?? null;
   const candidates = rawTargets
     .map(concreteModel)
-    .filter((candidate) => candidate !== null && candidate.ref !== source.ref)
+    // A target past its `until` has left the pool in OpenCode; moving a session onto it would bypass that cutoff.
+    .filter((candidate) => candidate !== null && candidate.ref !== source.ref && (candidate.until === null || candidate.until > now))
     .map((candidate) => ({
       ...candidate,
       health: poolHealth.targets.find((target) => target.ref === candidate.ref),
@@ -157,10 +155,12 @@ const withTimeout = (promise, ms, what) => {
 /**
  * The rotation job. Every dependency is injected:
  * - `computeHealth()` resolves to the pool health report;
- * - `readRoutes()` returns the configured `model_routes` map;
- * - `sessionsOnTarget({ routeID, providerID, modelID })` resolves to `[{ sessionID, lastAttempt }]`;
+ * - `readRoutes(directory)` returns the `model_routes` map, with a project's
+ *   overrides when given its directory;
+ * - `sessionsOnTarget({ routeID, ref })` resolves to `[{ sessionID, lastAttempt }]`;
+ * - `activeSessionIDs()` resolves to the set of sessions with a running loop (OpenCode's `session.active`);
  * - `targetReliability()` resolves to `[{ providerID, modelID, failures, lastSuccess, lastFailure }]`;
- * - `getSession(sessionID)` resolves to `{ parentID?, model? }` (OpenCode's `Session.Info`);
+ * - `getSession(sessionID)` resolves to `{ parentID?, model?, location? }` (OpenCode's `Session.Info`);
  * - `switchModel(sessionID, model)` sets the session's model;
  * - `isAutoSession(sessionID)` says whether Auto picks its model per send.
  * OpenCode calls are bounded by `callTimeoutMs`, so a call that never answers
@@ -171,6 +171,7 @@ export const createPoolRotation = ({
   computeHealth,
   readRoutes,
   sessionsOnTarget,
+  activeSessionIDs = async () => new Set(),
   targetReliability = async () => [],
   getSession,
   switchModel,
@@ -192,40 +193,60 @@ export const createPoolRotation = ({
     return writeRotationSettings(dataDir, { ...settings(), ...parsed.data });
   };
 
+  const readSession = (sessionID) => withTimeout(getSession(sessionID), callTimeoutMs, 'Reading the session').catch(() => null);
+
+  /** Whether the session is still on the pool and not on Auto: the user's own choice since then stands. */
+  const stillOnPool = (session, sessionID, poolID) => !isAutoSession(sessionID)
+    && session?.model?.providerID === ROUTE_PROVIDER_ID && session.model.id === poolID;
+
   /**
    * The live sessions on `source` in `poolID`: those still on the pool, not on
    * Auto, and not finished subagents. `movable` leaves out the ones in back-off
-   * after a failed switch and is in the order they would move.
+   * after a failed switch and is in the order they would move. A subagent
+   * counts as running only when OpenCode lists it as active; when that list
+   * cannot be read, subagents are not moved at all.
    */
-  const sessionsOn = async (poolID, source, tickStart) => {
-    const [providerID, ...rest] = source.ref.split('/');
-    const onTarget = await sessionsOnTarget({ routeID: poolID, providerID, modelID: rest.join('/') });
+  const sessionsOn = async (poolID, source, tickStart, active) => {
+    const onTarget = await sessionsOnTarget({ routeID: poolID, ref: source.ref });
     const live = [];
     for (const { sessionID, lastAttempt } of onTarget) {
-      if (isAutoSession(sessionID)) continue;
-      const session = await withTimeout(getSession(sessionID), callTimeoutMs, 'Reading the session').catch(() => null);
-      // Only a session still on this pool moves; the user's own choice since then stands.
-      if (session?.model?.providerID !== ROUTE_PROVIDER_ID || session.model.id !== poolID) continue;
+      const session = await readSession(sessionID);
+      if (!stillOnPool(session, sessionID, poolID)) continue;
       const subagent = Boolean(session.parentID);
-      if (subagent && tickStart - lastAttempt > RUNNING_WITHIN_MS) continue;
-      live.push({ sessionID, lastAttempt, subagent });
+      // A finished subagent will not send again, so moving it would spend a move on nothing.
+      if (subagent && !active?.has(sessionID)) continue;
+      live.push({ sessionID, lastAttempt, subagent, directory: session.location?.directory ?? null });
     }
     const movable = orderForMove(live.filter(({ sessionID }) => (failedUntil.get(sessionID) ?? 0) <= tickStart));
     return { live, movable };
   };
 
+  /**
+   * Whether `destination` belongs to the pool as this session's project
+   * defines it: a project can override a pool with the same id.
+   */
+  const destinationInSessionPool = (poolID, destination, directory) => {
+    if (!directory) return true;
+    const targets = readRoutes(directory)[poolID]?.targets ?? [];
+    return targets.map(concreteModel).some((candidate) => candidate?.ref === destination.ref);
+  };
+
   /** Picks and moves at most one session in `poolID`; resolves to the move or null. */
-  const rotatePool = async (poolID, poolHealth, rawTargets, reliabilityByRef, tickStart) => {
+  const rotatePool = async (poolID, poolHealth, rawTargets, reliabilityByRef, tickStart, active) => {
     const sources = poolHealth.targets
       .filter((target) => NEAR_LIMIT.has(target.plan?.projection?.status))
       .toSorted((left, right) => right.plan.projection.ratio - left.plan.projection.ratio);
     for (const source of sources) {
-      const destination = pickDestination(poolHealth, rawTargets, source, reliabilityByRef);
+      const destination = pickDestination(poolHealth, rawTargets, source, reliabilityByRef, tickStart);
       if (!destination) continue;
-      const { live, movable } = await sessionsOn(poolID, source, tickStart);
+      const { live, movable } = await sessionsOn(poolID, source, tickStart, active);
       // The last session on a target stays: moving it saves no cache from a shared bust.
       if (live.length < 2) continue;
       for (const chosen of movable) {
+        if (!destinationInSessionPool(poolID, destination, chosen.directory)) continue;
+        // Reading the other sessions takes time; the user may have picked a
+        // model or Auto for this one since, and that choice stands.
+        if (!stillOnPool(await readSession(chosen.sessionID), chosen.sessionID, poolID)) continue;
         try {
           await withTimeout(switchModel(chosen.sessionID, destination.model), callTimeoutMs, 'Switching the session model');
         } catch (error) {
@@ -254,14 +275,16 @@ export const createPoolRotation = ({
       if (!current.enabled) return [];
       const health = await computeHealth();
       if (!health.statsAvailable) return [];
-      const routes = readRoutes();
+      const routes = readRoutes(null);
+      // null when the list cannot be read: then no subagent is moved.
+      const active = await withTimeout(activeSessionIDs(), callTimeoutMs, 'Reading active sessions').catch(() => null);
       const reliabilityByRef = new Map((await targetReliability()).map((row) => [`${row.providerID}/${row.modelID}`, row]));
       const made = [];
       for (const [poolID, poolHealth] of Object.entries(health.pools)) {
         const last = lastMoveByPool.get(poolID);
         if (last !== undefined && tickStart - last < current.intervalMinutes * 60_000) continue;
         try {
-          const move = await rotatePool(poolID, poolHealth, routes[poolID]?.targets ?? [], reliabilityByRef, tickStart);
+          const move = await rotatePool(poolID, poolHealth, routes[poolID]?.targets ?? [], reliabilityByRef, tickStart, active);
           if (move) {
             lastMoveByPool.set(poolID, move.at);
             made.push(move);
@@ -293,8 +316,11 @@ export const createPoolRotation = ({
   return { settings, updateSettings, tick, start, stop, recentMoves: () => [...moves] };
 };
 
+// `session.active`: running sessions keyed by session id; anything else is a failed read.
+const activeSessionsSchema = z.record(z.string(), z.unknown());
+
 /**
- * The two OpenCode session calls rotation needs. Session routes resolve the
+ * The OpenCode session calls rotation needs. Session routes resolve the
  * session's own location, so no directory header is sent. `session.get` reads
  * the record only; `session.switchModel` goes through OpenCode's session
  * location middleware, which starts the session's location (its plugins and
@@ -308,6 +334,11 @@ const createOpenCodeSessionAccess = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders 
   return {
     getSession: (sessionID) => client().session.get({ sessionID }, { signal: AbortSignal.timeout(DEFAULT_CALL_TIMEOUT_MS) }),
     switchModel: (sessionID, model) => client().session.switchModel({ sessionID, model }, { signal: AbortSignal.timeout(DEFAULT_CALL_TIMEOUT_MS) }),
+    // `session.active` is global (no location starts) and lists only sessions with a running loop.
+    activeSessionIDs: async () => {
+      const statuses = activeSessionsSchema.parse(await client().session.active({ signal: AbortSignal.timeout(DEFAULT_CALL_TIMEOUT_MS) }));
+      return new Set(Object.keys(statuses));
+    },
   };
 };
 
@@ -336,10 +367,11 @@ export const registerPoolRotation = (app, { readConfigLayers, openchamberDataDir
     dataDir: openchamberDataDir,
     // A remote OpenCode's telemetry is not on this machine; health then reports it unavailable and nothing moves.
     computeHealth: () => computePoolHealth({ readConfigLayers, openchamberDataDir, telemetryLocal: isOpenCodeLocal() }),
-    readRoutes: () => readModelRoutes(readConfigLayers(null).mergedConfig),
+    readRoutes: (directory) => readModelRoutes(readConfigLayers(directory ?? null).mergedConfig),
     sessionsOnTarget: (target) => querySessionsOnTarget(resolveOpenCodeDbPath(), target),
     targetReliability: () => queryTargetReliability(resolveOpenCodeDbPath()),
     getSession: sessions.getSession,
+    activeSessionIDs: sessions.activeSessionIDs,
     switchModel: sessions.switchModel,
     isAutoSession,
   });

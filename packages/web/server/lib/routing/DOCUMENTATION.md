@@ -425,15 +425,22 @@ makes that visible so the user can spread them.
   by default and its description says so. Once a minute, per pool: a source
   is a target whose linked plan projects to `warn` or `over`; a destination
   is another concrete target of the pool not linked to the same plan, not
-  near its own limit, and whose latest request in the last 15 minutes did not
-  fail (`queryTargetReliability`), a target with a recent success before one
-  with no recent traffic, then the most headroom. The target needs two or
-  more live sessions still on the pool (the per-route list, not the health
-  count, which includes other routes and sessions already moved): the last
-  one stays. One session moves: running subagents (`parentID` and a request
-  in the last two minutes) first, then the one idle longest; finished
+  near its own limit, not past its `until`, and whose latest request in the
+  last 15 minutes did not fail (`queryTargetReliability`), a target with a
+  recent success before one with no recent traffic, then the most headroom.
+  A pattern source (`openai/*`) counts the sessions whose latest attempt went
+  to any model it covers. The target needs two or more live sessions still
+  on the pool (the per-route list, not the health count, which includes
+  other routes and sessions already moved): the last one stays. One session
+  moves: running subagents (a `parentID` and listed by OpenCode's
+  `session.active`, so a subagent busy in one long tool call still counts
+  and one that just finished does not; when that list cannot be read no
+  subagent moves) first, then the one idle longest; finished
   subagents are not moved, Auto sessions never are, and only sessions whose
-  model is still the pool count. A switch that fails puts that session in a
+  model is still the pool count. The destination must also be in the pool as
+  the session's own project defines it (a project can override a pool with
+  the same id), and the session is read again right before the switch, so a
+  model or Auto picked while the others were being read stands. A switch that fails puts that session in a
   30-minute back-off and the next session is tried; a pool where every
   switch failed is not throttled. OpenCode calls time out after 15 seconds.
   `session.switchModel` goes through OpenCode's session location middleware,

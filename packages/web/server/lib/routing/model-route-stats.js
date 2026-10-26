@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { keyNamesTarget } from './model-routes.js';
 import { resolveOpenCodeDataDir } from './route-overrides-store.js';
 
 // The driver is imported lazily: a static import of `node:sqlite` would keep
@@ -228,7 +229,7 @@ export const queryTargetReliability = async (dbPath, { minutes = 15, now = Date.
  * went to `providerID/modelID`, with that attempt's time. A session that has
  * since moved to another target of the route is left out.
  */
-export const querySessionsOnTarget = async (dbPath, { routeID, providerID, modelID, minutes = 15, now = Date.now() }) => {
+export const querySessionsOnTarget = async (dbPath, { routeID, ref, minutes = 15, now = Date.now() }) => {
   const db = await openRouteDb(dbPath);
   try {
     const since = now - Math.max(1, Number(minutes) || 15) * 60_000;
@@ -243,7 +244,8 @@ export const querySessionsOnTarget = async (dbPath, { routeID, providerID, model
     const latest = new Map();
     for (const row of rows) if (!latest.has(row.sessionID)) latest.set(row.sessionID, row);
     return [...latest.values()]
-      .filter((row) => row.providerID === providerID && row.modelID === modelID)
+      // A pattern target (`openai/*`) covers every concrete model OpenCode recorded under it.
+      .filter((row) => keyNamesTarget(`${row.providerID}/${row.modelID}`, ref))
       .map((row) => ({ sessionID: row.sessionID, lastAttempt: row.time }));
   } finally {
     db.close();
