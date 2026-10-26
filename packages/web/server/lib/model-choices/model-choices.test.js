@@ -1,0 +1,275 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import express from 'express';
+import request from 'supertest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createModelChoiceActions } from '../openchamber-control/model-choice-actions.js';
+import { OPENCHAMBER_AGENT_TOOL_ACTIONS } from '../openchamber-control/actions.js';
+import { buildModelChoiceNotes, buildModelChoiceSuggestions, goalWriterSuggestionId } from './notes.js';
+import { registerModelChoiceRoutes } from './routes.js';
+import { createModelChoiceService } from './service.js';
+import { createModelChoiceStore, MAX_MODEL_CHOICE_EVENTS, MODEL_CHOICE_RETENTION_MS } from './store.js';
+
+const DAY = 24 * 60 * 60 * 1000;
+
+const choice = (overrides = {}) => ({
+  surface: 'goal-writer',
+  kind: 'effort',
+  chosen: { model: 'anthropic/claude-opus', variant: 'low' },
+  replaced: { model: 'anthropic/claude-opus', variant: 'high' },
+  sessionModel: 'anthropic/claude-sonnet',
+  inputSize: 'long',
+  ...overrides,
+});
+
+const stamped = (overrides = {}, at = 1) => ({ ...choice(overrides), at });
+
+let dataDir;
+let clock;
+
+beforeEach(async () => {
+  dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'model-choices-'));
+  clock = 1_000 * DAY;
+});
+
+afterEach(async () => {
+  await fs.rm(dataDir, { recursive: true, force: true });
+});
+
+const makeStore = () => createModelChoiceStore({ dataDir, now: () => clock });
+
+const makeService = (settings = {}) => {
+  const current = { ...settings };
+  const persistSettings = vi.fn(async (changes) => Object.assign(current, changes));
+  const service = createModelChoiceService({
+    store: makeStore(),
+    readSettings: async () => current,
+    persistSettings,
+  });
+  return { service, persistSettings, current };
+};
+
+describe('model choice store', () => {
+  it('keeps the fields of a choice and nothing else, with the time it was made', async () => {
+    const store = makeStore();
+    await store.record({ ...choice(), message: 'secret prompt text' });
+    const { events } = await store.snapshot();
+    expect(events).toEqual([stamped({}, clock)]);
+    expect(await fs.readFile(store.filePath, 'utf8')).not.toContain('secret prompt text');
+  });
+
+  it('refuses a choice with an unknown surface or a model without a provider', async () => {
+    const store = makeStore();
+    await expect(store.record(choice({ surface: 'elsewhere' }))).rejects.toMatchObject({ statusCode: 400 });
+    await expect(store.record(choice({ chosen: { model: 'opus', variant: null } }))).rejects.toMatchObject({ statusCode: 400 });
+    await expect(fs.access(store.filePath)).rejects.toThrow();
+  });
+
+  it('keeps the newest 5,000 choices from the last 90 days', async () => {
+    const store = makeStore();
+    const old = stamped({}, clock - MODEL_CHOICE_RETENTION_MS - 1);
+    const recent = Array.from({ length: MAX_MODEL_CHOICE_EVENTS }, (_, index) => stamped({ sessionModel: `p/m${index}` }, clock - 1));
+    await fs.writeFile(store.filePath, JSON.stringify({ version: 1, events: [old, ...recent], decisions: [] }));
+    await store.record(choice({ sessionModel: 'p/newest' }));
+    const { events } = await store.snapshot();
+    expect(events).toHaveLength(MAX_MODEL_CHOICE_EVENTS);
+    expect(events.at(-1).sessionModel).toBe('p/newest');
+    expect(events[0].sessionModel).toBe('p/m1');
+  });
+
+  it('drops choices older than 90 days when it reads', async () => {
+    const store = makeStore();
+    await fs.writeFile(store.filePath, JSON.stringify({ version: 1, events: [stamped({}, clock - MODEL_CHOICE_RETENTION_MS - 1), stamped({}, clock - DAY)], decisions: [] }));
+    expect((await store.snapshot()).events).toHaveLength(1);
+  });
+
+  it('reports a malformed file as an error and leaves it in place', async () => {
+    const store = makeStore();
+    await fs.writeFile(store.filePath, '{"version":1,"events":"nope"}');
+    await expect(store.snapshot()).rejects.toMatchObject({ statusCode: 500 });
+    await expect(store.record(choice())).rejects.toMatchObject({ statusCode: 500 });
+    expect(await fs.readFile(store.filePath, 'utf8')).toBe('{"version":1,"events":"nope"}');
+  });
+
+  it('records two choices made at the same moment', async () => {
+    const store = makeStore();
+    await Promise.all([store.record(choice()), store.record(choice({ kind: 'model' }))]);
+    expect((await store.snapshot()).events).toHaveLength(2);
+  });
+
+  it('clears every choice and decision', async () => {
+    const store = makeStore();
+    await store.record(choice());
+    await store.decide('goal-writer:a/b:default', 'declined');
+    await store.clear();
+    expect(await store.snapshot()).toEqual({ events: [], decisions: [] });
+  });
+});
+
+describe('model choice notes', () => {
+  it('summarizes repeated choices per surface, largest first', () => {
+    const events = [
+      ...Array.from({ length: 7 }, () => stamped()),
+      stamped({ chosen: { model: 'openai/gpt-5', variant: null } }),
+      stamped({ chosen: { model: 'openai/gpt-5', variant: null } }),
+      stamped({ surface: 'composer', chosen: { model: 'opencode-route/cheap-fast', variant: null }, replaced: null, inputSize: 'unknown' }),
+      stamped({ surface: 'composer', chosen: { model: 'opencode-route/cheap-fast', variant: null }, replaced: null, inputSize: 'unknown' }),
+    ];
+    expect(buildModelChoiceNotes(events).map((note) => note.text)).toEqual([
+      'picks low effort on claude-opus for goal specs (7 of 9 times), usually over high effort on claude-opus, mostly for long inputs',
+      'picks default effort on gpt-5 for goal specs (2 of 9 times), usually over high effort on claude-opus, mostly for long inputs',
+      'picks default effort on pool cheap-fast for chat messages (2 of 2 times)',
+    ]);
+  });
+
+  it('leaves out a choice made once', () => {
+    expect(buildModelChoiceNotes([stamped()])).toEqual([]);
+  });
+});
+
+describe('model choice suggestions', () => {
+  const habit = (count, overrides) => Array.from({ length: count }, () => stamped(overrides));
+
+  it('suggests the goal writer default when recent goal choices show a clear habit', () => {
+    const [suggestion] = buildModelChoiceSuggestions({ events: [...habit(5), stamped({ chosen: { model: 'x/y', variant: null } })], decisions: [], settings: {} });
+    expect(suggestion).toMatchObject({
+      id: 'goal-writer:anthropic/claude-opus:low',
+      count: 5,
+      total: 6,
+      settings: { sessionGoalWriterModel: 'anthropic/claude-opus', sessionGoalWriterVariant: 'low' },
+    });
+  });
+
+  it('suggests nothing below five matching choices or below 70 percent of them', () => {
+    expect(buildModelChoiceSuggestions({ events: habit(4), decisions: [], settings: {} })).toEqual([]);
+    const mixed = [...habit(5), ...habit(3, { chosen: { model: 'x/y', variant: null } })];
+    expect(buildModelChoiceSuggestions({ events: mixed, decisions: [], settings: {} })).toEqual([]);
+  });
+
+  it('suggests nothing when the setting already says so, or the user answered it', () => {
+    const settings = { sessionGoalWriterModel: 'anthropic/claude-opus', sessionGoalWriterVariant: 'low' };
+    expect(buildModelChoiceSuggestions({ events: habit(6), decisions: [], settings })).toEqual([]);
+    const decisions = [{ id: goalWriterSuggestionId({ model: 'anthropic/claude-opus', variant: 'low' }), decision: 'declined', at: 1 }];
+    expect(buildModelChoiceSuggestions({ events: habit(6), decisions, settings: {} })).toEqual([]);
+  });
+
+  it('reads only goal writer choices', () => {
+    expect(buildModelChoiceSuggestions({ events: habit(6, { surface: 'composer' }), decisions: [], settings: {} })).toEqual([]);
+  });
+});
+
+describe('model choice service', () => {
+  it('records nothing while recording is off, and records by default', async () => {
+    const off = makeService({ modelChoiceRecordingEnabled: false });
+    await expect(off.service.record(choice())).resolves.toEqual({ recorded: false });
+    expect((await off.service.summary()).total).toBe(0);
+
+    const on = makeService({});
+    await expect(on.service.record(choice())).resolves.toEqual({ recorded: true });
+    expect((await on.service.summary()).total).toBe(1);
+  });
+
+  it('offers no suggestion while recording is off', async () => {
+    const { service, current } = makeService({});
+    for (let index = 0; index < 5; index += 1) await service.record(choice());
+    expect((await service.summary()).suggestions).toHaveLength(1);
+    current.modelChoiceRecordingEnabled = false;
+    expect((await service.summary()).suggestions).toEqual([]);
+  });
+
+  it('applies an approved suggestion and never offers it again', async () => {
+    const { service, persistSettings } = makeService({});
+    for (let index = 0; index < 5; index += 1) await service.record(choice());
+    const [suggestion] = (await service.summary()).suggestions;
+    await expect(service.decide(suggestion.id, 'approved')).resolves.toMatchObject({ settings: suggestion.settings });
+    expect(persistSettings).toHaveBeenCalledWith(suggestion.settings);
+    expect((await service.summary()).suggestions).toEqual([]);
+  });
+
+  it('records a decline without changing settings, and the suggestion stays gone', async () => {
+    const { service, persistSettings } = makeService({});
+    for (let index = 0; index < 5; index += 1) await service.record(choice());
+    const [suggestion] = (await service.summary()).suggestions;
+    await service.decide(suggestion.id, 'declined');
+    expect(persistSettings).not.toHaveBeenCalled();
+    for (let index = 0; index < 5; index += 1) await service.record(choice());
+    expect((await service.summary()).suggestions).toEqual([]);
+  });
+
+  it('keeps a suggestion on offer when applying it fails', async () => {
+    const { service, persistSettings } = makeService({});
+    persistSettings.mockRejectedValueOnce(new Error('disk full'));
+    for (let index = 0; index < 5; index += 1) await service.record(choice());
+    const [suggestion] = (await service.summary()).suggestions;
+    await expect(service.decide(suggestion.id, 'approved')).rejects.toThrow('disk full');
+    expect((await service.summary()).suggestions).toHaveLength(1);
+  });
+
+  it('refuses to answer a suggestion that is not on offer', async () => {
+    const { service, persistSettings } = makeService({});
+    await expect(service.decide('goal-writer:a/b:default', 'approved')).rejects.toMatchObject({ statusCode: 404 });
+    expect(persistSettings).not.toHaveBeenCalled();
+  });
+
+  it('returns the newest events first, up to the limit', async () => {
+    const { service } = makeService({});
+    await service.record(choice({ sessionModel: 'p/first' }));
+    await service.record(choice({ sessionModel: 'p/second' }));
+    const summary = await service.summary({ limit: 1 });
+    expect(summary.events.map((event) => event.sessionModel)).toEqual(['p/second']);
+  });
+});
+
+describe('model choice routes', () => {
+  const createApp = (service) => {
+    const app = express();
+    registerModelChoiceRoutes(app, { modelChoiceService: service });
+    return app;
+  };
+
+  it('records, reads, answers and clears over HTTP', async () => {
+    const { service } = makeService({});
+    const app = createApp(service);
+    for (let index = 0; index < 5; index += 1) {
+      await request(app).post('/api/openchamber/model-choices').send(choice()).expect(200, { recorded: true });
+    }
+    const read = await request(app).get('/api/openchamber/model-choices?limit=2').expect(200);
+    expect(read.body).toMatchObject({ enabled: true, total: 5 });
+    expect(read.body.events).toHaveLength(2);
+    expect(read.body.notes[0].text).toContain('low effort on claude-opus');
+
+    await request(app).post('/api/openchamber/model-choices/decision')
+      .send({ id: read.body.suggestions[0].id, decision: 'declined' })
+      .expect(200);
+    await request(app).post('/api/openchamber/model-choices/decision')
+      .send({ id: read.body.suggestions[0].id, decision: 'declined' })
+      .expect(404);
+
+    await request(app).delete('/api/openchamber/model-choices').expect(204);
+    expect((await request(app).get('/api/openchamber/model-choices').expect(200)).body.total).toBe(0);
+  });
+
+  it('answers 400 for an invalid choice or decision', async () => {
+    const app = createApp(makeService({}).service);
+    await request(app).post('/api/openchamber/model-choices').send({ surface: 'composer' }).expect(400);
+    await request(app).post('/api/openchamber/model-choices/decision').send({ id: 'x', decision: 'maybe' }).expect(400);
+  });
+});
+
+describe('models.choices agent action', () => {
+  it('is offered to agents and returns notes and recent events only', async () => {
+    expect(OPENCHAMBER_AGENT_TOOL_ACTIONS).toContain('models.choices');
+    const { service } = makeService({});
+    await service.record(choice());
+    await service.record(choice());
+    const actions = createModelChoiceActions({ modelChoiceService: service });
+    const result = await actions.execute('models.choices', { limit: 1 });
+    expect(Object.keys(result).sort()).toEqual(['enabled', 'events', 'notes', 'total']);
+    expect(result).toMatchObject({ enabled: true, total: 2 });
+    expect(result.events).toHaveLength(1);
+    expect(result.notes[0].text).toBe('picks low effort on claude-opus for goal specs (2 of 2 times), usually over high effort on claude-opus, mostly for long inputs');
+  });
+});

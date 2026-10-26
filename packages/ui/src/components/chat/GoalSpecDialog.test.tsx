@@ -44,7 +44,7 @@ const installDom = () => {
 };
 
 const written: GoalSpecResult = { ok: true, spec: '## Objective\nDark mode', providerID: 'p', modelID: 'm', variant: null };
-const base = { sessionModel: null, directory: null } as const;
+const base = { sessionModel: null, directory: null, inputLength: 12 } as const;
 
 describe('GoalSpecDialog', () => {
   let root: Root;

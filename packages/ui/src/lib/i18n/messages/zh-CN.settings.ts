@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2587,6 +2588,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n['zh-CN'],
   ...extensionsSettingsI18n['zh-CN'],
   ...messagingSettingsI18n['zh-CN'],
+  ...modelChoicesSettingsI18n['zh-CN'],
   ...settingsLayoutI18n['zh-CN'],
   'settings.page.integrations.title': '集成',
   'settings.page.integrations.description': '连接 OpenChamber 所使用的服务和订阅。',

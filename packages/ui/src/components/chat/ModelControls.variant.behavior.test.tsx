@@ -920,6 +920,68 @@ describe('ModelControls effort restore', () => {
     });
   }
 
+  describe('recording manual choices', () => {
+    const recordedChoices = async (run: () => Promise<void>) => {
+      const originalFetch = globalThis.fetch;
+      const bodies: unknown[] = [];
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/api/openchamber/model-choices')) bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch;
+      try {
+        await run();
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+      return bodies;
+    };
+    const pickEffort = async (container: HTMLElement, label: string) => {
+      await act(async () => container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const button = Array.from(container.querySelectorAll('button')).find((entry) => entry.textContent?.trim() === label);
+      if (!button) throw new Error(`No effort button "${label}"`);
+      await act(async () => button.click());
+    };
+
+    beforeEach(() => {
+      useUIStore.setState({ isModelSelectorOpen: true, modelChoiceRecordingEnabled: true });
+    });
+
+    test('an effort picked in the main composer is recorded with what it replaced', async () => {
+      const bodies = await recordedChoices(async () => {
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          await pickEffort(dom.container, 'Low');
+        } finally {
+          await cleanup();
+        }
+      });
+      expect(bodies).toEqual([{
+        surface: 'composer',
+        kind: 'effort',
+        chosen: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: 'low' },
+        replaced: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: null },
+        sessionModel: `${PROVIDER_ID}/${MODEL_ID}`,
+        inputSize: 'unknown',
+      }]);
+    });
+
+    test('a pick in a side-chat picker is not recorded', async () => {
+      const bodies = await recordedChoices(async () => {
+        const { dom, cleanup } = await renderModelControls({
+          sessionId: 'btw-pending:ses_restore',
+          selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: AGENT, variant: null },
+        });
+        try {
+          await pickEffort(dom.container, 'Low');
+        } finally {
+          await cleanup();
+        }
+      });
+      expect(bodies).toEqual([]);
+    });
+  });
+
   describe('following the session agent', () => {
     const OTHER_MODEL_ID = 'gpt-other';
     const recordOn = (agentName: string) => ({

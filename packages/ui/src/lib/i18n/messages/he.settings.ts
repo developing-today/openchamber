@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2586,5 +2587,6 @@ export const settingsDict = {
   ...guestIntegrationsI18n.he,
   ...extensionsSettingsI18n.he,
   ...messagingSettingsI18n.he,
+  ...modelChoicesSettingsI18n.he,
   ...settingsLayoutI18n.he,
 } as const;

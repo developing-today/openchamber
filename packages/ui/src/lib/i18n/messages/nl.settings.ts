@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2577,6 +2578,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.nl,
   ...extensionsSettingsI18n.nl,
   ...messagingSettingsI18n.nl,
+  ...modelChoicesSettingsI18n.nl,
   ...settingsLayoutI18n.nl,
   'settings.page.integrations.title': 'Integraties',
   'settings.page.integrations.description': 'Verbind GitHub en Linear zodat OpenChamber met uw issues en pull requests kan werken.',

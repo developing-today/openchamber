@@ -32,6 +32,7 @@ import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingSt
 import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 
 import { MessageSearchSettings } from './MessageSearchSettings';
+import { ModelChoiceSettings } from './ModelChoiceSettings';
 import { SessionGoalCheckerField, SessionGoalLengthFields, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
 import { SessionGoalWriterFields } from './SessionGoalWriterFields';
 import { useChatSettingsTabStore, type ChatSettingsTab } from './chatSettingsTabs';
@@ -630,6 +631,9 @@ const AssistanceTab: React.FC = () => {
           </div>
         </SettingsSection>
       )}
+
+      {/* The history lives on the OpenChamber server, which VS Code does not have. */}
+      {isVSCode ? null : <ModelChoiceSettings />}
     </>
   );
 };

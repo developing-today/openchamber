@@ -304,6 +304,14 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('messageSearchReasoningEnabled', (v) => useUIStore.getState().setMessageSearchReasoningEnabled(v)),
   }),
+  // The server records manual model choices only while this is on (absent
+  // reads as on); VS Code has no OpenChamber server to keep them.
+  modelChoiceRecordingEnabled: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('modelChoiceRecordingEnabled', (v) => useUIStore.getState().setModelChoiceRecordingEnabled(v)),
+  }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentScheduleToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentScheduleToolEnabled', (v) => useUIStore.getState().setAgentScheduleToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),

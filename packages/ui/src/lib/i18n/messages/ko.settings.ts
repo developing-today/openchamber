@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2587,6 +2588,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,
   ...messagingSettingsI18n.ko,
+  ...modelChoicesSettingsI18n.ko,
   ...settingsLayoutI18n.ko,
   'settings.page.integrations.title': '통합',
   'settings.page.integrations.description': 'OpenChamber와 함께 쓰는 서비스와 구독을 연결합니다.',
