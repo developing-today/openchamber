@@ -8,7 +8,7 @@
 import { listStoredCredentials, readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import { isRecord } from '../../opencode/config-v2.js';
-import { buildResult } from '../utils/index.js';
+import { asNonEmptyString, buildResult } from '../utils/index.js';
 
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
@@ -260,21 +260,22 @@ const readQuotaConfigFacts = () => {
     for (const layerError of layerErrors ?? []) {
       console.warn(`Quota: OpenCode config layer did not parse (${layerError.path}); its disabled_providers entries are not honored.`);
     }
-    const disabled = new Set(
-      Array.isArray(mergedConfig?.disabled_providers)
-        ? mergedConfig.disabled_providers.filter((entry) => typeof entry === 'string' && entry.length > 0)
-        : []
-    );
+    const disabled = new Set();
+    if (Array.isArray(mergedConfig?.disabled_providers)) {
+      for (const entry of mergedConfig.disabled_providers) {
+        const id = asNonEmptyString(entry);
+        if (id) disabled.add(id);
+      }
+    }
     const instances = new Map();
     for (const sectionKey of ['providers', 'provider']) {
       const section = mergedConfig?.[sectionKey];
       if (!isRecord(section)) continue;
       for (const [id, definition] of Object.entries(section)) {
-        if (isRecord(definition) && typeof definition.instanceOf === 'string' && definition.instanceOf.length > 0) {
-          instances.set(id, {
-            base: definition.instanceOf,
-            name: typeof definition.name === 'string' && definition.name.length > 0 ? definition.name : null
-          });
+        if (!isRecord(definition)) continue;
+        const base = asNonEmptyString(definition.instanceOf);
+        if (base) {
+          instances.set(id, { base, name: asNonEmptyString(definition.name) });
         }
       }
     }
@@ -348,7 +349,7 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false } =
   for (const instanceId of facts.instances.keys()) {
     if (!includeDisabled && facts.disabled.has(instanceId)) continue;
     const resolved = resolveInstanceProvider(facts, instanceId);
-    if (!resolved || typeof resolved.provider.fetchQuotaForCredential !== 'function') continue;
+    if (!resolved?.provider.fetchQuotaForCredential) continue;
     const rows = await listStoredCredentials(instanceId);
     if (rows.some((row) => isCredentialUsable(resolved.provider, row, resolved.instance.base))) {
       visible.push(instanceId);
@@ -407,14 +408,15 @@ const fetchPerCredential = async (provider, { resultProviderId, resultProviderNa
   const results = [];
   for (const row of usable) {
     const result = await provider.fetchQuotaForCredential(row);
-    results.push({
+    const labeled = {
       ...result,
       providerId: resultProviderId,
-      ...(resultProviderName ? { providerName: resultProviderName } : {}),
       credentialId: row.id,
-      ...(row.label ? { credentialLabel: row.label } : {}),
       credentialActive: row.active
-    });
+    };
+    if (resultProviderName) labeled.providerName = resultProviderName;
+    if (row.label) labeled.credentialLabel = row.label;
+    results.push(labeled);
   }
   return results;
 };
@@ -431,7 +433,7 @@ const unsupportedResult = (providerId) => buildResult({
 const fetchInstanceResults = async (providerId) => {
   const facts = readQuotaConfigFacts();
   const resolved = resolveInstanceProvider(facts, providerId);
-  if (!resolved || typeof resolved.provider.fetchQuotaForCredential !== 'function') return null;
+  if (!resolved?.provider.fetchQuotaForCredential) return null;
   const results = await fetchPerCredential(resolved.provider, {
     resultProviderId: providerId,
     resultProviderName: resolved.instance.name ?? undefined,
@@ -455,7 +457,7 @@ export const fetchQuotaForProviderInstances = async (providerId) => {
     return (await fetchInstanceResults(providerId)) ?? [unsupportedResult(providerId)];
   }
 
-  if (typeof provider.fetchQuotaForCredential !== 'function') {
+  if (!provider.fetchQuotaForCredential) {
     return [await fetchQuotaForProvider(providerId)];
   }
 

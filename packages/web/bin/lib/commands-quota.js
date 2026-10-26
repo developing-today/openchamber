@@ -1,5 +1,6 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { isJsonMode, isQuietMode, printJson } from '../cli-output.js';
+import { asNonEmptyString } from '../../server/lib/shared/guards.js';
 
 const DEFAULT_OPENCODE_PORT = 4096;
 
@@ -44,35 +45,34 @@ ENVIRONMENT:
 // auth header matches server/lib/opencode/auth-state-runtime.js: Basic
 // `opencode:<password>` from OPENCODE_SERVER_PASSWORD, no header when unset.
 const resolveOpenCodeBaseUrl = (env) => {
-  const host = typeof env.OPENCODE_HOST === 'string' ? env.OPENCODE_HOST.trim() : '';
+  const host = asNonEmptyString(env.OPENCODE_HOST);
   if (host) return host.replace(/\/+$/, '');
   const port = Number.parseInt(env.OPENCODE_PORT ?? '', 10);
   return `http://127.0.0.1:${Number.isInteger(port) && port > 0 ? port : DEFAULT_OPENCODE_PORT}`;
 };
 
 const buildOpenCodeAuthHeaders = (env) => {
-  const password = typeof env.OPENCODE_SERVER_PASSWORD === 'string' ? env.OPENCODE_SERVER_PASSWORD.trim() : '';
+  const password = asNonEmptyString(env.OPENCODE_SERVER_PASSWORD);
   if (!password) return {};
   return { Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}` };
 };
 
 const formatWindowValue = (window) => {
-  if (typeof window?.usedPercent === 'number' && Number.isFinite(window.usedPercent)) {
+  if (Number.isFinite(window?.usedPercent)) {
     return `${window.usedPercent}% used`;
   }
-  if (typeof window?.valueLabel === 'string' && window.valueLabel.length > 0) {
-    return window.valueLabel;
-  }
-  return 'unknown';
+  return asNonEmptyString(window?.valueLabel) ?? 'unknown';
 };
 
 const formatResultHeader = (result) => {
   const parts = [`${result.providerName} (${result.providerId})`];
-  if (typeof result.credentialLabel === 'string' && result.credentialLabel.length > 0) {
-    parts.push(result.credentialLabel);
+  const credentialLabel = asNonEmptyString(result.credentialLabel);
+  if (credentialLabel) {
+    parts.push(credentialLabel);
   }
-  if (typeof result.accountLabel === 'string' && result.accountLabel.length > 0) {
-    parts.push(result.accountLabel);
+  const accountLabel = asNonEmptyString(result.accountLabel);
+  if (accountLabel) {
+    parts.push(accountLabel);
   }
   return parts.join(' — ');
 };
@@ -88,29 +88,27 @@ const formatQuotaResultLines = (result) => {
   }
   const lines = [header];
   for (const [label, window] of entries) {
-    const reset = typeof window?.resetAtFormatted === 'string' && window.resetAtFormatted.length > 0
-      ? `, resets ${window.resetAtFormatted}`
-      : '';
+    const resetAtFormatted = asNonEmptyString(window?.resetAtFormatted);
+    const reset = resetAtFormatted ? `, resets ${resetAtFormatted}` : '';
     lines.push(`  ${label}: ${formatWindowValue(window)}${reset}`);
   }
   return lines;
 };
 
 const formatQuotaQuietLine = (result) => {
-  const head = typeof result.credentialLabel === 'string' && result.credentialLabel.length > 0
-    ? `${result.providerId}/${result.credentialLabel.trim().replace(/\s+/g, '-')}`
+  const credentialLabel = asNonEmptyString(result.credentialLabel);
+  const head = credentialLabel
+    ? `${result.providerId}/${credentialLabel.replace(/\s+/g, '-')}`
     : result.providerId;
   if (!result.ok) {
     return `${head} error`;
   }
   const tokens = Object.entries(result.usage?.windows ?? {}).map(([label, window]) => {
-    if (typeof window?.usedPercent === 'number' && Number.isFinite(window.usedPercent)) {
+    if (Number.isFinite(window?.usedPercent)) {
       return `${label}:${window.usedPercent}%`;
     }
-    if (typeof window?.valueLabel === 'string' && window.valueLabel.length > 0) {
-      return `${label}:${window.valueLabel}`;
-    }
-    return `${label}:unknown`;
+    const valueLabel = asNonEmptyString(window?.valueLabel);
+    return valueLabel ? `${label}:${valueLabel}` : `${label}:unknown`;
   });
   return [head, ...tokens].join(' ');
 };
@@ -185,9 +183,13 @@ const resolveQuotaProviderArgs = ({ args, catalogue, configuredIds, includeDisab
 
 const normalizeProviderArgs = (providerArg) => {
   if (Array.isArray(providerArg)) {
-    return providerArg.filter((token) => typeof token === 'string' && token.length > 0);
+    return providerArg.flatMap((token) => {
+      const value = asNonEmptyString(token);
+      return value ? [value] : [];
+    });
   }
-  return typeof providerArg === 'string' && providerArg.length > 0 ? [providerArg] : [];
+  const single = asNonEmptyString(providerArg);
+  return single ? [single] : [];
 };
 
 function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = process.env } = {}) {
@@ -200,7 +202,7 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
 
     const runtime = await loadQuotaRuntime();
     runtime.configureOpenCodeCredentials(runtime.openCodeCredentialSource({
-      buildOpenCodeUrl: (requestPath) => `${resolveOpenCodeBaseUrl(env)}${typeof requestPath === 'string' ? requestPath : ''}`,
+      buildOpenCodeUrl: (requestPath) => `${resolveOpenCodeBaseUrl(env)}${requestPath ?? ''}`,
       getOpenCodeAuthHeaders: () => buildOpenCodeAuthHeaders(env),
     }));
 
@@ -254,5 +256,4 @@ export {
   buildOpenCodeAuthHeaders,
   formatQuotaResultLines,
   formatQuotaQuietLine,
-  resolveQuotaProviderArgs,
 };

@@ -821,10 +821,14 @@ const getKimiApiKey = (auth: AuthFile) => {
 const readDisabledQuotaProviderIds = (): Set<string> => {
   try {
     const config = readConfig();
-    const entries = config.disabled_providers;
-    return new Set(Array.isArray(entries)
-      ? entries.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
-      : []);
+    const disabled = new Set<string>();
+    if (Array.isArray(config.disabled_providers)) {
+      for (const entry of config.disabled_providers) {
+        const id = asNonEmptyString(entry);
+        if (id) disabled.add(id);
+      }
+    }
+    return disabled;
   } catch (error) {
     console.warn('Quota: failed to read the OpenCode config; listing without the disabled filter.', error);
     return new Set();

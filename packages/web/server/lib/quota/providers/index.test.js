@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const authState = vi.hoisted(() => ({ projected: {}, rows: [] }));
-const configState = vi.hoisted(() => ({ merged: {} }));
 
 vi.mock('../../opencode/auth.js', () => ({
   readOpenCodeCredentials: async () => authState.projected,
@@ -10,16 +12,26 @@ vi.mock('../../opencode/auth.js', () => ({
     : authState.rows),
 }));
 
-vi.mock('../../opencode/shared.js', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    readConfigLayers: () => ({ mergedConfig: configState.merged, layerErrors: [] }),
-  };
+// The registry reads disabled_providers and provider instances through the
+// real config-layer reader. Point its global config directory at a path that
+// does not exist so the machine's own opencode.json can never leak into these
+// assertions; the custom layer is resolved from OPENCODE_CONFIG at call time,
+// so each test writes the config it needs to a fresh file.
+vi.hoisted(() => {
+  process.env.OPENCODE_CONFIG_DIR = 'quota-providers-test-without-config-dir';
 });
 
 import * as google from './google/index.js';
 import { fetchQuotaForProvider, fetchQuotaForProviderInstances, listConfiguredQuotaProviders, listQuotaProviderCatalogue } from './index.js';
+
+const createdConfigPaths = [];
+
+const setMergedConfig = (config) => {
+  const filePath = path.join(os.tmpdir(), `quota-providers-config-${process.pid}-${Math.random().toString(16).slice(2)}`);
+  fs.writeFileSync(filePath, JSON.stringify(config));
+  vi.stubEnv('OPENCODE_CONFIG', filePath);
+  createdConfigPaths.push(filePath);
+};
 
 const whamPayload = (email, usedPercent) => ({
   email,
@@ -46,13 +58,11 @@ const fakeFetch = async (url, init = {}) => {
   return { ok: true, status: 200, json: async () => ({ data: {} }) };
 };
 
-const oauthRow = (integrationID, { id, label, active, access, accountId }) => ({
-  id,
-  integrationID,
-  label,
-  active,
-  value: { type: 'oauth', access, refresh: 'rt', expires: 1, ...(accountId ? { accountId } : {}) },
-});
+const oauthRow = (integrationID, { id, label, active, access, accountId }) => {
+  const value = { type: 'oauth', access, refresh: 'rt', expires: 1 };
+  if (accountId) value.accountId = accountId;
+  return { id, integrationID, label, active, value };
+};
 
 const legacyRow = oauthRow('openai', { id: 'cred_legacy', label: 'OAuth', active: false, access: 'legacy-token', accountId: 'acc_main' });
 const sharingRow = oauthRow('openai', { id: 'cred_sharing', label: 'OpenAI 2', active: true, access: 'sharing-token' });
@@ -60,12 +70,16 @@ const sharingRow = oauthRow('openai', { id: 'cred_sharing', label: 'OpenAI 2', a
 beforeEach(() => {
   authState.projected = {};
   authState.rows = [];
-  configState.merged = {};
+  setMergedConfig({});
   vi.stubGlobal('fetch', fakeFetch);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  for (const filePath of createdConfigPaths.splice(0)) {
+    fs.rmSync(filePath, { force: true });
+  }
 });
 
 describe('quota provider registry', () => {
@@ -97,7 +111,7 @@ describe('disabled providers', () => {
       'github-copilot': { type: 'oauth', access: 'gh-token' },
       openai: { type: 'oauth', access: 'sharing-token' },
     };
-    configState.merged = { disabled_providers: ['openrouter', 'github-copilot'] };
+    setMergedConfig({ disabled_providers: ['openrouter', 'github-copilot'] });
   });
 
   it('leaves disabled providers out of the listing by default', async () => {
@@ -171,11 +185,11 @@ describe('per-credential quota', () => {
 
 describe('provider instances', () => {
   beforeEach(() => {
-    configState.merged = {
+    setMergedConfig({
       provider: {
         'openai.alternate': { instanceOf: 'openai', name: 'OpenAI Alternate (Student - popesdrew)' },
       },
-    };
+    });
     authState.rows = [
       oauthRow('openai.alternate', { id: 'cred_alt', label: 'OAuth', active: true, access: 'alt-token', accountId: 'acc_alt' }),
     ];
@@ -199,12 +213,12 @@ describe('provider instances', () => {
   });
 
   it('leaves a disabled instance out of the listing', async () => {
-    configState.merged = {
+    setMergedConfig({
       disabled_providers: ['openai.alternate'],
       provider: {
         'openai.alternate': { instanceOf: 'openai', name: 'OpenAI Alternate (Student - popesdrew)' },
       },
-    };
+    });
     await expect(listConfiguredQuotaProviders()).resolves.not.toContain('openai.alternate');
     await expect(listConfiguredQuotaProviders({ includeDisabled: true })).resolves.toContain('openai.alternate');
   });
@@ -228,7 +242,7 @@ describe('provider catalogue', () => {
   });
 
   it('marks providers the merged config turns off as disabled', () => {
-    configState.merged = { disabled_providers: ['openrouter', 'github-copilot'] };
+    setMergedConfig({ disabled_providers: ['openrouter', 'github-copilot'] });
     const catalogue = listQuotaProviderCatalogue();
     expect(catalogue.find((entry) => entry.id === 'openrouter')?.disabled).toBe(true);
     expect(catalogue.find((entry) => entry.id === 'github-copilot-addon')?.disabled).toBe(true);
@@ -236,11 +250,11 @@ describe('provider catalogue', () => {
   });
 
   it('includes configured provider instances under their own id and name', () => {
-    configState.merged = {
+    setMergedConfig({
       provider: {
         'openai.alternate': { instanceOf: 'openai', name: 'OpenAI Alternate (Student - popesdrew)' },
       },
-    };
+    });
     const catalogue = listQuotaProviderCatalogue();
     const instance = catalogue.find((entry) => entry.id === 'openai.alternate');
     expect(instance?.name).toBe('OpenAI Alternate (Student - popesdrew)');

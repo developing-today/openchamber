@@ -35,6 +35,8 @@
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 
+import { asNonEmptyString } from '../shared/guards.js';
+
 // Wired once per runtime: `server/index.js` on the web server, the extension
 // entry point in VS Code. Until then every read throws.
 let source = null;
@@ -130,7 +132,7 @@ export const projectCredentialEntries = (entries) => {
 export const projectCredentialRows = (entries) => entries.map((entry) => ({
   id: entry.id,
   integrationID: entry.integrationID,
-  label: typeof entry.label === 'string' && entry.label.length > 0 ? entry.label : null,
+  label: asNonEmptyString(entry.label),
   active: Boolean(entry.active),
   value: projectCredentialValue(entry.value),
 }));
