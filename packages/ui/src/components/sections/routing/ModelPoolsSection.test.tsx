@@ -34,8 +34,12 @@ const saveModelRouteTuning = async (tuning: unknown) => {
   serverTuning = tuning;
   return { routes: serverRoutes, tuning, available: true };
 };
+// When set, the nth schedule save waits for the nth gate, so a test can hold saves open.
+let scheduleSaveGates: Array<Promise<void>> = [];
 const saveModelRouteSchedules = async (schedules: ScheduleListValue | null) => {
+  const gate = scheduleSaveGates[scheduleSaves.length];
   scheduleSaves.push(schedules);
+  if (gate) await gate;
   if (saveError) throw saveError;
   serverSchedules = schedules;
   return { routes: serverRoutes, tuning: serverTuning, schedules, otherSchedules: serverOtherSchedules, available: true };
@@ -218,6 +222,7 @@ describe('ModelPoolsSection', () => {
     routeSaves.length = 0;
     tuningSaves.length = 0;
     scheduleSaves.length = 0;
+    scheduleSaveGates = [];
     serverRoutes = {};
     serverTuning = null;
     serverSchedules = null;
@@ -494,6 +499,29 @@ describe('ModelPoolsSection', () => {
       await clickButton(dom.container, 'Remove schedule');
       expect(scheduleSaves.at(-1)).toBeNull();
       expect(routeSaves).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('schedule saves go one at a time, and an older answer never replaces a newer edit', async () => {
+    serverSchedules = [{ providers: ['deepseek'], when: {}, factor: 0.5 }];
+    const releases: Array<() => void> = [];
+    scheduleSaveGates = [0, 1].map(() => new Promise<void>((resolve) => { releases.push(resolve); }));
+    const flush = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await typeInto(findInput(dom.container, 'Pools'), 'first');
+      await typeInto(findInput(dom.container, 'Pools'), 'second');
+      // The second save waits for the first to answer.
+      expect(scheduleSaves).toHaveLength(1);
+      await act(async () => { releases[0](); await flush(); });
+      // The first answer has landed; the newer edit stays on screen.
+      expect(scheduleSaves).toHaveLength(2);
+      expect(findInput(dom.container, 'Pools').value).toBe('second');
+      await act(async () => { releases[1](); await flush(); });
+      expect(scheduleSaves).toMatchObject([[{ routes: ['first'] }], [{ routes: ['second'] }]]);
+      expect(findInput(dom.container, 'Pools').value).toBe('second');
     } finally {
       await cleanup();
     }

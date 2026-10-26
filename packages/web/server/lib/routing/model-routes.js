@@ -734,7 +734,16 @@ export const registerModelRouteRoutes = (app, dependencies) => {
     CONFIG_FILE,
     isEnterpriseMode,
     refreshOpenCodeAfterConfigChange,
+    resolveOptionalProjectDirectory = async () => ({ directory: null }),
   } = dependencies;
+
+  // Only the read-only list of other files' schedules looks at the project:
+  // OpenCode applies a project's model_route_schedules too, so Settings shows
+  // them. Pools and tuning keep reading and writing as before.
+  const projectLayers = async (req) => {
+    const { directory } = await resolveOptionalProjectDirectory(req);
+    return directory ? readConfigLayers(directory) : null;
+  };
 
   const refuseInEnterpriseMode = (_req, res, next) =>
     isEnterpriseMode()
@@ -751,7 +760,7 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         // The user file's own list, which is the one Settings edits; the
         // merged view would copy other files' entries into it on save.
         schedules: readModelRouteSchedules(getConfigForPath(layers, targetPath)),
-        otherSchedules: readOtherModelRouteSchedules(layers, targetPath),
+        otherSchedules: readOtherModelRouteSchedules((await projectLayers(req)) ?? layers, targetPath),
         path: targetPath,
       });
     } catch (error) {
@@ -797,7 +806,7 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         routes: routes ?? readModelRoutes(layers.mergedConfig),
         tuning: tuning === undefined ? readModelRouteTuning(layers.mergedConfig) : tuning,
         schedules: readModelRouteSchedules(targetConfig),
-        otherSchedules: readOtherModelRouteSchedules(layers, targetPath),
+        otherSchedules: readOtherModelRouteSchedules((await projectLayers(req)) ?? layers, targetPath),
         path: targetPath,
       });
     } catch (error) {

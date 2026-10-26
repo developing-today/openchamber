@@ -85,8 +85,13 @@ type ModelRoutesState = z.infer<typeof modelRoutesStateSchema> & { available: bo
 
 const errorPayloadSchema = z.object({ error: z.string().min(1) });
 
-export const fetchModelRoutes = async (): Promise<ModelRoutesState> => {
-  const response = await runtimeFetch('/api/model-routes');
+// The project directory lets the server list the project's own cross-pool
+// schedules (read-only); pools and tuning read the same with or without it.
+const withDirectory = (path: string, directory?: string | null) =>
+  directory ? `${path}?directory=${encodeURIComponent(directory)}` : path;
+
+export const fetchModelRoutes = async (directory?: string | null): Promise<ModelRoutesState> => {
+  const response = await runtimeFetch(withDirectory('/api/model-routes', directory));
   if (response.status === 404) return { routes: {}, available: false };
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -100,8 +105,8 @@ const putModelRoutes = async (body: {
   routes?: Record<string, ModelRoute>;
   tuning?: ModelRouteTuning | null;
   schedules?: ScheduleListValue | null;
-}): Promise<ModelRoutesState> => {
-  const response = await runtimeFetch('/api/model-routes', {
+}, directory?: string | null): Promise<ModelRoutesState> => {
+  const response = await runtimeFetch(withDirectory('/api/model-routes', directory), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -120,7 +125,8 @@ export const saveModelRoutes = (routes: Record<string, ModelRoute>): Promise<Mod
 export const saveModelRouteTuning = (tuning: ModelRouteTuning | null): Promise<ModelRoutesState> => putModelRoutes({ tuning });
 
 /** Saves the schedules that apply across pools; null removes the list from the config. */
-export const saveModelRouteSchedules = (schedules: ScheduleListValue | null): Promise<ModelRoutesState> => putModelRoutes({ schedules });
+export const saveModelRouteSchedules = (schedules: ScheduleListValue | null, directory?: string | null): Promise<ModelRoutesState> =>
+  putModelRoutes({ schedules }, directory);
 
 const routeTargetStatsSchema = z.object({
   providerID: z.string(),

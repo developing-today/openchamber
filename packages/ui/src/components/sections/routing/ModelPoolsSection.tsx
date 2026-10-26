@@ -39,6 +39,7 @@ import { PRESET_ROUTE_IDS, presetTargets, type PresetId } from '@/lib/routing/ro
 import { pickedAutonomy, routeReference, routeReferenceID, targetLabel, targetUntil, withoutAbsentWeights } from '@/lib/routing/poolAdvanced';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 
 const PRESETS = [
   { id: 'cheap', titleKey: 'settings.pools.preset.cheap', infoKey: 'settings.pools.preset.cheapInfo' },
@@ -405,6 +406,7 @@ export const ModelPoolsSection: React.FC = () => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
   const decisions = useRoutingStore((state) => state.decisions);
+  const settingsDirectory = useSettingsDirectory();
   const [routes, setRoutes] = React.useState<Record<string, ModelRoute> | null>(null);
   const [available, setAvailable] = React.useState(true);
   const [drafts, setDrafts] = React.useState<Record<string, ModelRoute>>({});
@@ -420,7 +422,7 @@ export const ModelPoolsSection: React.FC = () => {
 
   React.useEffect(() => {
     let cancelled = false;
-    fetchModelRoutes()
+    fetchModelRoutes(settingsDirectory)
       .then((state) => {
         if (cancelled) return;
         // A server without /api/model-routes answers 404, which the API
@@ -444,7 +446,7 @@ export const ModelPoolsSection: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [settingsDirectory]);
 
   const persist = React.useCallback(async (next: Record<string, ModelRoute>) => {
     setRoutes(next);
@@ -477,19 +479,31 @@ export const ModelPoolsSection: React.FC = () => {
   }, []);
 
   // An empty list removes the key, so the config carries no `model_route_schedules: []`.
-  const saveSchedules = React.useCallback(async (next: ScheduleListValue) => {
+  // Schedule saves go out one at a time, and only the newest edit's answer
+  // lands: an older save finishing late must not replace a newer list on
+  // screen, which the next edit would then write back.
+  const scheduleSaveChainRef = React.useRef<Promise<void>>(Promise.resolve());
+  const scheduleSaveSeqRef = React.useRef(0);
+  const saveSchedules = React.useCallback((next: ScheduleListValue) => {
+    const seq = ++scheduleSaveSeqRef.current;
     setSchedules(next);
-    try {
-      const state = await saveModelRouteSchedules(next.length > 0 ? next : null);
-      lastSavedSchedulesRef.current = state.schedules ?? null;
-      setSchedules(state.schedules ?? null);
-      setOtherSchedules(state.otherSchedules ?? []);
-      setError(null);
-    } catch (failure) {
-      setSchedules(lastSavedSchedulesRef.current);
-      setError(failure instanceof Error ? failure.message : String(failure));
-    }
-  }, []);
+    const run = scheduleSaveChainRef.current.then(async () => {
+      try {
+        const state = await saveModelRouteSchedules(next.length > 0 ? next : null, settingsDirectory);
+        lastSavedSchedulesRef.current = state.schedules ?? null;
+        if (seq !== scheduleSaveSeqRef.current) return;
+        setSchedules(state.schedules ?? null);
+        setOtherSchedules(state.otherSchedules ?? []);
+        setError(null);
+      } catch (failure) {
+        if (seq !== scheduleSaveSeqRef.current) return;
+        setSchedules(lastSavedSchedulesRef.current);
+        setError(failure instanceof Error ? failure.message : String(failure));
+      }
+    });
+    scheduleSaveChainRef.current = run;
+    return run;
+  }, [settingsDirectory]);
 
   const applyPreset = (preset: PresetId) => {
     if (!routes) return;

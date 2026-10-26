@@ -872,7 +872,7 @@ describe('registerModelRouteRoutes', () => {
     beforeEach(() => {
       userConfig = { experimental: { model_routes: { old: { targets: ['a/b'] } }, model_route_schedules: userSchedules } };
       projectConfig = { experimental: { model_route_schedules: projectSchedules } };
-      const layers = {
+      const withProject = {
         userConfig,
         userOverrideConfig: {},
         customConfig: {},
@@ -881,10 +881,18 @@ describe('registerModelRouteRoutes', () => {
         mergedConfig: { experimental: { ...userConfig.experimental, model_route_schedules: projectSchedules } },
         paths: { userPath: '/u/opencode.json', userOverridePath: null, customPath: null, projectPath: '/p/opencode.json' },
       };
+      // Like shared.js readConfigLayers: without a working directory there is no project layer.
+      const withoutProject = {
+        ...withProject,
+        projectConfig: {},
+        mergedConfig: { experimental: { ...userConfig.experimental } },
+        paths: { ...withProject.paths, projectPath: null },
+      };
       layered = {
         ...deps,
-        readConfigLayers: vi.fn(() => layers),
+        readConfigLayers: vi.fn((directory) => (directory === '/p' ? withProject : withoutProject)),
         getConfigForPath: vi.fn((given, path) => (path === '/p/opencode.json' ? given.projectConfig : given.userConfig)),
+        resolveOptionalProjectDirectory: vi.fn(async (req) => ({ directory: req.query?.directory ?? null })),
       };
     });
 
@@ -892,9 +900,18 @@ describe('registerModelRouteRoutes', () => {
       const { app, routes } = makeApp();
       registerModelRouteRoutes(app, layered);
       const response = res();
-      await routes.get[0][1]({}, response);
+      await routes.get[0][1]({ query: { directory: '/p' } }, response);
       expect(response.out.body.schedules).toEqual(userSchedules);
       expect(response.out.body.otherSchedules).toEqual([{ path: '/p/opencode.json', schedules: projectSchedules }]);
+    });
+
+    it('GET without a project directory lists no project schedules', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({ query: {} }, response);
+      expect(response.out.body.schedules).toEqual(userSchedules);
+      expect(response.out.body.otherSchedules).toEqual([]);
     });
 
     it('PUT writes only the user file\'s list, and a save of routes alone leaves it as it was', async () => {
@@ -903,14 +920,14 @@ describe('registerModelRouteRoutes', () => {
       const [, , , handler] = routes.put[0];
       const edited = [{ ...userSchedules[0], factor: 0.25 }];
       const saved = res();
-      await handler({ body: { schedules: edited } }, saved);
+      await handler({ body: { schedules: edited }, query: { directory: '/p' } }, saved);
       expect(userConfig.experimental.model_route_schedules).toEqual(edited);
       expect(projectConfig.experimental.model_route_schedules).toEqual(projectSchedules);
       expect(saved.out.body.schedules).toEqual(edited);
       expect(saved.out.body.otherSchedules).toEqual([{ path: '/p/opencode.json', schedules: projectSchedules }]);
 
       const routesOnly = res();
-      await handler({ body: { routes: { old: { targets: ['a/c'] } } } }, routesOnly);
+      await handler({ body: { routes: { old: { targets: ['a/c'] } } }, query: { directory: '/p' } }, routesOnly);
       expect(userConfig.experimental.model_route_schedules).toEqual(edited);
       expect(routesOnly.out.body.schedules).toEqual(edited);
     });

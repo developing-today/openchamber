@@ -312,6 +312,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       CONFIG_FILE,
       isEnterpriseMode,
       refreshOpenCodeAfterConfigChange,
+      resolveOptionalProjectDirectory,
     });
     registerModelRouteStatsRoutes(app);
     registerMessageModelAttributionRoutes(app);
