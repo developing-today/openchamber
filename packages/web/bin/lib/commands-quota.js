@@ -92,6 +92,29 @@ const formatQuotaResultLines = (result) => {
     const reset = resetAtFormatted ? `, resets ${resetAtFormatted}` : '';
     lines.push(`  ${label}: ${formatWindowValue(window)}${reset}`);
   }
+  lines.push(...formatModelBreakdownLines(result.usage?.models));
+  return lines;
+};
+
+const formatAmount = (value) => (Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100));
+
+// Per-model detail a provider attached to the result (Open Design usage
+// records), printed as an indented block under the provider's windows. Each
+// segment appears only when the provider reported that field.
+const formatModelBreakdownLines = (models) => {
+  if (!Array.isArray(models) || models.length === 0) {
+    return [];
+  }
+  const lines = ['  models:'];
+  for (const entry of models) {
+    const segments = [];
+    if (Number.isFinite(entry?.credits)) segments.push(`${formatAmount(entry.credits)} credits`);
+    if (Number.isFinite(entry?.sharePercent)) segments.push(`${formatAmount(entry.sharePercent)}% share`);
+    if (Number.isFinite(entry?.totalTokens) && entry.totalTokens > 0) segments.push(`${entry.totalTokens} tokens`);
+    if (Number.isFinite(entry?.multiplier)) segments.push(`${formatAmount(entry.multiplier)}x multiplier`);
+    const model = asNonEmptyString(entry?.model) ?? 'unknown model';
+    lines.push(segments.length > 0 ? `    ${model}: ${segments.join(', ')}` : `    ${model}`);
+  }
   return lines;
 };
 
