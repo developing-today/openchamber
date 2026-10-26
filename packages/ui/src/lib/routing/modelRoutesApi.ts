@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { storedSchedulesSchema, type ScheduleListValue } from '@/lib/routing/scheduleSchema';
 
 export const AUTONOMY_LEVELS = ['fixed', 'rules', 'adaptive', 'predictive', 'agent'] as const;
 export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
@@ -42,6 +43,7 @@ const budgetSchema = z
   })
   .passthrough();
 
+
 // The server's limits on a pool's own text (`validateModelRoute` in
 // packages/web/server/lib/routing/model-routes.js); a guard test there keeps
 // the two equal.
@@ -66,6 +68,7 @@ const modelRouteSchema = z
     hedgeAfterMs: z.number().optional(),
     health: healthSchema.optional(),
     budgets: z.record(z.string(), budgetSchema).optional(),
+    schedules: storedSchedulesSchema.optional(),
   })
   .passthrough();
 
@@ -85,6 +88,8 @@ export type ModelRouteTuning = z.infer<typeof modelRouteTuningSchema>;
 const modelRoutesStateSchema = z.object({
   routes: z.record(z.string(), modelRouteSchema),
   tuning: modelRouteTuningSchema.nullable().optional(),
+  schedules: storedSchedulesSchema.nullable().optional(),
+  otherSchedules: z.array(z.object({ path: z.string(), schedules: storedSchedulesSchema })).optional(),
   path: z.string().optional(),
 });
 
@@ -92,8 +97,13 @@ type ModelRoutesState = z.infer<typeof modelRoutesStateSchema> & { available: bo
 
 const errorPayloadSchema = z.object({ error: z.string().min(1) });
 
-export const fetchModelRoutes = async (): Promise<ModelRoutesState> => {
-  const response = await runtimeFetch('/api/model-routes');
+// The project directory lets the server list the project's own cross-pool
+// schedules (read-only); pools and tuning read the same with or without it.
+const withDirectory = (path: string, directory?: string | null) =>
+  directory ? `${path}?directory=${encodeURIComponent(directory)}` : path;
+
+export const fetchModelRoutes = async (directory?: string | null): Promise<ModelRoutesState> => {
+  const response = await runtimeFetch(withDirectory('/api/model-routes', directory));
   if (response.status === 404) return { routes: {}, available: false };
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -103,8 +113,12 @@ export const fetchModelRoutes = async (): Promise<ModelRoutesState> => {
   return { ...modelRoutesStateSchema.parse(payload), available: true };
 };
 
-const putModelRoutes = async (body: { routes?: Record<string, ModelRoute>; tuning?: ModelRouteTuning | null }): Promise<ModelRoutesState> => {
-  const response = await runtimeFetch('/api/model-routes', {
+const putModelRoutes = async (body: {
+  routes?: Record<string, ModelRoute>;
+  tuning?: ModelRouteTuning | null;
+  schedules?: ScheduleListValue | null;
+}, directory?: string | null): Promise<ModelRoutesState> => {
+  const response = await runtimeFetch(withDirectory('/api/model-routes', directory), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -121,6 +135,10 @@ export const saveModelRoutes = (routes: Record<string, ModelRoute>): Promise<Mod
 
 /** Saves the automatic-review settings; null removes them so OpenCode's defaults apply. */
 export const saveModelRouteTuning = (tuning: ModelRouteTuning | null): Promise<ModelRoutesState> => putModelRoutes({ tuning });
+
+/** Saves the schedules that apply across pools; null removes the list from the config. */
+export const saveModelRouteSchedules = (schedules: ScheduleListValue | null, directory?: string | null): Promise<ModelRoutesState> =>
+  putModelRoutes({ schedules }, directory);
 
 const routeTargetStatsSchema = z.object({
   providerID: z.string(),

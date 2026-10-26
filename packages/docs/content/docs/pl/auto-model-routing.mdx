@@ -33,6 +33,8 @@ Dla każdej kategorii możesz ustawić:
 - **Myślenie:** poziom myślenia dla tego modelu
 - **Agent:** agent, który wykonuje te zadania; puste pole zostawia agenta, którego użyłoby pole wiadomości
 
+Harmonogramy zmieniają wagi celów w wybrane dni lub godziny, na przykład żeby wysyłać mniej ruchu do dostawcy w jego godzinach szczytu. Harmonogramy danej puli są w jej opcjach zaawansowanych w **Ustawienia → Routing → Pule modeli**, a **Harmonogramy dla wszystkich pul** pod listą pul zmieniają pasujące cele w każdej puli albo tylko w pulach, które podasz. Każdy harmonogram przyjmuje dni tygodnia, dni miesiąca, godzinę początku i końca, strefę czasową oraz albo mnożnik wagi, albo wagę, która ją zastępuje. Poza oknem obowiązują skonfigurowane wagi. OpenCode stosuje też harmonogramy z innych swoich plików konfiguracyjnych, na przykład z `opencode.json` projektu. Ustawienia pokazują je tylko do odczytu, pod nazwą pliku, w którym można je edytować.
+
 Jev sortuje prompty, czytając nazwy i opisy kategorii, więc opisy działają jak instrukcje. Napisz, co należy do kategorii, a co nie. Kategorie możesz edytować, wyłączać, usuwać i dodawać, a wbudowaną przywrócić, jeśli zmienisz zdanie. Auto potrzebuje co najmniej dwóch włączonych kategorii.
 
 ### Sprawdź, które sesje współdzielą cel

@@ -33,6 +33,8 @@ Pour chaque catégorie, vous pouvez définir :
 - **Réflexion :** le niveau de réflexion pour ce modèle
 - **Agent :** l’agent qui exécute ces tâches ; vide garde l’agent que le champ de saisie utiliserait
 
+Les plannings modifient les poids des cibles certains jours ou à certaines heures, par exemple pour envoyer moins de trafic à un fournisseur pendant ses heures de pointe. Les plannings propres à un pool se trouvent dans ses options avancées, sous **Paramètres → Routage → Pools de modèles**, et **Plannings pour tous les pools**, sous la liste des pools, modifie les cibles correspondantes dans chaque pool, ou seulement dans les pools que vous indiquez. Chaque planning prend des jours de la semaine, des jours du mois, une heure de début et de fin, un fuseau horaire, et soit un facteur qui multiplie le poids, soit un poids qui le remplace. Hors de sa plage, les poids configurés s’appliquent. OpenCode applique aussi les plannings de ses autres fichiers de configuration, comme le `opencode.json` d’un projet. Les paramètres les affichent en lecture seule, sous le nom du fichier où les modifier.
+
 Jev trie les prompts en lisant le nom et la description des catégories : les descriptions servent donc d’instructions. Écrivez ce qui appartient à la catégorie et ce qui n’y appartient pas. Vous pouvez modifier, désactiver, supprimer ou ajouter des catégories, et restaurer une catégorie intégrée si vous changez d’avis. Auto a besoin d’au moins deux catégories activées.
 
 ### Voir quelles sessions partagent une cible

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Switch } from '@/components/ui/switch';
 import { SETTINGS_HELPER_CLASS, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
-import { RangedNumberField } from '@/components/sections/routing/PoolAdvancedFields';
+import { RangedNumberField } from '@/components/sections/routing/RangedNumberField';
 import { useI18n } from '@/lib/i18n';
 import type { ModelRouteTuning } from '@/lib/routing/modelRoutesApi';
 import { tuningToSave, withOptional } from '@/lib/routing/poolAdvanced';

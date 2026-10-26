@@ -253,6 +253,38 @@ the source and manages the TypeSafe key and, through `CustomEndpointFields.tsx`,
 the custom endpoint; `JevAccessNote` links there from the
 features that need Jev.
 
+## Model pool config
+
+`model-routes.js` — `GET`/`PUT /api/model-routes`: OpenCode's
+`experimental.model_routes` (the pools), `model_route_tuning` (automatic
+review) and `model_route_schedules` (weight changes across pools), written to
+the user's global `opencode.json(c)` and refused in enterprise mode. A `PUT`
+carries any of `routes`, `tuning` and `schedules`; `null` removes `tuning` or
+`schedules`. Every key is checked against OpenCode's schema
+(`packages/schema/src/config/model-routes.ts`) before anything is written, and
+one bad pool refuses the whole map. A schedule is also refused where OpenCode
+would quietly drop it (`packages/core/src/model-route-schedule.ts`,
+`routeWeightRules` in `packages/core/src/config/plugin/model-routes.ts`): an
+empty day list, an unreadable time or timezone, or neither `factor` nor
+`weight`. Two cases OpenCode keeps are refused too, because they do not do what
+they say: a start equal to its end (the rule stays and is never active) and
+both `factor` and `weight` (the weight applies and the factor is ignored).
+A cross-pool schedule's `providers`, `models`, `targets` and `routes` follow
+the same list rules as a route schedule's `targets`: a blank entry or an empty
+list is refused, because OpenCode reads an empty matcher as "everything".
+
+OpenCode adds up `model_route_schedules` from every config file, while
+`mergeConfigs` keeps only the last file's list. So `schedules` in a response
+is the list in the user file, as stored, and the only one a `PUT` writes;
+`otherSchedules` lists the non-empty lists in the other files
+(`{ path, schedules }`), which Settings shows read-only, in OpenCode's
+reading order from `readConfigSources` (`../opencode/shared.js`): the global
+files, `OPENCODE_CONFIG`, then every `opencode.json(c)` and
+`.opencode/opencode.json(c)` from the outermost ancestor folder down to the
+project. The folder files are included only when the request names the
+Settings project (`?directory=` or the `x-opencode-directory` header). Pools and tuning read and write the same with or without it. Settings
+sends schedule saves one at a time and keeps only the newest edit's answer.
+
 ## Pool descriptions
 
 `model-routes.js` reads and writes OpenCode's `experimental.model_routes` in the
@@ -408,8 +440,8 @@ makes that visible so the user can spread them.
   a route whose targets only chase references in a
   cycle that reaches no concrete model target (OpenCode drops both
   silently, and the second would expand to no models). Cross-pool schedules
-  (`experimental.model_route_schedules`) are not OpenChamber's to save yet;
-  #297 covers their editor.
+  (`experimental.model_route_schedules`) go through `validateModelRouteSchedules`,
+  which reuses the route schedule window checks; see "Model pool config".
 - `pool-plan-links.js` keeps `pool-plan-links.json` in the OpenChamber data
   directory: a map from a target reference (`provider/model`, or a `*`
   pattern) to a plan id from the plan store. Two targets linked to one plan

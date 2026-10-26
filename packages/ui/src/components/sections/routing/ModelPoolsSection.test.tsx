@@ -3,11 +3,14 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 
+import type { ScheduleList, ScheduleListValue, StoredSchedules } from '@/lib/routing/scheduleSchema';
+
 // Hand-rolled recorders rather than bun's `mock()`: its installed types omit
 // `.mock`/`mockClear`, while the runtime behaviour is all these tests need.
 const routeFetches: string[] = [];
 const routeSaves: unknown[] = [];
 const tuningSaves: unknown[] = [];
+const scheduleSaves: unknown[] = [];
 let serverRoutes: Record<string, {
   targets: string[];
   selection?: 'ordered' | 'round-robin' | 'weighted';
@@ -16,12 +19,14 @@ let serverRoutes: Record<string, {
   details?: string;
 }> = {};
 let serverTuning: unknown = null;
+let serverSchedules: ScheduleList | null = null;
+let serverOtherSchedules: { path: string; schedules: StoredSchedules }[] = [];
 let saveError: Error | null = null;
 
 let serverAvailable = true;
 const fetchModelRoutes = async () => {
   routeFetches.push('fetch');
-  return { routes: serverRoutes, tuning: serverTuning, available: serverAvailable };
+  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, otherSchedules: serverOtherSchedules, available: serverAvailable };
 };
 const saveModelRoutes = async (routes: unknown) => {
   routeSaves.push(routes);
@@ -35,6 +40,16 @@ const saveModelRouteTuning = async (tuning: unknown) => {
   serverTuning = tuning;
   return { routes: serverRoutes, tuning, available: true };
 };
+// When set, the nth schedule save waits for the nth gate, so a test can hold saves open.
+let scheduleSaveGates: Array<Promise<void>> = [];
+const saveModelRouteSchedules = async (schedules: ScheduleListValue | null) => {
+  const gate = scheduleSaveGates[scheduleSaves.length];
+  scheduleSaves.push(schedules);
+  if (gate) await gate;
+  if (saveError) throw saveError;
+  serverSchedules = schedules;
+  return { routes: serverRoutes, tuning: serverTuning, schedules, otherSchedules: serverOtherSchedules, available: true };
+};
 const fetchRouteStats = async () => ({ available: false, reason: 'no-database' });
 
 mock.module('@/lib/routing/modelRoutesApi', () => ({
@@ -43,6 +58,7 @@ mock.module('@/lib/routing/modelRoutesApi', () => ({
   fetchModelRoutes,
   saveModelRoutes,
   saveModelRouteTuning,
+  saveModelRouteSchedules,
   fetchRouteStats,
 }));
 
@@ -212,8 +228,12 @@ describe('ModelPoolsSection', () => {
     routeFetches.length = 0;
     routeSaves.length = 0;
     tuningSaves.length = 0;
+    scheduleSaves.length = 0;
+    scheduleSaveGates = [];
     serverRoutes = {};
     serverTuning = null;
+    serverSchedules = null;
+    serverOtherSchedules = [];
     saveError = null;
     serverAvailable = true;
     useConfigStore.setState({
@@ -481,6 +501,104 @@ describe('ModelPoolsSection', () => {
       expect(dom.container.textContent).toContain('Enter a number from 1 to 1440.');
       await typeInto(findInput(dom.container, 'Minutes between reviews'), '30');
       expect(tuningSaves.at(-1)).toEqual({ intervalMinutes: 30 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a pool schedule saves inside that pool', async () => {
+    // beforeEach gave the server an empty map; the pool is added to it.
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'] } });
+    const { dom, cleanup } = await renderSection();
+    try {
+      await openAdvanced(dom.container);
+      // The pool's list renders before the one across pools, so its button comes first.
+      await clickButton(dom.container, 'Add schedule');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], schedules: [{ when: {}, factor: 1 }] } });
+      expect(scheduleSaves).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('schedules across pools load, save through their own request, and an empty list removes them', async () => {
+    serverSchedules = [{ providers: ['deepseek'], when: { start: '09:00', end: '17:00' }, factor: 0.5 }];
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(findInput(dom.container, 'Providers').value).toBe('deepseek');
+      await typeInto(findInput(dom.container, 'Pools'), 'cheap-pool');
+      expect(scheduleSaves.at(-1)).toEqual([
+        { providers: ['deepseek'], when: { start: '09:00', end: '17:00' }, factor: 0.5, routes: ['cheap-pool'] },
+      ]);
+      await clickButton(dom.container, 'Remove schedule');
+      expect(scheduleSaves.at(-1)).toBeNull();
+      expect(routeSaves).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('schedule saves go one at a time, and an older answer never replaces a newer edit', async () => {
+    serverSchedules = [{ providers: ['deepseek'], when: {}, factor: 0.5 }];
+    const releases: Array<() => void> = [];
+    scheduleSaveGates = [0, 1].map(() => new Promise<void>((resolve) => { releases.push(resolve); }));
+    const flush = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); };
+    const { dom, cleanup } = await renderSection();
+    try {
+      await typeInto(findInput(dom.container, 'Pools'), 'first');
+      await typeInto(findInput(dom.container, 'Pools'), 'second');
+      // The second save waits for the first to answer.
+      expect(scheduleSaves).toHaveLength(1);
+      await act(async () => { releases[0](); await flush(); });
+      // The first answer has landed; the newer edit stays on screen.
+      expect(scheduleSaves).toHaveLength(2);
+      expect(findInput(dom.container, 'Pools').value).toBe('second');
+      await act(async () => { releases[1](); await flush(); });
+      expect(scheduleSaves).toMatchObject([[{ routes: ['first'] }], [{ routes: ['second'] }]]);
+      expect(findInput(dom.container, 'Pools').value).toBe('second');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // OpenCode adds up the lists from every config file; only the user file's is editable here.
+  test('lists from other config files show read-only with their file, and saves never include them', async () => {
+    serverSchedules = [{ providers: ['deepseek'], when: {}, factor: 0.5 }];
+    serverOtherSchedules = [{ path: '/repo/opencode.json', schedules: [{ models: ['*flash*'], when: {}, weight: 2 }] }];
+    const { dom, cleanup } = await renderSection();
+    try {
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('These schedules from /repo/opencode.json also apply. Edit them in that file.');
+      expect(text).toContain('*flash*');
+      expect([...dom.container.querySelectorAll('input')].some((el) => el.value === '*flash*')).toBe(false);
+      await typeInto(findInput(dom.container, 'Pools'), 'cheap-pool');
+      expect(scheduleSaves.at(-1)).toEqual([{ providers: ['deepseek'], when: {}, factor: 0.5, routes: ['cheap-pool'] }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a malformed schedule list still lets the pools load', async () => {
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'], schedules: { start: 900 } } });
+    serverSchedules = [{ when: { start: 900 }, factor: 2 }];
+    const { dom, cleanup } = await renderSection();
+    try {
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('kept');
+      expect(text).toContain("OpenChamber can't read this schedule");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a refused schedule save rolls back to the saved list and shows why', async () => {
+    saveError = new Error('schedule 1 when.timezone must be an IANA timezone');
+    const { dom, cleanup } = await renderSection();
+    try {
+      await clickButton(dom.container, 'Add schedule');
+      expect(scheduleSaves).toEqual([[{ when: {}, factor: 1 }]]);
+      expect([...dom.container.querySelectorAll('button')].some((el) => el.textContent?.trim() === 'Remove schedule')).toBe(false);
+      expect(dom.container.textContent).toContain('schedule 1 when.timezone must be an IANA timezone');
     } finally {
       await cleanup();
     }

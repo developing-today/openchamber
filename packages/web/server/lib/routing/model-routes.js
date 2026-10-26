@@ -40,6 +40,7 @@ const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "
 const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
 const SCHEDULE_KEYS = ["id", "targets", "when", "factor", "weight", "note"];
 const WINDOW_KEYS = ["daysOfWeek", "daysOfMonth", "start", "end", "timezone", "from", "until"];
+const GLOBAL_SCHEDULE_KEYS = ["id", "providers", "models", "targets", "routes", "when", "factor", "weight", "note"];
 // The weekday spellings OpenCode's schema accepts, beside a whole number from 0 (Sunday) to 6.
 const DAY_OF_WEEK_NAMES = [
   "sun", "sunday", "mon", "monday", "tue", "tuesday", "tues", "wed", "wednesday",
@@ -81,6 +82,32 @@ const readModelRouteTuning = (config) => {
   const tuning = config?.experimental?.model_route_tuning;
   return isRecord(tuning) ? tuning : null;
 };
+
+/** `experimental.model_route_schedules` as one config file stores it, or null. */
+const readModelRouteSchedules = (config) => config?.experimental?.model_route_schedules ?? null;
+
+/**
+ * Cross-pool schedules from the config files other than `targetPath`, with
+ * the file each came from, in OpenCode's reading order. OpenCode applies every
+ * file's list (it flattens them), so Settings shows these read-only and writes
+ * only the user file's. `sources` is `readConfigSources(directory)`: the
+ * global files, `OPENCODE_CONFIG`, and every folder file from the outermost
+ * ancestor down to the project, json and jsonc and `.opencode`.
+ */
+const readOtherModelRouteSchedules = (sources, targetPath) =>
+  sources.flatMap(({ path, config }) => {
+    if (!path || path === targetPath) return [];
+    const schedules = config?.experimental?.model_route_schedules;
+    return Array.isArray(schedules) && schedules.length > 0 ? [{ path, schedules }] : [];
+  });
+
+/** The layers' files as a source list, for callers that have no readConfigSources. */
+const sourcesFromLayers = (layers) => [
+  [layers.paths.userPath, layers.userConfig],
+  [layers.paths.userOverridePath, layers.userOverrideConfig],
+  [layers.paths.customPath, layers.customConfig],
+  [layers.paths.projectPath, layers.projectConfig],
+].map(([path, config]) => ({ path, config }));
 
 const HEALTH_LIMITS = {
   firstTokenTimeoutMs: MAX_MS,
@@ -173,47 +200,47 @@ const isKnownTimezone = (value) => {
 
 /** A schedule's `when` window, judged the way OpenCode judges it: its schema first, then the
  * schedule parser, which drops a window it cannot read and takes the whole schedule with it. */
-const validateScheduleWindow = (id, label, window) => {
+const validateScheduleWindow = (subject, window) => {
   const unknown = unknownKeysProblem(window, WINDOW_KEYS);
-  if (unknown) return `route "${id}" ${label} window has ${unknown}`;
+  if (unknown) return `${subject} window has ${unknown}`;
   if (window.daysOfWeek !== undefined) {
     if (!Array.isArray(window.daysOfWeek))
-      return `route "${id}" ${label} window.daysOfWeek must be a list of weekday names or whole numbers from 0 to 6`;
+      return `${subject} window.daysOfWeek must be a list of weekday names or whole numbers from 0 to 6`;
     if (window.daysOfWeek.length === 0)
-      return `route "${id}" ${label} window.daysOfWeek must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
+      return `${subject} window.daysOfWeek must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
     for (const day of window.daysOfWeek)
       if (!DAY_OF_WEEK_NAMES.includes(day) && !isWhole(day, 0, 6))
-        return `route "${id}" ${label} window.daysOfWeek entry "${String(day)}" is not a weekday name or a whole number from 0 to 6`;
+        return `${subject} window.daysOfWeek entry "${String(day)}" is not a weekday name or a whole number from 0 to 6`;
   }
   if (window.daysOfMonth !== undefined) {
     if (!Array.isArray(window.daysOfMonth))
-      return `route "${id}" ${label} window.daysOfMonth must be a list of whole numbers from 1 to 31, or -1 for the last day`;
+      return `${subject} window.daysOfMonth must be a list of whole numbers from 1 to 31, or -1 for the last day`;
     if (window.daysOfMonth.length === 0)
-      return `route "${id}" ${label} window.daysOfMonth must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
+      return `${subject} window.daysOfMonth must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
     for (const day of window.daysOfMonth)
       if (day !== -1 && !isWhole(day, 1, 31))
-        return `route "${id}" ${label} window.daysOfMonth entry "${String(day)}" is not a whole number from 1 to 31 or -1`;
+        return `${subject} window.daysOfMonth entry "${String(day)}" is not a whole number from 1 to 31 or -1`;
   }
   for (const key of ["start", "end"])
     if (window[key] !== undefined && !isWindowTime(window[key]))
-      return `route "${id}" ${label} window.${key} must be a local time like "09:00"`;
+      return `${subject} window.${key} must be a local time like "09:00"`;
   if (
     window.start !== undefined &&
     window.end !== undefined &&
     windowTimeMinutes(window.start) === windowTimeMinutes(window.end)
   )
-    return `route "${id}" ${label} window.start and window.end must not be the same time: OpenCode treats an equal start and end as an empty window that can never apply`;
+    return `${subject} window.start and window.end must not be the same time: OpenCode treats an equal start and end as an empty window that can never apply`;
   if (window.timezone !== undefined && !isKnownTimezone(window.timezone))
-    return `route "${id}" ${label} window.timezone must be an IANA timezone name OpenCode can resolve`;
+    return `${subject} window.timezone must be an IANA timezone name OpenCode can resolve`;
   for (const key of ["from", "until"])
     if (window[key] !== undefined && !isWhole(window[key], 1, Number.MAX_SAFE_INTEGER))
-      return `route "${id}" ${label} window.${key} must be a positive epoch-millisecond time`;
+      return `${subject} window.${key} must be a positive epoch-millisecond time`;
   if (window.from !== undefined && window.until !== undefined && window.from >= window.until)
-    return `route "${id}" ${label} window.from must be before window.until: OpenCode drops a window that can never apply`;
+    return `${subject} window.from must be before window.until: OpenCode drops a window that can never apply`;
   // A window that has already ended can never apply again: OpenCode's
   // active() check is `now >= window.until` from the moment it passes.
   if (window.until !== undefined && window.until <= Date.now())
-    return `route "${id}" ${label} window.until is in the past: the window has already ended, so the schedule can never apply`;
+    return `${subject} window.until is in the past: the window has already ended, so the schedule can never apply`;
   return null;
 };
 
@@ -357,7 +384,7 @@ const validateSchedules = (id, schedules, targets) => {
       }
     }
     if (!isRecord(schedule.when)) return `route "${id}" ${label} needs a when window object`;
-    const windowProblem = validateScheduleWindow(id, label, schedule.when);
+    const windowProblem = validateScheduleWindow(`route "${id}" ${label}`, schedule.when);
     if (windowProblem) return windowProblem;
     if (schedule.factor !== undefined && schedule.weight !== undefined)
       return `route "${id}" ${label} gives both factor and weight: OpenCode uses the weight and ignores the factor, so give one of them`;
@@ -679,6 +706,43 @@ export const validateModelRoutes = (routes) => {
   return null;
 };
 
+/**
+ * `experimental.model_route_schedules`: weight changes across routes, as
+ * OpenCode's GlobalSchedule schema defines them. The window, the factor or
+ * weight, and the list rules are the ones a route's own schedules follow: a
+ * blank entry or an empty list is refused, because OpenCode reads an empty
+ * matcher as "everything".
+ */
+export const validateModelRouteSchedules = (schedules) => {
+  if (!Array.isArray(schedules)) return "schedules must be a list of schedule objects";
+  for (const [index, schedule] of schedules.entries()) {
+    const label = `schedule ${index + 1}`;
+    if (!isRecord(schedule)) return `${label} must be an object`;
+    const unknown = unknownKeysProblem(schedule, GLOBAL_SCHEDULE_KEYS);
+    if (unknown) return `${label} has ${unknown}`;
+    for (const key of ["id", "note"])
+      if (schedule[key] !== undefined && !isString(schedule[key])) return `${label} ${key} must be a string`;
+    for (const key of ["providers", "models", "targets", "routes"]) {
+      const list = schedule[key];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || list.some((entry) => !isString(entry) || entry.trim() === ""))
+        return `${label} ${key} must be a list of non-blank strings`;
+      if (list.length === 0)
+        return `${label} ${key} must not be empty: OpenCode reads an empty list as every ${key.slice(0, -1)}, so leave the key out instead`;
+    }
+    if (!isRecord(schedule.when)) return `${label} needs a when window object`;
+    const windowProblem = validateScheduleWindow(label, schedule.when);
+    if (windowProblem) return windowProblem;
+    if (schedule.factor !== undefined && schedule.weight !== undefined)
+      return `${label} sets both factor and weight: OpenCode applies the weight and ignores the factor, so keep one`;
+    if (schedule.factor === undefined && schedule.weight === undefined)
+      return `${label} needs a factor or a weight: OpenCode drops a schedule with neither`;
+    if (schedule.factor !== undefined && !isPositiveNumber(schedule.factor)) return `${label} factor must be a positive number`;
+    if (schedule.weight !== undefined && !isPositiveNumber(schedule.weight)) return `${label} weight must be a positive number`;
+  }
+  return null;
+};
+
 // The shape OpenCode's schema accepts for one note (`NOTE_LINE`, packages/schema/src/config/model-routes.ts):
 // one line of `match: text`, with a non-space character before its first colon (never a colon) and after it.
 const NOTE_LINE = /^[^:\r\n]*[^\s:][^:\r\n]*:[^\r\n]*\S[^\r\n]*$/;
@@ -710,7 +774,17 @@ export const registerModelRouteRoutes = (app, dependencies) => {
     CONFIG_FILE,
     isEnterpriseMode,
     refreshOpenCodeAfterConfigChange,
+    resolveOptionalProjectDirectory = async () => ({ directory: null }),
+    readConfigSources = (directory) => sourcesFromLayers(readConfigLayers(directory)),
   } = dependencies;
+
+  // Only the read-only list of other files' schedules looks at the project:
+  // OpenCode applies every folder file's model_route_schedules too, so
+  // Settings shows them. Pools and tuning keep reading and writing as before.
+  const otherSchedulesFor = async (req, targetPath) => {
+    const { directory } = await resolveOptionalProjectDirectory(req);
+    return readOtherModelRouteSchedules(readConfigSources(directory ?? null), targetPath);
+  };
 
   const refuseInEnterpriseMode = (_req, res, next) =>
     isEnterpriseMode()
@@ -720,10 +794,15 @@ export const registerModelRouteRoutes = (app, dependencies) => {
   app.get("/api/model-routes", async (req, res) => {
     try {
       const layers = readConfigLayers(null);
+      const targetPath = layers.paths.userPath ?? CONFIG_FILE;
       res.json({
         routes: readModelRoutes(layers.mergedConfig),
         tuning: readModelRouteTuning(layers.mergedConfig),
-        path: layers.paths.userPath ?? CONFIG_FILE,
+        // The user file's own list, which is the one Settings edits; the
+        // merged view would copy other files' entries into it on save.
+        schedules: readModelRouteSchedules(getConfigForPath(layers, targetPath)),
+        otherSchedules: await otherSchedulesFor(req, targetPath),
+        path: targetPath,
       });
     } catch (error) {
       res.status(500).json({ error: error?.message ?? "Failed to read model pools" });
@@ -732,15 +811,19 @@ export const registerModelRouteRoutes = (app, dependencies) => {
 
   app.put("/api/model-routes", express.json({ limit: "256kb" }), refuseInEnterpriseMode, async (req, res) => {
     try {
-      const { routes, tuning } = req.body ?? {};
-      if (routes === undefined && tuning === undefined)
-        return res.status(400).json({ error: "Send routes, tuning, or both" });
+      const { routes, tuning, schedules } = req.body ?? {};
+      if (routes === undefined && tuning === undefined && schedules === undefined)
+        return res.status(400).json({ error: "Send routes, tuning, schedules, or any of them together" });
       if (routes !== undefined) {
         const problem = validateModelRoutes(routes);
         if (problem) return res.status(400).json({ error: problem });
       }
       if (tuning !== undefined && tuning !== null) {
         const problem = validateModelRouteTuning(tuning);
+        if (problem) return res.status(400).json({ error: problem });
+      }
+      if (schedules !== undefined && schedules !== null) {
+        const problem = validateModelRouteSchedules(schedules);
         if (problem) return res.status(400).json({ error: problem });
       }
       const layers = readConfigLayers(null);
@@ -750,6 +833,8 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       if (routes !== undefined) targetConfig.experimental.model_routes = routes;
       if (tuning === null) delete targetConfig.experimental.model_route_tuning;
       else if (tuning !== undefined) targetConfig.experimental.model_route_tuning = tuning;
+      if (schedules === null) delete targetConfig.experimental.model_route_schedules;
+      else if (schedules !== undefined) targetConfig.experimental.model_route_schedules = schedules;
       writeConfig(targetConfig, targetPath);
       if (refreshOpenCodeAfterConfigChange) {
         try {
@@ -761,6 +846,8 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       res.json({
         routes: routes ?? readModelRoutes(layers.mergedConfig),
         tuning: tuning === undefined ? readModelRouteTuning(layers.mergedConfig) : tuning,
+        schedules: readModelRouteSchedules(targetConfig),
+        otherSchedules: await otherSchedulesFor(req, targetPath),
         path: targetPath,
       });
     } catch (error) {
