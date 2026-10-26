@@ -228,3 +228,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | ROADMAP Done records the #448, #452, #456, #459, #460 completions   | 2026-10-26 | #458, #461                 |
 | pr-intake runs on this fork as well as upstream                     | 2026-10-26 | #87, #462                  |
 | pr-intake labels with the workflow token when the app is unset      | 2026-10-26 | #87, #466                  |
+| ROADMAP Done records the #462 and #466 completions                  | 2026-10-26 | #467, #470                 |
