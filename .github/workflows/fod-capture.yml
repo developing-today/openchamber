@@ -25,17 +25,11 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
       - name: Record environment
         run: |
-          { nix --version; bun --version; uname -a; nix config show; } > "$RUNNER_TEMP/env.txt" 2>&1 || true
+          { nix --version; uname -a; nix config show; } > "$RUNNER_TEMP/env.txt" 2>&1 || true
 
-      - name: Host install (as in opencode-update)
-        run: bun install --frozen-lockfile
-
-      - name: Build the openchamber package (as in opencode-update)
+      - name: Build the openchamber package (clean checkout, no host install)
         id: build
         continue-on-error: true
         run: |
