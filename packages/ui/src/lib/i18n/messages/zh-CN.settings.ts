@@ -1874,6 +1874,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': '启用服务器',
   'settings.mcp.page.server.enableAria': '启用服务器',
   "settings.mcp.page.server.enableCacheNote": "此服务器关闭了 Code Mode，开启或关闭它后，正在运行的会话下一轮不会使用提示缓存。",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode 为默认时，OpenCode 会给自带 Code Mode 的服务器提供普通工具，因此开启或关闭此服务器后，正在运行的会话下一轮可能不会使用提示缓存。",
   'settings.mcp.page.server.transportMode': '传输模式',
   'settings.mcp.page.connection.command': '命令',
   'settings.mcp.page.connection.serverUrl': '服务器 URL',

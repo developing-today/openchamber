@@ -1834,6 +1834,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': 'Server aktivieren',
   'settings.mcp.page.server.enableAria': 'Server aktivieren',
   "settings.mcp.page.server.enableCacheNote": "Code Mode ist für diesen Server aus. Wenn du ihn ein- oder ausschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Steht Code Mode auf Standard, gibt OpenCode einem Server mit eigenem Code Mode normale Tools. Diesen Server ein- oder auszuschalten kann daher dazu führen, dass der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht nutzt.",
   'settings.mcp.page.server.transportMode': 'Transportmodus',
   'settings.mcp.page.connection.command': 'Befehl',
   'settings.mcp.page.connection.serverUrl': 'Server-URL',

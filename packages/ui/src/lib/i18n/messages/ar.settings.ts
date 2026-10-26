@@ -1866,6 +1866,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': 'تفعيل الخادم',
   'settings.mcp.page.server.enableAria': 'تفعيل الخادم',
   "settings.mcp.page.server.enableCacheNote": "وضع الشيفرة متوقف لهذا الخادم، لذا فإن تشغيله أو إيقافه يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "عند ترك وضع الشيفرة على الافتراضي، يمنح OpenCode الخادم الذي يملك وضع شيفرة خاصًا به أدوات عادية، لذا قد يجعل تشغيل هذا الخادم أو إيقافه الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
   'settings.mcp.page.server.transportMode': 'وضع النقل',
   'settings.mcp.page.connection.command': 'الأمر',
   'settings.mcp.page.connection.serverUrl': 'عنوان URL للخادم',

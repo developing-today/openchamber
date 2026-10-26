@@ -526,6 +526,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': 'Włącz serwer',
   'settings.mcp.page.server.enableAria': 'Włącz serwer',
   "settings.mcp.page.server.enableCacheNote": "Code Mode jest wyłączony dla tego serwera, więc jego włączenie lub wyłączenie sprawia, że następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Gdy Code Mode jest ustawiony na Domyślnie, OpenCode daje serwerowi z własnym Code Mode zwykłe narzędzia, więc włączenie lub wyłączenie tego serwera może sprawić, że następna tura trwającej sesji nie skorzysta z pamięci podręcznej promptu.",
   'settings.mcp.page.server.importJson': 'Importuj z fragmentu JSON',
   'settings.mcp.page.server.importJsonTitle': 'Importuj pełną konfigurację serwera MCP z fragmentu JSON',
   'settings.mcp.page.server.name': 'Nazwa serwera',

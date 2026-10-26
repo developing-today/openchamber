@@ -1907,6 +1907,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': 'サーバーを有効化',
   'settings.mcp.page.server.enableAria': 'サーバーを有効化',
   "settings.mcp.page.server.enableCacheNote": "このサーバーは Code Mode がオフのため、オン・オフすると実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode が既定のとき、OpenCode は独自の Code Mode を持つサーバーに通常のツールを渡します。そのため、このサーバーをオン・オフすると、実行中のセッションの次のターンがプロンプトキャッシュを使わない場合があります。",
   'settings.mcp.page.server.transportMode': 'トランスポートモード',
   'settings.mcp.page.connection.command': 'コマンド',
   'settings.mcp.page.connection.serverUrl': 'サーバー URL',

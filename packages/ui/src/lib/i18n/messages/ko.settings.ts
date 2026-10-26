@@ -1874,6 +1874,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': '서버 활성화',
   'settings.mcp.page.server.enableAria': '서버 활성화',
   "settings.mcp.page.server.enableCacheNote": "이 서버는 Code Mode가 꺼져 있어, 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode가 기본값이면 OpenCode는 자체 Code Mode가 있는 서버에 일반 도구를 줍니다. 그래서 이 서버를 켜거나 끄면 실행 중인 세션의 다음 턴이 프롬프트 캐시를 사용하지 않을 수 있습니다.",
   'settings.mcp.page.server.transportMode': 'Transport 모드',
   'settings.mcp.page.connection.command': '명령어',
   'settings.mcp.page.connection.serverUrl': '서버 URL',

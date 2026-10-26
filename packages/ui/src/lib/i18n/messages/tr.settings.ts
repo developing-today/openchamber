@@ -1795,6 +1795,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': 'Sunucuyu Etkinleştir',
   'settings.mcp.page.server.enableAria': 'Sunucuyu etkinleştir',
   "settings.mcp.page.server.enableCacheNote": "Bu sunucuda Code Mode kapalı; sunucuyu açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode Varsayılan'dayken OpenCode, kendi Code Mode'u olan bir sunucuya normal araçlar verir; bu yüzden bu sunucuyu açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açabilir.",
   'settings.mcp.page.server.transportMode': 'Aktarım Modu',
   'settings.mcp.page.connection.command': 'Komut',
   'settings.mcp.page.connection.serverUrl': 'Sunucu URL\'si',

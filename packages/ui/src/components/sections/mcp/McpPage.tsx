@@ -1330,11 +1330,19 @@ export const McpPage: React.FC = () => {
               }}
               label={t('settings.mcp.page.server.enable')}
               ariaLabel={t('settings.mcp.page.server.enableAria')}
-              // Only a server with code mode off puts its tools in the request's tool
-              // list; with code mode on or left to OpenCode they sit in a catalog
-              // OpenCode appends as a message, which keeps the cached prefix. A new
-              // server's draft reaches OpenCode only on Create, so it costs nothing yet.
-              description={!isNewServer && codemode === 'off' ? t('settings.mcp.page.server.enableCacheNote') : undefined}
+              // A server whose tools are direct changes the request's tool list, which
+              // providers cache as the start of the prompt. Off is always direct. Default
+              // is direct when OpenCode's own defaults turn code mode off (servers that
+              // bring their own, such as executor); the config this page reads does not
+              // show that decision, so Default gets a "may". On keeps tools in the
+              // appended catalog. A new server's draft reaches OpenCode only on Create.
+              description={isNewServer
+                ? undefined
+                : codemode === 'off'
+                  ? t('settings.mcp.page.server.enableCacheNote')
+                  : codemode === 'default'
+                    ? t('settings.mcp.page.server.enableCacheNoteDefault')
+                    : undefined}
             />
 
         </SettingsSection>

@@ -1874,6 +1874,7 @@ export const settingsDict = {
   "settings.mcp.page.server.enable": "Увімкнути сервер",
   "settings.mcp.page.server.enableAria": "Увімкнути сервер",
   "settings.mcp.page.server.enableCacheNote": "Для цього сервера Code Mode вимкнено, тож якщо його увімкнути чи вимкнути, наступний хід активної сесії не використає кеш промпту.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Коли Code Mode стоїть на «За замовчуванням», OpenCode дає серверу з власним Code Mode звичайні інструменти, тож якщо увімкнути чи вимкнути цей сервер, наступний хід активної сесії може не використати кеш промпту.",
   "settings.mcp.page.server.transportMode": "Транспортний режим",
   "settings.mcp.page.connection.command": "Команда",
   "settings.mcp.page.connection.serverUrl": "URL сервера",

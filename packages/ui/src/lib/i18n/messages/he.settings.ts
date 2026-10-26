@@ -1866,6 +1866,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': 'הפעל שרת',
   'settings.mcp.page.server.enableAria': 'הפעל שרת',
   "settings.mcp.page.server.enableCacheNote": "מצב הקוד כבוי בשרת הזה, ולכן הפעלה או כיבוי שלו גורמים לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "כשמצב הקוד על ברירת מחדל, OpenCode נותן לשרת שמביא מצב קוד משלו כלים רגילים, ולכן הפעלה או כיבוי של השרת הזה עלולים לגרום לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
   'settings.mcp.page.server.transportMode': 'מצב תעבורה',
   'settings.mcp.page.connection.command': 'פקודה',
   'settings.mcp.page.connection.serverUrl': 'URL של השרת',

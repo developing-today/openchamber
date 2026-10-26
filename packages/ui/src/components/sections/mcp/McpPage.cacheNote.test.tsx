@@ -32,6 +32,7 @@ afterAll(async () => { await act(async () => root.unmount()); fetchSpy.mockResto
 
 const enableNote = settingsDict['settings.mcp.page.server.enableCacheNote'];
 const codemodeNote = settingsDict['settings.mcp.page.advanced.codemodeCacheNote'];
+const enableDefaultNote = settingsDict['settings.mcp.page.server.enableCacheNoteDefault'];
 
 const showServer = async (server: { name: string; type: 'remote'; url: string; codemode?: boolean; disabled?: boolean }) => {
   useMcpStore.setState({ refresh: async () => {} });
@@ -45,14 +46,25 @@ const showServer = async (server: { name: string; type: 'remote'; url: string; c
 };
 
 // A server with code mode off has its tools in the request's tool list, so enabling or
-// disabling it costs a running session its prompt cache; the code mode choice moves the
-// tools in or out of that list, so it always does.
-test('the Enabled row warns about the prompt cache only for a server with code mode off', async () => {
+// disabling it costs a running session its prompt cache; with code mode On it never does.
+test('the Enabled row warns for code mode Off and stays quiet for code mode On', async () => {
   await showServer({ name: 'direct', type: 'remote', url: 'https://direct.test', codemode: false });
   expect(container.textContent).toContain(enableNote);
+  expect(container.textContent).not.toContain(enableDefaultNote);
 
   await act(async () => { root.render(null); });
-  await showServer({ name: 'catalog', type: 'remote', url: 'https://catalog.test' });
+  await showServer({ name: 'catalog', type: 'remote', url: 'https://catalog.test', codemode: true });
+  expect(container.textContent).not.toContain(enableNote);
+  expect(container.textContent).not.toContain(enableDefaultNote);
+});
+
+// Default can resolve to plain tools (OpenCode turns code mode off for servers with
+// their own), and this page cannot see that decision, so it warns with "may"
+// (PR #306 review 4354883743).
+test('the Enabled row of a server on code mode Default says the cache may be lost', async () => {
+  await act(async () => { root.render(null); });
+  await showServer({ name: 'default', type: 'remote', url: 'https://default.test' });
+  expect(container.textContent).toContain(enableDefaultNote);
   expect(container.textContent).not.toContain(enableNote);
 });
 
@@ -92,6 +104,7 @@ test('a new server draft shows neither cache note', async () => {
   await act(async () => { root.render(<I18nProvider><McpPage /></I18nProvider>); });
   expect(container.textContent).toContain(settingsDict['settings.mcp.page.server.enable']);
   expect(container.textContent).not.toContain(enableNote);
+  expect(container.textContent).not.toContain(enableDefaultNote);
   await openAdvanced();
   expect(container.textContent).not.toContain(codemodeNote);
 });

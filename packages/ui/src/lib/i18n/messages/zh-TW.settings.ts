@@ -1762,6 +1762,7 @@ export const settingsDict = {
   'settings.mcp.page.server.enable': '啟用伺服器',
   'settings.mcp.page.server.enableAria': '啟用伺服器',
   "settings.mcp.page.server.enableCacheNote": "此伺服器關閉了 Code Mode，開啟或關閉它後，執行中的工作階段下一輪不會使用提示快取。",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode 為預設時，OpenCode 會給自帶 Code Mode 的伺服器提供一般工具，因此開啟或關閉此伺服器後，執行中的工作階段下一輪可能不會使用提示快取。",
   'settings.mcp.page.server.transportMode': '傳輸模式',
   'settings.mcp.page.connection.command': '命令',
   'settings.mcp.page.connection.serverUrl': '伺服器 URL',
