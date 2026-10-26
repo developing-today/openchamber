@@ -39,7 +39,7 @@ jobs:
           nix build .#openchamber 2>&1 | tee "$RUNNER_TEMP/b.log" || true
           grep -m1 "got:" "$RUNNER_TEMP/b.log" || echo "B: no mismatch line"
 
-      - name: A — build the FOD standalone (same drv, fresh: B registered nothing)
+      - name: A — build the FOD standalone (same drv, fresh, B registered nothing)
         id: a
         continue-on-error: true
         run: |
