@@ -226,3 +226,5 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Renovate kept off the workflow-owned opencode flake input           | 2026-10-25 | #459                       |
 | opencode-update install failures recorded on the tracking issue     | 2026-10-26 | #457, #460                 |
 | ROADMAP Done records the #448, #452, #456, #459, #460 completions   | 2026-10-26 | #458, #461                 |
+| pr-intake runs on this fork as well as upstream                     | 2026-10-26 | #87, #462                  |
+| pr-intake labels with the workflow token when the app is unset      | 2026-10-26 | #87, #466                  |
