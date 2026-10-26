@@ -61,7 +61,11 @@ jobs:
       - name: Find an open failure issue
         id: failure-issue
         run: |
-          gh issue list --state open --limit 100 --json number,title > "$RUNNER_TEMP/issues.json"
+          # Server-side title search: a plain list is capped, so the tracking
+          # issue falls out of the window once the repo has enough open
+          # issues and a duplicate gets opened instead. The jq filter below
+          # still requires the exact title.
+          gh issue list --state open --search "\"$FAILURE_ISSUE_TITLE\" in:title" --limit 100 --json number,title > "$RUNNER_TEMP/issues.json"
           number=$(jq -r --arg title "$FAILURE_ISSUE_TITLE" \
             '.[] | select(.title == $title) | .number' "$RUNNER_TEMP/issues.json" | head -n 1)
           echo "number=${number}" >> "$GITHUB_OUTPUT"
