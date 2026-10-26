@@ -1315,9 +1315,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
           ? Math.round(remainingFraction * 100)
           : null;
         const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-        const resetAt = quotaInfo?.resetTime
-          ? new Date(quotaInfo.resetTime).getTime()
-          : null;
+        const resetAt = toTimestamp(quotaInfo?.resetTime);
         const window = resolveGoogleWindow(source.sourceId, resetAt);
         models[scopedName] = {
           windows: {
@@ -1540,7 +1538,7 @@ const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
       const remainingFraction = quotaInfo?.remainingFraction;
       const remainingPercent = typeof remainingFraction === 'number' ? Math.round(remainingFraction * 100) : null;
       const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-      const resetAt = quotaInfo?.resetTime ? new Date(quotaInfo.resetTime).getTime() : null;
+      const resetAt = toTimestamp(quotaInfo?.resetTime);
       const window = resolveGoogleWindow('antigravity', resetAt);
 
       models[name] = {
