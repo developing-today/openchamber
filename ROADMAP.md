@@ -232,3 +232,6 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Git log maxCount and diff context judged strictly everywhere        | 2026-10-26 | #463, #464, #465, #469     |
 | Subsession models picker sets a session's subsession policy         | 2026-10-26 | #468                       |
 | ROADMAP Done records the #469 and #468 completions                  | 2026-10-26 | #471, #472                 |
+| Per-credential and instance quota, openchamber quota CLI            | 2026-10-26 | #474                       |
+| Open Design (AMR) quota provider on a managed session cookie        | 2026-10-26 | #475                       |
+| opencode-update failure excerpt keeps a truncated single line       | 2026-10-26 | #478, #479                 |
