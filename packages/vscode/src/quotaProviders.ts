@@ -812,11 +812,35 @@ const getKimiApiKey = (auth: AuthFile) => {
 };
 
 /**
+ * Providers turned off in the merged OpenCode config (`disabled_providers`).
+ * A config that cannot be read is logged and answers an empty set, so the
+ * failure is visible instead of silently changing which providers list.
+ * Mirrors packages/web/server/lib/quota/providers/index.js (kept in sync
+ * per the quota DOCUMENTATION.md parity note).
+ */
+const readDisabledQuotaProviderIds = (): Set<string> => {
+  try {
+    const config = readConfig();
+    const entries = config.disabled_providers;
+    return new Set(Array.isArray(entries)
+      ? entries.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+      : []);
+  } catch (error) {
+    console.warn('Quota: failed to read the OpenCode config; listing without the disabled filter.', error);
+    return new Set();
+  }
+};
+
+/**
  * Providers with a usable credential. Throws when OpenCode's credentials
  * cannot be read, so a transient failure does not look like "nothing
  * configured".
+ *
+ * Providers turned off in OpenCode's config (`disabled_providers`) are left
+ * out unless `includeDisabled` is set. Fetching one by name always works:
+ * the filter governs the listing, never an explicit ask.
  */
-export const listConfiguredQuotaProviders = async () => {
+export const listConfiguredQuotaProviders = async ({ includeDisabled = false }: { includeDisabled?: boolean } = {}) => {
   const auth = await readOpenCodeCredentials();
   const configured = new Set<string>();
   if (openCodeGoApiKey(auth) || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
@@ -927,6 +951,18 @@ export const listConfiguredQuotaProviders = async () => {
 
   if (resolveXaiAuth(auth)) {
     configured.add('xai');
+  }
+
+  if (!includeDisabled) {
+    const disabled = readDisabledQuotaProviderIds();
+    for (const id of disabled) {
+      configured.delete(id);
+    }
+    // The add-on row reads the same Copilot credential, so the one
+    // `github-copilot` entry in disabled_providers governs both rows.
+    if (disabled.has('github-copilot')) {
+      configured.delete('github-copilot-addon');
+    }
   }
 
   return Array.from(configured);
