@@ -870,6 +870,11 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
     };
+    // Forwarded unchanged on create: OpenCode owns the policy shape and
+    // its checks. Send and fork keep the policy the session already has.
+    if (action === 'session.create' && input.subagentPolicy !== undefined) {
+      payload.subagentPolicy = input.subagentPolicy;
+    }
     // A pull request makes a worktree of its own, so its branch name (and a
     // start ref the session service refuses) travel without a worktree name.
     if (input.pullRequest !== undefined) {

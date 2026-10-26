@@ -6359,7 +6359,10 @@ export async function getLog(directory, options = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
-    const maxCount = options.maxCount || 50;
+    // Only a positive integer caps the history. Anything else takes the
+    // default: a negative reaching git as --max-count=-5 means unlimited,
+    // so an invalid value must never pass through (#463).
+    const maxCount = Number.isInteger(options.maxCount) && options.maxCount > 0 ? options.maxCount : 50;
 
     if (options.all) {
       const logArgs = [

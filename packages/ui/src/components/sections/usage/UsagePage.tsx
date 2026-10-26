@@ -93,6 +93,7 @@ export const UsagePage: React.FC = () => {
   const credentialProviderId = selectedProviderId === 'exe-dev'
     || selectedProviderId === 'cursor'
     || selectedProviderId === 'zenmux'
+    || selectedProviderId === 'opendesign'
     ? selectedProviderId
     : null;
   const hasCredentialsForm = credentialProviderId !== null;

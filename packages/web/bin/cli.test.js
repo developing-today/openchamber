@@ -437,6 +437,33 @@ describe('cli args', () => {
     }
   });
 
+  it('builds a subsession model policy from --subagent-models', () => {
+    const parsed = parseArgs([
+      'session',
+      'create',
+      '--dir',
+      '/repo',
+      '--subagent-models',
+      'openai/gpt-5.5, anthropic/claude-sonnet-5',
+    ]);
+
+    expect(parsed.options.subagentModels).toBe('openai/gpt-5.5, anthropic/claude-sonnet-5');
+    expect(buildSessionCreatePayload(parsed.options)).toEqual({
+      directory: '/repo',
+      subagentPolicy: { models: ['openai/gpt-5.5', 'anthropic/claude-sonnet-5'] },
+    });
+  });
+
+  it('rejects malformed --subagent-models entries and other commands using the flag', () => {
+    expect(() => buildSessionCreatePayload({
+      directory: '/repo',
+      subagentModels: 'gpt-5.5',
+    })).toThrow('--model must be in provider/model format.');
+    expect(parseArgs(['status', '--subagent-models', 'openai/gpt-5.5']).removedFlagErrors).toEqual([
+      'Unknown option for status: --subagent-models (used by: session)',
+    ]);
+  });
+
   it('parses session list filters', () => {
     const parsed = parseArgs(['session', 'list', '--dir', '/repo', '--limit', '5']);
 
@@ -572,6 +599,28 @@ describe('cli args', () => {
 
     expect(parsed.command).toBe('projects');
     expect(parsed.options.json).toBe(true);
+  });
+
+  it('parses quota command with and without a provider', () => {
+    const withProvider = parseArgs(['quota', 'codex', '--json']);
+
+    expect(withProvider.command).toBe('quota');
+    expect(withProvider.quotaProvider).toBe('codex');
+    expect(withProvider.options.json).toBe(true);
+
+    const withoutProvider = parseArgs(['quota']);
+
+    expect(withoutProvider.command).toBe('quota');
+    expect(withoutProvider.quotaProvider).toBeNull();
+    expect(withoutProvider.quotaProviders).toEqual([]);
+  });
+
+  it('parses several quota providers in order', () => {
+    const parsed = parseArgs(['quota', 'claude', 'chatgpt', 'git*']);
+
+    expect(parsed.command).toBe('quota');
+    expect(parsed.quotaProvider).toBe('claude');
+    expect(parsed.quotaProviders).toEqual(['claude', 'chatgpt', 'git*']);
   });
 
   it('formats projects compactly', () => {

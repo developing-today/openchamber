@@ -27,7 +27,7 @@ const STATE_DB = join(homedir(), 'Library', 'Application Support', 'Cursor', 'Us
 
 export const providerId = 'cursor';
 export const providerName = 'Cursor';
-const aliases = ['cursor'];
+export const aliases = ['cursor'];
 
 const readJwtPayload = (token) => {
   try {

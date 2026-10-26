@@ -135,6 +135,38 @@ export type SessionStatus = SessionStatusWire
 
 export type SessionOutcome = "succeeded" | "failed" | "interrupted"
 
+/**
+ * One agent's entry in a session policy's `agentOverrides`.
+ *
+ * The fields mirror the OpenCode contract for `Session.AgentOverride`. They
+ * stay optional and are carried unchanged by this UI: the picker edits only
+ * the policy's `models` list and preserves every override as loaded.
+ */
+export type SubagentAgentOverride = {
+  model?: ModelRef
+  models?: string[]
+  excludedModels?: string[]
+  subagentModels?: string[]
+  subagentExcludedModels?: string[]
+  force?: boolean
+}
+
+/**
+ * The models a session's subsessions may run, as the session declares it.
+ *
+ * This follows the OpenCode contract for `Session.SubagentPolicy`: `models`
+ * and `excludedModels` hold model selectors, exact refs `provider/model` or
+ * wider forms such as `provider/*` and `provider/model#variant`. The
+ * generated `@opencode/client` types do not carry the field yet, so it is
+ * defined here at the API boundary (see `./client.ts` and
+ * `./projection.ts`) and can be dropped once the regenerated client ships it.
+ */
+export type SubagentPolicy = {
+  models?: string[]
+  excludedModels?: string[]
+  agentOverrides?: Record<string, SubagentAgentOverride>
+}
+
 export type Session = {
   id: string
   parentID?: string
@@ -158,6 +190,8 @@ export type Session = {
   }
   metadata?: Metadata
   permissions?: PermissionRuleset
+  /** Models this session's subsessions may run; absent means no policy is set. */
+  subagentPolicy?: SubagentPolicy
   revert?: SessionRevert
   fork?: {
     sessionID: string

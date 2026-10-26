@@ -4,6 +4,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -28,6 +29,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -142,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['zh-CN'],
   ...referencePickerI18n['zh-CN'],
   ...sessionMenuHintsI18n['zh-CN'],
+  ...sessionErrorRecoveryI18n['zh-CN'],
   ...sidebarLayoutI18n['zh-CN'],
   ...projectKnowledgeI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
@@ -166,6 +169,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
   ...sessionGoalWriterI18n['zh-CN'],
+  ...subsessionModelsI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',

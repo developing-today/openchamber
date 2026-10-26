@@ -74,4 +74,29 @@ describe('VS Code Antigravity quota', () => {
     assert.equal(models['claude-sonnet-5-5']?.windows.weekly?.remainingPercent, 50);
     assert.ok(!JSON.stringify(result).includes('test-access'));
   });
+
+  it('maps an unparseable fallback resetTime to a null resetAt and a valid one to epoch ms', async () => {
+    globalThis.fetch = async (url, options) => {
+      if (String(url) === 'https://oauth2.googleapis.com/token') {
+        return Response.json({ access_token: 'test-access' });
+      }
+      assert.equal(new Headers(options?.headers).get('Authorization'), 'Bearer test-access');
+      if (String(url).endsWith(':retrieveUserQuotaSummary')) {
+        return Response.json({ groups: [] });
+      }
+      return Response.json({
+        models: {
+          'gemini-bad': { quotaInfo: { remainingFraction: 0.9, resetTime: 'not-a-date' } },
+          'gemini-good': { quotaInfo: { remainingFraction: 0.9, resetTime: '2026-10-25T10:00:00Z' } },
+        },
+      });
+    };
+
+    const result = await fetchQuotaForProvider('antigravity');
+
+    assert.equal(result.ok, true);
+    const models = result.usage?.models ?? {};
+    assert.equal(models['gemini-bad']?.windows['5h']?.resetAt, null);
+    assert.equal(models['gemini-good']?.windows['5h']?.resetAt, Date.parse('2026-10-25T10:00:00Z'));
+  });
 });

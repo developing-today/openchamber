@@ -3,6 +3,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -26,6 +27,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -3816,6 +3818,7 @@ export const dict = {
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...sessionMenuHintsI18n.ar,
+  ...sessionErrorRecoveryI18n.ar,
   ...sidebarLayoutI18n.ar,
   ...projectKnowledgeI18n.ar,
   ...linearPanelI18n.ar,
@@ -3839,6 +3842,7 @@ export const dict = {
   ...pluginsGridI18n.ar,
   ...integrationsCatalogI18n['ar'],
   ...sessionGoalWriterI18n['ar'],
+  ...subsessionModelsI18n['ar'],
   ...diffFindI18n['ar'],
   'settings.usage.page.state.claudeSignedOutTitle': 'لم يتم تسجيل الدخول إلى Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'شغّل هذا الأمر في الطرفية:',

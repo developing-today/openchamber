@@ -10,7 +10,7 @@ import {
 
 export const providerId = 'deepseek';
 export const providerName = 'DeepSeek';
-const aliases = ['deepseek'];
+export const aliases = ['deepseek'];
 const DEEPSEEK_QUOTA_URL = 'https://api.deepseek.com/user/balance';
 
 export const isConfigured = (auth) => {

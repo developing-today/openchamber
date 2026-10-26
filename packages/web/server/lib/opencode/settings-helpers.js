@@ -755,6 +755,9 @@ export const createSettingsHelpers = (dependencies) => {
     } else if (typeof candidate.queueModeEnabled === 'boolean') {
       result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
     }
+    if (candidate.activeRunModelChangeBehavior === 'next-message' || candidate.activeRunModelChangeBehavior === 'restart') {
+      result.activeRunModelChangeBehavior = candidate.activeRunModelChangeBehavior;
+    }
     if (typeof candidate.autoCreateWorktree === 'boolean') {
       result.autoCreateWorktree = candidate.autoCreateWorktree;
     }
