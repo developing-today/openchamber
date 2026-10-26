@@ -13,19 +13,19 @@ import { z } from 'zod';
 
 import { renameWithRetry } from '../shared/atomic-rename.js';
 
-export const MODEL_CHOICE_FILE_NAME = 'model-choices.json';
+const MODEL_CHOICE_FILE_NAME = 'model-choices.json';
 export const MAX_MODEL_CHOICE_EVENTS = 5_000;
 export const MODEL_CHOICE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
-export const MODEL_CHOICE_SURFACES = ['goal-writer', 'composer'];
-export const MODEL_CHOICE_INPUT_SIZES = ['empty', 'short', 'medium', 'long', 'unknown'];
+const MODEL_CHOICE_SURFACES = ['goal-writer', 'composer'];
+const MODEL_CHOICE_INPUT_SIZES = ['empty', 'short', 'medium', 'long', 'unknown'];
 
 const modelRefSchema = z.string().trim().min(3).max(300).regex(/^[^/\s]+\/\S+$/);
 const variantSchema = z.string().trim().min(1).max(64).nullable();
 const selectionSchema = z.object({ model: modelRefSchema, variant: variantSchema });
 
 /** What the UI sends for one choice; unknown keys are dropped. */
-export const modelChoiceInputSchema = z.object({
+const modelChoiceInputSchema = z.object({
   surface: z.enum(MODEL_CHOICE_SURFACES),
   kind: z.enum(['model', 'effort']),
   chosen: selectionSchema,

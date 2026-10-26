@@ -232,6 +232,7 @@ const useUIStore = create(() => ({
   isMobile: false,
   isModelSelectorOpen: false,
   activeRunModelChangeBehavior: 'next-message' as 'next-message' | 'restart',
+  modelChoiceRecordingEnabled: true,
   hiddenModels: [],
   favoriteAgents: [],
   toggleFavoriteAgent: () => undefined,
@@ -1060,10 +1061,10 @@ describe('ModelControls effort restore', () => {
     const recordedChoices = async (run: () => Promise<void>) => {
       const originalFetch = globalThis.fetch;
       const bodies: unknown[] = [];
-      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).includes('/api/openchamber/model-choices')) bodies.push(JSON.parse(String(init?.body)));
         return new Response('{}', { status: 200 });
-      }) as typeof fetch;
+      }, { preconnect: async () => {} });
       try {
         await run();
         await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
@@ -1096,6 +1097,29 @@ describe('ModelControls effort restore', () => {
         surface: 'composer',
         kind: 'effort',
         chosen: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: 'low' },
+        replaced: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: null },
+        sessionModel: `${PROVIDER_ID}/${MODEL_ID}`,
+        inputSize: 'unknown',
+      }]);
+    });
+
+    test('a model picked in the main composer is recorded as a model choice', async () => {
+      modelPickerChoice = { providerID: PROVIDER_ID, modelID: SECOND_MODEL_ID, model: secondModel };
+      const bodies = await recordedChoices(async () => {
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          const item = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+            .find((entry) => entry.textContent?.trim() === SECOND_MODEL_ID);
+          if (!item) throw new Error(`Expected model picker entry ${SECOND_MODEL_ID}`);
+          await act(async () => item.click());
+        } finally {
+          await cleanup();
+        }
+      });
+      expect(bodies).toEqual([{
+        surface: 'composer',
+        kind: 'model',
+        chosen: { model: `${PROVIDER_ID}/${SECOND_MODEL_ID}`, variant: null },
         replaced: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: null },
         sessionModel: `${PROVIDER_ID}/${MODEL_ID}`,
         inputSize: 'unknown',

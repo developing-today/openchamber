@@ -10,10 +10,10 @@
 import { buildModelChoiceNotes, buildModelChoiceSuggestions } from './notes.js';
 import { ModelChoiceStoreError } from './store.js';
 
-export const DEFAULT_EVENT_LIMIT = 50;
-export const MAX_EVENT_LIMIT = 500;
+const DEFAULT_EVENT_LIMIT = 50;
+const MAX_EVENT_LIMIT = 500;
 
-export const isModelChoiceRecordingEnabled = (settings) => settings?.modelChoiceRecordingEnabled !== false;
+const isModelChoiceRecordingEnabled = (settings) => settings?.modelChoiceRecordingEnabled !== false;
 
 export const createModelChoiceService = ({ store, readSettings, persistSettings }) => {
   const recordingEnabled = async () => isModelChoiceRecordingEnabled(await readSettings());

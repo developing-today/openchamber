@@ -9,10 +9,10 @@ type Sent = { url: string; body: unknown };
 
 const captureFetch = (): Sent[] => {
   const sent: Sent[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     sent.push({ url: String(input), body: JSON.parse(String(init?.body)) });
     return new Response('{"recorded":true}', { status: 200 });
-  }) as typeof fetch;
+  }, { preconnect: async () => {} });
   return sent;
 };
 

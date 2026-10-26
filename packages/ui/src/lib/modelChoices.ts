@@ -11,12 +11,12 @@ import { useUIStore } from '@/stores/useUIStore';
 // answer, parsed once at the boundary. A choice never carries message text,
 // only a size bucket of the input it was made for.
 
-export type ModelChoiceSurface = 'goal-writer' | 'composer';
-export type ModelChoiceInputSize = 'empty' | 'short' | 'medium' | 'long' | 'unknown';
+type ModelChoiceSurface = 'goal-writer' | 'composer';
+type ModelChoiceInputSize = 'empty' | 'short' | 'medium' | 'long' | 'unknown';
 
 type ModelSelection = { model: string; variant: string | null };
 
-export interface ModelChoice {
+interface ModelChoice {
   surface: ModelChoiceSurface;
   /** `model` when the model changed, `effort` when only the effort did. */
   kind: 'model' | 'effort';
@@ -111,7 +111,7 @@ const decisionSchema = z.object({
   settings: z.object({ sessionGoalWriterModel: z.string(), sessionGoalWriterVariant: z.string() }).nullable(),
 });
 
-export type ModelChoiceSummary = z.infer<typeof summarySchema>;
+type ModelChoiceSummary = z.infer<typeof summarySchema>;
 export type ModelChoiceSuggestion = z.infer<typeof suggestionSchema>;
 
 /** Whether recording is on, how many choices are kept, and the suggestions on offer. Throws on failure. */

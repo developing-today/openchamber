@@ -2,15 +2,22 @@
  * Notes and suggestions built from the recorded model choices. Deterministic:
  * the same events always give the same notes, and no model is asked.
  */
+import { z } from 'zod';
+
+/** The goal writer settings a suggestion compares against; anything else reads as unset. */
+const goalWriterSettingsSchema = z.object({
+  sessionGoalWriterModel: z.string().trim().catch(''),
+  sessionGoalWriterVariant: z.string().trim().catch(''),
+});
 
 /** A note needs at least this many matching choices. */
-export const MIN_NOTE_COUNT = 2;
+const MIN_NOTE_COUNT = 2;
 /** A suggestion reads the surface's most recent choices only, so it follows today's habit. */
-export const SUGGESTION_WINDOW = 20;
+const SUGGESTION_WINDOW = 20;
 /** And needs this many matching choices among them, ... */
-export const MIN_SUGGESTION_COUNT = 5;
+const MIN_SUGGESTION_COUNT = 5;
 /** ... making up at least this share of the window. */
-export const MIN_SUGGESTION_SHARE = 0.7;
+const MIN_SUGGESTION_SHARE = 0.7;
 /** A detail (input size, what it replaced) is named when it covers this share of the note's choices. */
 const DOMINANT_SHARE = 0.7;
 const MAX_NOTES = 20;
@@ -118,9 +125,8 @@ export const buildModelChoiceSuggestions = ({ events, decisions, settings }) => 
   const count = top.events.length;
   if (count < MIN_SUGGESTION_COUNT || count / recent.length < MIN_SUGGESTION_SHARE) return [];
 
-  const currentModel = typeof settings.sessionGoalWriterModel === 'string' ? settings.sessionGoalWriterModel.trim() : '';
-  const currentVariant = typeof settings.sessionGoalWriterVariant === 'string' ? settings.sessionGoalWriterVariant.trim() : '';
-  if (currentModel === top.chosen.model && currentVariant === (top.chosen.variant ?? '')) return [];
+  const current = goalWriterSettingsSchema.parse(settings);
+  if (current.sessionGoalWriterModel === top.chosen.model && current.sessionGoalWriterVariant === (top.chosen.variant ?? '')) return [];
 
   const id = goalWriterSuggestionId(top.chosen);
   if (decided.has(id)) return [];

@@ -94,3 +94,14 @@ Enterprise mode gates nothing here.
 - `../openchamber-control/model-choice-actions.js` — `models.choices`.
 - UI: `packages/ui/src/lib/modelChoices.ts` (sending and reading),
   `ModelChoiceSettings.tsx` (Settings section and the goal writer suggestion).
+
+## Tests
+
+- `model-choices.test.js`: store, retention, notes, suggestions, the
+  recording switch, routes and the agent action.
+- UI: `modelChoices.test.ts` (size buckets, sending, the off switch),
+  `GoalSpecDialog.test.tsx` and `SessionGoalDialog.test.tsx` (which goal
+  window picks are recorded), `ModelControls.variant.behavior.test.tsx`
+  (composer model and effort picks, side chats left out) and
+  `ModelChoiceSettings.test.tsx` (switch, count, Clear history, Approve and
+  Decline).
