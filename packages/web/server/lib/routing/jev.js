@@ -9,13 +9,18 @@ import {
   SAFETY_INSTRUCTIONS,
   SAFETY_KINDS,
 } from './defaults.js';
+import { MAX_DESCRIPTION_LENGTH, MAX_DETAILS_LENGTH } from './model-routes.js';
 
 // A category whose model is a pool (`opencode-route/<id>`) runs on whatever
 // that pool picks; the pool's own description says what it is for.
 const ROUTE_PROVIDER_ID = 'opencode-route';
-// The pool keys Jev reads; `model-routes.js` validates them on save, but the
-// config file can be edited by hand.
-const poolTextSchema = z.object({ description: z.string().optional(), details: z.string().optional() });
+// The pool keys Jev reads. `model-routes.js` validates them on save, but the
+// config file can be edited by hand, so each value is held to the same rules
+// here and one that breaks them reads as absent, as the Routing page reads it.
+const poolTextSchema = z.object({
+  description: z.string().max(MAX_DESCRIPTION_LENGTH).regex(/^[^\r\n]*$/).optional().catch(undefined),
+  details: z.string().max(MAX_DETAILS_LENGTH).optional().catch(undefined),
+});
 
 /**
  * The criteria text of one category: its description, plus the description and

@@ -284,8 +284,11 @@ without its text. In a routed
 send, each enabled category whose own model is a pool gets
 `\n\nRuns on the model pool "<id>": <description>\n<details>` appended to its
 description; a category without a model of its own, or on a pool with neither
-key, keeps its description alone. Criteria stay one string per category. A
-config that cannot be read means no pool text, and routing goes on.
+key, keeps its description alone. Each value is held to the save's rules
+(`MAX_DESCRIPTION_LENGTH`, `MAX_DETAILS_LENGTH`, no line break in the
+description), and a hand-edited value that breaks them is left out. Criteria
+stay one string per category. A config that cannot be read means no pool text,
+and routing goes on.
 
 The text goes to the same classification provider as the rest of the routing
 request, so enterprise mode already covers it. The OpenCode `plan_info` pool

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { attachmentHint, createRoutingRuntime, readOpenCodeKeys, requestTextOf, routingRequestTextOf } from './runtime.js';
 import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
-import { createJevClient, decidePermission, decideRouting } from './jev.js';
+import { buildRoutingRequest, createJevClient, decidePermission, decideRouting } from './jev.js';
 import { classifierEndpoint, parseCustomEndpointUrl, resolveClassifier } from './classifier.js';
 
 const AUTO = { providerID: 'openchamber', id: 'auto' };
@@ -154,6 +154,29 @@ describe('decisions', () => {
     expect(decidePermission({ ask: { noul: 0.61 }, kind: { choice: 'git_history' } }, { threshold: 0.6 })).toEqual({ hold: true, score: 0.61, kind: 'git_history' });
     expect(decidePermission({ ask: { noul: 0.2 }, kind: { choice: 'read_only' } }, { threshold: 0.6 }).hold).toBe(false);
     expect(() => decidePermission({}, { threshold: 0.6 })).toThrow(/ask score/);
+  });
+});
+
+describe('buildRoutingRequest pool text', () => {
+  const criteriaFor = (pool) => buildRoutingRequest({
+    categories: [{ id: 'hard', description: 'Hard work.', model: { providerID: 'opencode-route', modelID: 'strong' } }],
+    history: [],
+    request: 'x',
+    pools: { strong: { targets: ['p/a'], ...pool } },
+  }).questions.category.criteria.hard;
+  const withNotes = (notes) => `Hard work.\n\nRuns on the model pool "strong": ${notes}`;
+
+  it('drops hand-edited text the save would refuse and keeps the valid field', () => {
+    expect(criteriaFor({ description: 'one\ntwo', details: 'Spans packages.' })).toBe(withNotes('Spans packages.'));
+    expect(criteriaFor({ description: 'one\rtwo' })).toBe('Hard work.');
+    expect(criteriaFor({ description: 'a'.repeat(201), details: 'Spans packages.' })).toBe(withNotes('Spans packages.'));
+    expect(criteriaFor({ description: 'Long refactors.', details: 'b'.repeat(2001) })).toBe(withNotes('Long refactors.'));
+    expect(criteriaFor({ description: 4, details: 'Spans packages.' })).toBe(withNotes('Spans packages.'));
+  });
+
+  it('keeps text exactly at the limits', () => {
+    expect(criteriaFor({ description: 'a'.repeat(200), details: 'b'.repeat(2000) }))
+      .toBe(withNotes(`${'a'.repeat(200)}\n${'b'.repeat(2000)}`));
   });
 });
 
