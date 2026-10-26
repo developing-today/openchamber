@@ -8,7 +8,7 @@ import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { rearmQueuedGoal, useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { applyGoalChoice, rearmQueuedGoal, useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { planGoalWriter, requestGoalSpec, type GoalSubmitChoice } from '@/lib/goalWriter';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -1342,17 +1342,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         goal?: GoalSubmitChoice;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
-
-    // The goal writer's choice for this send, as the composer arm. Applied
-    // right before the message leaves, sent or queued, so an early return
-    // that sends nothing never leaves a stale arm behind.
-    const applyGoalChoice = (choice: GoalSubmitChoice | undefined) => {
-        if (!choice) return;
-        const goalArm = useSessionGoalArmStore.getState();
-        if (choice.kind === 'none') goalArm.setArmed(false);
-        else if (choice.kind === 'unchanged') goalArm.setArmed(true, null, { settled: true });
-        else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message', ignoreLimit: choice.ignoreLimit });
-    };
 
     // A send waiting on the goal writer: the dialog's request and the
     // message it was written from, which the chosen send uses. Both belong to

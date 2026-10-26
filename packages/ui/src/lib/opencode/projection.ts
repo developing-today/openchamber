@@ -34,6 +34,7 @@ import {
   type Part,
   type Project,
   type Session,
+  type SubagentPolicy,
   type ToolPart,
   type ToolState,
   type SyntheticMessage,
@@ -50,7 +51,15 @@ export type AssistantToolItem = Extract<AssistantContentItem, { type: "tool" }>
 // Sessions
 // ---------------------------------------------------------------------------
 
-export function projectSession(info: SessionInfo): Session {
+/**
+ * A wire session as OpenCode sends it once subsession governance lands. The
+ * generated client types do not know `subagentPolicy` yet, so the field is
+ * intersected in here at the boundary; drop the intersection once the
+ * regenerated client ships the field on `SessionInfo`.
+ */
+export type SessionInfoWithSubagentPolicy = SessionInfo & { subagentPolicy?: SubagentPolicy }
+
+export function projectSession(info: SessionInfoWithSubagentPolicy): Session {
   return compact({
     id: info.id,
     parentID: info.parentID,
@@ -66,6 +75,7 @@ export function projectSession(info: SessionInfo): Session {
     time: compact({ ...info.time }),
     metadata: info.metadata,
     permissions: info.permissions,
+    subagentPolicy: info.subagentPolicy,
     revert: info.revert,
     fork: info.fork,
   })

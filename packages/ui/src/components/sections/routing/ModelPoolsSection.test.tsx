@@ -17,9 +17,10 @@ let serverSchedules: ScheduleList | null = null;
 let serverOtherSchedules: { path: string; schedules: StoredSchedules }[] = [];
 let saveError: Error | null = null;
 
+let serverAvailable = true;
 const fetchModelRoutes = async () => {
   routeFetches.push('fetch');
-  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, otherSchedules: serverOtherSchedules, available: true };
+  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, otherSchedules: serverOtherSchedules, available: serverAvailable };
 };
 const saveModelRoutes = async (routes: unknown) => {
   routeSaves.push(routes);
@@ -222,6 +223,7 @@ describe('ModelPoolsSection', () => {
     serverSchedules = null;
     serverOtherSchedules = [];
     saveError = null;
+    serverAvailable = true;
     useConfigStore.setState({
       providers: [
         {
@@ -250,6 +252,19 @@ describe('ModelPoolsSection', () => {
       expect(text).toContain('Cheapest first');
       expect(text).toContain('Fastest first');
       expect(text).toContain('Sturdiest first');
+      expect(routeFetches.length).toBe(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('shows the unavailable message instead of Loading when the server has no model-routes endpoint', async () => {
+    serverAvailable = false;
+    const { dom, cleanup } = await renderSection();
+    try {
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('Routing is not available on this server.');
+      expect(text).not.toContain('Loading pools');
       expect(routeFetches.length).toBe(1);
     } finally {
       await cleanup();

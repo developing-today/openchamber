@@ -12,7 +12,7 @@ import {
 
 export const providerId = 'neuralwatt';
 export const providerName = 'NeuralWatt';
-const aliases = ['neuralwatt'];
+export const aliases = ['neuralwatt'];
 const NEURALWATT_QUOTA_URL = 'https://api.neuralwatt.com/v1/quota';
 
 // 30d month / 365d year are fixed approximations; real calendars vary but the

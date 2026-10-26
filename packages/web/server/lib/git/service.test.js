@@ -231,6 +231,23 @@ describe('getLog with a base', () => {
   });
 });
 
+describe('getLog maxCount guard (#463)', () => {
+  it('caps invalid maxCount values at the default instead of passing them to git', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    for (let i = 0; i < 55; i += 1) {
+      await git.commit(`commit ${i}`, { '--allow-empty': null });
+    }
+
+    // --max-count=-5 would return all 55 commits; the guard applies the
+    // default of 50 instead. Zero and fractional values take the default too.
+    expect((await getLog(tmpDir, { maxCount: -5 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: 0 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: 2.5 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, {})).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: 7 })).all).toHaveLength(7);
+  });
+});
+
 describe('resolveBaseRefForLog', () => {
   it('returns the local ref unchanged when it exists, even if origin also exists', async () => {
     const checkRef = async (ref) => ref === 'main' || ref === 'refs/remotes/origin/main';
