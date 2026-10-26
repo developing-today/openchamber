@@ -88,8 +88,29 @@ jobs:
       matrix:
         target: ${{ fromJson(needs.collect.outputs.targets) }}
     steps:
+      # The bot app token is preferred so labels and comments come from the
+      # app, but a repository that has not installed the app has no
+      # OC_REVIEW_APP_* secrets (this fork, #87): detect that here (the
+      # values themselves are never printed) and let the steps below fall
+      # back to the workflow's own GITHUB_TOKEN, whose declared permissions
+      # already cover labelling and commenting, instead of failing in the
+      # token step (the #61 failure mode; same gate bot-help got in #73).
+      - name: Check bot app configuration
+        id: review-app
+        env:
+          REVIEW_APP_ID: ${{ secrets.OC_REVIEW_APP_ID }}
+          REVIEW_APP_PRIVATE_KEY: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$REVIEW_APP_ID" ] && [ -n "$REVIEW_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::OpenChamber bot app is not configured for this repository (OC_REVIEW_APP_ID / OC_REVIEW_APP_PRIVATE_KEY secrets are unset); labelling with the workflow token instead."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate bot app token
         id: app-token
+        if: steps.review-app.outputs.configured == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
@@ -111,7 +132,7 @@ jobs:
           # no parking comment.
           POST_COMMENTS: ${{ github.event_name != 'push' }}
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
             const { execFileSync } = require("node:child_process");
 
