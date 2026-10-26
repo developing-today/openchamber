@@ -110,6 +110,7 @@ import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
+import { readLayeredModelRoutes } from './lib/routing/model-routes.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
@@ -141,7 +142,7 @@ import { createVaultResolver } from './lib/environment/vault.js';
 import { configureGitHubVaultReader } from './lib/github/auth.js';
 import { configureGitLabVaultReader } from './lib/gitlab/auth-storage.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
-import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
+import { OPENCODE_CONFIG_DIR, readConfigSources } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -428,6 +429,8 @@ const settingsHelpers = createSettingsHelpers({
   sanitizeModelRefs,
   sanitizeSkillCatalogs,
   sanitizeProjects,
+  // Called per settings response; the runtime is created at startup, so false until then.
+  areManagedToolsLive: () => managedConfigRuntime?.appliesLive() === true,
 });
 
 const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
@@ -1126,6 +1129,7 @@ const routingRuntime = createRoutingRuntime({
   getOpenCodeAuthHeaders,
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   isSessionWarm: (sessionId, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionId, cacheLifetimeMs),
+  readModelPools: (directory) => readLayeredModelRoutes(readConfigSources(directory || null)),
 });
 
 // "In work": Jev opens a session when real work starts in it and hints when a
@@ -2136,6 +2140,7 @@ async function main(options = {}) {
     agentToolRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
     isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
+    isManagedOpenCode: () => !ENV_SKIP_OPENCODE_START && !isExternalOpenCode,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 

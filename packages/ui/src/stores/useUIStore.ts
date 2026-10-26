@@ -1157,6 +1157,11 @@ interface UIStore {
    */
   routingFeatureAvailable: boolean;
   /**
+   * Whether OpenChamber's tool switches reach the running OpenCode without a
+   * restart. Server-owned and not persisted, like the flags above.
+   */
+  managedToolsApplyLive: boolean;
+  /**
    * When the user last looked at each memory scope, keyed by scope. Drives the
    * new/changed badges; there is no stored review state.
    */
@@ -1437,6 +1442,7 @@ interface UIStore {
   setPermissionDefaultMode: (value: PermissionMode) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
   setRoutingFeatureAvailable: (value: boolean) => void;
+  setManagedToolsApplyLive: (value: boolean) => void;
   markAgentMemoryViewed: (key: string, viewedAt: number) => void;
   setProjectContextTab: (value: string) => void;
   openProjectKnowledgePlan: (directory: string, projectContextId: string, planId: string) => void;
@@ -1680,6 +1686,7 @@ export const useUIStore = create<UIStore>()(
         permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,
         routingFeatureAvailable: false,
+        managedToolsApplyLive: false,
         agentMemoryViewedAt: {},
         projectContextTab: 'notes',
         projectKnowledgePlanRequest: null,
@@ -3349,6 +3356,9 @@ export const useUIStore = create<UIStore>()(
         },
         setRoutingFeatureAvailable: (value) => {
           set({ routingFeatureAvailable: value });
+        },
+        setManagedToolsApplyLive: (value) => {
+          set({ managedToolsApplyLive: value });
         },
         markAgentMemoryViewed: (key, viewedAt) => {
           set((state) => ({

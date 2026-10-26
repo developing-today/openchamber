@@ -2981,6 +2981,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'يتطلب المصادقة',
   'mcpDropdown.status.needsRegistration': 'يتطلب التسجيل: {error}',
   'mcpDropdown.empty.configureInConfig': 'اضبط خوادم MCP في الإعدادات.',
+  "mcpDropdown.cacheNote": "تشغيل خادم أُوقف فيه وضع الشيفرة أو إيقافه يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
   'sessionAuth.error.rateLimitTitle': 'محاولات كثيرة جدًا',
   'sessionAuth.error.networkTitle': 'تعذّر الوصول إلى الخادم',
   'sessionAuth.error.rateLimitDescriptionSingle': 'يُرجى الانتظار {minutes} دقيقة قبل المحاولة مجددًا.',

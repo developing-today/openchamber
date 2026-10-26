@@ -349,6 +349,13 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
   }),
+  // Server-owned: whether the Tools page switches reach the running OpenCode live.
+  managedToolsApplyLive: field({
+    scope: 'instance',
+    computed: true,
+    parse: parseBoolean,
+    ui: uiStore('managedToolsApplyLive', (v) => useUIStore.getState().setManagedToolsApplyLive(v), { autoSave: false }),
+  }),
   openCodeUpdateToastDismissedVersion: field({ scope: 'instance', parse: parseTrimmedStringUpTo(128) }),
   autoDeleteEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('autoDeleteEnabled', (v) => useUIStore.getState().setAutoDeleteEnabled(v)) }),
   autoDeleteAfterDays: field({ scope: 'instance', parse: parseIntegerInRange(1, 365), ui: uiStore('autoDeleteAfterDays', (v) => useUIStore.getState().setAutoDeleteAfterDays(v)) }),

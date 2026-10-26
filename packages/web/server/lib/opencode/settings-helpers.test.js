@@ -14,7 +14,7 @@ import { createSettingsNormalizationRuntime } from './settings-normalization-run
 const testFilePath = fileURLToPath(import.meta.url);
 const packagesWebDir = join(dirname(testFilePath), '..', '..', '..');
 
-const createTestHelpers = () => createSettingsHelpers({
+const createTestHelpers = (extra = {}) => createSettingsHelpers({
   normalizePathForPersistence: (value) => value,
   normalizeDirectoryPath: (value) => value,
   normalizeTunnelBootstrapTtlMs: (value) => value,
@@ -30,6 +30,7 @@ const createTestHelpers = () => createSettingsHelpers({
   sanitizeModelRefs: () => undefined,
   sanitizeSkillCatalogs: () => undefined,
   sanitizeProjects: () => undefined,
+  ...extra,
 });
 
 const createTestHelpersWithRealSanitizers = () => {
@@ -931,6 +932,15 @@ describe('settings registry gate', () => {
       desktopHosts: [],
       notARealKey: 1,
     })).toEqual({});
+  });
+
+  // Server-owned and read-only: the Tools page gates its prompt cache note on it, and
+  // a client must never be able to write it back.
+  it('reports whether managed tool switches apply live, and never accepts it as an update', () => {
+    expect(createTestHelpers().formatSettingsResponse({}).managedToolsApplyLive).toBe(false);
+    expect(createTestHelpers({ areManagedToolsLive: () => true }).formatSettingsResponse({}).managedToolsApplyLive).toBe(true);
+    expect(createTestHelpers({ areManagedToolsLive: () => false }).formatSettingsResponse({}).managedToolsApplyLive).toBe(false);
+    expect(createTestHelpers().sanitizeSettingsUpdate({ managedToolsApplyLive: true })).toEqual({});
   });
 
   it('never returns secret keys from a formatted response', () => {

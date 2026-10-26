@@ -3080,6 +3080,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '認証が必要です',
   'mcpDropdown.status.needsRegistration': '登録が必要: {error}',
   'mcpDropdown.empty.configureInConfig': '設定でMCPサーバーを構成してください。',
+  "mcpDropdown.cacheNote": "Code Mode がオフのサーバーを切り替えると、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
   'sessionAuth.error.rateLimitTitle': '試行回数が多すぎます',
   'sessionAuth.error.networkTitle': 'サーバーに到達できません',
   'sessionAuth.error.rateLimitDescriptionSingle': '再試行まで{minutes}分お待ちください。',
