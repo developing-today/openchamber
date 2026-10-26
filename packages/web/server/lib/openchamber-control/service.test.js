@@ -586,6 +586,15 @@ describe('OpenChamber control service', () => {
     expect(sessionService.send).toHaveBeenCalledWith('ses_1', { directory: '/repo', prompt: 'Go' });
   });
 
+  it('refuses a subagentPolicy that is not an object on session.create', async () => {
+    const { service, sessionService } = createService();
+    for (const subagentPolicy of ['anthropic/claude', ['anthropic/claude'], 42]) {
+      await expect(service.execute('session.create', { title: 'Governed', subagentPolicy, newWorktree: false }, '/repo'))
+        .rejects.toThrow('subagentPolicy must be an object');
+    }
+    expect(sessionService.create).not.toHaveBeenCalled();
+  });
+
   it('hands a pull request number to session creation with the folder and branch names it may carry', async () => {
     const { service, sessionService } = createService();
     await service.execute('session.create', { pullRequest: 42 }, '/repo');

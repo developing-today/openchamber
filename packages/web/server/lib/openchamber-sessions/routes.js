@@ -1,4 +1,4 @@
-import { asNonEmptyString, isBoolean } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean, isRecord } from '../shared/guards.js';
 import express from 'express';
 import {
   createWorktree as createWorktreeDefault,
@@ -268,8 +268,14 @@ const createSession = async ({ client, directory, title, subagentPolicy }) => {
     location: { directory },
     ...(title ? { title } : {}),
   };
-  // Forwarded unchanged: OpenCode owns the policy shape and its checks.
-  if (subagentPolicy !== undefined) createInput.subagentPolicy = subagentPolicy;
+  // Forwarded unchanged once it passes the same object check the update
+  // path applies: OpenCode owns the policy shape and its checks.
+  if (subagentPolicy !== undefined) {
+    if (!isRecord(subagentPolicy)) {
+      throw new OpenChamberControlError('subagentPolicy must be an object with models, excludedModels, or agentOverrides', 400);
+    }
+    createInput.subagentPolicy = subagentPolicy;
+  }
   const session = await client.session.create(createInput);
   const sessionID = asNonEmptyString(session?.id);
   if (!sessionID) throw new Error('failed to create session');

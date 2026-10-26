@@ -666,6 +666,18 @@ describe('openchamber session routes', () => {
     expect(response.body.subagentPolicy).toEqual(subagentPolicy);
   });
 
+  it('refuses a subagentPolicy that is not an object on session create', async () => {
+    const { app } = createApp();
+    for (const subagentPolicy of ['anthropic/claude', ['anthropic/claude'], 42]) {
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', subagentPolicy })
+        .expect(400);
+      expect(response.body.error).toContain('subagentPolicy must be an object');
+    }
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
   it('percent-encodes the directory header for non-ASCII checkout paths', async () => {
     const { app } = createApp();
     await request(app)
