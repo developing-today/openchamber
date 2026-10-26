@@ -235,3 +235,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 | Per-credential and instance quota, openchamber quota CLI            | 2026-10-26 | #474                       |
 | Open Design (AMR) quota provider on a managed session cookie        | 2026-10-26 | #475                       |
 | opencode-update failure excerpt keeps a truncated single line       | 2026-10-26 | #478, #479                 |
+| ROADMAP Done records the #474, #475 and #478 completions            | 2026-10-26 | #482, #485                 |
