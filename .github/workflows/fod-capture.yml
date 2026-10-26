@@ -1,7 +1,8 @@
-# THROWAWAY debug workflow (branch debug/fod-ci-capture): build the
-# openchamber node_modules fixed-output derivation in a clean Actions
-# environment and upload a per-file manifest of the produced tree, so it can
-# be diffed against a locally built tree. Delete with the branch.
+# THROWAWAY debug workflow (branch debug/fod-ci-capture): replicate the
+# opencode-update workflow's build context exactly (host `bun install` in the
+# checkout, then `nix build .#openchamber`) to reproduce the node_modules FOD
+# hash mismatch, then capture the produced tree's per-file manifest.
+# Delete with the branch.
 name: fod-capture
 
 on:
@@ -24,25 +25,36 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
       - name: Record environment
         run: |
-          { nix --version; uname -a; nix config show; } > "$RUNNER_TEMP/env.txt" 2>&1 || true
+          { nix --version; bun --version; uname -a; nix config show; } > "$RUNNER_TEMP/env.txt" 2>&1 || true
 
-      - name: Build the node_modules FOD
+      - name: Host install (as in opencode-update)
+        run: bun install --frozen-lockfile
+
+      - name: Build the openchamber package (as in opencode-update)
         id: build
+        continue-on-error: true
         run: |
-          OUT=$(nix build .#packages.x86_64-linux.openchamber.node_modules --no-link --print-out-paths)
-          echo "out=$OUT" >> "$GITHUB_OUTPUT"
-          echo "built: $OUT"
+          set -o pipefail
+          nix build .#openchamber 2>&1 | tee "$RUNNER_TEMP/build.log"
 
-      - name: Manifest the produced tree
+      - name: Rebuild FOD with the CI-observed hash and manifest it
+        if: always()
         run: |
-          cd "${{ steps.build.outputs.out }}"
+          grep -m1 "got:" "$RUNNER_TEMP/build.log" || echo "no got: line (build outcome above)"
+          sed -i 's|sha256-UTeYcuNWiTMZiOHzLoGNmRj8L0Kf3CJcmr/nytukvtM=|sha256-l/YLyGlVTz60KAD9ylwVqKaN+DMxP+gAE2ba0ROvaIc=|' nix/hashes.json
+          OUT=$(nix build .#packages.x86_64-linux.openchamber.node_modules --no-link --print-out-paths)
+          echo "captured out: $OUT"
+          cd "$OUT"
           find . -printf '%y %m %s %p %l\n' | LC_ALL=C sort > "$RUNNER_TEMP/structure.txt"
           find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/files.sha256"
-          cp "$RUNNER_TEMP/env.txt" . 2>/dev/null || true
 
       - name: Upload manifest
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fod-ci-manifest
@@ -50,3 +62,4 @@ jobs:
             ${{ runner.temp }}/structure.txt
             ${{ runner.temp }}/files.sha256
             ${{ runner.temp }}/env.txt
+            ${{ runner.temp }}/build.log
