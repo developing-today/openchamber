@@ -315,6 +315,33 @@ describe('computePoolHealth', () => {
     expect(exact.plan.projection.projected).toBe(4);
   });
 
+  it('counts a request once when a pattern and a model it covers link to the same plan', async () => {
+    const now = Date.now();
+    // 20 attempts on openai/gpt-x in 24h against a 24-request daily quota:
+    // the single-link projection is 20 (ratio 0.83). Counting the rows under
+    // both links would project 40 and flip the plan to over.
+    const rows = [];
+    for (let i = 0; i < 20; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'gpt-x' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 24, windowHours: 24 }])];
+    const routes = { pool1: { targets: ['openai/*', 'openai/gpt-x'] } };
+    const both = await computePoolHealth({
+      ...baseDeps(dbPath, { routes, plans, links: { 'openai/*': 'openai-plus', 'openai/gpt-x': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    const patternOnly = await computePoolHealth({
+      ...baseDeps(dbPath, { routes, plans, links: { 'openai/*': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    for (const target of both.pools.pool1.targets) {
+      expect(target.plan.projection.projected).toBe(20);
+      expect(target.plan.projection.status).not.toBe('over');
+    }
+    expect(both.pools.pool1.targets[0].plan.projection).toEqual(patternOnly.pools.pool1.targets[0].plan.projection);
+  });
+
   it('leaves nested pools out of the target list', async () => {
     const dbPath = seedDb(tempDir(), []);
     const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { outer: { targets: ['openai/a', 'opencode-route/inner'] } } }) });
