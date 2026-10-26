@@ -43,10 +43,21 @@ let
       runHook postBuild
     '';
 
+    # On Linux, bun's isolated installer does not create the .bin symlinks
+    # inside the .bun store entries identically on every build machine
+    # (observed: browserslist's update-browserslist-db link is present in
+    # GitHub Actions builds and absent in local ones), and a single such
+    # link flips this derivation's fixed-output hash — see issue #449.
+    # Those links are install-time bookkeeping; package resolution uses
+    # the workspace-level .bin links, which stay. Dropping them makes the
+    # output identical in every environment. Darwin is exempt: its pin
+    # was measured on a Mac and reproduces there, and the variance has
+    # only been observed on Linux.
     installPhase = ''
       runHook preInstall
       mkdir -p $out
       find . -type d -name node_modules -prune -exec cp -R --parents {} $out \;
+      ${lib.optionalString platform.isLinux "find $out -type l -path '*/node_modules/.bun/*/node_modules/.bin/*' -delete"}
       runHook postInstall
     '';
 
