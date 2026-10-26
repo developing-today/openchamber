@@ -598,6 +598,8 @@ function parseArgs(argv = process.argv.slice(2)) {
   const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
   const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
   const controlAction = command === 'control' ? (positional[1] || 'help') : null;
+  const quotaProvider = command === 'quota' ? (positional[1] || null) : null;
+  const quotaProviders = command === 'quota' ? positional.slice(1) : [];
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -615,6 +617,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     scheduleAction,
     sessionAction,
     controlAction,
+    quotaProvider,
+    quotaProviders,
     options,
     removedFlagErrors,
     helpRequested,
@@ -639,6 +643,7 @@ COMMANDS:
   session        Create, inspect, and read OpenChamber sessions
   models         Show default and favorite models
   projects       Show configured projects and IDs
+  quota          Show provider quota and usage windows
   control        Show OpenChamber control-plane commands
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
@@ -699,6 +704,7 @@ COMMANDS:
   session                        Create, inspect, and read sessions
   models                         Show default and favorite models
   projects                       Show configured projects and IDs
+  quota                          Show provider quota and usage windows
   schedule                       Manage scheduled tasks
   tunnel                         Inspect tunnel status/readiness
   logs                           Tail logs for CLI-managed runtimes
@@ -707,6 +713,7 @@ DETAILED HELP:
   openchamber session --help     Show session creation, status, and message options
   openchamber models --help      Show model defaults and favorites help
   openchamber projects --help    Show project list help
+  openchamber quota --help       Show provider quota help
   openchamber schedule --help    Show scheduled task actions and schedule options
   openchamber tunnel help        Show tunnel lifecycle/status commands
   openchamber status --help      Show runtime status options
@@ -721,6 +728,7 @@ EXAMPLES:
   openchamber status
   openchamber models
   openchamber projects
+  openchamber quota codex
   openchamber session --help
   openchamber schedule --help
 `);
@@ -887,7 +895,7 @@ _openchamber_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="serve stop restart handoff status schedule session models projects tunnel logs update"
+    commands="serve stop restart handoff status schedule session models projects quota tunnel logs update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -944,6 +952,7 @@ _openchamber() {
     'session:Create sessions'
     'models:Show default and favorite models'
     'projects:Show configured projects and IDs'
+    'quota:Show provider quota and usage windows'
     'tunnel:Tunnel lifecycle commands'
     'logs:Tail OpenChamber logs'
     'update:Check for and install updates'
