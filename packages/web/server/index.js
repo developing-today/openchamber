@@ -158,6 +158,7 @@ import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
+import { createDeviceSettingsStore } from './lib/device-settings/store.js';
 import { readManagedOpenCodeState, resolveManagedOpenCodePaths } from './lib/opencode/managed-opencode-state.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
@@ -363,6 +364,8 @@ let agentToolRuntime = null;
 let managedConfigRuntime = null;
 // Set in main() by prepareInstanceDir; the lifecycle saves it with the managed OpenCode state.
 let instanceDir = null;
+// Set in main() for a self-handoff successor: the server handing off to this one.
+let handoffPredecessorPid = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -1420,6 +1423,8 @@ const clientPairingRuntime = createClientPairingRuntime({
   storePath: CLIENT_PAIRING_SESSIONS_FILE_PATH,
   remoteClientAuthRuntime,
 });
+// What each open window reports of its device-only settings (lib/device-settings).
+const deviceSettingsStore = createDeviceSettingsStore();
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
 });
@@ -1610,6 +1615,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getInstanceDir: () => instanceDir,
+  getHandoffPredecessorPid: () => handoffPredecessorPid,
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
   resolveUserEnvironment: () => environmentRuntime.forOpenCodeResolved(),
 });
@@ -1971,6 +1977,7 @@ const openChamberControlService = createOpenChamberControlService({
       // Set inside main() once the self-handoff runtime exists, and only when
       // this process owns its signals (a standalone server, not an embedder).
       getRequestHandoff: () => requestSelfHandoff,
+      listDeviceSettings: () => deviceSettingsStore.list(),
     }),
     createIntegrationActions({ readSettingsFromDiskMigrated, persistSettings }),
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
@@ -2087,12 +2094,13 @@ async function main(options = {}) {
   // A managed OpenCode this server adopts keeps reading the folder it was
   // started with, so the saved state's folder is claimed when its owner is gone
   // or is the predecessor handing off to this server (instance-dir.js).
+  handoffPredecessorPid = Number.isInteger(options.handoffPredecessor) ? options.handoffPredecessor : null;
   instanceDir = await prepareInstanceDir({
     fsPromises,
     path,
     dataDir: OPENCHAMBER_DATA_DIR,
     claimDir: readManagedOpenCodeState(resolveManagedOpenCodePaths(OPENCHAMBER_DATA_DIR).statePath)?.instanceDir ?? null,
-    handoffFrom: Number.isInteger(options.handoffPredecessor) ? options.handoffPredecessor : null,
+    handoffFrom: handoffPredecessorPid,
   });
   agentToolRuntime = createAgentToolRuntime({
     crypto,
@@ -2708,6 +2716,7 @@ async function main(options = {}) {
     scheduledTaskService,
     openChamberSessionService,
     openChamberControlService,
+    deviceSettingsStore,
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,

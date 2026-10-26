@@ -59,6 +59,15 @@
         }
       );
 
+      # `nix run .#update-hashes` re-bakes the current system's
+      # node_modules hash in nix/hashes.json (see nix/update-hashes.sh).
+      apps = forAllSystems (system: {
+        update-hashes = {
+          type = "app";
+          program = toString ./nix/update-hashes.sh;
+        };
+      });
+
       devShells = forAllSystems (
         system:
         let

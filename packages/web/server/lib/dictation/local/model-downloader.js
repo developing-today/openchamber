@@ -4,10 +4,11 @@
  * with the system `tar` into the speech-models directory.
  */
 
-import { createWriteStream } from 'fs';
+import { createHash } from 'crypto';
+import { createReadStream, createWriteStream } from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
 import path from 'path';
-import { Readable } from 'stream';
+import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { spawn } from 'child_process';
 
@@ -30,8 +31,26 @@ async function hasRequiredFiles(modelDir, requiredFiles) {
   return results.every(Boolean);
 }
 
-async function downloadToFile(url, outputPath, onProgress) {
-  const res = await fetch(url);
+/**
+ * Downloads `url` to `outputPath`, enforcing the catalog's pinned size and
+ * SHA-256 for the archive. The pinned size is known before the fetch, so an
+ * over-long body is refused the moment it passes that size instead of being
+ * written to disk in full: a broken or hostile endpoint could otherwise fill
+ * the disk without bound. The file lands at `outputPath` only when its size
+ * and digest both match the pins; anything else is discarded. A model with
+ * no pins is never downloaded.
+ *
+ * @param {string} url
+ * @param {string} outputPath
+ * @param {((downloadedBytes: number, totalBytes: number | null) => void) | undefined} onProgress
+ * @param {{ bytes?: number, sha256?: string, fetchImpl?: typeof fetch }} [expected]
+ */
+export async function downloadToFile(url, outputPath, onProgress, expected = {}) {
+  const { bytes, sha256, fetchImpl = fetch } = expected;
+  if (!Number.isInteger(bytes) || bytes <= 0 || !/^[0-9a-f]{64}$/.test(sha256 ?? '')) {
+    throw new Error(`No pinned size and checksum for ${url}, so it cannot be downloaded safely`);
+  }
+  const res = await fetchImpl(url);
   if (!res.ok) {
     throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
   }
@@ -39,26 +58,66 @@ async function downloadToFile(url, outputPath, onProgress) {
     throw new Error(`Failed to download ${url}: missing response body`);
   }
 
-  const totalBytes = Number.parseInt(res.headers.get('content-length') || '', 10) || null;
   let downloadedBytes = 0;
+  const digest = createHash('sha256');
+  const verify = new Transform({
+    transform(chunk, _encoding, callback) {
+      downloadedBytes += chunk.length;
+      if (downloadedBytes > bytes) {
+        callback(new Error(`The download from ${url} was larger than the expected ${bytes} bytes, so it was discarded; try again`));
+        return;
+      }
+      digest.update(chunk);
+      if (typeof onProgress === 'function') {
+        onProgress(downloadedBytes, bytes);
+      }
+      callback(null, chunk);
+    },
+  });
 
   const tmpPath = `${outputPath}.tmp-${Date.now()}`;
   await mkdir(path.dirname(outputPath), { recursive: true });
 
-  const nodeStream = Readable.fromWeb(res.body);
-  if (typeof onProgress === 'function') {
-    nodeStream.on('data', (chunk) => {
-      downloadedBytes += chunk.length;
-      onProgress(downloadedBytes, totalBytes);
-    });
-  }
-
   try {
-    await pipeline(nodeStream, createWriteStream(tmpPath));
-    await rename(tmpPath, outputPath);
+    await pipeline(Readable.fromWeb(res.body), verify, createWriteStream(tmpPath));
   } catch (error) {
     await rm(tmpPath, { force: true }).catch(() => undefined);
     throw error;
+  }
+  if (downloadedBytes !== bytes) {
+    await rm(tmpPath, { force: true }).catch(() => undefined);
+    throw new Error(`The download from ${url} was incomplete (${downloadedBytes} of ${bytes} bytes), so it was discarded; try again`);
+  }
+  if (digest.digest('hex') !== sha256) {
+    await rm(tmpPath, { force: true }).catch(() => undefined);
+    throw new Error(`The download from ${url} did not match its pinned checksum, so it was discarded; try again`);
+  }
+  await rename(tmpPath, outputPath);
+}
+
+/**
+ * Whether a previously downloaded archive still matches its pins. A cached
+ * archive that does not is discarded by the caller and re-downloaded: bytes
+ * cached before the pins existed, or written by anything else, are not
+ * trusted just because the file is non-empty.
+ *
+ * @param {string} archivePath
+ * @param {{ bytes?: number, sha256?: string }} expected
+ * @returns {Promise<boolean>}
+ */
+export async function archiveMatchesPins(archivePath, expected) {
+  try {
+    const s = await stat(archivePath);
+    if (!s.isFile() || s.size !== expected.bytes) {
+      return false;
+    }
+    const digest = createHash('sha256');
+    for await (const chunk of createReadStream(archivePath)) {
+      digest.update(chunk);
+    }
+    return digest.digest('hex') === expected.sha256;
+  } catch {
+    return false;
   }
 }
 
@@ -101,15 +160,6 @@ async function extractTarArchive(archivePath, destDir) {
   });
 }
 
-async function isNonEmptyFile(filePath) {
-  try {
-    const s = await stat(filePath);
-    return s.isFile() && s.size > 0;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Check whether a model is fully installed (all required files present).
  * @param {string} modelsDir
@@ -131,11 +181,16 @@ export async function isLocalSttModelInstalled(modelsDir, modelId) {
  * installed model forever ("Protobuf parsing failed" at load time).
  *
  * @param {{ modelsDir: string, modelId: string,
- *           onProgress?: (downloadedBytes: number, totalBytes: number | null) => void }} options
+ *           onProgress?: (downloadedBytes: number, totalBytes: number | null) => void,
+ *           fetchImpl?: typeof fetch, spec?: object,
+ *           extractImpl?: (archivePath: string, destDir: string) => Promise<void> }} options
+ *        `fetchImpl`, `spec` and `extractImpl` are test seams: production
+ *        callers omit them and get the global fetch, the catalog spec and
+ *        the system tar extraction.
  * @returns {Promise<string>}
  */
-export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
-  const spec = getLocalSttModelSpec(modelId);
+export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetchImpl, spec: specOverride, extractImpl = extractTarArchive }) {
+  const spec = specOverride ?? getLocalSttModelSpec(modelId);
   const modelDir = path.join(modelsDir, spec.extractedDir);
   if (await hasRequiredFiles(modelDir, spec.requiredFiles)) {
     return modelDir;
@@ -149,13 +204,14 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
   const archiveFilename = path.basename(new URL(spec.archiveUrl).pathname);
   const archivePath = path.join(downloadsDir, archiveFilename);
 
-  if (!(await isNonEmptyFile(archivePath))) {
-    await downloadToFile(spec.archiveUrl, archivePath, onProgress);
+  if (!(await archiveMatchesPins(archivePath, spec))) {
+    await rm(archivePath, { force: true }).catch(() => undefined);
+    await downloadToFile(spec.archiveUrl, archivePath, onProgress, { ...spec, fetchImpl });
   }
 
   const stagingDir = path.join(modelsDir, `.staging-${spec.extractedDir}-${Date.now()}`);
   try {
-    await extractTarArchive(archivePath, stagingDir);
+    await extractImpl(archivePath, stagingDir);
 
     const stagedModelDir = path.join(stagingDir, spec.extractedDir);
     if (!(await hasRequiredFiles(stagedModelDir, spec.requiredFiles))) {

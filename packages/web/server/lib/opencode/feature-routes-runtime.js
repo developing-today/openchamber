@@ -46,6 +46,7 @@ import { createTrackedItemsPersistence } from '../tracked-items/persistence.js';
 import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
+import { registerDeviceSettingsRoutes } from '../device-settings/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
@@ -281,6 +282,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       scheduledTaskService,
       openChamberSessionService,
       openChamberControlService,
+      deviceSettingsStore,
       waitForOpenCodeReady,
       getOpenChamberEventClients,
       writeSseEvent,
@@ -386,6 +388,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService });
+    if (deviceSettingsStore) registerDeviceSettingsRoutes(app, { store: deviceSettingsStore });
 
     registerMarkdownImageGrantRoutes(app, {
       fsPromises,

@@ -33,7 +33,7 @@ import {
 
 export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
-const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
+export const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
 
 // Mirrors the Z.ai credit label (same monitor API family): `usage` is the
 // total, `currentValue` the consumed amount.

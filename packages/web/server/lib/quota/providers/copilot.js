@@ -80,7 +80,7 @@ const buildCopilotWindows = (payload) => {
 
 export const providerId = 'github-copilot';
 export const providerName = 'GitHub Copilot';
-const aliases = ['github-copilot', 'copilot'];
+export const aliases = ['github-copilot', 'copilot'];
 
 const INVALID_COPILOT_ENTERPRISE_URL = 'Invalid GitHub Copilot Enterprise URL';
 

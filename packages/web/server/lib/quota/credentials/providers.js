@@ -16,6 +16,17 @@ export const normalizers = {
     const platformApiKey = clean(value?.platformApiKey);
     return platformApiKey ? { platformApiKey } : null;
   },
+  opendesign: (value) => {
+    const cookieInput = clean(value?.cookie);
+    const workspaceId = clean(value?.workspaceId);
+    if (!cookieInput || !workspaceId) return null;
+    // Accept the cookie header value as copied from the browser, or a bare
+    // session token, which is stored under its Better Auth cookie name.
+    const cookie = cookieInput.includes('better-auth')
+      ? cookieInput
+      : `better-auth.session_token=${cookieInput}`;
+    return { cookie, workspaceId };
+  },
 };
 
 export const readManagedCredential = (providerId) => {

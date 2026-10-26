@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import http from 'node:http';
 
-import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -69,6 +69,22 @@ describe('projectCredentialEntries', () => {
   });
 });
 
+describe('projectCredentialRows', () => {
+  it('keeps every row with its id, label and active flag in the legacy entry shape', () => {
+    const rows = projectCredentialRows([
+      entry('openai', false, { type: 'oauth', methodID: 'chatgpt-browser', access: 'legacy', refresh: 'rt', expires: 42, metadata: { accountID: 'acc_1' } }),
+      entry('openai', true, { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'sharing', refresh: 'rt2', expires: 43, metadata: {} }),
+      { id: 'cred_x', integrationID: 'deepseek', label: '', active: true, value: { type: 'key', key: 'ds' } },
+    ]);
+
+    expect(rows).toEqual([
+      { id: 'cred_openai_false', integrationID: 'openai', label: 'default', active: false, value: { type: 'oauth', access: 'legacy', refresh: 'rt', expires: 42, accountId: 'acc_1' } },
+      { id: 'cred_openai_true', integrationID: 'openai', label: 'default', active: true, value: { type: 'oauth', access: 'sharing', refresh: 'rt2', expires: 43 } },
+      { id: 'cred_x', integrationID: 'deepseek', label: null, active: true, value: { type: 'api', key: 'ds' } },
+    ]);
+  });
+});
+
 describe('projectEnvironmentKeys', () => {
   it('takes each variable OpenCode reports from the launch environment', () => {
     const integrations = [
@@ -128,6 +144,28 @@ describe('readOpenCodeCredentials', () => {
     await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
     await expect(getProviderAuth('openai')).resolves.toBeNull();
     expect(requests[0]).toEqual({ url: '/api/credential', authorization: 'Basic test' });
+  });
+
+  it('lists every stored credential row, not only the active one', async () => {
+    respond = (res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        data: [
+          entry('openai', false, { type: 'oauth', methodID: 'chatgpt-browser', access: 'legacy', refresh: 'rt-legacy', expires: 42, metadata: { accountID: 'acc_1' } }),
+          entry('openai', true, { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'sharing', refresh: 'rt-sharing', expires: 43, metadata: {} }),
+          entry('deepseek', true, { type: 'key', key: 'ds' }),
+        ],
+      }));
+    };
+
+    const openaiRows = await listStoredCredentials('openai');
+    expect(openaiRows.map((row) => [row.label, row.active, row.value.access])).toEqual([
+      ['default', false, 'legacy'],
+      ['default', true, 'sharing'],
+    ]);
+    expect(openaiRows[0].value.accountId).toBe('acc_1');
+    await expect(listStoredCredentials()).resolves.toHaveLength(3);
+    await expect(listStoredCredentials('anthropic')).resolves.toEqual([]);
   });
 
   it('reads the selected browser login of an integration with its method and metadata, and without the refresh token', async () => {

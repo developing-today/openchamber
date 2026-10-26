@@ -41,6 +41,14 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-projects.js`
   - Prints configured project labels, ids, and directories for later control-plane calls.
 
+- `commands-quota.js`
+  - Implements `openchamber quota [provider ...]`.
+  - Reads quota from the running OpenCode in-process: it wires the shared credential source (`server/lib/opencode/auth.js`) itself and calls the shared quota dispatcher (`server/lib/quota/index.js`), so no OpenChamber server needs to be running.
+  - The OpenCode endpoint comes from the external-OpenCode settings only: `OPENCODE_HOST`, else `OPENCODE_PORT` on 127.0.0.1, else the default serve port 4096. The auth header is Basic `opencode:<OPENCODE_SERVER_PASSWORD>` when that variable is set, matching the server's auth-state runtime.
+  - Provider arguments resolve against the shared provider catalogue (`listQuotaProviderCatalogue`): an argument matches a provider exactly by id, display name, or credential alias, case-insensitively, or as a `*` / `?` wildcard pattern over those fields. Several arguments run in argument order and a provider named more than once is fetched once. An exact match counts as an explicit ask, so it fetches a provider OpenCode has turned off; a wildcard expands over configured providers only and leaves turned off providers out unless `--all` is passed. An argument that resolves to nothing is a usage error (exit 2) raised before anything is fetched.
+  - Without a provider it prints every configured provider, leaving out the ones OpenCode has turned off (`disabled_providers`) unless `--all` is passed. One provider's failure is printed inline and does not hide the others.
+  - Providers with several stored credentials print one block per credential, labeled with the credential and the account it metered; `--quiet` prints one line per credential and `--json` keeps the same flat list of results with the labels attached. The exit code is 1 when a requested provider produced no successful result; a provider with at least one successful credential does not fail the run.
+
 - `commands-logs.js`
   - Implements `openchamber logs`.
   - Resolves log files, tails recent lines, and follows log output.

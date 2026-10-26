@@ -71,6 +71,7 @@ const COMMAND_OWNED_FLAGS = new Map([
   ['upstream', SESSION], ['no-upstream', SESSION], ['title', SESSION],
   ['session', SESSION_OR_SCHEDULE], ['message', SESSION_OR_SCHEDULE], ['prompt', SESSION_OR_SCHEDULE],
   ['model', SESSION_OR_SCHEDULE], ['agent', SESSION_OR_SCHEDULE], ['variant', SESSION_OR_SCHEDULE],
+  ['subagent-models', SESSION],
   ['goal', SESSION_OR_SCHEDULE], ['goal-token-budget', SESSION_OR_SCHEDULE], ['project', SESSION_OR_SCHEDULE],
   ['dir', SESSION_OR_SCHEDULE], ['directory', SESSION_OR_SCHEDULE],
   ['provider', TUNNEL], ['mode', TUNNEL], ['profile', TUNNEL], ['config', TUNNEL], ['token', TUNNEL],
@@ -134,6 +135,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     timezone: undefined,
     agent: undefined,
     variant: undefined,
+    subagentModels: undefined,
     disabled: false,
     goal: false,
     goalTokenBudget: undefined,
@@ -374,6 +376,13 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.variant = typeof value === 'string' ? value : options.variant;
         break;
       }
+      case 'subagent-models': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        // consumeValue yields a non-empty string or undefined, nothing else.
+        if (value !== undefined) options.subagentModels = value;
+        break;
+      }
       case 'disabled':
         options.disabled = true;
         break;
@@ -453,7 +462,15 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'timeout': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.timeout = typeof value === 'string' ? value : options.timeout;
+        // Judged whole, like --port and --lines/--limit: Number(...) alone
+        // reads 'abc' as NaN, which serializes to null in the control
+        // request and the server then silently substitutes the 600-second
+        // default; '1.5' and '86401' pass here and fail only at the server.
+        const parsedTimeout = /^\d+$/.test((value ?? '').trim()) ? parseInt(value, 10) : NaN;
+        if (!(parsedTimeout >= 1 && parsedTimeout <= 86400)) {
+          throw new TunnelCliError('Invalid timeout value. Provide an integer number of seconds from 1 to 86400.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.timeout = value;
         break;
       }
       case 'with-status':
@@ -474,20 +491,24 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'lines': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        const parsed = parseInt(value ?? '', 10);
-        if (Number.isFinite(parsed) && parsed > 0) {
-          options.lines = parsed;
+        // Judged whole, like --port: parseInt alone would read '10junk' as
+        // 10, '1e3' as 1 and '10.9' as 10, and a fully non-numeric value
+        // would silently keep the default instead of telling the user.
+        if (!/^\d+$/.test((value ?? '').trim()) || parseInt(value, 10) < 1) {
+          throw new TunnelCliError('Invalid lines value. Provide a positive integer.', EXIT_CODE.USAGE_ERROR);
         }
+        options.lines = parseInt(value, 10);
         break;
       }
       case 'limit': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        const parsed = parseInt(value ?? '', 10);
-        if (!Number.isFinite(parsed) || parsed < 1) {
+        // Judged whole, like --port: parseInt alone would read '10junk' as
+        // 10, '1e3' as 1 and '10.9' as 10 instead of reaching this error.
+        if (!/^\d+$/.test((value ?? '').trim()) || parseInt(value, 10) < 1) {
           throw new TunnelCliError('Invalid limit value. Provide a positive integer.', EXIT_CODE.USAGE_ERROR);
         }
-        options.limit = parsed;
+        options.limit = parseInt(value, 10);
         break;
       }
       case 'relay':
@@ -577,6 +598,8 @@ function parseArgs(argv = process.argv.slice(2)) {
   const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
   const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
   const controlAction = command === 'control' ? (positional[1] || 'help') : null;
+  const quotaProvider = command === 'quota' ? (positional[1] || null) : null;
+  const quotaProviders = command === 'quota' ? positional.slice(1) : [];
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -594,6 +617,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     scheduleAction,
     sessionAction,
     controlAction,
+    quotaProvider,
+    quotaProviders,
     options,
     removedFlagErrors,
     helpRequested,
@@ -618,6 +643,7 @@ COMMANDS:
   session        Create, inspect, and read OpenChamber sessions
   models         Show default and favorite models
   projects       Show configured projects and IDs
+  quota          Show provider quota and usage windows
   control        Show OpenChamber control-plane commands
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
@@ -678,6 +704,7 @@ COMMANDS:
   session                        Create, inspect, and read sessions
   models                         Show default and favorite models
   projects                       Show configured projects and IDs
+  quota                          Show provider quota and usage windows
   schedule                       Manage scheduled tasks
   tunnel                         Inspect tunnel status/readiness
   logs                           Tail logs for CLI-managed runtimes
@@ -686,6 +713,7 @@ DETAILED HELP:
   openchamber session --help     Show session creation, status, and message options
   openchamber models --help      Show model defaults and favorites help
   openchamber projects --help    Show project list help
+  openchamber quota --help       Show provider quota help
   openchamber schedule --help    Show scheduled task actions and schedule options
   openchamber tunnel help        Show tunnel lifecycle/status commands
   openchamber status --help      Show runtime status options
@@ -700,6 +728,7 @@ EXAMPLES:
   openchamber status
   openchamber models
   openchamber projects
+  openchamber quota codex
   openchamber session --help
   openchamber schedule --help
 `);
@@ -866,7 +895,7 @@ _openchamber_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="serve stop restart handoff status schedule session models projects tunnel logs update"
+    commands="serve stop restart handoff status schedule session models projects quota tunnel logs update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -923,6 +952,7 @@ _openchamber() {
     'session:Create sessions'
     'models:Show default and favorite models'
     'projects:Show configured projects and IDs'
+    'quota:Show provider quota and usage windows'
     'tunnel:Tunnel lifecycle commands'
     'logs:Tail OpenChamber logs'
     'update:Check for and install updates'

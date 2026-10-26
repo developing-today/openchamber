@@ -299,6 +299,12 @@ other.
   for the registry's `perSurface` keys, because the sidebar layout, themes and
   font sizes the user changes in the app are stored per surface and the base
   read alone shows them as absent.
+- `settings.devices` (`config-actions.js`) lists the device settings each open
+  window reported (`../device-settings/store.js`, `PUT /api/config/device-settings`):
+  the registry's device-scoped keys, which `settings.get` cannot show because
+  they live in the window's own storage. One entry per window, memory only, at most 20, keys
+  outside the registry's device scope dropped. Read only. 503 when the server
+  did not wire the store.
 - `opencode.config.set` (`config-actions.js`) writes the user file (default),
   the project file, or with `configScope: custom` the file the user's own
   `OPENCODE_CONFIG` names, the file Settings writes when it is set. Without
@@ -318,6 +324,13 @@ other.
   store refuses to archive is a 500, never a claimed success. Archiving is
   reversible, so the agent tool may use it — that is how throwaway sessions
   an agent created are removed through the same API.
+- `subagentPolicy` (`{ models, excludedModels, agentOverrides }`, model
+  selectors such as `provider/model` or `provider/*`) travels unchanged on
+  `session.create`, through the session service to OpenCode's session create
+  body, and `session.subagentPolicy` replaces it on an existing session
+  through `session.update`. OpenCode owns the shape and its checks, so this
+  layer forwards the value and never narrows or rewrites it. A change
+  applies to subsessions started after it.
 - `session.delete` permanently removes a session through the
   directory-scoped client's `session.remove`. It is CLI-only
   (`agentExposed: false`, like `schedule.status`): permanent deletion stays
