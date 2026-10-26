@@ -946,6 +946,30 @@ describe('registerModelRouteRoutes', () => {
       expect(response.out.body.otherSchedules).toEqual([]);
     });
 
+    it('GET lists every folder file OpenCode reads, in its order, and never the user file', async () => {
+      const ancestorSchedules = [{ providers: ['groq'], when: {}, factor: 0.8 }];
+      const dotSchedules = [{ targets: ['openai/*'], when: {}, weight: 3 }];
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, {
+        ...layered,
+        readConfigSources: vi.fn((directory) => (directory === '/p'
+          ? [
+              { path: '/u/opencode.json', config: userConfig },
+              { path: '/opencode.json', config: { experimental: { model_route_schedules: ancestorSchedules } } },
+              { path: '/p/opencode.json', config: projectConfig },
+              { path: '/p/.opencode/opencode.json', config: { experimental: { model_route_schedules: dotSchedules } } },
+            ]
+          : [{ path: '/u/opencode.json', config: userConfig }])),
+      });
+      const response = res();
+      await routes.get[0][1]({ query: { directory: '/p' } }, response);
+      expect(response.out.body.otherSchedules).toEqual([
+        { path: '/opencode.json', schedules: ancestorSchedules },
+        { path: '/p/opencode.json', schedules: projectSchedules },
+        { path: '/p/.opencode/opencode.json', schedules: dotSchedules },
+      ]);
+    });
+
     it('PUT writes only the user file\'s list, and a save of routes alone leaves it as it was', async () => {
       const { app, routes } = makeApp();
       registerModelRouteRoutes(app, layered);

@@ -88,19 +88,26 @@ const readModelRouteSchedules = (config) => config?.experimental?.model_route_sc
 
 /**
  * Cross-pool schedules from the config files other than `targetPath`, with
- * the file each came from. OpenCode applies every file's list (it flattens
- * them), so Settings shows these read-only and writes only the user file's.
+ * the file each came from, in OpenCode's reading order. OpenCode applies every
+ * file's list (it flattens them), so Settings shows these read-only and writes
+ * only the user file's. `sources` is `readConfigSources(directory)`: the
+ * global files, `OPENCODE_CONFIG`, and every folder file from the outermost
+ * ancestor down to the project, json and jsonc and `.opencode`.
  */
-const readOtherModelRouteSchedules = (layers, targetPath) =>
-  [
-    [layers.paths.userOverridePath, layers.userOverrideConfig],
-    [layers.paths.customPath, layers.customConfig],
-    [layers.paths.projectPath, layers.projectConfig],
-  ].flatMap(([path, config]) => {
+const readOtherModelRouteSchedules = (sources, targetPath) =>
+  sources.flatMap(({ path, config }) => {
     if (!path || path === targetPath) return [];
     const schedules = config?.experimental?.model_route_schedules;
     return Array.isArray(schedules) && schedules.length > 0 ? [{ path, schedules }] : [];
   });
+
+/** The layers' files as a source list, for callers that have no readConfigSources. */
+const sourcesFromLayers = (layers) => [
+  [layers.paths.userPath, layers.userConfig],
+  [layers.paths.userOverridePath, layers.userOverrideConfig],
+  [layers.paths.customPath, layers.customConfig],
+  [layers.paths.projectPath, layers.projectConfig],
+].map(([path, config]) => ({ path, config }));
 
 const HEALTH_LIMITS = {
   firstTokenTimeoutMs: MAX_MS,
@@ -768,14 +775,15 @@ export const registerModelRouteRoutes = (app, dependencies) => {
     isEnterpriseMode,
     refreshOpenCodeAfterConfigChange,
     resolveOptionalProjectDirectory = async () => ({ directory: null }),
+    readConfigSources = (directory) => sourcesFromLayers(readConfigLayers(directory)),
   } = dependencies;
 
   // Only the read-only list of other files' schedules looks at the project:
-  // OpenCode applies a project's model_route_schedules too, so Settings shows
-  // them. Pools and tuning keep reading and writing as before.
-  const projectLayers = async (req) => {
+  // OpenCode applies every folder file's model_route_schedules too, so
+  // Settings shows them. Pools and tuning keep reading and writing as before.
+  const otherSchedulesFor = async (req, targetPath) => {
     const { directory } = await resolveOptionalProjectDirectory(req);
-    return directory ? readConfigLayers(directory) : null;
+    return readOtherModelRouteSchedules(readConfigSources(directory ?? null), targetPath);
   };
 
   const refuseInEnterpriseMode = (_req, res, next) =>
@@ -793,7 +801,7 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         // The user file's own list, which is the one Settings edits; the
         // merged view would copy other files' entries into it on save.
         schedules: readModelRouteSchedules(getConfigForPath(layers, targetPath)),
-        otherSchedules: readOtherModelRouteSchedules((await projectLayers(req)) ?? layers, targetPath),
+        otherSchedules: await otherSchedulesFor(req, targetPath),
         path: targetPath,
       });
     } catch (error) {
@@ -839,7 +847,7 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         routes: routes ?? readModelRoutes(layers.mergedConfig),
         tuning: tuning === undefined ? readModelRouteTuning(layers.mergedConfig) : tuning,
         schedules: readModelRouteSchedules(targetConfig),
-        otherSchedules: readOtherModelRouteSchedules((await projectLayers(req)) ?? layers, targetPath),
+        otherSchedules: await otherSchedulesFor(req, targetPath),
         path: targetPath,
       });
     } catch (error) {

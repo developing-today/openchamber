@@ -277,10 +277,12 @@ OpenCode adds up `model_route_schedules` from every config file, while
 `mergeConfigs` keeps only the last file's list. So `schedules` in a response
 is the list in the user file, as stored, and the only one a `PUT` writes;
 `otherSchedules` lists the non-empty lists in the other files
-(`{ path, schedules }`), which Settings shows read-only. The project file is
-one of them only when the request names the Settings project (`?directory=`
-or the `x-opencode-directory` header); without one there is no project layer
-to read. Pools and tuning read and write the same with or without it. Settings
+(`{ path, schedules }`), which Settings shows read-only, in OpenCode's
+reading order from `readConfigSources` (`../opencode/shared.js`): the global
+files, `OPENCODE_CONFIG`, then every `opencode.json(c)` and
+`.opencode/opencode.json(c)` from the outermost ancestor folder down to the
+project. The folder files are included only when the request names the
+Settings project (`?directory=` or the `x-opencode-directory` header). Pools and tuning read and write the same with or without it. Settings
 sends schedule saves one at a time and keeps only the newest edit's answer.
 
 ## Pool descriptions

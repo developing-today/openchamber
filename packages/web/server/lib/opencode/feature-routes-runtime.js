@@ -70,7 +70,7 @@ import {
   encodePluginId,
   decodePluginId,
 } from './plugins.js';
-import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, readConfigLayers, getConfigForPath, writeConfig, CONFIG_FILE } from './shared.js';
+import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, readConfigLayers, readConfigSources, getConfigForPath, writeConfig, CONFIG_FILE } from './shared.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from './skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
@@ -313,6 +313,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       isEnterpriseMode,
       refreshOpenCodeAfterConfigChange,
       resolveOptionalProjectDirectory,
+      readConfigSources,
     });
     registerModelRouteStatsRoutes(app);
     registerMessageModelAttributionRoutes(app);
