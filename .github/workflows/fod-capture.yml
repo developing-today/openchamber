@@ -1,0 +1,52 @@
+# THROWAWAY debug workflow (branch debug/fod-ci-capture): build the
+# openchamber node_modules fixed-output derivation in a clean Actions
+# environment and upload a per-file manifest of the produced tree, so it can
+# be diffed against a locally built tree. Delete with the branch.
+name: fod-capture
+
+on:
+  push:
+    branches: [debug/fod-ci-capture]
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Record environment
+        run: |
+          { nix --version; uname -a; nix config show; } > "$RUNNER_TEMP/env.txt" 2>&1 || true
+
+      - name: Build the node_modules FOD
+        id: build
+        run: |
+          OUT=$(nix build .#packages.x86_64-linux.openchamber.node_modules --no-link --print-out-paths)
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          echo "built: $OUT"
+
+      - name: Manifest the produced tree
+        run: |
+          cd "${{ steps.build.outputs.out }}"
+          find . -printf '%y %m %s %p %l\n' | LC_ALL=C sort > "$RUNNER_TEMP/structure.txt"
+          find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/files.sha256"
+          cp "$RUNNER_TEMP/env.txt" . 2>/dev/null || true
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: fod-ci-manifest
+          path: |
+            ${{ runner.temp }}/structure.txt
+            ${{ runner.temp }}/files.sha256
+            ${{ runner.temp }}/env.txt
