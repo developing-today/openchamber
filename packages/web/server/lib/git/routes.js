@@ -21,6 +21,28 @@ const toGitRemoteSummary = (remote) => ({
 // best-effort and `removeWorktree` swallows its failure.
 const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
 
+// Every git endpoint judges its numeric parameters the same strict way
+// (#463/#464/#465): the value's whole text must be digits, the judgement
+// POST /api/git/diffs already applied to `context` and the Web CLI applies
+// to its numeric options. Bare parseInt reinterpreted '10junk' as 10 and
+// let '-5' through, and Number + isFinite let '2.9' reach git as -U2.9,
+// which git rejects.
+// Diff context: a non-negative integer, else the 3-line default.
+const parseDiffContextLines = (value) => {
+  const text = String(value ?? '');
+  return /^\d+$/.test(text) ? Number(text) : 3;
+};
+
+// Log maxCount: a positive integer, else undefined so the service applies
+// its default. A negative must never reach git: --max-count=-5 asks git
+// for the repository's entire history.
+const parseLogMaxCount = (value) => {
+  const text = String(value ?? '');
+  if (!/^\d+$/.test(text)) return undefined;
+  const maxCount = Number(text);
+  return maxCount > 0 ? maxCount : undefined;
+};
+
 /**
  * Builds the best-effort disposal hook handed to `removeWorktree`. The URL and
  * auth headers are route dependencies, so this module never resolves the
@@ -894,12 +916,11 @@ export function registerGitRoutes(app, {
       }
 
       const staged = req.query.staged === 'true';
-      const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
 
       const { diff, submodule } = await getPathDiff(directory, {
         path,
         staged,
-        contextLines: Number.isFinite(context) ? context : 3,
+        contextLines: parseDiffContextLines(req.query.context),
       });
 
       res.json({ diff, submodule });
@@ -927,12 +948,11 @@ export function registerGitRoutes(app, {
       }
 
       const staged = req.body?.staged === true;
-      const context = Number(req.body?.context);
 
       const diffs = await getPathDiffs(directory, {
         paths,
         staged,
-        contextLines: Number.isInteger(context) && context >= 0 ? context : 3,
+        contextLines: parseDiffContextLines(req.body?.context),
       });
 
       res.json({ diffs });
@@ -991,14 +1011,13 @@ export function registerGitRoutes(app, {
       }
 
       const pathParam = typeof req.query.path === 'string' && req.query.path ? req.query.path : undefined;
-      const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
 
       const diff = await getRangeDiff(directory, {
         base,
         head,
         includeWorkingTree: req.query.includeWorkingTree === 'true',
         path: pathParam,
-        contextLines: Number.isFinite(context) ? context : 3,
+        contextLines: parseDiffContextLines(req.query.context),
       });
 
       res.json({ diff });
@@ -1866,7 +1885,7 @@ export function registerGitRoutes(app, {
       const { maxCount, from, to, file } = req.query;
       const all = req.query.all === 'true';
       const log = await getLog(directory, {
-        maxCount: maxCount ? parseInt(maxCount) : undefined,
+        maxCount: parseLogMaxCount(maxCount),
         from,
         to,
         file,
@@ -1904,12 +1923,11 @@ export function registerGitRoutes(app, {
       const directory = resolveDirectoryQuery(req.query.directory);
       const hash = resolveDirectoryQuery(req.query.hash);
       if (!directory || !hash) return res.status(400).json({ error: 'directory and hash are required' });
-      const context = Number(req.query.context ?? 3);
       const diff = await getCommitDiff(directory, {
         hash,
         path: resolveDirectoryQuery(req.query.path, true) ?? undefined,
         previousPath: resolveDirectoryQuery(req.query.previousPath, true) ?? undefined,
-        contextLines: Number.isFinite(context) ? context : 3,
+        contextLines: parseDiffContextLines(req.query.context),
       });
       res.json({ diff });
     } catch (error) {
