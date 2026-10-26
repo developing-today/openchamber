@@ -144,6 +144,9 @@ export const orderForMove = (sessions) =>
     return left.lastAttempt - right.lastAttempt;
   });
 
+/** Thrown to end a tick when rotation was turned off while it ran. */
+class RotationTurnedOff extends Error {}
+
 const withTimeout = (promise, ms, what) => {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -247,6 +250,8 @@ export const createPoolRotation = ({
         // Reading the other sessions takes time; the user may have picked a
         // model or Auto for this one since, and that choice stands.
         if (!stillOnPool(await readSession(chosen.sessionID), chosen.sessionID, poolID)) continue;
+        // Reads can take seconds each; turning rotation off meanwhile stops the tick before any move.
+        if (!settings().enabled) throw new RotationTurnedOff();
         try {
           await withTimeout(switchModel(chosen.sessionID, destination.model), callTimeoutMs, 'Switching the session model');
         } catch (error) {
@@ -290,6 +295,7 @@ export const createPoolRotation = ({
             made.push(move);
           }
         } catch (error) {
+          if (error instanceof RotationTurnedOff) return made;
           log.warn?.(`[pool-rotation] ${poolID}: ${error?.message ?? error}`);
         }
       }

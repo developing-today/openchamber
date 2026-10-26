@@ -6,12 +6,16 @@ import type { RotationState } from '@/lib/routing/poolHealthApi';
 
 let rotationState: RotationState = { settings: { enabled: false, intervalMinutes: 5 }, moves: [] };
 let loadFailure: Error | null = null;
+// When set, a read waits for it, so a test can answer a read after a save.
+let readGate: Promise<void> | null = null;
 const saves: Array<Partial<RotationState['settings']>> = [];
 
 mock.module('@/lib/routing/poolHealthApi', () => ({
   fetchRotation: async () => {
+    const snapshot = rotationState;
+    if (readGate) await readGate;
     if (loadFailure) throw loadFailure;
-    return rotationState;
+    return snapshot;
   },
   saveRotation: async (patch: Partial<RotationState['settings']>) => {
     saves.push(patch);
@@ -71,16 +75,20 @@ const renderFields = async () => {
   const { PoolRotationFields } = await import('./PoolRotationFields');
   const { I18nProvider } = await import('@/lib/i18n');
   const root = createRoot(dom.container);
-  await act(async () => {
-    root.render(
-      <I18nProvider>
-        <PoolRotationFields reloadKey="initial" />
-      </I18nProvider>,
-    );
-  });
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  const render = async (reloadKey: string) => {
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <PoolRotationFields reloadKey={reloadKey} />
+        </I18nProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  };
+  await render('initial');
   return {
     dom,
+    rerender: render,
     cleanup: async () => {
       await act(async () => root.unmount());
       dom.restore();
@@ -92,6 +100,7 @@ describe('PoolRotationFields', () => {
   beforeEach(() => {
     rotationState = { settings: { enabled: false, intervalMinutes: 5 }, moves: [] };
     loadFailure = null;
+    readGate = null;
     saves.length = 0;
   });
 
@@ -106,6 +115,25 @@ describe('PoolRotationFields', () => {
       await act(async () => { await Promise.resolve(); });
       expect(saves).toEqual([{ enabled: true }]);
       expect(dom.container.textContent).toContain('Minutes between moves in one pool');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a read that answers after a save does not put the old setting back', async () => {
+    const { dom, rerender, cleanup } = await renderFields();
+    try {
+      let release: () => void = () => {};
+      readGate = new Promise<void>((resolve) => { release = resolve; });
+      // A refresh starts a read, which sees rotation off and holds that answer.
+      await rerender('refresh');
+      const toggle = dom.container.querySelector<HTMLElement>('[role="switch"]')!;
+      await act(async () => toggle.click());
+      await act(async () => { await Promise.resolve(); });
+      expect(saves).toEqual([{ enabled: true }]);
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+      await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
     } finally {
       await cleanup();
     }

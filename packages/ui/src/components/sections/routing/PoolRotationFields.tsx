@@ -18,12 +18,15 @@ export const PoolRotationFields: React.FC<{ reloadKey?: string }> = ({ reloadKey
   const [state, setState] = React.useState<RotationState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  // Bumped by every save: a read that started before a save must not replace what the save answered.
+  const revisionRef = React.useRef(0);
 
   React.useEffect(() => {
     let cancelled = false;
+    const revision = revisionRef.current;
     fetchRotation()
       .then((next) => {
-        if (cancelled) return;
+        if (cancelled || revision !== revisionRef.current) return;
         setState(next);
         setError(null);
       })
@@ -36,6 +39,7 @@ export const PoolRotationFields: React.FC<{ reloadKey?: string }> = ({ reloadKey
   }, [t, reloadKey]);
 
   const save = (patch: Partial<RotationState['settings']>) => {
+    revisionRef.current += 1;
     setSaving(true);
     saveRotation(patch)
       .then((next) => {

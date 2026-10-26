@@ -308,6 +308,27 @@ describe('pool rotation', () => {
     expect(switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old']);
   });
 
+  it('moves nothing once rotation is turned off while a tick reads sessions', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const sessions = {
+      'primary-old': { model: pool },
+      'primary-new': { model: pool },
+      sub: { parentID: 'primary-old', model: pool },
+    };
+    let data = '';
+    const ctx = setup({
+      sessions,
+      // The user turns rotation off while the tick is reading the sessions.
+      getSession: async (sessionID) => {
+        fs.writeFileSync(path.join(data, 'pool-rotation.json'), JSON.stringify({ enabled: false, intervalMinutes: 5 }));
+        return sessions[sessionID];
+      },
+    });
+    data = ctx.data;
+    expect(await ctx.rotation.tick()).toEqual([]);
+    expect(ctx.switches).toEqual([]);
+  });
+
   it('does not spend a move on a subagent that has finished', async () => {
     // OpenCode no longer lists it as running, however recent its last request.
     const { rotation, switches } = setup({
