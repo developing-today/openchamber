@@ -14,7 +14,7 @@ import {
 
 export const providerId = 'opencode-go';
 export const providerName = 'OpenCode Go';
-const aliases = ['opencode-go'];
+export const aliases = ['opencode-go'];
 
 // OpenCode Go has two credential shapes. An API key, stored under the
 // `opencode-go` integration or the shared `opencode` one, uses the legacy usage

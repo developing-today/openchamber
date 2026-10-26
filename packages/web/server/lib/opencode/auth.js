@@ -20,7 +20,10 @@
  * The answer keeps the legacy `auth.json` entry shape the consumers were
  * written against: `{ type: 'api', key }` / `{ type: 'oauth', access, refresh,
  * expires, accountId?, enterpriseUrl? }`, keyed by integration id, which for
- * providers is the provider id.
+ * providers is the provider id. `listStoredCredentials` answers the same
+ * values as a row list (id, label, active flag, integration id) for the
+ * consumers, quota today, that read every credential of an integration
+ * instead of only the selected one.
  *
  * One write exists, `renewStoredLogin`: an isolated space's gatekeeper holds
  * the host's short OpenAI token, and the host keeps it fresh itself, because
@@ -31,6 +34,8 @@
 
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
+
+import { asNonEmptyString } from '../shared/guards.js';
 
 // Wired once per runtime: `server/index.js` on the web server, the extension
 // entry point in VS Code. Until then every read throws.
@@ -123,6 +128,15 @@ export const projectCredentialEntries = (entries) => {
   return result;
 };
 
+/** Every stored credential as a row: store id, label, active flag, and the projected legacy entry. */
+export const projectCredentialRows = (entries) => entries.map((entry) => ({
+  id: entry.id,
+  integrationID: entry.integrationID,
+  label: asNonEmptyString(entry.label),
+  active: Boolean(entry.active),
+  value: projectCredentialValue(entry.value),
+}));
+
 const readStored = async (current) => projectCredentialEntries(await current.list());
 
 const readWithEnvironment = async (current) => {
@@ -152,6 +166,7 @@ const coalesce = () => {
 const sharedRead = coalesce();
 const sharedStoredRead = coalesce();
 const sharedLoginRead = coalesce();
+const sharedCredentialRowsRead = coalesce();
 
 /**
  * Each integration's selected browser login, as OpenCode stores it: the method, the short access
@@ -184,6 +199,20 @@ export function readOpenCodeCredentials() {
 export async function getProviderAuth(providerId) {
   const credentials = await sharedStoredRead(readStored);
   return credentials[providerId] || null;
+}
+
+const readAllCredentialRows = async (current) => projectCredentialRows(await current.list());
+
+/**
+ * Every credential row OpenCode stores, in store order, or only the rows of
+ * one integration when `integrationID` is given. Unlike the projected read,
+ * no row is dropped for being inactive: callers enumerate accounts.
+ * Environment-variable keys are not store rows and never appear here.
+ * Throws when OpenCode cannot be asked.
+ */
+export async function listStoredCredentials(integrationID) {
+  const rows = await sharedCredentialRowsRead(readAllCredentialRows);
+  return integrationID ? rows.filter((row) => row.integrationID === integrationID) : rows;
 }
 
 /**

@@ -15,7 +15,7 @@ export { resolveGoogleAuthSources } from './auth.js';
 
 export const providerId = 'google';
 export const providerName = 'Google';
-const aliases = ['google', 'google.oauth'];
+export const aliases = ['google', 'google.oauth'];
 
 export const isConfigured = (auth) => resolveGoogleAuthSources(auth).length > 0;
 

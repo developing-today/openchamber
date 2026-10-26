@@ -601,6 +601,28 @@ describe('cli args', () => {
     expect(parsed.options.json).toBe(true);
   });
 
+  it('parses quota command with and without a provider', () => {
+    const withProvider = parseArgs(['quota', 'codex', '--json']);
+
+    expect(withProvider.command).toBe('quota');
+    expect(withProvider.quotaProvider).toBe('codex');
+    expect(withProvider.options.json).toBe(true);
+
+    const withoutProvider = parseArgs(['quota']);
+
+    expect(withoutProvider.command).toBe('quota');
+    expect(withoutProvider.quotaProvider).toBeNull();
+    expect(withoutProvider.quotaProviders).toEqual([]);
+  });
+
+  it('parses several quota providers in order', () => {
+    const parsed = parseArgs(['quota', 'claude', 'chatgpt', 'git*']);
+
+    expect(parsed.command).toBe('quota');
+    expect(parsed.quotaProvider).toBe('claude');
+    expect(parsed.quotaProviders).toEqual(['claude', 'chatgpt', 'git*']);
+  });
+
   it('formats projects compactly', () => {
     expect(formatProjectLine({
       id: 'path_repo',
