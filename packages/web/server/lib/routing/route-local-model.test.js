@@ -67,6 +67,29 @@ describe('downloadModel', () => {
     expect(fs.existsSync(`${file}.part`)).toBe(false);
   });
 
+  it('aborts a download larger than the pinned size without consuming the whole body', async () => {
+    const file = tempFile();
+    let pulls = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls > 50) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(Buffer.from('y'.repeat(CONTENT.length)));
+      },
+    });
+    const fetchImpl = vi.fn(async () => new Response(body, { status: 200 }));
+    await expect(downloadModel({ file, model: modelFor(), fetchImpl })).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringMatching(/larger than the expected/),
+    });
+    expect(pulls).toBeLessThan(50);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(`${file}.part`)).toBe(false);
+  });
+
   it('keeps an installed file of the pinned size without downloading it again', async () => {
     const file = tempFile();
     fs.writeFileSync(file, CONTENT);

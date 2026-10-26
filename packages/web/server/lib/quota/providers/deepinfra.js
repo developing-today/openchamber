@@ -10,7 +10,7 @@ import {
 
 export const providerId = 'deepinfra';
 export const providerName = 'DeepInfra';
-const aliases = ['deepinfra', 'deep-infra', 'deep_infra'];
+export const aliases = ['deepinfra', 'deep-infra', 'deep_infra'];
 const DEEPINFRA_ME_URL = 'https://api.deepinfra.com/v1/me?checklist=true';
 
 export const isConfigured = (auth) => {

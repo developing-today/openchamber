@@ -367,6 +367,8 @@ let agentToolRuntime = null;
 let managedConfigRuntime = null;
 // Set in main() by prepareInstanceDir; the lifecycle saves it with the managed OpenCode state.
 let instanceDir = null;
+// Set in main() for a self-handoff successor: the server handing off to this one.
+let handoffPredecessorPid = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -1622,6 +1624,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getInstanceDir: () => instanceDir,
+  getHandoffPredecessorPid: () => handoffPredecessorPid,
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
   resolveUserEnvironment: () => environmentRuntime.forOpenCodeResolved(),
 });
@@ -2101,12 +2104,13 @@ async function main(options = {}) {
   // A managed OpenCode this server adopts keeps reading the folder it was
   // started with, so the saved state's folder is claimed when its owner is gone
   // or is the predecessor handing off to this server (instance-dir.js).
+  handoffPredecessorPid = Number.isInteger(options.handoffPredecessor) ? options.handoffPredecessor : null;
   instanceDir = await prepareInstanceDir({
     fsPromises,
     path,
     dataDir: OPENCHAMBER_DATA_DIR,
     claimDir: readManagedOpenCodeState(resolveManagedOpenCodePaths(OPENCHAMBER_DATA_DIR).statePath)?.instanceDir ?? null,
-    handoffFrom: Number.isInteger(options.handoffPredecessor) ? options.handoffPredecessor : null,
+    handoffFrom: handoffPredecessorPid,
   });
   agentToolRuntime = createAgentToolRuntime({
     crypto,

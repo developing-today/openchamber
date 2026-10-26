@@ -2,6 +2,7 @@ import express from 'express';
 import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 import { fetchExeDevUsage } from './providers/exe-dev.js';
+import { validateOpenDesignCredential } from './providers/opendesign.js';
 import { aliases as zaiAliases, giftResetTypes as zaiGiftResetTypes, useZaiGiftReset } from './providers/zai.js';
 import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
 
@@ -14,6 +15,7 @@ const validators = {
     const result = await fetchZenmuxQuota({ readCredential: () => credential });
     if (!result.ok) throw new Error(result.error ?? 'Credential validation failed');
   },
+  opendesign: validateOpenDesignCredential,
 };
 
 const getProvider = (req, res) => {

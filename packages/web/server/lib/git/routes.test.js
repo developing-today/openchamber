@@ -23,6 +23,11 @@ const gitLibraries = {
   observeWorktreeTopology: vi.fn(),
   subscribeWorktreeTopologyChanges: vi.fn(),
   removeWorktree: vi.fn(),
+  getPathDiff: vi.fn(),
+  getPathDiffs: vi.fn(),
+  getRangeDiff: vi.fn(),
+  getCommitDiff: vi.fn(),
+  getLog: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -48,6 +53,11 @@ vi.mock('./index.js', () => ({
   observeWorktreeTopology: gitLibraries.observeWorktreeTopology,
   subscribeWorktreeTopologyChanges: gitLibraries.subscribeWorktreeTopologyChanges,
   removeWorktree: gitLibraries.removeWorktree,
+  getPathDiff: gitLibraries.getPathDiff,
+  getPathDiffs: gitLibraries.getPathDiffs,
+  getRangeDiff: gitLibraries.getRangeDiff,
+  getCommitDiff: gitLibraries.getCommitDiff,
+  getLog: gitLibraries.getLog,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -1383,5 +1393,101 @@ describe('batched project reads', () => {
     await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/repo-a'] } }, response);
 
     expect(gitLibraries.observeWorktreeTopology).not.toHaveBeenCalled();
+  });
+});
+
+describe('git route numeric parameters (#463/#464/#465)', () => {
+  beforeEach(() => {
+    gitLibraries.getPathDiff.mockReset();
+    gitLibraries.getPathDiffs.mockReset();
+    gitLibraries.getRangeDiff.mockReset();
+    gitLibraries.getCommitDiff.mockReset();
+    gitLibraries.getLog.mockReset();
+    gitLibraries.getPathDiff.mockResolvedValue({ diff: 'diff', submodule: null });
+    gitLibraries.getPathDiffs.mockResolvedValue([]);
+    gitLibraries.getRangeDiff.mockResolvedValue('range diff');
+    gitLibraries.getCommitDiff.mockResolvedValue('commit diff');
+    gitLibraries.getLog.mockResolvedValue({ all: [], latest: null, total: 0 });
+  });
+
+  it('judges GET /api/git/diff context strictly', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/diff');
+    const cases = [['10junk', 3], ['1e3', 3], ['2.9', 3], ['-5', 3], ['abc', 3], [undefined, 3], ['0', 0], ['10', 10]];
+    for (const [context, expected] of cases) {
+      gitLibraries.getPathDiff.mockClear();
+      const response = createMockResponse();
+      const query = { directory: '/repo', path: 'a.txt' };
+      if (context !== undefined) query.context = context;
+      await handler({ query }, response);
+      expect(response.statusCode).toBe(200);
+      expect(gitLibraries.getPathDiff).toHaveBeenCalledWith('/repo', expect.objectContaining({ contextLines: expected }));
+    }
+  });
+
+  it('judges GET /api/git/range-diff context strictly', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/range-diff');
+    const cases = [['10junk', 3], ['2.9', 3], ['-5', 3], [undefined, 3], ['0', 0], ['5', 5]];
+    for (const [context, expected] of cases) {
+      gitLibraries.getRangeDiff.mockClear();
+      const response = createMockResponse();
+      const query = { directory: '/repo', base: 'main', head: 'feature' };
+      if (context !== undefined) query.context = context;
+      await handler({ query }, response);
+      expect(response.statusCode).toBe(200);
+      expect(gitLibraries.getRangeDiff).toHaveBeenCalledWith('/repo', expect.objectContaining({ contextLines: expected }));
+    }
+  });
+
+  it('judges POST /api/git/diffs context strictly', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('POST', '/api/git/diffs');
+    const cases = [['10junk', 3], [2.9, 3], [-5, 3], [undefined, 3], [0, 0], [10, 10]];
+    for (const [context, expected] of cases) {
+      gitLibraries.getPathDiffs.mockClear();
+      const response = createMockResponse();
+      const body = { paths: ['a.txt'] };
+      if (context !== undefined) body.context = context;
+      await handler({ query: { directory: '/repo' }, body }, response);
+      expect(response.statusCode).toBe(200);
+      expect(gitLibraries.getPathDiffs).toHaveBeenCalledWith('/repo', expect.objectContaining({ contextLines: expected }));
+    }
+  });
+
+  it('judges GET /api/git/commit-diff context strictly, so a fractional value cannot 500', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/commit-diff');
+    const cases = [['10junk', 3], ['2.9', 3], ['-5', 3], [undefined, 3], ['0', 0], ['10', 10]];
+    for (const [context, expected] of cases) {
+      gitLibraries.getCommitDiff.mockClear();
+      const response = createMockResponse();
+      const query = { directory: '/repo', hash: 'abc1234' };
+      if (context !== undefined) query.context = context;
+      await handler({ query }, response);
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({ diff: 'commit diff' });
+      expect(gitLibraries.getCommitDiff).toHaveBeenCalledWith('/repo', expect.objectContaining({ contextLines: expected }));
+    }
+  });
+
+  it('judges GET /api/git/log maxCount strictly, so a negative cannot reach git', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/log');
+    const cases = [['10junk', undefined], ['1e3', undefined], ['2.5', undefined], ['0', undefined], ['-5', undefined], ['abc', undefined], [undefined, undefined], ['1', 1], ['50', 50]];
+    for (const [maxCount, expected] of cases) {
+      gitLibraries.getLog.mockClear();
+      const response = createMockResponse();
+      const query = { directory: '/repo' };
+      if (maxCount !== undefined) query.maxCount = maxCount;
+      await handler({ query }, response);
+      expect(response.statusCode).toBe(200);
+      expect(gitLibraries.getLog).toHaveBeenCalledWith('/repo', expect.objectContaining({ maxCount: expected }));
+    }
   });
 });

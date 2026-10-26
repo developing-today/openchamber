@@ -20,6 +20,8 @@ const fakeOpenCodeSource = `
   if (args.includes('--version')) { console.log('2.0.26'); process.exit(0); }
   const host = args[args.indexOf('--hostname') + 1];
   const port = Number(args[args.indexOf('--port') + 1]);
+  // Every fake records its pid, so teardown can stop the ones a failing handoff left behind.
+  require('node:fs').appendFileSync(require('node:path').join(__dirname, 'opencode-pids'), process.pid + '\\n');
   const server = http.createServer((req, res) => {
     if (req.url === '/api/info' || req.url === '/global/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -280,11 +282,24 @@ const startClient = (port) => {
   };
 };
 
+// Every fake OpenCode the sandbox started, not only the one state.json names last: when a handoff fails,
+// the OpenCode it should have kept is no longer recorded and was left running after the test (12 orphans
+// from one failing run, dezren39/nix#667). Only pids still running this sandbox's fake script are signalled.
 const killRecordedOpenCode = (sandbox) => {
   const state = readJson(sandbox.statePath);
-  if (state?.pid && isAlive(state.pid)) {
+  const listed = (() => {
     try {
-      process.kill(state.pid, 'SIGKILL');
+      return fs.readFileSync(path.join(sandbox.root, 'opencode-pids'), 'utf8').split('\n').map(Number);
+    } catch {
+      return [];
+    }
+  })();
+  for (const pid of new Set([state?.pid, ...listed])) {
+    if (!Number.isInteger(pid) || pid <= 0 || !isAlive(pid)) continue;
+    const command = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).stdout ?? '';
+    if (pid !== state?.pid && !command.includes(sandbox.root)) continue;
+    try {
+      process.kill(pid, 'SIGKILL');
     } catch {
       // Already gone.
     }

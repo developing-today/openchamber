@@ -12,7 +12,7 @@ import {
 
 export const providerId = 'hyper';
 export const providerName = 'Charm Hyper';
-const aliases = ['hyper'];
+export const aliases = ['hyper'];
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
 const CREDIT_TO_USD = 0.05;
 

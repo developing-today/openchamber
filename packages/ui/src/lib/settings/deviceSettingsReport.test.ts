@@ -95,6 +95,84 @@ describe('device settings reporter, closing and switching', () => {
     }
   });
 
+  test('a closing report that lands first stays delivered when the older in-flight send lands after it', async () => {
+    let values = { sidebarWidth: 300 };
+    const sent: Array<{ values: { sidebarWidth: number }; closing: boolean }> = [];
+    const finish: Array<(took: boolean) => void> = [];
+    const reporter = createDeviceSettingsReporter({
+      read: () => values,
+      send: (report, closing) => {
+        sent.push({ values: report.values, closing });
+        return new Promise<boolean>((resolve) => { finish.push(resolve); });
+      },
+      deviceId: 'device-aaaa',
+      surface: 'web',
+      schedule: () => 1,
+      cancel: () => undefined,
+    });
+    const first = reporter.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    values = { sidebarWidth: 320 };
+    const closing = reporter.flush(true);
+    // The closing send goes out at once; it does not wait for the first.
+    expect(sent.map((report) => report.values.sidebarWidth)).toEqual([300, 320]);
+    expect(sent[1].closing).toBe(true);
+    // The closing (newer) report lands first, the older one second.
+    finish[1](true);
+    await closing;
+    finish[0](true);
+    await first;
+    // The newest snapshot is the delivered one: a further flush sends nothing.
+    const again = reporter.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent).toHaveLength(2);
+    finish[2]?.(true);
+    await again;
+  });
+
+  test('a refused closing report does not count as delivered — the newer snapshot is sent again', async () => {
+    let values = { sidebarWidth: 300 };
+    const sent: Array<{ values: { sidebarWidth: number }; closing: boolean }> = [];
+    const finish: Array<(took: boolean) => void> = [];
+    const reporter = createDeviceSettingsReporter({
+      read: () => values,
+      send: (report, closing) => {
+        sent.push({ values: report.values, closing });
+        return new Promise<boolean>((resolve) => { finish.push(resolve); });
+      },
+      deviceId: 'device-aaaa',
+      surface: 'web',
+      schedule: () => 1,
+      cancel: () => undefined,
+    });
+    const first = reporter.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    values = { sidebarWidth: 320 };
+    const closing = reporter.flush(true);
+    expect(sent.map((report) => report.values.sidebarWidth)).toEqual([300, 320]);
+    // The closing (newer) report is refused; the older in-flight one is taken.
+    finish[1](false);
+    await closing;
+    finish[0](true);
+    await first;
+    // The delivered record is the older snapshot, so the newer one goes again.
+    const again = reporter.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent.map((report) => report.values.sidebarWidth)).toEqual([300, 320, 320]);
+    finish[2](true);
+    await again;
+    // Now the newest snapshot is delivered: a further flush sends nothing.
+    const last = reporter.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent).toHaveLength(3);
+    await last;
+  });
+
   test('a send to the previous server that never answers does not hold up the new one', async () => {
     hold = true;
     try {

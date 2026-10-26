@@ -10,7 +10,7 @@ import {
 
 export const providerId = 'zenmux';
 export const providerName = 'ZenMux';
-const aliases = ['zenmux'];
+export const aliases = ['zenmux'];
 const ZENMUX_BALANCE_URL = 'https://zenmux.ai/api/v1/management/payg/balance';
 
 const readStoredCredential = () => readManagedCredential(providerId);

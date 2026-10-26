@@ -35,6 +35,12 @@ Pour chaque catégorie, vous pouvez définir :
 
 Jev trie les prompts en lisant le nom et la description des catégories : les descriptions servent donc d’instructions. Écrivez ce qui appartient à la catégorie et ce qui n’y appartient pas. Vous pouvez modifier, désactiver, supprimer ou ajouter des catégories, et restaurer une catégorie intégrée si vous changez d’avis. Auto a besoin d’au moins deux catégories activées.
 
+### Voir quelles sessions partagent une cible
+
+Quand le forfait d’une cible est épuisé, toutes les sessions sur cette cible basculent en même temps, et chacune repart avec un cache de prompts froid. **Paramètres → Routage → Pools de modèles → État des pools** indique, pour chaque cible de chaque pool, combien de sessions l’ont utilisée au cours des 15 dernières minutes, et prévient quand au moins deux sessions la partagent.
+
+Liez une cible à l’un de vos forfaits dans ce panneau pour voir une estimation : son usage récent, avec celui de toutes les autres cibles liées au même forfait, ramené à la fenêtre de quota du forfait. Les fenêtres qui comptent des requêtes, des messages ou des tokens ont une estimation ; celles en dollars ou en pourcentage n’en ont pas. Le chiffre est une estimation tirée des 24 dernières heures de trafic OpenCode et ne voit pas l’usage en dehors d’OpenCode. Dans un pool pondéré ou tour par tour, une cible à 70 % ou plus de sa fenêtre reçoit un bouton **Réduire le poids**, qui divise son poids par deux pour que les nouvelles sessions penchent vers les autres cibles.
+
 ## Ce qui se passe à l’envoi
 
 1. OpenChamber envoie à Jev votre message et un court extrait des derniers tours.

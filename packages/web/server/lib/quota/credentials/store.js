@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { renameSyncWithRetry } from '../../shared/atomic-rename.js';
 
-const MANAGED_QUOTA_PROVIDERS = new Set(['exe-dev', 'cursor', 'zenmux']);
+const MANAGED_QUOTA_PROVIDERS = new Set(['exe-dev', 'cursor', 'zenmux', 'opendesign']);
 
 const credentialsDirectory = () => path.join(
   process.env.OPENCHAMBER_DATA_DIR

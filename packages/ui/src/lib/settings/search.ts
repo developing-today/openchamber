@@ -630,6 +630,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['paste', 'clipboard', 'attachment', 'large', 'text', 'file', 'double paste', 'ctrl v', 'cmd v'],
   },
   {
+    id: 'chat.active-run-model-change',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.activeRunModelChange',
+    descriptionKey: 'settings.openchamber.visual.field.activeRunModelChangeInfo',
+    keywords: ['model', 'switch', 'running', 'run', 'stop', 'restart', 'next message'],
+  },
+  {
     id: 'chat.enter-to-send',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.enterToSend',

@@ -158,8 +158,13 @@ export const extractAnnouncedUrls = (
       const end = (match.index ?? 0) + match[0].length;
       const hasPath = match[1].split('/').length > 3;
       if (!hasPath && /\d/.test(line[end] ?? '')) return false;
+      const normalized = normalizeLoopbackUrl(match[1]);
+      // A port-0 match names no server either, and it must not win the
+      // line's selection only for add() to drop it: a valid address on the
+      // same line is still announced (#285).
+      if (hasZeroPort(normalized)) return false;
       try {
-        new URL(normalizeLoopbackUrl(match[1]));
+        new URL(normalized);
         return true;
       } catch {
         return false;

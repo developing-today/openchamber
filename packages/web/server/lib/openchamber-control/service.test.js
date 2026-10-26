@@ -572,6 +572,20 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
   });
 
+  it('forwards subagentPolicy unchanged on session.create and leaves it off send and fork', async () => {
+    const { service, sessionService } = createService();
+    const subagentPolicy = {
+      models: ['anthropic/claude-haiku-5-5', 'opencode-go/*'],
+      excludedModels: ['openai/gpt-5'],
+      agentOverrides: { build: { models: ['anthropic/claude-haiku-5-5'] } },
+    };
+    await service.execute('session.create', { title: 'Governed', subagentPolicy, newWorktree: false }, '/repo');
+    expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'Governed', subagentPolicy });
+    sessionService.send.mockResolvedValue({ sessionId: 'ses_1', directory: '/repo' });
+    await service.execute('session.send', { sessionId: 'ses_1', prompt: 'Go', subagentPolicy }, '/repo');
+    expect(sessionService.send).toHaveBeenCalledWith('ses_1', { directory: '/repo', prompt: 'Go' });
+  });
+
   it('hands a pull request number to session creation with the folder and branch names it may carry', async () => {
     const { service, sessionService } = createService();
     await service.execute('session.create', { pullRequest: 42 }, '/repo');
