@@ -104,8 +104,12 @@ jobs:
           fi
 
       - name: Install dependencies
+        id: install
         if: steps.plan.outputs.verify == 'true'
-        run: bun install --frozen-lockfile
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bun install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/install.log"
 
       - name: Build the openchamber package
         id: build
@@ -132,6 +136,9 @@ jobs:
           if [ "${{ steps.update.outcome }}" = "failure" ]; then
             failed_step="nix flake update opencode"
             error_log="$RUNNER_TEMP/update.log"
+          elif [ "${{ steps.plan.outputs.verify }}" = "true" ] && [ "${{ steps.install.outcome }}" = "failure" ]; then
+            failed_step="bun install --frozen-lockfile"
+            error_log="$RUNNER_TEMP/install.log"
           elif [ "${{ steps.plan.outputs.verify }}" = "true" ] && [ "${{ steps.build.outcome }}" = "failure" ]; then
             failed_step="nix build .#openchamber"
             error_log="$RUNNER_TEMP/build.log"
