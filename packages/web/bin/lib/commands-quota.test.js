@@ -157,6 +157,34 @@ describe('quota formatting', () => {
     expect(formatQuotaQuietLine(codexSharingResult)).toBe('codex/OpenAI-2 error');
   });
 
+  it('prints the per-model breakdown under the windows', () => {
+    const withModels = {
+      providerId: 'opendesign',
+      providerName: 'Open Design',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '7d': { usedPercent: 15, resetAtFormatted: 'Sat, Nov 1, 7:00 PM' },
+        },
+        models: [
+          { model: 'claude-haiku', credits: 4.5, sharePercent: 75, totalTokens: 2250, multiplier: 2 },
+          { model: 'deepseek-v4-flash', credits: 1.5, sharePercent: 25, totalTokens: 3000, multiplier: 1 },
+        ],
+      },
+      fetchedAt: 0,
+    };
+    expect(formatQuotaResultLines(withModels)).toEqual([
+      'Open Design (opendesign)',
+      '  7d: 15% used, resets Sat, Nov 1, 7:00 PM',
+      '  models:',
+      '    claude-haiku: 4.5 credits, 75% share, 2250 tokens, 2x multiplier',
+      '    deepseek-v4-flash: 1.5 credits, 25% share, 3000 tokens, 1x multiplier',
+    ]);
+    // Quiet mode stays one line and leaves the breakdown out.
+    expect(formatQuotaQuietLine(withModels)).toBe('opendesign 7d:15%');
+  });
+
   it('formats a failed result as one line with the error', () => {
     expect(formatQuotaResultLines(claudeResult)).toEqual(['Claude (claude): Session expired']);
   });
