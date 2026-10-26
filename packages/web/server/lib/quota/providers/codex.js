@@ -12,16 +12,14 @@ import {
 
 export const providerId = 'codex';
 export const providerName = 'Codex';
-const aliases = ['openai', 'codex', 'chatgpt'];
+export const aliases = ['openai', 'codex', 'chatgpt'];
 
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.access || entry?.token);
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+const fetchQuotaForEntry = async (entry) => {
   const accessToken = entry?.access ?? entry?.token;
   const accountId = entry?.accountId;
 
@@ -143,7 +141,10 @@ export const fetchQuota = async () => {
       providerName,
       ok: true,
       configured: true,
-      usage: { windows }
+      usage: { windows },
+      // The usage payload names the account it metered. Surface it so a
+      // per-credential result can be told apart from another account's.
+      accountLabel: asNonEmptyString(payload?.email) ?? asNonEmptyString(payload?.account_id)
     });
   } catch (error) {
     return buildResult({
@@ -155,3 +156,13 @@ export const fetchQuota = async () => {
     });
   }
 };
+
+export const fetchQuota = async () => {
+  const auth = await readOpenCodeCredentials();
+  return fetchQuotaForEntry(normalizeAuthEntry(getAuthEntry(auth, aliases)));
+};
+
+/** Quota for one stored credential row, fetched with that row's own token. */
+export const fetchQuotaForCredential = async (credential) => (
+  fetchQuotaForEntry(normalizeAuthEntry(credential?.value))
+);

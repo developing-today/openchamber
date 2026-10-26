@@ -53,7 +53,7 @@ export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel 
   };
 };
 
-export const buildResult = ({ providerId, providerName, ok, configured, usage, error, planLabel }) => ({
+export const buildResult = ({ providerId, providerName, ok, configured, usage, error, planLabel, credentialId, credentialLabel, accountLabel }) => ({
   providerId,
   providerName,
   ok,
@@ -61,6 +61,9 @@ export const buildResult = ({ providerId, providerName, ok, configured, usage, e
   usage: usage ?? null,
   ...(error ? { error } : {}),
   ...(planLabel ? { planLabel } : {}),
+  ...(credentialId ? { credentialId } : {}),
+  ...(credentialLabel ? { credentialLabel } : {}),
+  ...(accountLabel ? { accountLabel } : {}),
   fetchedAt: Date.now()
 });
 
