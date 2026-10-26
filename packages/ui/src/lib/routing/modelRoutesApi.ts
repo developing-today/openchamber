@@ -42,9 +42,22 @@ const budgetSchema = z
   })
   .passthrough();
 
+// The server's limits on a pool's own text (`validateModelRoute` in
+// packages/web/server/lib/routing/model-routes.js); a guard test there keeps
+// the two equal.
+export const POOL_DESCRIPTION_MAX_LENGTH = 200;
+export const POOL_DETAILS_MAX_LENGTH = 2000;
+
 const modelRouteSchema = z
   .object({
     name: z.string().optional(),
+    // OpenChamber's own keys: what the pool is for, read by Jev when a routing
+    // category runs on the pool. OpenCode ignores them. Every save sends the
+    // whole route map, so a hand-edited value the server would refuse (a wrong
+    // type, a line break in the description, text over the limits) reads as
+    // absent; otherwise one such value would block saving any pool.
+    description: z.string().max(POOL_DESCRIPTION_MAX_LENGTH).regex(/^[^\r\n]*$/).optional().catch(undefined),
+    details: z.string().max(POOL_DETAILS_MAX_LENGTH).optional().catch(undefined),
     targets: z.array(targetSchema),
     autonomy: z.enum(AUTONOMY_LEVELS).optional(),
     selection: z.enum(['ordered', 'round-robin', 'weighted']).optional(),
