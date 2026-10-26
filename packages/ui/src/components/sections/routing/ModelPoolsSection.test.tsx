@@ -11,7 +11,13 @@ const routeFetches: string[] = [];
 const routeSaves: unknown[] = [];
 const tuningSaves: unknown[] = [];
 const scheduleSaves: unknown[] = [];
-let serverRoutes: Record<string, { targets: string[]; selection?: 'ordered' | 'round-robin' | 'weighted'; weights?: Record<string, number> }> = {};
+let serverRoutes: Record<string, {
+  targets: string[];
+  selection?: 'ordered' | 'round-robin' | 'weighted';
+  weights?: Record<string, number>;
+  description?: string;
+  details?: string;
+}> = {};
 let serverTuning: unknown = null;
 let serverSchedules: ScheduleList | null = null;
 let serverOtherSchedules: { path: string; schedules: StoredSchedules }[] = [];
@@ -48,6 +54,7 @@ const fetchRouteStats = async () => ({ available: false, reason: 'no-database' }
 
 mock.module('@/lib/routing/modelRoutesApi', () => ({
   AUTONOMY_LEVELS: ['fixed', 'rules', 'adaptive', 'predictive', 'agent'],
+  POOL_DETAILS_MAX_LENGTH: 2000,
   fetchModelRoutes,
   saveModelRoutes,
   saveModelRouteTuning,
@@ -373,6 +380,33 @@ describe('ModelPoolsSection', () => {
       expect((routeSaves.at(-1) as Record<string, { name?: string }>).kept.name).toBe('Budget pool');
       await typeInto(findInput(dom.container, 'Display name'), '');
       expect((routeSaves.at(-1) as Record<string, { name?: string }>).kept.name).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('description and details show on the pool, save when left, and empty text removes them', async () => {
+    // beforeEach gave the server an empty map; the pool is added to it.
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'], description: 'Quick fixes', details: 'Old notes' } });
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(dom.container.textContent).toContain('Quick fixes');
+      await expandPool(dom.container);
+      expect(findInput(dom.container, 'Description').value).toBe('Quick fixes');
+      const details = dom.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Details"]');
+      if (!details) throw new Error('no details field');
+      expect(details.value).toBe('Old notes');
+      await typeInto(findInput(dom.container, 'Description'), '  Long refactors; slow  ');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], description: 'Long refactors; slow', details: 'Old notes' } });
+      await act(async () => {
+        details.value = ' Spans packages.\nAvoid for typos. ';
+        details.dispatchEvent(new Event('focusout', { bubbles: true }));
+      });
+      expect(routeSaves.at(-1)).toEqual({
+        kept: { targets: ['p/cheap'], description: 'Long refactors; slow', details: 'Spans packages.\nAvoid for typos.' },
+      });
+      await typeInto(findInput(dom.container, 'Description'), '');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], details: 'Spans packages.\nAvoid for typos.' } });
     } finally {
       await cleanup();
     }

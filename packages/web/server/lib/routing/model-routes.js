@@ -25,7 +25,15 @@ const MAX_COUNT = 50;
 
 // The keys each object may carry, as OpenCode's schema defines them. OpenCode
 // reads only these, so any other key would be saved and silently ignored.
-const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules"];
+// `description` and `details` are the exception: OpenChamber owns them and
+// gives them to Jev (`jev.js`). OpenCode decodes its config with
+// `onExcessProperty: "ignore"` (core config.ts, config/normalize.ts), so it
+// loads a route that carries them and drops the two keys.
+const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules", "description", "details"];
+// The UI reads a value over these as absent (`modelRoutesApi.ts`), so the two
+// must match; `model-routes.test.js` checks that.
+export const MAX_DESCRIPTION_LENGTH = 200;
+export const MAX_DETAILS_LENGTH = 2000;
 const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
@@ -55,6 +63,19 @@ const unknownKeysProblem = (value, allowed) => {
 export const readModelRoutes = (config) => {
   const routes = config?.experimental?.model_routes;
   return isRecord(routes) ? routes : {};
+};
+
+/**
+ * The pools OpenCode builds from every config file it reads (`sources` from
+ * `readConfigSources`, lowest priority first). A later file's pool replaces an
+ * earlier one of the same id whole, as OpenCode's model-routes config plugin
+ * does (`routes.set(id, route)`), so a pool's description comes from the same
+ * file as its targets. A file that failed to parse reads as empty and adds nothing.
+ */
+export const readLayeredModelRoutes = (sources) => {
+  const routes = {};
+  for (const source of sources) Object.assign(routes, readModelRoutes(source.config));
+  return routes;
 };
 
 const readModelRouteTuning = (config) => {
@@ -512,6 +533,18 @@ export const validateModelRoute = (id, route, expandedTargets) => {
   const unknown = unknownKeysProblem(route, ROUTE_KEYS);
   if (unknown) return `route "${id}" has ${unknown}`;
   if (route.name !== undefined && typeof route.name !== "string") return `route "${id}" name must be a string`;
+  // Only a string is equal to its own String(), so these are plain value checks.
+  if (route.description !== undefined) {
+    if (String(route.description) !== route.description || /[\r\n]/.test(route.description))
+      return `route "${id}" description must be one line of text`;
+    if (route.description.length > MAX_DESCRIPTION_LENGTH)
+      return `route "${id}" description must be at most ${MAX_DESCRIPTION_LENGTH} characters`;
+  }
+  if (route.details !== undefined) {
+    if (String(route.details) !== route.details) return `route "${id}" details must be text`;
+    if (route.details.length > MAX_DETAILS_LENGTH)
+      return `route "${id}" details must be at most ${MAX_DETAILS_LENGTH} characters`;
+  }
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
   const seenTargets = new Set();
