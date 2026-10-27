@@ -261,6 +261,10 @@ type ProviderResult = {
   fetchedAt: number;
   error?: string;
   planLabel?: string | null;
+  /** The plan is walled (402-class), distinct from a read failure (`ok: false`). */
+  quotaExhausted?: boolean;
+  /** When the walled window resets, epoch milliseconds, when the provider says. */
+  quotaResetAt?: number | null;
 };
 
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
@@ -890,6 +894,11 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false }: 
 
   if (getKimiApiKey(auth)) {
     configured.add('kimi-for-coding');
+  }
+
+  const metaAuth = normalizeAuthEntry(getAuthEntry(auth, ['meta']));
+  if (metaAuth && (asNonEmptyString(metaAuth.key) || asNonEmptyString(metaAuth.token) || asNonEmptyString(metaAuth.access))) {
+    configured.add('meta');
   }
 
   const minimaxAuth = normalizeAuthEntry(getAuthEntry(auth, ['minimax-coding-plan']));
@@ -3807,6 +3816,255 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+// Meta Model API (Muse Code High Usage plan) quota. Mirrors
+// `packages/web/server/lib/quota/providers/meta.js` — the VS Code extension
+// duplicates this logic rather than importing the web provider.
+//
+// Data source: `POST https://api.meta.ai/muse-code/key` (`x-api-version: 1.0.0`,
+// body `{ "onboard": false }`), the endpoint Meta's Muse Code CLI reads for
+// `/usage`. `subs_usage.window` is the rolling window (labelled by
+// `window_duration_mins`) and `subs_usage.weekly` the weekly one.
+//
+// The read authenticates with the Meta account OAuth token, not the minted
+// inference key: the endpoint refuses a minted key with 401. The OpenCode `meta`
+// credential is tried first; when it is the minted key, the account token comes
+// from the Muse CLI's own login store (`~/.config/muse/auth.json`). A 402-class
+// wall is `ok: false, quotaExhausted: true`, distinct from a read failure.
+const META_KEY_URL = 'https://api.meta.ai/muse-code/key';
+const META_WEEKLY_SECONDS = 7 * 24 * 60 * 60;
+const MUSE_AUTH_PATH = path.join(os.homedir(), '.config', 'muse', 'auth.json');
+
+const readMuseAccountToken = (): string | null => {
+  const parsed = readJsonFile(MUSE_AUTH_PATH);
+  const meta = asObject(asObject(parsed?.providers)?.meta);
+  return asNonEmptyString(meta?.access_token);
+};
+
+// The Meta key endpoint's response shape. Every field is read defensively and
+// a missing one falls through to null, so this describes what the parser
+// accepts rather than a guarantee about the payload.
+type MetaWindowPayload = {
+  used_percent?: unknown;
+  window_duration_mins?: unknown;
+  resets_at?: unknown;
+};
+type MetaSubscriptionUsage = {
+  window?: MetaWindowPayload;
+  weekly?: MetaWindowPayload;
+};
+type MetaQuotaDetail = {
+  limitKind?: string;
+  limit_kind?: string;
+  resetsAtMs?: number;
+  resets_at?: number;
+  resetsAt?: number;
+  tier?: string;
+};
+type MetaKeyResponse = {
+  is_subs_active?: boolean;
+  require_payment?: boolean;
+  subs_tier_name?: string;
+  subs_usage?: MetaSubscriptionUsage;
+  quota?: MetaQuotaDetail;
+  message?: string;
+  error?: { message?: string };
+  resetsAtMs?: number;
+  resets_at?: number;
+  limitKind?: string;
+  tier?: string;
+};
+
+const metaAccountTokenFromEntry = (entry: AuthEntry | null): string | null => {
+  const fields = asObject(entry);
+  return asNonEmptyString(fields?.access) ?? asNonEmptyString(fields?.accessToken) ?? asNonEmptyString(fields?.oauthAccessToken);
+};
+
+const metaKeyFromEntry = (entry: AuthEntry | null): string | null => {
+  const fields = asObject(entry);
+  return asNonEmptyString(fields?.key) ?? asNonEmptyString(fields?.token);
+};
+
+type MetaPlanOutcome =
+  | { kind: 'usage'; body: MetaKeyResponse }
+  | { kind: 'exhausted'; resetAt: number | null; limitKind: string | null; tier: string | null; message: string | null }
+  | { kind: 'unauthorized' }
+  | { kind: 'inactive' }
+  | { kind: 'error'; message: string };
+
+const metaQuotaErrorDetail = (body: MetaKeyResponse | null) => {
+  const quota = body?.quota;
+  const resetRaw = quota?.resetsAtMs ?? quota?.resets_at ?? quota?.resetsAt ?? body?.resetsAtMs ?? body?.resets_at;
+  return {
+    resetAt: toTimestamp(resetRaw),
+    limitKind: asNonEmptyString(quota?.limitKind) ?? asNonEmptyString(quota?.limit_kind) ?? asNonEmptyString(body?.limitKind),
+    tier: asNonEmptyString(quota?.tier) ?? asNonEmptyString(body?.tier),
+  };
+};
+
+const requestMetaPlanUsage = async (
+  bearer: string,
+  fetchImpl: (url: string, options: RequestInit) => Promise<Response>,
+): Promise<MetaPlanOutcome> => {
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  let response: Response;
+  try {
+    response = await fetchImpl(META_KEY_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'x-api-version': '1.0.0',
+      },
+      body: JSON.stringify({ onboard: false }),
+      signal: timeoutSignal,
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    return {
+      kind: 'error',
+      message: isTimeout
+        ? 'Request timed out'
+        : error instanceof SyntaxError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    };
+  }
+
+  const readBody = async (): Promise<MetaKeyResponse | null> => {
+    try {
+      // SAFETY: this is the Meta key endpoint's own response body; `MetaKeyResponse`
+      // describes the fields the parser reads, each of which is checked before use.
+      return (await response.json()) as MetaKeyResponse;
+    } catch {
+      return null;
+    }
+  };
+
+  if (response.status === 401 || response.status === 403) return { kind: 'unauthorized' };
+
+  if (response.status === 402 || response.status === 429) {
+    const body = await readBody();
+    return {
+      kind: 'exhausted',
+      ...metaQuotaErrorDetail(body),
+      message: asNonEmptyString(asObject(body?.error)?.message) ?? asNonEmptyString(body?.message) ?? null,
+    };
+  }
+
+  if (!response.ok) return { kind: 'error', message: `API error: ${response.status}` };
+
+  const body = await readBody();
+  if (!body) return { kind: 'error', message: 'Invalid response from provider' };
+  if (body.is_subs_active === false) return { kind: 'inactive' };
+  if (body.require_payment === true) {
+    return { kind: 'exhausted', ...metaQuotaErrorDetail(body), message: null };
+  }
+  return { kind: 'usage', body };
+};
+
+const metaWindowsFrom = (subsUsage: MetaSubscriptionUsage | undefined) => {
+  const windows = new Map<string, UsageWindow>();
+
+  const rolling = subsUsage?.window;
+  if (rolling) {
+    const durationMinutes = toNumber(rolling.window_duration_mins);
+    const windowSeconds = durationMinutes !== null && durationMinutes > 0 ? durationMinutes * 60 : null;
+    windows.set(windowSeconds ? resolveWindowLabel(windowSeconds) : 'rolling', toUsageWindow({
+      usedPercent: toNumber(rolling.used_percent),
+      windowSeconds,
+      resetAt: toTimestamp(rolling.resets_at),
+    }));
+  }
+
+  const weekly = subsUsage?.weekly;
+  if (weekly) {
+    windows.set('weekly', toUsageWindow({
+      usedPercent: toNumber(weekly.used_percent),
+      windowSeconds: META_WEEKLY_SECONDS,
+      resetAt: toTimestamp(weekly.resets_at),
+    }));
+  }
+
+  return Object.fromEntries(windows);
+};
+
+const metaOutcomeToResult = (outcome: MetaPlanOutcome): ProviderResult => {
+  if (outcome.kind === 'exhausted') {
+    const detail = outcome.message && outcome.message !== 'Subscription quota exhausted' ? `: ${outcome.message}` : '';
+    return {
+      ...buildResult({
+        providerId: 'meta',
+        providerName: 'Meta Model API',
+        ok: false,
+        configured: true,
+        error: `Subscription quota exhausted${detail}`,
+        planLabel: outcome.tier,
+      }),
+      quotaExhausted: true,
+      quotaResetAt: outcome.resetAt,
+    };
+  }
+  if (outcome.kind === 'inactive') {
+    return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'Meta subscription is inactive' });
+  }
+  if (outcome.kind === 'error') {
+    return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: outcome.message });
+  }
+  if (outcome.kind === 'unauthorized') {
+    return buildResult({
+      providerId: 'meta',
+      providerName: 'Meta Model API',
+      ok: false,
+      configured: true,
+      error: 'Meta plan usage needs the account login — sign in with the Muse Code CLI or store its account token',
+    });
+  }
+
+  const body = outcome.body;
+  const windows = metaWindowsFrom(body.subs_usage);
+  if (Object.keys(windows).length === 0) {
+    return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'No quota data in response' });
+  }
+  return buildResult({
+    providerId: 'meta',
+    providerName: 'Meta Model API',
+    ok: true,
+    configured: true,
+    planLabel: asNonEmptyString(body.subs_tier_name),
+    usage: { windows },
+  });
+};
+
+type MetaQuotaDependencies = {
+  readAuth?: () => AuthFile | Promise<AuthFile>;
+  readAccountToken?: () => string | null;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+export const fetchMetaQuota = async ({
+  readAuth = readOpenCodeCredentials,
+  readAccountToken = readMuseAccountToken,
+  fetchImpl = fetch,
+}: MetaQuotaDependencies = {}): Promise<ProviderResult> => {
+  const entry = normalizeAuthEntry(getAuthEntry(await readAuth(), ['meta']));
+  const primary = metaAccountTokenFromEntry(entry) ?? metaKeyFromEntry(entry);
+
+  if (!primary) {
+    return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: false, error: 'Not configured' });
+  }
+
+  const first = await requestMetaPlanUsage(primary, fetchImpl);
+  if (first.kind !== 'unauthorized') return metaOutcomeToResult(first);
+
+  const fallback = readAccountToken();
+  if (!fallback || fallback === primary) return metaOutcomeToResult(first);
+
+  return metaOutcomeToResult(await requestMetaPlanUsage(fallback, fetchImpl));
+};
+
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
 const HYPER_CREDIT_TO_USD = 0.05;
 
@@ -4255,6 +4513,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchAntigravityQuota();
     case 'kimi-for-coding':
       return fetchKimiQuota();
+    case 'meta':
+      return fetchMetaQuota();
     case 'nano-gpt':
       return fetchNanoGptQuota();
     case 'minimax-coding-plan':
