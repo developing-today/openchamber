@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import type { I18nKey } from '@/lib/i18n/store';
-import { buildSettingsSearchResults } from './search';
+import { getCustomizableShortcutActions } from '@/lib/shortcuts';
+import { buildSettingsSearchResults, shortcutSearchItemId } from './search';
 
 const t = (key: I18nKey): string => key;
 
@@ -193,31 +194,168 @@ describe('settings search', () => {
 });
 
 describe('settings search anchors', () => {
-  test('every routing entry id exists as a settings-item anchor in the component sources', () => {
-    const searchSource = readFileSync(join(__dirname, 'search.ts'), 'utf-8');
-    const routingIds = Array.from(searchSource.matchAll(/id: '([^']+)',\s+page: 'routing'/g), (match) => match[1]);
-    expect(routingIds.length).toBeGreaterThan(0);
+  const componentsDir = join(__dirname, '..', '..', 'components');
+  const settingsViewPath = join(componentsDir, 'views', 'SettingsView.tsx');
+  const shortcutsPagePath = join(componentsDir, 'sections', 'openchamber', 'KeyboardShortcutsSettings.tsx');
 
-    // Settings search reveals a result by finding [data-settings-item="<id>"]
-    // on the page, so every entry needs a literal anchor in a component:
-    // a settingsItem prop, or a data-settings-item attribute (#325).
-    const anchors = new Set<string>();
+  /** Every component source under components/, keyed by absolute path. */
+  const readComponentSources = (): Map<string, string> => {
+    const sources = new Map<string, string>();
     const collect = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const entryPath = join(dir, entry.name);
         if (entry.isDirectory()) collect(entryPath);
-        else if (entry.name.endsWith('.tsx')) {
-          const source = readFileSync(entryPath, 'utf-8');
-          for (const match of source.matchAll(/(?:settingsItem|data-settings-item)=\{?["']([^"']+)["']/g)) {
-            anchors.add(match[1]);
+        else if (entry.name.endsWith('.tsx')) sources.set(entryPath, readFileSync(entryPath, 'utf-8'));
+      }
+    };
+    collect(componentsDir);
+    return sources;
+  };
+
+  /** Resolves a relative import specifier to the module file on disk. */
+  const resolveModuleFile = (fromFile: string, specifier: string): string | null => {
+    const base = resolve(dirname(fromFile), specifier);
+    for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+      if (existsSync(candidate)) return candidate;
+    }
+    return null;
+  };
+
+  /**
+   * The ids of every entry in search.ts: the literal ids plus the shortcut ids
+   * generated from the shortcut schema, which the index builds through
+   * shortcutSearchItemId. Also returns every `id:` field so the test can refuse
+   * an entry whose id it cannot see.
+   */
+  const readSearchIndex = () => {
+    const source = readFileSync(join(__dirname, 'search.ts'), 'utf-8');
+    const literalIds = Array.from(
+      source.matchAll(/id: '([^']+)',\s*page: '[^']+'/g),
+      (match) => match[1],
+    );
+    const shortcutIds = getCustomizableShortcutActions()
+      .filter((action) => action.category !== 'desktop')
+      .map((action) => shortcutSearchItemId(action.id));
+    const idFields = Array.from(
+      source.matchAll(/\bid:\s*([^,\n]+),/g),
+      (match) => match[1].trim(),
+    );
+    return { ids: [...literalIds, ...shortcutIds], idFields };
+  };
+
+  /**
+   * A search result is revealed by finding [data-settings-item="<id>"] on the
+   * page, so every entry needs an anchor in a component (#325). Most are
+   * literal settingsItem/data-settings-item props; the helpers below read the
+   * anchors components build at render time from the sources that own them, so
+   * removing a construction fails the test instead of shipping a result that
+   * highlights nothing.
+   */
+  const collectLiteralAnchors = (sources: Map<string, string>): Set<string> => {
+    const anchors = new Set<string>();
+    for (const source of sources.values()) {
+      for (const match of source.matchAll(/(?:settingsItem|data-settings-item)=\{?["']([^"']+)["']/g)) {
+        anchors.add(match[1]);
+      }
+      // settingsItem={cond ? 'a' : 'b'} — both branches anchor a control.
+      for (const match of source.matchAll(/(?:settingsItem|data-settings-item)=\{([^}]*)\}/g)) {
+        if (!match[1].includes('?')) continue;
+        for (const literal of match[1].matchAll(/'([^']+)'/g)) anchors.add(literal[1]);
+      }
+    }
+    return anchors;
+  };
+
+  /**
+   * settingsItem={`prefix.${definition.field}`} over an imported catalog: one
+   * anchor per catalog entry, read from the entry ids in that module.
+   */
+  const collectCatalogAnchors = (sources: Map<string, string>): Set<string> => {
+    const anchors = new Set<string>();
+    for (const [filePath, source] of sources) {
+      const imports = new Map<string, string>();
+      for (const match of source.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'(\.[^']+)'/g)) {
+        for (const name of match[1].split(',')) {
+          const imported = name.trim().replace(/^type\s+/, '');
+          if (imported) imports.set(imported, match[2]);
+        }
+      }
+      for (const template of source.matchAll(/(?:settingsItem|data-settings-item)=\{`([^`$]+)\$\{([\w.]+)\}`\}/g)) {
+        const prefix = template[1];
+        const accessor = template[2];
+        const field = accessor.split('.').pop();
+        if (!field) continue;
+        for (const map of source.matchAll(/([A-Z][A-Z0-9_]*)\.map\(/g)) {
+          const specifier = imports.get(map[1]);
+          if (!specifier) continue;
+          const modulePath = resolveModuleFile(filePath, specifier);
+          if (!modulePath) continue;
+          const moduleSource = readFileSync(modulePath, 'utf-8');
+          for (const value of moduleSource.matchAll(new RegExp(`\\b${field}: '([^']+)'`, 'g'))) {
+            anchors.add(`${prefix}${value[1]}`);
           }
         }
       }
-    };
-    collect(join(__dirname, '..', '..', 'components'));
-
-    for (const id of routingIds) {
-      expect(anchors.has(id)).toBe(true);
     }
+    return anchors;
+  };
+
+  /**
+   * The Shortcuts page renders one row per customizable in-app action through
+   * shortcutSearchItemId(action.id); that call is the anchor for every
+   * generated shortcut id.
+   */
+  const collectShortcutAnchors = (sources: Map<string, string>): Set<string> => {
+    const anchors = new Set<string>();
+    const page = sources.get(shortcutsPagePath);
+    if (!page || !/settingsItem=\{shortcutSearchItemId\(action\.id\)\}/.test(page)) return anchors;
+    for (const action of getCustomizableShortcutActions()) {
+      if (action.category !== 'desktop') anchors.add(shortcutSearchItemId(action.id));
+    }
+    return anchors;
+  };
+
+  /**
+   * prepareSettingsSearchTarget can open a result on a different anchor (the
+   * Git identity picker lives in the Add extension dialog), so the redirect
+   * target is the id that must be anchored.
+   */
+  const collectRedirects = (sources: Map<string, string>): Map<string, string> => {
+    const redirects = new Map<string, string>();
+    const settingsView = sources.get(settingsViewPath);
+    if (!settingsView) return redirects;
+    for (const match of settingsView.matchAll(/if \(result\.id === '([^']+)'\)\s*\{\s*return '([^']+)';/g)) {
+      redirects.set(match[1], match[2]);
+    }
+    return redirects;
+  };
+
+  test('every search entry id has a settings-item anchor in the component sources', () => {
+    const sources = readComponentSources();
+    const anchors = new Set<string>([
+      ...collectLiteralAnchors(sources),
+      ...collectCatalogAnchors(sources),
+      ...collectShortcutAnchors(sources),
+    ]);
+    const redirects = collectRedirects(sources);
+
+    const { ids, idFields } = readSearchIndex();
+    // Every `id:` field is a literal or the one shortcut construction. A new
+    // entry that builds its id another way would slip past the anchor scan, so
+    // it has to be taught here first.
+    const unseenIdFields = idFields.filter(
+      (field) => field !== 'shortcutSearchItemId(action.id)' && !/^'[^']+'$/.test(field),
+    );
+    expect(unseenIdFields).toEqual([]);
+    // Every literal id plus one generated entry per in-app shortcut; a lower
+    // count means the scan stopped seeing entries, not that the index shrank.
+    expect(ids.length).toBeGreaterThan(250);
+
+    const unanchored = ids.filter((id) => {
+      if (anchors.has(id)) return false;
+      const redirect = redirects.get(id);
+      return !redirect || !anchors.has(redirect);
+    });
+    expect(unanchored).toEqual([]);
   });
 });
