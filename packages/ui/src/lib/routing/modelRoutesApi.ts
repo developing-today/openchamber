@@ -89,6 +89,7 @@ const modelRoutesStateSchema = z.object({
   routes: z.record(z.string(), modelRouteSchema),
   tuning: modelRouteTuningSchema.nullable().optional(),
   schedules: storedSchedulesSchema.nullable().optional(),
+  otherRoutes: z.array(z.object({ path: z.string(), routes: z.record(z.string(), modelRouteSchema) })).optional(),
   otherSchedules: z.array(z.object({ path: z.string(), schedules: storedSchedulesSchema })).optional(),
   path: z.string().optional(),
 });
@@ -97,8 +98,8 @@ type ModelRoutesState = z.infer<typeof modelRoutesStateSchema> & { available: bo
 
 const errorPayloadSchema = z.object({ error: z.string().min(1) });
 
-// The project directory lets the server list the project's own cross-pool
-// schedules (read-only); pools and tuning read the same with or without it.
+// The project directory lets the server list the project's own pools and
+// cross-pool schedules (read-only); tuning reads the same with or without it.
 const withDirectory = (path: string, directory?: string | null) =>
   directory ? `${path}?directory=${encodeURIComponent(directory)}` : path;
 

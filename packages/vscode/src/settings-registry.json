@@ -150,6 +150,14 @@
         "mobile"
       ]
     },
+    "modelChoiceRecordingEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },

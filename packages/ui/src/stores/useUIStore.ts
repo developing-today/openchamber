@@ -1132,6 +1132,8 @@ interface UIStore {
   messageSearchEnabled: boolean;
   /** Also index the agent's reasoning. Opt-in: it can make the index much bigger. */
   messageSearchReasoningEnabled: boolean;
+  /** Keep a local history of manual model and effort choices, for notes and Settings suggestions. On by default. */
+  modelChoiceRecordingEnabled: boolean;
   /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
   browserProvider: string;
   agentMemoryToolEnabled: boolean;
@@ -1429,6 +1431,7 @@ interface UIStore {
   setAgentWebToolEnabled: (value: boolean) => void;
   setMessageSearchEnabled: (value: boolean) => void;
   setMessageSearchReasoningEnabled: (value: boolean) => void;
+  setModelChoiceRecordingEnabled: (value: boolean) => void;
   setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentKnowledgeToolEnabled: (value: boolean) => void;
@@ -1672,6 +1675,7 @@ export const useUIStore = create<UIStore>()(
         agentWebToolEnabled: true,
         messageSearchEnabled: false,
         messageSearchReasoningEnabled: false,
+        modelChoiceRecordingEnabled: true,
         browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
         agentKnowledgeToolEnabled: true,
@@ -3320,6 +3324,9 @@ export const useUIStore = create<UIStore>()(
         setMessageSearchReasoningEnabled: (value) => {
           set({ messageSearchReasoningEnabled: value });
         },
+        setModelChoiceRecordingEnabled: (value) => {
+          set({ modelChoiceRecordingEnabled: value });
+        },
         setBrowserProvider: (value) => {
           set({ browserProvider: value });
         },
@@ -3881,6 +3888,7 @@ export const useUIStore = create<UIStore>()(
           agentWebToolEnabled: state.agentWebToolEnabled,
           messageSearchEnabled: state.messageSearchEnabled,
           messageSearchReasoningEnabled: state.messageSearchReasoningEnabled,
+          modelChoiceRecordingEnabled: state.modelChoiceRecordingEnabled,
           browserProvider: state.browserProvider,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           agentKnowledgeToolEnabled: state.agentKnowledgeToolEnabled,

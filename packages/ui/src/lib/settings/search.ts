@@ -568,6 +568,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['history limit', 'prompt recall', 'remember prompts', 'composer history', 'submitted prompts', 'trim history'],
   },
   {
+    id: 'chat.model-choices',
+    page: 'chat',
+    titleKey: 'settings.openchamber.modelChoices.title',
+    keywords: ['model', 'effort', 'choices', 'history', 'learn', 'suggestions', 'privacy'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.model-choice-recording',
+    page: 'chat',
+    titleKey: 'settings.openchamber.modelChoices.field.enabled',
+    descriptionKey: 'settings.openchamber.modelChoices.field.enabledInfo',
+    keywords: ['model', 'effort', 'record', 'history', 'learn', 'notes', 'privacy'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.message-search',
     page: 'chat',
     titleKey: 'settings.openchamber.messageSearch.title',

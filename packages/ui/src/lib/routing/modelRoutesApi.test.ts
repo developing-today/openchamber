@@ -35,6 +35,12 @@ describe('fetchModelRoutes', () => {
     expect(await fetchModelRoutes()).toMatchObject({ routes: { kept: { targets: ['p/a'] } }, tuning: { enabled: true }, available: true });
     expect(sent[0]).toMatchObject({ url: '/api/model-routes', method: 'GET' });
   });
+
+  test('reads the user file routes apart from the pools in other files', async () => {
+    const otherRoutes = [{ path: '/repo/opencode.json', routes: { projectonly: { targets: ['p/m'] } } }];
+    respond = () => reply(JSON.stringify({ routes: { kept: { targets: ['p/a'] } }, otherRoutes, path: '/u/opencode.json' }));
+    expect(await fetchModelRoutes()).toMatchObject({ routes: { kept: { targets: ['p/a'] } }, otherRoutes, available: true });
+  });
 });
 
 describe('fetchModelRoutes with hand-edited pool text', () => {

@@ -54,7 +54,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -114,6 +114,34 @@ const stubFetchReturning = (resolver: (url: string, init?: RequestInit) => Promi
 const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit): void => {
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
+
+describe('quota timestamp helpers', () => {
+  test('toTimestamp rejects non-finite numeric inputs', () => {
+    assert.equal(toTimestamp(Infinity), null);
+    assert.equal(toTimestamp(-Infinity), null);
+    assert.equal(toTimestamp(NaN), null);
+  });
+
+  test('toTimestamp preserves finite numbers and date-string parsing', () => {
+    assert.equal(toTimestamp(1_700_000_000), 1_700_000_000_000);
+    assert.equal(toTimestamp(1_700_000_000_000), 1_700_000_000_000);
+    assert.equal(toTimestamp('2023-11-14T22:13:20.000Z'), 1_700_000_000_000);
+    assert.equal(toTimestamp('garbage'), null);
+  });
+
+  test('normalizeTimestamp rejects non-finite numeric inputs', () => {
+    assert.equal(normalizeTimestamp(Infinity), null);
+    assert.equal(normalizeTimestamp(-Infinity), null);
+    assert.equal(normalizeTimestamp(NaN), null);
+  });
+
+  test('normalizeTimestamp preserves finite scaling and rejects non-numeric inputs', () => {
+    assert.equal(normalizeTimestamp(1_700_000_000), 1_700_000_000_000);
+    assert.equal(normalizeTimestamp(1_700_000_000_000), 1_700_000_000_000);
+    assert.equal(normalizeTimestamp('2023-11-14T22:13:20.000Z'), null);
+    assert.equal(normalizeTimestamp(null), null);
+  });
+});
 
 test('dispatches Charm Hyper through the generic quota API', async () => {
   stubFetchReturning(async () => Response.json({ balance: 100 }));
@@ -835,6 +863,51 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
   });
+
+  // The usage endpoint forwards its own percentages, and they can fall outside
+  // 0-100 on an exhausted overage or a spend control. Primary, secondary and
+  // spend control all clamp both bounds, and an absent value stays null.
+  for (const { label, usedPercent, expected, expectedRemaining } of [
+    { label: 'clamps above 100', usedPercent: 150, expected: 100, expectedRemaining: 0 },
+    { label: 'clamps below 0', usedPercent: -20, expected: 0, expectedRemaining: 100 },
+    { label: 'clamps a far overage', usedPercent: 200, expected: 100, expectedRemaining: 0 },
+    { label: 'keeps an in-range value', usedPercent: 42, expected: 42, expectedRemaining: 58 },
+    { label: 'keeps a missing value null', usedPercent: null, expected: null, expectedRemaining: null },
+  ]) {
+    test(`${label} on every Codex window`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        rate_limit: {
+          primary_window: { used_percent: usedPercent, limit_window_seconds: 18_000, reset_at: 1_700_000_000 },
+          secondary_window: { used_percent: usedPercent, limit_window_seconds: 604_800, reset_at: 1_700_000_000 },
+        },
+        spend_control: {
+          individual_limit: { limit: '7500', used: '100', used_percent: usedPercent },
+        },
+      })));
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, true);
+      for (const [name, window] of Object.entries(result.usage!.windows)) {
+        if (name === 'credits') continue;
+        assert.equal(window.usedPercent, expected, `${name} usedPercent`);
+        assert.equal(window.remainingPercent, expectedRemaining, `${name} remainingPercent`);
+      }
+      assert.equal(result.usage!.windows.credits!.usedPercent, expected);
+      assert.equal(result.usage!.windows.credits!.remainingPercent, expectedRemaining);
+    });
+  }
+
+  test('leaves a fractional in-range spend percent unrounded', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      rate_limit: null,
+      spend_control: { individual_limit: { limit: '7500', used: '1', used_percent: 36.5 } },
+    })));
+
+    const result = await fetchQuotaForProvider('codex');
+
+    assert.equal(result.usage!.windows.credits!.usedPercent, 36.5);
+  });
 });
 
 describe('GitHub Copilot quota provider (VS Code parity)', () => {
@@ -1036,6 +1109,50 @@ describe('Claude quota provider (VS Code parity)', () => {
     assert.equal(result.usage?.windows.extra_usage?.valueLabel, '$25.00 / $100.00');
   });
 
+  test('clamps limits and spend percentages while preserving missing values', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      limits: [
+        { kind: 'session', percent: 150 },
+        { kind: 'weekly_all', percent: -20 },
+        { kind: 'weekly_scoped', percent: 42, scope: { model: { display_name: 'Sonnet' } } },
+        { kind: 'weekly_scoped', scope: { model: { display_name: 'Opus' } } },
+      ],
+      spend: { enabled: true, percent: 200 },
+    })));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 100);
+    assert.equal(result.usage?.windows['7d']?.usedPercent, 0);
+    assert.equal(result.usage?.windows.extra_usage?.usedPercent, 100);
+    assert.equal(result.usage?.models?.Sonnet?.windows['7d']?.usedPercent, 42);
+    assert.equal(result.usage?.models?.Opus?.windows['7d']?.usedPercent, null);
+  });
+
+  test('clamps legacy utilization and keeps missing percentages null', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      five_hour: { utilization: 150 },
+      seven_day: { utilization: -20 },
+    })));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 100);
+    assert.equal(result.usage?.windows['7d']?.usedPercent, 0);
+
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      five_hour: {},
+      seven_day: {},
+      spend: { enabled: true },
+    })));
+
+    const missing = await fetchQuotaForProvider('claude');
+
+    assert.equal(missing.usage?.windows['5h']?.usedPercent, null);
+    assert.equal(missing.usage?.windows['7d']?.usedPercent, null);
+    assert.equal(missing.usage?.windows.extra_usage?.usedPercent, null);
+  });
+
   test('keeps serving the last good values while Anthropic rate limits', async () => {
     const responses = [
       mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
@@ -1089,6 +1206,28 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['MCP Tools']!.usedPercent, 0);
     assert.equal(windows['MCP Tools']!.windowSeconds, 30 * 24 * 60 * 60);
     assert.equal(windows['MCP Tools']!.resetAt, 1787128459979);
+  });
+
+  test('clamps out-of-range percentages to [0, 100]', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 150 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: -20 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 150 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(windows['5h']!.usedPercent, 100);
+    assert.equal(windows['5h']!.remainingPercent, 0);
+    assert.equal(windows.weekly!.usedPercent, 0);
+    assert.equal(windows.weekly!.remainingPercent, 100);
+    assert.equal(windows['MCP Tools']!.usedPercent, 100);
   });
 
   test('reports a z.ai business failure sent inside an HTTP 200 body', async () => {
@@ -1391,6 +1530,42 @@ describe('Zhipu AI Coding Plan quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows['5h']!.usedPercent, 45);
     assert.equal(result.usage!.windows['5h']!.valueLabel, '900 / 2k credits');
+  });
+
+  test('clamps out-of-range percentages and the derived fallback to [0, 100]', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, percentage: 150 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: -20 },
+        ],
+      },
+    })));
+
+    const clamped = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(clamped.ok, true);
+    assert.equal(clamped.usage!.windows['5h']!.usedPercent, 100);
+    assert.equal(clamped.usage!.windows['5h']!.remainingPercent, 0);
+    assert.equal(clamped.usage!.windows['MCP Tools']!.usedPercent, 0);
+    assert.equal(clamped.usage!.windows['MCP Tools']!.remainingPercent, 100);
+
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 100, currentValue: 200 },
+        ],
+      },
+    })));
+
+    const fallback = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(fallback.ok, true);
+    assert.equal(fallback.usage!.windows['5h']!.usedPercent, 100);
   });
 
   test('surfaces business failures reported inside HTTP 200 bodies', async () => {
@@ -1908,6 +2083,33 @@ describe('Cursor quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 42);
   });
 
+  test('clamps planUsage percentages above 100', async () => {
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: true, planUsage: { totalPercentUsed: 150 }, billingCycleEnd: '1788220800000' } } });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 100);
+  });
+
+  test('clamps negative planUsage percentages to zero', async () => {
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: true, planUsage: { totalPercentUsed: -20 }, billingCycleEnd: '1788220800000' } } });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 0);
+  });
+
+  test('keeps planUsage percentage null when it is missing', async () => {
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: true, planUsage: {}, billingCycleEnd: '1788220800000' } } });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, null);
+  });
+
   test('falls back to auth/usage and team-scoped GetHardLimit for enterprise accounts', async () => {
     let hardLimitBody = '';
     routeCursorApi(enterpriseRoutes, (url, body) => {
@@ -1922,6 +2124,32 @@ describe('Cursor quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 59);
     assert.equal(result.usage!.windows.on_demand, undefined);
     assert.equal(hardLimitBody, JSON.stringify({ teamId: '424242' }));
+  });
+
+  test('reports enterprise windowSeconds as the billing-cycle duration, not time until reset', async () => {
+    routeCursorApi({
+      ...enterpriseRoutes,
+      GetTeamSpend: { body: { teamMemberSpend: [{ userId: 424242, spendCents: 672 }] } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    // planInfo.billingCycleEnd 1788220800000 - usage.billingCycleStart 1787932328088 = 288471s
+    assert.equal(result.usage!.windows.billing_cycle!.windowSeconds, 288471);
+    assert.equal(result.usage!.windows.on_demand!.windowSeconds, 288471);
+  });
+
+  test('reports enterprise windowSeconds as null when the billing-cycle start is missing', async () => {
+    routeCursorApi({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: { body: { billingCycleEnd: '1787932328088', displayThreshold: 100 } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.windowSeconds, null);
   });
 
   test('reports on-demand spend from GetTeamSpend matched by userId', async () => {
@@ -2750,4 +2978,41 @@ describe('xAI quota provider (VS Code parity)', () => {
     assert.equal(result.configured, false);
     assert.equal(requests, 0);
   });
+});
+
+describe("Google quota provider (VS Code parity) - #545", () => {
+  beforeEach(() => {
+    configureOpenCodeCredentials({ list: async () => [oauth("google")] });
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+  });
+
+  for (const { label, remainingFraction, expectedUsed, expectedRemaining } of [
+    { label: "clamps a negative remainingFraction to 100 used", remainingFraction: -0.5, expectedUsed: 100, expectedRemaining: 0 },
+    { label: "keeps an in-range remainingFraction unclamped", remainingFraction: 0.75, expectedUsed: 25, expectedRemaining: 75 },
+  ]) {
+    test(label + " on the bucket and model-data paths", async () => {
+      stubFetchReturning(async (url) => {
+        if (url.endsWith(":retrieveUserQuota")) {
+          return mockResponse({ buckets: [{ modelId: "gemini-bucket", remainingFraction, resetTime: "2026-10-28T10:00:00Z" }] });
+        }
+        if (url.endsWith(":fetchAvailableModels")) {
+          return mockResponse({ models: { "gemini-model": { quotaInfo: { remainingFraction, resetTime: "2026-10-28T10:00:00Z" } } } });
+        }
+        return mockResponse({});
+      });
+
+      const result = await fetchQuotaForProvider("google");
+
+      assert.equal(result.ok, true);
+      const bucketWindow = result.usage?.models?.["gemini/gemini-bucket"]?.windows.daily;
+      assert.equal(bucketWindow?.usedPercent, expectedUsed);
+      assert.equal(bucketWindow?.remainingPercent, expectedRemaining);
+      const modelWindow = result.usage?.models?.["gemini/gemini-model"]?.windows.daily;
+      assert.equal(modelWindow?.usedPercent, expectedUsed);
+      assert.equal(modelWindow?.remainingPercent, expectedRemaining);
+    });
+  }
 });

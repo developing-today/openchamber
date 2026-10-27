@@ -168,17 +168,19 @@ const formatZhipuaiCreditValueLabel = (limit: ZhipuaiLimit): string | null => {
   return `${formatZhipuaiCreditAmount(used)} / ${formatZhipuaiCreditAmount(total)} credits`;
 };
 
+const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
+
 // `percentage` is the used percent; when the API omits it, derive it from
 // currentValue/usage (observed percentages are integers).
 const resolveZhipuaiUsedPercent = (limit: ZhipuaiLimit): number | null => {
   const percentage = toNumber(limit.percentage);
   if (percentage !== null) {
-    return percentage;
+    return clampPercent(percentage);
   }
   const used = toNumber(limit.currentValue);
   const total = toNumber(limit.usage);
   if (used === null || total === null || total <= 0) return null;
-  return Math.round((used / total) * 100);
+  return clampPercent(Math.round((used / total) * 100));
 };
 
 // bigmodel.cn reports business failures inside HTTP 200 bodies
@@ -415,9 +417,10 @@ const toNumber = (value: unknown): number | null => {
   return null;
 };
 
-const toTimestamp = (value: unknown): number | null => {
+export const toTimestamp = (value: unknown): number | null => {
   if (!value) return null;
   if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
     return value < 1_000_000_000_000 ? value * 1000 : value;
   }
   if (typeof value === 'string') {
@@ -984,6 +987,14 @@ const codexUnauthorizedMessage = async (response: Response): Promise<string> => 
     : 'Session expired \u2014 please re-authenticate with OpenAI';
 };
 
+// The usage endpoint passes its own computed percentages through, and a spend
+// control or an exhausted overage can arrive outside 0-100. Clamp both bounds
+// like the Copilot and Ollama Cloud paths, and keep an absent value absent.
+const toCodexUsedPercent = (value: number | string | null | undefined): number | null => {
+  const percent = toNumber(value);
+  return percent === null ? null : clampPercent(percent);
+};
+
 const fetchCodexQuota = async (): Promise<ProviderResult> => {
   const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openai', 'codex', 'chatgpt'])) as Record<string, unknown> | null;
@@ -1029,7 +1040,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     if (primary) {
       const windowSeconds = toNumber(primary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(primary.used_percent),
+        usedPercent: toCodexUsedPercent(primary.used_percent),
         windowSeconds,
         resetAt: toTimestamp(primary.reset_at),
       });
@@ -1037,7 +1048,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     if (secondary) {
       const windowSeconds = toNumber(secondary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(secondary.used_percent),
+        usedPercent: toCodexUsedPercent(secondary.used_percent),
         windowSeconds,
         resetAt: toTimestamp(secondary.reset_at),
       });
@@ -1065,7 +1076,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
         ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
         : null;
       windows.credits = toUsageWindow({
-        usedPercent: toNumber(spendLimit.used_percent),
+        usedPercent: toCodexUsedPercent(spendLimit.used_percent),
         windowSeconds: null,
         resetAt: null,
         valueLabel,
@@ -1285,7 +1296,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
         const remainingPercent = remainingFraction !== null
           ? Math.round(remainingFraction * 100)
           : null;
-        const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+        const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
         const resetAt = toTimestamp(bucket.resetTime);
         const window = resolveGoogleWindow(source.sourceId, resetAt);
 
@@ -1314,7 +1325,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
         const remainingPercent = typeof remainingFraction === 'number'
           ? Math.round(remainingFraction * 100)
           : null;
-        const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+        const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
         const resetAt = toTimestamp(quotaInfo?.resetTime);
         const window = resolveGoogleWindow(source.sourceId, resetAt);
         models[scopedName] = {
@@ -1460,7 +1471,7 @@ const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
     for (const b of group.buckets ?? []) {
       const remainingFraction = toNumber(b.remainingFraction);
       const remainingPercent = remainingFraction !== null ? Math.round(remainingFraction * 100) : null;
-      const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+      const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
       const resetAt = toTimestamp(b.resetTime);
       const windowStr = (b.window ?? b.bucketId ?? '').toLowerCase();
 
@@ -1537,7 +1548,7 @@ const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
       const quotaInfo = modelData?.quotaInfo;
       const remainingFraction = quotaInfo?.remainingFraction;
       const remainingPercent = typeof remainingFraction === 'number' ? Math.round(remainingFraction * 100) : null;
-      const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+      const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
       const resetAt = toTimestamp(quotaInfo?.resetTime);
       const window = resolveGoogleWindow('antigravity', resetAt);
 
@@ -1618,11 +1629,14 @@ const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
   const windows: Record<string, UsageWindow> = {};
   const models: Record<string, ProviderUsage> = {};
   const limits = Array.isArray(payload.limits) ? payload.limits : [];
+  const clampClaudeUsedPercent = (percent: number | null): number | null => {
+    return percent === null ? null : clampPercent(percent);
+  };
 
   for (const entry of limits) {
     const limit = asObject(entry);
     if (!limit) continue;
-    const usedPercent = toNumber(limit.percent);
+    const usedPercent = clampClaudeUsedPercent(toNumber(limit.percent));
     const resetAt = toTimestamp(limit.resets_at);
     if (limit.kind === 'session') {
       windows['5h'] = toUsageWindow({ usedPercent, windowSeconds: 5 * 60 * 60, resetAt });
@@ -1645,14 +1659,14 @@ const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
     const sevenDay = asObject(payload.seven_day);
     if (fiveHour) {
       windows['5h'] = toUsageWindow({
-        usedPercent: toNumber(fiveHour.utilization),
+        usedPercent: clampClaudeUsedPercent(toNumber(fiveHour.utilization)),
         windowSeconds: 5 * 60 * 60,
         resetAt: toTimestamp(fiveHour.resets_at),
       });
     }
     if (sevenDay) {
       windows['7d'] = toUsageWindow({
-        usedPercent: toNumber(sevenDay.utilization),
+        usedPercent: clampClaudeUsedPercent(toNumber(sevenDay.utilization)),
         windowSeconds: 7 * 24 * 60 * 60,
         resetAt: toTimestamp(sevenDay.resets_at),
       });
@@ -1671,7 +1685,7 @@ const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
     const used = usedMinor === null ? null : usedMinor / 10 ** exponent;
     const limit = limitMinor === null ? null : limitMinor / 10 ** (toNumber(limitMoney?.exponent) ?? 2);
     windows.extra_usage = toUsageWindow({
-      usedPercent: toNumber(spend.percent),
+      usedPercent: clampClaudeUsedPercent(toNumber(spend.percent)),
       windowSeconds: null,
       resetAt: null,
       valueLabel: used === null ? null : `${prefix}${formatMoney(used)}${limit === null ? '' : ` / ${prefix}${formatMoney(limit)}`}`,
@@ -2486,9 +2500,18 @@ const cursorCreditsWindow = (credits: Record<string, unknown> | null): UsageWind
   return balance === null ? null : toUsageWindow({ usedPercent: null, windowSeconds: null, resetAt: null, valueLabel: `$${formatMoney(balance / 100)}` });
 };
 
+const cursorCycleMs = (value: unknown): number | null => normalizeTimestamp(toNumber(value)) ?? toTimestamp(value);
+
+const cursorCycleWindowSeconds = (startValue: unknown, endValue: unknown): number | null => {
+  const start = cursorCycleMs(startValue);
+  const end = cursorCycleMs(endValue);
+  return start !== null && end !== null && end > start ? Math.floor((end - start) / 1000) : null;
+};
+
 const cursorEnterpriseWindows = (usage: Record<string, unknown> | null, plan: Record<string, unknown> | null, authUsage: Record<string, unknown> | null, hardLimit: Record<string, unknown> | null, memberSpend: Record<string, unknown> | null): Record<string, UsageWindow> => {
-  const resetAt = toTimestamp((plan?.planInfo as Record<string, unknown> | undefined)?.billingCycleEnd ?? usage?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const planInfo = (plan?.planInfo as Record<string, unknown> | undefined);
+  const resetAt = toTimestamp(planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
+  const windowSeconds = cursorCycleWindowSeconds(planInfo?.billingCycleStart ?? usage?.billingCycleStart, planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
   const windows: Record<string, UsageWindow> = {};
   const requestUsage = cursorRequestUsage(authUsage);
   if (requestUsage) {
@@ -2534,7 +2557,8 @@ const fetchCursorQuota = async (): Promise<ProviderResult> => {
       return buildResult({ providerId: 'cursor', providerName: planName ? `Cursor ${String(planName)}` : 'Cursor', ok: true, configured: true, usage: { windows } });
     }
     const planUsage = (usage.planUsage as Record<string, unknown> | undefined) ?? {};
-    const usedPercent = toNumber(planUsage.totalPercentUsed);
+    const rawUsedPercent = toNumber(planUsage.totalPercentUsed);
+    const usedPercent = rawUsedPercent === null ? null : Math.min(100, Math.max(0, rawUsedPercent));
     return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: true, configured: true, usage: { windows: { billing_cycle: toUsageWindow({ usedPercent, windowSeconds: null, resetAt: toTimestamp(usage.billingCycleEnd) }) } } });
   } catch (error) { return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' }); }
 };
@@ -2738,8 +2762,8 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
 };
 
 
-const normalizeTimestamp = (value: unknown) => {
-  if (typeof value !== 'number') return null;
+export const normalizeTimestamp = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value < 1_000_000_000_000 ? value * 1000 : value;
 };
 
@@ -2875,7 +2899,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
       const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
-      const usedPercent = typeof limit.percentage === 'number' ? limit.percentage : null;
+      const usedPercent = typeof limit.percentage === 'number' ? clampPercent(limit.percentage) : null;
 
       windows[windowLabel] = toUsageWindow({
         usedPercent,
@@ -2888,7 +2912,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
       windows['MCP Tools'] = toUsageWindow({
-        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? mcpToolsTimeLimit.percentage : null,
+        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? clampPercent(mcpToolsTimeLimit.percentage) : null,
         windowSeconds: 30 * 24 * 60 * 60,
         resetAt: mcpToolsTimeLimit.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null,
       });
@@ -3041,7 +3065,7 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
       // TIME_LIMIT unit=5 means 1 month (30 days)
       const monthSeconds = 30 * 24 * 60 * 60;
       const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
-      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? mcpToolsTimeLimit.percentage : null;
+      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? clampPercent(mcpToolsTimeLimit.percentage) : null;
 
       windows['MCP Tools'] = toUsageWindow({
         usedPercent,

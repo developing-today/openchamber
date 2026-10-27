@@ -29,6 +29,12 @@ const formatCreditValueLabel = (limit) => {
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
 
+// The monitor API can report percentages outside [0, 100]; clamp at the
+// read site. Non-finite or non-number input stays null. (No clamp inside
+// toUsageWindow: wafer's overage branch deliberately exceeds 100.)
+const clampUsedPercent = (value) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+
 // Gift reset timestamps come as 'YYYY-MM-DD HH:mm:ss' in UTC+8.
 const ZAI_RESET_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
@@ -192,7 +198,7 @@ export const fetchQuota = async () => {
       const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = limit?.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
-      const usedPercent = typeof limit?.percentage === 'number' ? limit.percentage : null;
+      const usedPercent = clampUsedPercent(limit?.percentage);
       const creditValueLabel = formatCreditValueLabel(limit);
 
       windows[windowLabel] = toUsageWindow({
@@ -206,7 +212,7 @@ export const fetchQuota = async () => {
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
       windows['MCP Tools'] = toUsageWindow({
-        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? mcpToolsTimeLimit.percentage : null,
+        usedPercent: clampUsedPercent(mcpToolsTimeLimit.percentage),
         windowSeconds: 30 * 24 * 60 * 60,
         resetAt: mcpToolsTimeLimit.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null
       });

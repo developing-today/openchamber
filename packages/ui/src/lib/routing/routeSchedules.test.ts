@@ -14,14 +14,23 @@ import {
 
 describe('weekdays', () => {
   test('reads names in any form OpenCode accepts, and numbers, skipping what it cannot read', () => {
-    expect(windowWeekdays({ daysOfWeek: ['monday', 'tues', 5, 'Mon', 9] })).toEqual([1, 2, 5]);
+    expect(windowWeekdays({ daysOfWeek: ['monday', 'tues', 5, 'Mon', 9] })).toEqual([1, 2, 5, 1]);
     expect(windowWeekdays(undefined)).toEqual([]);
+  });
+
+  test('reads case-insensitive, trimmed names and numeric strings', () => {
+    expect(windowWeekdays({ daysOfWeek: ['Mon', '5', ' fri '] })).toEqual([1, 5, 5]);
   });
 
   test('a toggle writes short names in week order, and the last day off removes the field', () => {
     expect(toggleWeekday({ daysOfWeek: ['friday'], start: '09:00' }, 1)).toEqual({ daysOfWeek: ['mon', 'fri'], start: '09:00' });
     expect(toggleWeekday({ daysOfWeek: ['fri'], start: '09:00' }, 5)).toEqual({ start: '09:00' });
     expect(toggleWeekday(undefined, 0)).toEqual({ daysOfWeek: ['sun'] });
+  });
+
+  test('preserves unreadable stored days when toggling a readable weekday', () => {
+    expect(toggleWeekday({ daysOfWeek: ['Mon', 'fri', 9] }, 0)).toEqual({ daysOfWeek: ['sun', 'mon', 'fri', 9] });
+    expect(toggleWeekday({ daysOfWeek: ['Mon', 9] }, 1)).toEqual({ daysOfWeek: [9] });
   });
 });
 

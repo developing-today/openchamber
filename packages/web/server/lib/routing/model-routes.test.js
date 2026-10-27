@@ -714,6 +714,9 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '9am' })).toMatch(/window\.start must be a local time/);
     expect(withWindow({ start: '24:00' })).toMatch(/window\.start/);
     expect(withWindow({ end: '17:60' })).toMatch(/window\.end/);
+    // Seconds past 59 are out of range and OpenCode refuses the whole schedule.
+    expect(withWindow({ start: '09:30:60' })).toMatch(/window\.start must be a local time/);
+    expect(withWindow({ end: '09:30:99' })).toMatch(/window\.end must be a local time/);
     expect(withWindow({ timezone: 'Nowhere/Special' })).toMatch(/window\.timezone/);
     expect(withWindow({ from: 0 })).toMatch(/window\.from must be a positive/);
     expect(withWindow({ from: 2000, until: 1000 })).toMatch(/from must be before window\.until/);
@@ -726,6 +729,8 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '00:00', end: '00:00' })).toMatch(/empty window that can never apply/);
     expect(withWindow({ start: '9:00', end: '09:00' })).toMatch(/must not be the same time/);
     expect(withWindow({ start: '09:00:15', end: '09:00:45' })).toMatch(/must not be the same time/);
+    // Seconds round down, so these are one minute to OpenCode.
+    expect(withWindow({ start: '09:30:5', end: '09:30' })).toMatch(/must not be the same time/);
   });
 
   it('accepts day numbers, single-digit times and a start past its end, which OpenCode runs past midnight', () => {
@@ -735,6 +740,9 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '09:00' })).toBeNull();
     expect(withWindow({ end: '17:00' })).toBeNull();
     expect(withWindow({ start: '09:00', end: '09:01' })).toBeNull();
+    // Seconds are read the way OpenCode reads them: one or two digits, to 59.
+    expect(withWindow({ start: '09:30:5', end: '09:31' })).toBeNull();
+    expect(withWindow({ start: '9:30', end: '9:31' })).toBeNull();
     expect(withWindow({ timezone: 'UTC', from: 1000, until: 4102444800000 })).toBeNull();
   });
 
@@ -837,12 +845,12 @@ describe('registerModelRouteRoutes', () => {
     };
   });
 
-  it('GET returns the merged routes and path', async () => {
+  it('GET returns the user file\'s routes and path', async () => {
     const { app, routes } = makeApp();
     registerModelRouteRoutes(app, deps);
     const response = res();
     await routes.get[0][1]({}, response);
-    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, schedules: null, otherSchedules: [], path: '/u/opencode.json' });
+    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, schedules: null, otherRoutes: [], otherSchedules: [], path: '/u/opencode.json' });
   });
 
   it('GET returns the cross-pool schedules', async () => {
@@ -986,6 +994,84 @@ describe('registerModelRouteRoutes', () => {
       await handler({ body: { routes: { old: { targets: ['a/c'] } } }, query: { directory: '/p' } }, routesOnly);
       expect(userConfig.experimental.model_route_schedules).toEqual(edited);
       expect(routesOnly.out.body.schedules).toEqual(edited);
+    });
+  });
+
+  // #324: GET returned the merged pool map and every save wrote the whole map
+  // to the user file, so a pool defined only in a project file was copied
+  // into the user file and kept applying to every project.
+  describe('with pools in two config files', () => {
+    const userRoutes = { own: { targets: ['a/b'] } };
+    const projectRoutes = { projectonly: { targets: ['p/m'] } };
+    let userConfig;
+    let projectConfig;
+    let layered;
+
+    beforeEach(() => {
+      userConfig = { experimental: { model_routes: userRoutes } };
+      projectConfig = { experimental: { model_routes: projectRoutes } };
+      const withProject = {
+        userConfig,
+        userOverrideConfig: {},
+        customConfig: {},
+        projectConfig,
+        mergedConfig: { experimental: { model_routes: { ...userRoutes, ...projectRoutes } } },
+        paths: { userPath: '/u/opencode.json', userOverridePath: null, customPath: null, projectPath: '/p/opencode.json' },
+      };
+      const withoutProject = {
+        ...withProject,
+        projectConfig: {},
+        mergedConfig: { experimental: { model_routes: userRoutes } },
+        paths: { ...withProject.paths, projectPath: null },
+      };
+      layered = {
+        ...deps,
+        readConfigLayers: vi.fn((directory) => (directory === '/p' ? withProject : withoutProject)),
+        getConfigForPath: vi.fn((given, path) => (path === '/p/opencode.json' ? given.projectConfig : given.userConfig)),
+        resolveOptionalProjectDirectory: vi.fn(async (req) => ({ directory: req.query?.directory ?? null })),
+      };
+    });
+
+    it('GET returns the user file\'s pools to edit and the other file\'s pools apart', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({ query: { directory: '/p' } }, response);
+      expect(response.out.body.routes).toEqual(userRoutes);
+      expect(response.out.body.otherRoutes).toEqual([{ path: '/p/opencode.json', routes: projectRoutes }]);
+    });
+
+    it('GET without a project directory lists no project pools', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({ query: {} }, response);
+      expect(response.out.body.routes).toEqual(userRoutes);
+      expect(response.out.body.otherRoutes).toEqual([]);
+    });
+
+    it('a save performed while a project-defined pool is present does not copy it into the user file', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const [, , , handler] = routes.put[0];
+      // The client edits only the user file's pools, as GET now returns them.
+      const edited = { own: { targets: ['a/c'] } };
+      const saved = res();
+      await handler({ body: { routes: edited }, query: { directory: '/p' } }, saved);
+      expect(userConfig.experimental.model_routes).toEqual(edited);
+      expect(projectConfig.experimental.model_routes).toEqual(projectRoutes);
+      expect(saved.out.body.routes).toEqual(edited);
+      expect(saved.out.body.otherRoutes).toEqual([{ path: '/p/opencode.json', routes: projectRoutes }]);
+    });
+
+    it('a tuning save alone returns the user file\'s pools, not the merged map', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const [, , , handler] = routes.put[0];
+      const saved = res();
+      await handler({ body: { tuning: { enabled: true } }, query: { directory: '/p' } }, saved);
+      expect(saved.out.body.routes).toEqual(userRoutes);
+      expect(userConfig.experimental.model_routes).toEqual(userRoutes);
     });
   });
 
@@ -1247,6 +1333,11 @@ describe('validateModelRouteSchedules', () => {
     expect(validateModelRouteSchedules([{ provider: ['x'], when: {}, factor: 2 }])).toMatch(/schedule 1 has unknown key "provider"/);
     expect(validateModelRouteSchedules([{ when: {}, factor: 2 }, { routes: 'cheap', when: {}, factor: 2 }])).toMatch(/schedule 2 routes must be a list/);
     expect(validateModelRouteSchedules([{ when: { start: '24:00' }, factor: 2 }])).toMatch(/^schedule 1 window\.start must be a local time/);
+    // The same seconds handling on the cross-pool surface: out of range is
+    // refused, one digit is accepted, as OpenCode's `minutesOf` reads them.
+    expect(validateModelRouteSchedules([{ when: { start: '09:30:60' }, factor: 2 }])).toMatch(/^schedule 1 window\.start must be a local time/);
+    expect(validateModelRouteSchedules([{ when: { end: '09:30:99' }, factor: 2 }])).toMatch(/^schedule 1 window\.end must be a local time/);
+    expect(validateModelRouteSchedules([{ when: { start: '09:30:5', end: '09:31:59' }, factor: 2 }])).toBeNull();
   });
 
   // The same list rules a route's own schedules follow: OpenCode reads an empty
