@@ -30,4 +30,57 @@ describe('Google transforms', () => {
 
     expect(result['google/gemini-2.5-pro'].windows.daily.usedPercent).toBe(expectedUsedPercent);
   });
+
+  it('transformModelData returns the parsed resetAt for a valid resetTime', () => {
+    const result = transformModelData(
+      'gemini-2.5-pro',
+      { quotaInfo: { remainingFraction: 0.5, resetTime: '2026-10-08T14:29:35Z' } },
+      'google'
+    );
+
+    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBe(Date.parse('2026-10-08T14:29:35Z'));
+  });
+
+  it('transformModelData returns resetAt null for an unparseable resetTime', () => {
+    const result = transformModelData(
+      'gemini-2.5-pro',
+      { quotaInfo: { remainingFraction: 0.5, resetTime: 'not-a-date' } },
+      'google'
+    );
+
+    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBeNull();
+  });
+
+  it.each([
+    ['missing resetTime', { quotaInfo: { remainingFraction: 0.5 } }],
+    ['missing quotaInfo', {}],
+    ['missing modelData', undefined]
+  ])('transformModelData returns resetAt null for %s', (_label, modelData) => {
+    const result = transformModelData('gemini-2.5-pro', modelData, 'google');
+
+    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBeNull();
+  });
+
+  it('transformModelData does not double-prefix an already scoped model name', () => {
+    const result = transformModelData(
+      'google/gemini-2.5-pro',
+      { quotaInfo: { remainingFraction: 0.5, resetTime: '2026-10-08T14:29:35Z' } },
+      'google'
+    );
+
+    expect(Object.keys(result)).toEqual(['google/gemini-2.5-pro']);
+  });
+
+  it.each([
+    ['2026-10-08T14:29:35Z', Date.parse('2026-10-08T14:29:35Z')],
+    ['not-a-date', null],
+    [undefined, null]
+  ])('transformQuotaBucket returns resetAt %s -> %s', (resetTime, expectedResetAt) => {
+    const result = transformQuotaBucket(
+      { modelId: 'gemini-2.5-pro', remainingFraction: 0.5, resetTime },
+      'google'
+    );
+
+    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBe(expectedResetAt);
+  });
 });
