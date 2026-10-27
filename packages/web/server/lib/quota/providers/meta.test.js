@@ -22,12 +22,12 @@ const USAGE_PAYLOAD = {
   is_subs_active: true,
   require_payment: false,
   subs_tier_name: 'Muse Code High Usage',
-  subs_tier_id: '27681527378179523',
+  subs_tier_id: 'tier_test_high_usage',
   user_email: 'user@example.com',
   subs_usage: {
     window: { used_percent: 6, window_duration_mins: 300, resets_at: 1793090405 },
     weekly: { used_percent: 10, resets_at: 1793577600 },
-    tier: '27681527378179523',
+    tier: 'tier_test_high_usage',
   },
 };
 
