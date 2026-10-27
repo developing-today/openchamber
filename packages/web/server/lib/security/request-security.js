@@ -139,7 +139,22 @@ export const createRequestSecurityRuntime = (deps) => {
     if (host) {
       hosts.add(host.toLowerCase());
       origins.add(`${protocol}://${host}`);
-      const [hostname, port] = host.split(':');
+      let hostname = host;
+      let port = '';
+      if (host.startsWith('[')) {
+        const end = host.indexOf(']');
+        if (end !== -1) {
+          hostname = host.slice(0, end + 1);
+          const rest = host.slice(end + 1);
+          if (rest.startsWith(':') && /^\d+$/.test(rest.slice(1))) {
+            port = rest.slice(1);
+          }
+        }
+      } else {
+        const split = host.split(':');
+        hostname = split[0];
+        port = split[1] ?? '';
+      }
       const normalizedHost = typeof hostname === 'string' ? hostname.toLowerCase() : '';
       const portSuffix = typeof port === 'string' && port.length > 0 ? `:${port}` : '';
       if (normalizedHost === 'localhost') {
