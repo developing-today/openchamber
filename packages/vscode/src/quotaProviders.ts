@@ -168,17 +168,19 @@ const formatZhipuaiCreditValueLabel = (limit: ZhipuaiLimit): string | null => {
   return `${formatZhipuaiCreditAmount(used)} / ${formatZhipuaiCreditAmount(total)} credits`;
 };
 
+const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
+
 // `percentage` is the used percent; when the API omits it, derive it from
 // currentValue/usage (observed percentages are integers).
 const resolveZhipuaiUsedPercent = (limit: ZhipuaiLimit): number | null => {
   const percentage = toNumber(limit.percentage);
   if (percentage !== null) {
-    return percentage;
+    return clampPercent(percentage);
   }
   const used = toNumber(limit.currentValue);
   const total = toNumber(limit.usage);
   if (used === null || total === null || total <= 0) return null;
-  return Math.round((used / total) * 100);
+  return clampPercent(Math.round((used / total) * 100));
 };
 
 // bigmodel.cn reports business failures inside HTTP 200 bodies
@@ -2884,7 +2886,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
       const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
-      const usedPercent = typeof limit.percentage === 'number' ? limit.percentage : null;
+      const usedPercent = typeof limit.percentage === 'number' ? clampPercent(limit.percentage) : null;
 
       windows[windowLabel] = toUsageWindow({
         usedPercent,
@@ -2897,7 +2899,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
       windows['MCP Tools'] = toUsageWindow({
-        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? mcpToolsTimeLimit.percentage : null,
+        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? clampPercent(mcpToolsTimeLimit.percentage) : null,
         windowSeconds: 30 * 24 * 60 * 60,
         resetAt: mcpToolsTimeLimit.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null,
       });
@@ -3050,7 +3052,7 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
       // TIME_LIMIT unit=5 means 1 month (30 days)
       const monthSeconds = 30 * 24 * 60 * 60;
       const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
-      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? mcpToolsTimeLimit.percentage : null;
+      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? clampPercent(mcpToolsTimeLimit.percentage) : null;
 
       windows['MCP Tools'] = toUsageWindow({
         usedPercent,

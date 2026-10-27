@@ -1091,6 +1091,28 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['MCP Tools']!.resetAt, 1787128459979);
   });
 
+  test('clamps out-of-range percentages to [0, 100]', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 150 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: -20 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 150 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(windows['5h']!.usedPercent, 100);
+    assert.equal(windows['5h']!.remainingPercent, 0);
+    assert.equal(windows.weekly!.usedPercent, 0);
+    assert.equal(windows.weekly!.remainingPercent, 100);
+    assert.equal(windows['MCP Tools']!.usedPercent, 100);
+  });
+
   test('reports a z.ai business failure sent inside an HTTP 200 body', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({ code: 1001, msg: 'Token expired', success: false })));
 
@@ -1391,6 +1413,42 @@ describe('Zhipu AI Coding Plan quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows['5h']!.usedPercent, 45);
     assert.equal(result.usage!.windows['5h']!.valueLabel, '900 / 2k credits');
+  });
+
+  test('clamps out-of-range percentages and the derived fallback to [0, 100]', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, percentage: 150 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: -20 },
+        ],
+      },
+    })));
+
+    const clamped = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(clamped.ok, true);
+    assert.equal(clamped.usage!.windows['5h']!.usedPercent, 100);
+    assert.equal(clamped.usage!.windows['5h']!.remainingPercent, 0);
+    assert.equal(clamped.usage!.windows['MCP Tools']!.usedPercent, 0);
+    assert.equal(clamped.usage!.windows['MCP Tools']!.remainingPercent, 100);
+
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 100, currentValue: 200 },
+        ],
+      },
+    })));
+
+    const fallback = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(fallback.ok, true);
+    assert.equal(fallback.usage!.windows['5h']!.usedPercent, 100);
   });
 
   test('surfaces business failures reported inside HTTP 200 bodies', async () => {
