@@ -742,6 +742,15 @@ describe('ClinePass quota provider (VS Code parity)', () => {
     });
   }
 
+  for (const [percentUsed, expected] of [[150, 100], ['150', 100], [-20, 0], ['-20', 0]] as const) {
+    test(`clamps out-of-range percentage ${JSON.stringify(percentUsed)} to ${expected}`, async () => {
+      const result = await fetchClinePassQuota({ readAuth, fetchImpl: async () => Response.json({ data: { limits: [{ type: 'weekly', percentUsed }] } }) });
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows.weekly?.usedPercent, expected);
+      assert.equal(result.usage?.windows.weekly?.remainingPercent, 100 - expected);
+    });
+  }
+
   for (const entry of [{ key: '' }, { key: ' ' }, { key: 42 }, {}]) {
     test(`falls back to a usable token: ${JSON.stringify(entry)}`, async () => {
       const result = await fetchClinePassQuota({

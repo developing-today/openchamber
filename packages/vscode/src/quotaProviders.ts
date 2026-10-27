@@ -3565,8 +3565,9 @@ export const fetchClinePassQuota = async ({ readAuth = readOpenCodeCredentials, 
       const limitType = asNonEmptyString(limit.type);
       const kind = limitType === null ? undefined : CLINE_WINDOW_KINDS.get(limitType);
       if (!kind) continue;
-      const usedPercent = toNumber(asNonEmptyString(limit.percentUsed)
+      const rawUsedPercent = toNumber(asNonEmptyString(limit.percentUsed)
         ?? (Number.isFinite(limit.percentUsed) ? limit.percentUsed : null));
+      const usedPercent = rawUsedPercent === null ? null : clampPercent(rawUsedPercent);
       if (usedPercent === null) continue;
       windows[kind.key] = toUsageWindow({
         usedPercent,
