@@ -19,14 +19,34 @@ concurrency:
 jobs:
   label:
     timeout-minutes: 10
-    if: ${{ github.repository == 'openchamber/openchamber' }}
+    if: ${{ github.repository == 'openchamber/openchamber' || github.repository == 'developing-today/openchamber' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
+      # The bot app token is preferred, but a repository that has not
+      # installed the app has no OC_REVIEW_APP_* secrets (#87): detect
+      # that here (the values themselves are never printed) so the
+      # token step is skipped and the label step falls back to the
+      # workflow token, which this job's permissions already cover,
+      # instead of failing in the token step (the #61 failure mode).
+      - name: Check bot app configuration
+        id: review-app
+        env:
+          REVIEW_APP_ID: ${{ secrets.OC_REVIEW_APP_ID }}
+          REVIEW_APP_PRIVATE_KEY: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$REVIEW_APP_ID" ] && [ -n "$REVIEW_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::OpenChamber bot app is not configured for this repository (OC_REVIEW_APP_ID / OC_REVIEW_APP_PRIVATE_KEY secrets are unset); labelling with the workflow token instead."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate bot app token
         id: app-token
+        if: steps.review-app.outputs.configured == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
@@ -36,4 +56,4 @@ jobs:
         uses: eps1lon/actions-label-merge-conflict@0273be72a0bbd58fcd71d0d6c02c209b50d1e5e1 # v3.1.0
         with:
           dirtyLabel: "merge-conflict:true"
-          repoToken: ${{ steps.app-token.outputs.token }}
+          repoToken: ${{ steps.app-token.outputs.token || github.token }}
