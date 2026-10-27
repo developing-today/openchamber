@@ -302,7 +302,7 @@ const pickTeamMemberSpendByUserId = (teamSpend, userId) => {
 const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpend) => {
   const resetAt = toTimestamp(plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
   const windowSeconds = cycleWindowSeconds(
-    usage?.billingCycleStart,
+    plan?.planInfo?.billingCycleStart ?? usage?.billingCycleStart,
     plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd
   );
   const windows = {};
