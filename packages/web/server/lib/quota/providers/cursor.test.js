@@ -211,6 +211,19 @@ describe('Cursor quota', () => {
     expect(result.usage.windows.billing_cycle.windowSeconds).toBe(288471);
   });
 
+  it('reports enterprise windowSeconds when billingCycleStart is only in planInfo', async () => {
+    mockResponses({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: ok({ billingCycleEnd: '1787932328088', displayThreshold: 100 }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Enterprise', price: 'Custom', billingCycleStart: '1787932328088', billingCycleEnd: '1788220800000' } })
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBe(288471);
+  });
+
   it('reports enterprise windowSeconds as null when the billing-cycle start is missing', async () => {
     mockResponses({
       ...enterpriseRoutes,
