@@ -6,9 +6,10 @@ import express from 'express';
  *
  * OpenChamber owns the Jev category decision (which kind of task this is);
  * OpenCode owns provider failover inside the chosen pool. This module is the
- * bridge: it reads the merged OpenCode config and writes route definitions to
- * the user's global `opencode.json(c)`, the same file the providers surface
- * writes to. Writes are refused in enterprise mode, where the administrator
+ * bridge: it reads the user's global `opencode.json(c)` for editing, shows
+ * the pools in the other config files read-only, and writes route definitions
+ * back to the user file, the same file the providers surface writes to.
+ * Writes are refused in enterprise mode, where the administrator
  * controls the OpenCode config.
  */
 
@@ -99,6 +100,21 @@ const readOtherModelRouteSchedules = (sources, targetPath) =>
     if (!path || path === targetPath) return [];
     const schedules = config?.experimental?.model_route_schedules;
     return Array.isArray(schedules) && schedules.length > 0 ? [{ path, schedules }] : [];
+  });
+
+/**
+ * The pools in the config files other than `targetPath`, with the file each
+ * came from, in OpenCode's reading order. OpenCode builds its pools from
+ * every file it reads, so Settings shows these read-only and writes only the
+ * user file's pools. Each file's map is shown as stored: a later file's pool
+ * replaces an earlier one of the same id in OpenCode's view, and the file
+ * that holds a pool is where that pool is edited.
+ */
+const readOtherModelRoutes = (sources, targetPath) =>
+  sources.flatMap(({ path, config }) => {
+    if (!path || path === targetPath) return [];
+    const routes = readModelRoutes(config);
+    return Object.keys(routes).length > 0 ? [{ path, routes }] : [];
   });
 
 /** The layers' files as a source list, for callers that have no readConfigSources. */
@@ -778,12 +794,16 @@ export const registerModelRouteRoutes = (app, dependencies) => {
     readConfigSources = (directory) => sourcesFromLayers(readConfigLayers(directory)),
   } = dependencies;
 
-  // Only the read-only list of other files' schedules looks at the project:
-  // OpenCode applies every folder file's model_route_schedules too, so
-  // Settings shows them. Pools and tuning keep reading and writing as before.
-  const otherSchedulesFor = async (req, targetPath) => {
+  // Only the read-only lists of other files' pools and schedules look at the
+  // project: OpenCode applies every folder file's pools and schedules too, so
+  // Settings shows them. Tuning keeps reading and writing as before.
+  const otherFilesFor = async (req, targetPath) => {
     const { directory } = await resolveOptionalProjectDirectory(req);
-    return readOtherModelRouteSchedules(readConfigSources(directory ?? null), targetPath);
+    const sources = readConfigSources(directory ?? null);
+    return {
+      otherRoutes: readOtherModelRoutes(sources, targetPath),
+      otherSchedules: readOtherModelRouteSchedules(sources, targetPath),
+    };
   };
 
   const refuseInEnterpriseMode = (_req, res, next) =>
@@ -795,13 +815,16 @@ export const registerModelRouteRoutes = (app, dependencies) => {
     try {
       const layers = readConfigLayers(null);
       const targetPath = layers.paths.userPath ?? CONFIG_FILE;
+      const targetConfig = getConfigForPath(layers, targetPath);
       res.json({
-        routes: readModelRoutes(layers.mergedConfig),
+        // The user file's own pools, which are the ones Settings edits; the
+        // merged view would copy other files' pools into it on save.
+        routes: readModelRoutes(targetConfig),
         tuning: readModelRouteTuning(layers.mergedConfig),
         // The user file's own list, which is the one Settings edits; the
         // merged view would copy other files' entries into it on save.
-        schedules: readModelRouteSchedules(getConfigForPath(layers, targetPath)),
-        otherSchedules: await otherSchedulesFor(req, targetPath),
+        schedules: readModelRouteSchedules(targetConfig),
+        ...(await otherFilesFor(req, targetPath)),
         path: targetPath,
       });
     } catch (error) {
@@ -844,10 +867,10 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         }
       }
       res.json({
-        routes: routes ?? readModelRoutes(layers.mergedConfig),
+        routes: routes ?? readModelRoutes(targetConfig),
         tuning: tuning === undefined ? readModelRouteTuning(layers.mergedConfig) : tuning,
         schedules: readModelRouteSchedules(targetConfig),
-        otherSchedules: await otherSchedulesFor(req, targetPath),
+        ...(await otherFilesFor(req, targetPath)),
         path: targetPath,
       });
     } catch (error) {

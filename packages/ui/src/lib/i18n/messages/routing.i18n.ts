@@ -414,6 +414,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber can't read this schedule, so it is shown as stored. Remove it here, or fix it in the configuration file.",
     'settings.pools.schedules.unreadableList': "OpenChamber can't read these schedules because they are not a list. Fix them in the configuration file.",
     'settings.pools.schedules.otherFile': "These schedules from {path} also apply. Edit them in that file.",
+    'settings.pools.otherFile': "These pools from {path} also apply. Edit them in that file.",
   },
   nl: {
     'settings.routing.plans.title': 'Abonnementen en gebruik',
@@ -829,6 +830,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber kan dit schema niet lezen, dus het wordt getoond zoals het is opgeslagen. Verwijder het hier of herstel het in het configuratiebestand.",
     'settings.pools.schedules.unreadableList': "OpenChamber kan deze schema's niet lezen omdat ze geen lijst zijn. Herstel ze in het configuratiebestand.",
     'settings.pools.schedules.otherFile': "Deze schema's uit {path} gelden ook. Bewerk ze in dat bestand.",
+    'settings.pools.otherFile': "Deze pools uit {path} gelden ook. Bewerk ze in dat bestand.",
   },
   uk: {
     'settings.routing.plans.title': 'Плани та використання',
@@ -1244,6 +1246,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber не може прочитати цей розклад, тому він показаний так, як збережений. Видаліть його тут або виправте у файлі конфігурації.",
     'settings.pools.schedules.unreadableList': "OpenChamber не може прочитати ці розклади, бо вони не є списком. Виправте їх у файлі конфігурації.",
     'settings.pools.schedules.otherFile': "Ці розклади з {path} теж діють. Редагуйте їх у тому файлі.",
+    'settings.pools.otherFile': "Ці пули з {path} теж діють. Редагуйте їх у тому файлі.",
   },
   de: {
     'settings.routing.plans.title': 'Pläne und Nutzung',
@@ -1659,6 +1662,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber kann diesen Zeitplan nicht lesen, daher wird er so angezeigt, wie er gespeichert ist. Entferne ihn hier oder korrigiere ihn in der Konfigurationsdatei.",
     'settings.pools.schedules.unreadableList': "OpenChamber kann diese Zeitpläne nicht lesen, weil sie keine Liste sind. Korrigiere sie in der Konfigurationsdatei.",
     'settings.pools.schedules.otherFile': "Diese Zeitpläne aus {path} gelten ebenfalls. Bearbeite sie in dieser Datei.",
+    'settings.pools.otherFile': "Diese Pools aus {path} gelten ebenfalls. Bearbeite sie in dieser Datei.",
   },
   fr: {
     'settings.routing.plans.title': 'Forfaits et utilisation',
@@ -2074,6 +2078,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber ne peut pas lire ce planning, il est donc affiché tel qu'il est enregistré. Supprimez-le ici ou corrigez-le dans le fichier de configuration.",
     'settings.pools.schedules.unreadableList': "OpenChamber ne peut pas lire ces plannings, car ce n'est pas une liste. Corrigez-les dans le fichier de configuration.",
     'settings.pools.schedules.otherFile': "Ces plannings de {path} s'appliquent aussi. Modifiez-les dans ce fichier.",
+    'settings.pools.otherFile': "Ces pools de {path} s'appliquent aussi. Modifiez-les dans ce fichier.",
   },
   es: {
     'settings.routing.plans.title': 'Planes y uso',
@@ -2489,6 +2494,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber no puede leer este horario, así que se muestra tal como está guardado. Quítalo aquí o corrígelo en el archivo de configuración.",
     'settings.pools.schedules.unreadableList': "OpenChamber no puede leer estos horarios porque no son una lista. Corrígelos en el archivo de configuración.",
     'settings.pools.schedules.otherFile': "Estos horarios de {path} también se aplican. Edítalos en ese archivo.",
+    'settings.pools.otherFile': "Estos pools de {path} también se aplican. Edítalos en ese archivo.",
   },
   ja: {
     'settings.routing.plans.title': 'プランと使用量',
@@ -2904,6 +2910,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber はこのスケジュールを読み取れないため、保存されているとおりに表示しています。ここで削除するか、設定ファイルで修正してください。",
     'settings.pools.schedules.unreadableList': "これらのスケジュールはリストではないため、OpenChamber は読み取れません。設定ファイルで修正してください。",
     'settings.pools.schedules.otherFile': "{path} のこれらのスケジュールも適用されます。そのファイルで編集してください。",
+    'settings.pools.otherFile': "{path} のこれらのプールも適用されます。そのファイルで編集してください。",
   },
   ko: {
     'settings.routing.plans.title': '플랜 및 사용량',
@@ -3319,6 +3326,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber가 이 일정을 읽을 수 없어 저장된 그대로 표시합니다. 여기에서 삭제하거나 설정 파일에서 고치세요.",
     'settings.pools.schedules.unreadableList': "이 일정은 목록이 아니어서 OpenChamber가 읽을 수 없습니다. 설정 파일에서 고치세요.",
     'settings.pools.schedules.otherFile': "{path}의 이 일정도 적용됩니다. 해당 파일에서 편집하세요.",
+    'settings.pools.otherFile': "{path}의 이 풀도 적용됩니다. 해당 파일에서 편집하세요.",
   },
   pl: {
     'settings.routing.plans.title': 'Plany i wykorzystanie',
@@ -3734,6 +3742,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber nie może odczytać tego harmonogramu, więc jest pokazany tak, jak go zapisano. Usuń go tutaj albo popraw w pliku konfiguracji.",
     'settings.pools.schedules.unreadableList': "OpenChamber nie może odczytać tych harmonogramów, bo nie są listą. Popraw je w pliku konfiguracji.",
     'settings.pools.schedules.otherFile': "Te harmonogramy z {path} też obowiązują. Edytuj je w tamtym pliku.",
+    'settings.pools.otherFile': "Te pule z {path} też obowiązują. Edytuj je w tamtym pliku.",
   },
   'pt-BR': {
     'settings.routing.plans.title': 'Planos e uso',
@@ -4149,6 +4158,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "O OpenChamber não consegue ler este agendamento, então ele aparece como está salvo. Remova-o aqui ou corrija-o no arquivo de configuração.",
     'settings.pools.schedules.unreadableList': "O OpenChamber não consegue ler estes agendamentos porque eles não são uma lista. Corrija-os no arquivo de configuração.",
     'settings.pools.schedules.otherFile': "Estes agendamentos de {path} também se aplicam. Edite-os nesse arquivo.",
+    'settings.pools.otherFile': "Estes pools de {path} também se aplicam. Edite-os nesse arquivo.",
   },
   tr: {
     'settings.routing.plans.title': 'Planlar ve kullanım',
@@ -4564,6 +4574,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber bu zamanlamayı okuyamıyor, bu yüzden kaydedildiği gibi gösteriliyor. Burada kaldırın ya da yapılandırma dosyasında düzeltin.",
     'settings.pools.schedules.unreadableList': "Bu zamanlamalar bir liste olmadığı için OpenChamber bunları okuyamıyor. Yapılandırma dosyasında düzeltin.",
     'settings.pools.schedules.otherFile': "{path} içindeki bu zamanlamalar da uygulanır. Onları o dosyada düzenleyin.",
+    'settings.pools.otherFile': "{path} içindeki bu havuzlar da uygulanır. Onları o dosyada düzenleyin.",
   },
   'zh-CN': {
     'settings.routing.plans.title': '套餐与用量',
@@ -4979,6 +4990,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber 无法读取这条时间表，因此按保存时的原样显示。可以在这里移除，或在配置文件中修正。",
     'settings.pools.schedules.unreadableList': "这些时间表不是列表，OpenChamber 无法读取。请在配置文件中修正。",
     'settings.pools.schedules.otherFile': "来自 {path} 的这些时间表同样生效。请在该文件中编辑。",
+    'settings.pools.otherFile': "来自 {path} 的这些池同样生效。请在该文件中编辑。",
   },
   'zh-TW': {
     'settings.routing.plans.title': '方案與用量',
@@ -5394,6 +5406,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber 無法讀取這筆排程，因此依儲存時的原樣顯示。可以在這裡移除，或在設定檔中修正。",
     'settings.pools.schedules.unreadableList': "這些排程不是清單，OpenChamber 無法讀取。請在設定檔中修正。",
     'settings.pools.schedules.otherFile': "來自 {path} 的這些排程同樣生效。請在該檔案中編輯。",
+    'settings.pools.otherFile': "來自 {path} 的這些池同樣生效。請在該檔案中編輯。",
   },
   ar: {
     "settings.routing.plans.title": "الخطط والاستخدام",
@@ -5676,6 +5689,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "لا يستطيع OpenChamber قراءة هذا الجدول، لذا يُعرض كما حُفظ. أزله هنا، أو أصلحه في ملف الإعدادات.",
     'settings.pools.schedules.unreadableList': "لا يستطيع OpenChamber قراءة هذه الجداول لأنها ليست قائمة. أصلحها في ملف الإعدادات.",
     'settings.pools.schedules.otherFile': "تُطبّق أيضًا هذه الجداول من {path}. عدّلها في ذلك الملف.",
+    'settings.pools.otherFile': "تُطبّق أيضًا هذه المجمّعات من {path}. عدّلها في ذلك الملف.",
     'chat.modelControls.autoModel': 'تلقائي',
     'chat.permissionCard.heldBySafetyNet': 'أوقفت شبكة الأمان هذا الإجراء لتقرر بشأنه',
     'routing.safetyKind.readOnly': 'للقراءة فقط',
@@ -6091,6 +6105,7 @@ export const routingI18n = {
     'settings.pools.schedules.unreadable': "OpenChamber לא יכול לקרוא את לוח הזמנים הזה, ולכן הוא מוצג כפי שנשמר. אפשר להסיר אותו כאן או לתקן אותו בקובץ ההגדרות.",
     'settings.pools.schedules.unreadableList': "OpenChamber לא יכול לקרוא את לוחות הזמנים האלה כי הם אינם רשימה. יש לתקן אותם בקובץ ההגדרות.",
     'settings.pools.schedules.otherFile': "גם לוחות הזמנים האלה מ-{path} חלים. יש לערוך אותם בקובץ ההוא.",
+    'settings.pools.otherFile': "גם המאגרים האלה מ-{path} חלים. יש לערוך אותם בקובץ ההוא.",
     'chat.modelControls.autoModel': 'אוטומטי',
     'chat.permissionCard.heldBySafetyNet': 'רשת הביטחון עצרה את הפעולה הזו כדי שההחלטה תהיה שלך',
     'routing.safetyKind.readOnly': 'קריאה בלבד',

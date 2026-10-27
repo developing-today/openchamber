@@ -21,18 +21,19 @@ let serverRoutes: Record<string, {
 let serverTuning: unknown = null;
 let serverSchedules: ScheduleList | null = null;
 let serverOtherSchedules: { path: string; schedules: StoredSchedules }[] = [];
+let serverOtherRoutes: { path: string; routes: typeof serverRoutes }[] = [];
 let saveError: Error | null = null;
 
 let serverAvailable = true;
 const fetchModelRoutes = async () => {
   routeFetches.push('fetch');
-  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, otherSchedules: serverOtherSchedules, available: serverAvailable };
+  return { routes: serverRoutes, tuning: serverTuning, schedules: serverSchedules, otherSchedules: serverOtherSchedules, otherRoutes: serverOtherRoutes, available: serverAvailable };
 };
 const saveModelRoutes = async (routes: unknown) => {
   routeSaves.push(routes);
   if (saveError) throw saveError;
   serverRoutes = routes as typeof serverRoutes;
-  return { routes, tuning: serverTuning, available: true };
+  return { routes, tuning: serverTuning, otherRoutes: serverOtherRoutes, available: true };
 };
 const saveModelRouteTuning = async (tuning: unknown) => {
   tuningSaves.push(tuning);
@@ -234,6 +235,7 @@ describe('ModelPoolsSection', () => {
     serverTuning = null;
     serverSchedules = null;
     serverOtherSchedules = [];
+    serverOtherRoutes = [];
     saveError = null;
     serverAvailable = true;
     useConfigStore.setState({
@@ -573,6 +575,24 @@ describe('ModelPoolsSection', () => {
       expect([...dom.container.querySelectorAll('input')].some((el) => el.value === '*flash*')).toBe(false);
       await typeInto(findInput(dom.container, 'Pools'), 'cheap-pool');
       expect(scheduleSaves.at(-1)).toEqual([{ providers: ['deepseek'], when: {}, factor: 0.5, routes: ['cheap-pool'] }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // #324: pools from other config files show read-only; a save writes only the user file's pools.
+  test('pools from other config files show read-only with their file, and saves never include them', async () => {
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'] } });
+    serverOtherRoutes = [{ path: '/repo/opencode.json', routes: { projectonly: { targets: ['p/projectmodel'] } } }];
+    const { dom, cleanup } = await renderSection();
+    try {
+      const text = dom.container.textContent ?? '';
+      expect(text).toContain('These pools from /repo/opencode.json also apply. Edit them in that file.');
+      expect(text).toContain('projectonly');
+      expect(text).toContain('p/projectmodel');
+      await openAdvanced(dom.container);
+      await clickButton(dom.container, 'Add schedule');
+      expect(routeSaves.at(-1)).toEqual({ kept: { targets: ['p/cheap'], schedules: [{ when: {}, factor: 1 }] } });
     } finally {
       await cleanup();
     }
