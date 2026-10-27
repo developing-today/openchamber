@@ -23,6 +23,7 @@ export type QuotaProviderId =
   | 'deepseek'
   | 'exe-dev'
   | 'hyper'
+  | 'meta'
   | 'neuralwatt'
   | 'kilo'
   | 'zenmux'
@@ -68,6 +69,14 @@ export interface ProviderResult {
   credentialLabel?: string;
   credentialActive?: boolean;
   accountLabel?: string;
+  /**
+   * The provider's plan is walled (a 402-class quota-exhausted state), which is
+   * distinct from a read failure (`ok: false` without this flag). A consumer
+   * that parks work on walls reads this, never the bare `ok`.
+   */
+  quotaExhausted?: boolean;
+  /** When the walled window resets, in epoch milliseconds, when the provider says. */
+  quotaResetAt?: number | null;
   usage: ProviderUsage | null;
   fetchedAt: number;
 }
