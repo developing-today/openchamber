@@ -185,6 +185,14 @@ const requestPlanUsage = async (bearer, fetchImpl) => {
   return { kind: 'usage', body };
 };
 
+// The plan endpoint reports its own percentages; an exhausted plan can push
+// them outside 0-100. Clamp both bounds like the sibling providers, and keep
+// an absent or non-numeric value absent (toNumber returns null for those).
+const toUsedPercent = (value) => {
+  const percent = toNumber(value);
+  return percent === null ? null : Math.min(100, Math.max(0, percent));
+};
+
 const buildWindows = (subsUsage) => {
   const windows = {};
 
@@ -193,7 +201,7 @@ const buildWindows = (subsUsage) => {
     const durationMinutes = toNumber(rolling.window_duration_mins);
     const windowSeconds = durationMinutes !== null && durationMinutes > 0 ? durationMinutes * 60 : null;
     windows[windowSeconds ? resolveWindowLabel(windowSeconds) : 'rolling'] = toUsageWindow({
-      usedPercent: toNumber(rolling.used_percent),
+      usedPercent: toUsedPercent(rolling.used_percent),
       windowSeconds,
       resetAt: toTimestamp(rolling.resets_at)
     });
@@ -202,7 +210,7 @@ const buildWindows = (subsUsage) => {
   const weekly = asObject(subsUsage?.weekly);
   if (weekly) {
     windows.weekly = toUsageWindow({
-      usedPercent: toNumber(weekly.used_percent),
+      usedPercent: toUsedPercent(weekly.used_percent),
       windowSeconds: WEEKLY_SECONDS,
       resetAt: toTimestamp(weekly.resets_at)
     });
