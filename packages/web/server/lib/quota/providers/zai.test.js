@@ -62,6 +62,42 @@ describe('Z.ai quota provider', () => {
     });
   });
 
+  it('clamps out-of-range percentages to [0, 100] on every window', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 150 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: -20 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 150 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuota();
+    const windows = result.usage.windows;
+
+    expect(result.ok).toBe(true);
+    expect(windows['5h']).toMatchObject({ usedPercent: 100, remainingPercent: 0 });
+    expect(windows.weekly).toMatchObject({ usedPercent: 0, remainingPercent: 100 });
+    expect(windows['MCP Tools']).toMatchObject({ usedPercent: 100, remainingPercent: 0 });
+  });
+
+  it('reports a non-finite percentage as null instead of leaking it into the window', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: Number.NaN },
+        ],
+      },
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBeNull();
+    expect(result.usage.windows['5h'].remainingPercent).toBeNull();
+  });
+
   it('maps CREDIT_LIMIT entries to windows with credit value labels and plan level', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
       code: 200,
