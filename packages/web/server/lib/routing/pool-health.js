@@ -176,8 +176,12 @@ export const computePoolHealth = async ({
       const weight = route.weights?.[ref] ?? 1;
       // Shifting weight only helps when traffic can go to a target on another quota.
       const elsewhere = refs.some((other) => other !== ref && links[other] !== planID);
+      // A pattern target (`openai/*`) can never carry a weight: OpenCode expands
+      // it to concrete leaves and reads each leaf's weight by its concrete key,
+      // so a saved `weights['openai/*']` would match nothing (and pool
+      // validation refuses pattern keys). Never suggest lowering it.
       const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && elsewhere
-        && projection.status !== 'ok' && weight > MIN_WEIGHT
+        && projection.status !== 'ok' && weight > MIN_WEIGHT && !ref.includes('*')
         ? 'lower-weight'
         : null;
       return { ref, activeSessions, plan: planInfo, missingPlanID, blastRadius, suggestion };
