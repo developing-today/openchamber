@@ -1036,6 +1036,50 @@ describe('Claude quota provider (VS Code parity)', () => {
     assert.equal(result.usage?.windows.extra_usage?.valueLabel, '$25.00 / $100.00');
   });
 
+  test('clamps limits and spend percentages while preserving missing values', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      limits: [
+        { kind: 'session', percent: 150 },
+        { kind: 'weekly_all', percent: -20 },
+        { kind: 'weekly_scoped', percent: 42, scope: { model: { display_name: 'Sonnet' } } },
+        { kind: 'weekly_scoped', scope: { model: { display_name: 'Opus' } } },
+      ],
+      spend: { enabled: true, percent: 200 },
+    })));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 100);
+    assert.equal(result.usage?.windows['7d']?.usedPercent, 0);
+    assert.equal(result.usage?.windows.extra_usage?.usedPercent, 100);
+    assert.equal(result.usage?.models?.Sonnet?.windows['7d']?.usedPercent, 42);
+    assert.equal(result.usage?.models?.Opus?.windows['7d']?.usedPercent, null);
+  });
+
+  test('clamps legacy utilization and keeps missing percentages null', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      five_hour: { utilization: 150 },
+      seven_day: { utilization: -20 },
+    })));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 100);
+    assert.equal(result.usage?.windows['7d']?.usedPercent, 0);
+
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      five_hour: {},
+      seven_day: {},
+      spend: { enabled: true },
+    })));
+
+    const missing = await fetchQuotaForProvider('claude');
+
+    assert.equal(missing.usage?.windows['5h']?.usedPercent, null);
+    assert.equal(missing.usage?.windows['7d']?.usedPercent, null);
+    assert.equal(missing.usage?.windows.extra_usage?.usedPercent, null);
+  });
+
   test('keeps serving the last good values while Anthropic rate limits', async () => {
     const responses = [
       mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
