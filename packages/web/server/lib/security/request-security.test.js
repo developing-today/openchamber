@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isPasswordlessSocketOriginAllowed } from './request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isLocalDevClientOrigin, isPasswordlessSocketOriginAllowed } from './request-security.js';
 
 const createRuntime = () => createRequestSecurityRuntime({
   readSettingsFromDiskMigrated: async () => ({}),
@@ -157,6 +157,11 @@ describe('request security runtime', () => {
     const devRuntime = createRequestSecurityRuntime({ readSettingsFromDiskMigrated: async () => ({}), allowLocalDevOrigins: true });
     expect(await devRuntime.isRequestOriginAllowed(devPage)).toBe(true);
 
+    expect(isLocalDevClientOrigin('http://[::1]:5173')).toBe(true);
+    expect(isLocalDevClientOrigin('https://[::1]:5173')).toBe(true);
+    expect(isLocalDevClientOrigin('http://[::1]')).toBe(false);
+    expect(isLocalDevClientOrigin('https://evil.example.com:5173')).toBe(false);
+
     expect(allowsLocalDevOrigins({})).toBe(false);
     expect(allowsLocalDevOrigins({ OPENCHAMBER_ALLOW_DEV_ORIGINS: '1' })).toBe(true);
     expect(allowsLocalDevOrigins({ OPENCHAMBER_ELECTRON_DEV: '1' })).toBe(true);
@@ -180,6 +185,8 @@ describe('request security runtime', () => {
   test('lets only the app, its shells and named embedders frame it', () => {
     expect(buildFrameAncestorsPolicy()).toBe("frame-ancestors 'self' openchamber-ui://app capacitor://localhost https://localhost");
     expect(buildFrameAncestorsPolicy({ allowLocalDevOrigins: true })).toContain('http://127.0.0.1:*');
+    expect(buildFrameAncestorsPolicy({ allowLocalDevOrigins: true })).toContain('http://[::1]:*');
+    expect(buildFrameAncestorsPolicy()).not.toContain('[::1]');
     expect(buildFrameAncestorsPolicy({ extra: 'https://dash.example.com, *' })).toMatch(/ https:\/\/dash\.example\.com \*$/);
     // Anything that is not a plain origin stays out of the policy.
     expect(buildFrameAncestorsPolicy({ extra: "https://a.test; script-src 'unsafe-inline'" })).not.toContain('script-src');
