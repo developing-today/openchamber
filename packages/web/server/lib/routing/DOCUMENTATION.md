@@ -363,7 +363,9 @@ makes that visible so the user can spread them.
   against OpenCode's `Config.ModelRoute` schema, `schedules` included: a
   schedule carries an optional `id`, `targets` patterns and `note`, a required
   `when` window (weekday names or 0 to 6, days of month or -1, `start`/`end`
-  local times, `timezone`, `from`/`until`), and one of `factor` or `weight`.
+  local times read as OpenCode's `minutesOf` reads them: one or two digit
+  hours, minutes and optional seconds, all in range, seconds rounded down,
+  `timezone`, `from`/`until`), and one of `factor` or `weight`.
   Values OpenCode would drop or silently ignore are refused with the reason:
   a window its parser cannot read, an empty day list, a window whose start
   and end are the same time (OpenCode treats that as an empty window that

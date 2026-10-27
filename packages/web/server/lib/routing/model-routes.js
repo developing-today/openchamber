@@ -176,14 +176,19 @@ const isString = (value) => String(value) === value;
 const isPositiveNumber = (value) => Number.isFinite(value) && value > 0;
 
 // A window time as OpenCode's schedule parser reads it (`minutesOf` in
-// model-route-schedule.ts): "9:30", "09:30" or "9:30:15", hours to 23, minutes to 59.
-// The parser compares minutes since midnight and rounds seconds down, so two
-// spellings of one minute are the same time to it.
+// model-route-schedule.ts): "9:30", "09:30", "9:30:15" or "9:30:5", hours to
+// 23, minutes to 59, seconds to 59. The parser compares minutes since
+// midnight and rounds seconds down, so two spellings of one minute are the
+// same time to it.
 const windowTimeMinutes = (value) => {
   if (!isString(value)) return undefined;
-  const match = /^(\d{1,2}):(\d{1,2})(?::\d{2})?$/.exec(value.trim());
-  if (match === null || Number(match[1]) > 23 || Number(match[2]) > 59) return undefined;
-  return Number(match[1]) * 60 + Number(match[2]);
+  const match = /^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/.exec(value.trim());
+  if (match === null) return undefined;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = match[3] === undefined ? 0 : Number(match[3]);
+  if (hours > 23 || minutes > 59 || seconds > 59) return undefined;
+  return hours * 60 + minutes;
 };
 
 const isWindowTime = (value) => windowTimeMinutes(value) !== undefined;

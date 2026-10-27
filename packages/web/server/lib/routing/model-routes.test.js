@@ -714,6 +714,9 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '9am' })).toMatch(/window\.start must be a local time/);
     expect(withWindow({ start: '24:00' })).toMatch(/window\.start/);
     expect(withWindow({ end: '17:60' })).toMatch(/window\.end/);
+    // Seconds past 59 are out of range and OpenCode refuses the whole schedule.
+    expect(withWindow({ start: '09:30:60' })).toMatch(/window\.start must be a local time/);
+    expect(withWindow({ end: '09:30:99' })).toMatch(/window\.end must be a local time/);
     expect(withWindow({ timezone: 'Nowhere/Special' })).toMatch(/window\.timezone/);
     expect(withWindow({ from: 0 })).toMatch(/window\.from must be a positive/);
     expect(withWindow({ from: 2000, until: 1000 })).toMatch(/from must be before window\.until/);
@@ -726,6 +729,8 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '00:00', end: '00:00' })).toMatch(/empty window that can never apply/);
     expect(withWindow({ start: '9:00', end: '09:00' })).toMatch(/must not be the same time/);
     expect(withWindow({ start: '09:00:15', end: '09:00:45' })).toMatch(/must not be the same time/);
+    // Seconds round down, so these are one minute to OpenCode.
+    expect(withWindow({ start: '09:30:5', end: '09:30' })).toMatch(/must not be the same time/);
   });
 
   it('accepts day numbers, single-digit times and a start past its end, which OpenCode runs past midnight', () => {
@@ -735,6 +740,9 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '09:00' })).toBeNull();
     expect(withWindow({ end: '17:00' })).toBeNull();
     expect(withWindow({ start: '09:00', end: '09:01' })).toBeNull();
+    // Seconds are read the way OpenCode reads them: one or two digits, to 59.
+    expect(withWindow({ start: '09:30:5', end: '09:31' })).toBeNull();
+    expect(withWindow({ start: '9:30', end: '9:31' })).toBeNull();
     expect(withWindow({ timezone: 'UTC', from: 1000, until: 4102444800000 })).toBeNull();
   });
 
@@ -1247,6 +1255,11 @@ describe('validateModelRouteSchedules', () => {
     expect(validateModelRouteSchedules([{ provider: ['x'], when: {}, factor: 2 }])).toMatch(/schedule 1 has unknown key "provider"/);
     expect(validateModelRouteSchedules([{ when: {}, factor: 2 }, { routes: 'cheap', when: {}, factor: 2 }])).toMatch(/schedule 2 routes must be a list/);
     expect(validateModelRouteSchedules([{ when: { start: '24:00' }, factor: 2 }])).toMatch(/^schedule 1 window\.start must be a local time/);
+    // The same seconds handling on the cross-pool surface: out of range is
+    // refused, one digit is accepted, as OpenCode's `minutesOf` reads them.
+    expect(validateModelRouteSchedules([{ when: { start: '09:30:60' }, factor: 2 }])).toMatch(/^schedule 1 window\.start must be a local time/);
+    expect(validateModelRouteSchedules([{ when: { end: '09:30:99' }, factor: 2 }])).toMatch(/^schedule 1 window\.end must be a local time/);
+    expect(validateModelRouteSchedules([{ when: { start: '09:30:5', end: '09:31:59' }, factor: 2 }])).toBeNull();
   });
 
   // The same list rules a route's own schedules follow: OpenCode reads an empty
