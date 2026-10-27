@@ -274,16 +274,20 @@ the same list rules as a route schedule's `targets`: a blank entry or an empty
 list is refused, because OpenCode reads an empty matcher as "everything".
 
 OpenCode adds up `model_route_schedules` from every config file, while
-`mergeConfigs` keeps only the last file's list. So `schedules` in a response
-is the list in the user file, as stored, and the only one a `PUT` writes;
-`otherSchedules` lists the non-empty lists in the other files
-(`{ path, schedules }`), which Settings shows read-only, in OpenCode's
-reading order from `readConfigSources` (`../opencode/shared.js`): the global
-files, `OPENCODE_CONFIG`, then every `opencode.json(c)` and
-`.opencode/opencode.json(c)` from the outermost ancestor folder down to the
-project. The folder files are included only when the request names the
-Settings project (`?directory=` or the `x-opencode-directory` header). Pools and tuning read and write the same with or without it. Settings
-sends schedule saves one at a time and keeps only the newest edit's answer.
+`mergeConfigs` keeps only the last file's list, and it builds its pools from
+every file's `model_routes`, a later file's pool replacing an earlier one of
+the same id. So `schedules` and `routes` in a response are the user file's
+own, as stored, and the only ones a `PUT` writes; `otherSchedules` lists the
+non-empty lists in the other files (`{ path, schedules }`) and `otherRoutes`
+the non-empty pool maps (`{ path, routes }`), which Settings shows read-only,
+in OpenCode's reading order from `readConfigSources`
+(`../opencode/shared.js`): the global files, `OPENCODE_CONFIG`, then every
+`opencode.json(c)` and `.opencode/opencode.json(c)` from the outermost
+ancestor folder down to the project. The folder files are included only when
+the request names the Settings project (`?directory=` or the
+`x-opencode-directory` header). Tuning reads and writes the same with or
+without it. Settings sends schedule saves one at a time and keeps only the
+newest edit's answer.
 
 ## Pool descriptions
 

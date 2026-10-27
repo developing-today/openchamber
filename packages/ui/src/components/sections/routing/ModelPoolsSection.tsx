@@ -461,6 +461,7 @@ export const ModelPoolsSection: React.FC = () => {
   const [tuning, setTuning] = React.useState<ModelRouteTuning | null>(null);
   const [schedules, setSchedules] = React.useState<ScheduleList | null>(null);
   const [otherSchedules, setOtherSchedules] = React.useState<{ path: string; schedules: StoredSchedules }[]>([]);
+  const [otherRoutes, setOtherRoutes] = React.useState<{ path: string; routes: Record<string, ModelRoute> }[]>([]);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [newId, setNewId] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
@@ -487,6 +488,7 @@ export const ModelPoolsSection: React.FC = () => {
         lastSavedSchedulesRef.current = state.schedules ?? null;
         setSchedules(state.schedules ?? null);
         setOtherSchedules(state.otherSchedules ?? []);
+        setOtherRoutes(state.otherRoutes ?? []);
       })
       .catch((failure) => {
         if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure));
@@ -504,6 +506,7 @@ export const ModelPoolsSection: React.FC = () => {
       const state = await saveModelRoutes(payload);
       lastSavedRef.current = state.routes;
       setRoutes(state.routes);
+      setOtherRoutes(state.otherRoutes ?? []);
       setError(null);
     } catch (failure) {
       // A failed save rolls back to the last server-confirmed state so the
@@ -659,6 +662,12 @@ export const ModelPoolsSection: React.FC = () => {
                 </Button>
               </div>
             </SettingsFieldRow>
+            {otherRoutes.map((file) => (
+              <div key={file.path} className="space-y-2">
+                <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.otherFile', { path: file.path })}</p>
+                <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{JSON.stringify(file.routes, null, 2)}</pre>
+              </div>
+            ))}
             <div className="space-y-2">
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.tuning.title')}</p>
               <RouteTuningFields tuning={tuning} onSave={(next) => void saveTuning(next)} />
