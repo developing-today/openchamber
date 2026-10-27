@@ -2469,8 +2469,7 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/issues/list'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');
-      const requestedPage = readQueryString(req, 'page');
-      const page = requestedPage ? Number(requestedPage) : 1;
+      const page = readPositiveIntegerQuery(req, 'page') ?? 1;
       const searchQuery = readQueryString(req, 'query');
       const canonical = req.path.startsWith('/api/source-control/');
       const trustedContext = canonical
@@ -2822,7 +2821,7 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/pulls/list'), async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
+      const page = readPositiveIntegerQuery(req, 'page') ?? 1;
       const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
       const canonical = req.path.startsWith('/api/source-control/');
       const trustedContext = canonical
@@ -3030,7 +3029,7 @@ export function registerGitHubRoutes(app, options = {}) {
     let writeToken = null;
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
+      const number = readPositiveIntegerQuery(req, 'number');
       const includeDiff = req.query?.diff === '1' || req.query?.diff === 'true';
       const includeCheckDetails = req.query?.checkDetails === '1' || req.query?.checkDetails === 'true';
       const canonical = req.path.startsWith('/api/source-control/');
@@ -3039,16 +3038,15 @@ export function registerGitHubRoutes(app, options = {}) {
       if (canonical && Boolean(owner) !== Boolean(repoName)) {
         return res.status(400).json({ error: 'complete repository selector is required' });
       }
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
       const trustedContext = canonical
         ? await validateReadContext(req, directory)
         : null;
       if (canonical && !trustedContext) {
         return res.status(501).json({ error: 'Bound source control status is unavailable' });
       }
-      if (!directory || !number) {
-        return res.status(400).json({ error: 'directory and number are required' });
-      }
-
       const accountContext = await getOctokitForRequest(req, trustedContext?.accountId);
       const octokit = accountContext?.octokit;
       if (!octokit) {
