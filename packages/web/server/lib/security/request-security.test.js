@@ -81,6 +81,39 @@ describe('request security runtime', () => {
     })).toBe(false);
   });
 
+  test('allows loopback aliases when the server is reached via [::1] with a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]:3000' },
+      socket: {},
+    });
+
+    expect(await viaIpv6('http://[::1]:3000')).toBe(true);
+    expect(await viaIpv6('http://localhost:3000')).toBe(true);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
+  test('allows loopback aliases when the server is reached via [::1] without a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]' },
+      socket: {},
+    });
+
+    expect(await viaIpv6('http://[::1]')).toBe(true);
+    expect(await viaIpv6('http://localhost')).toBe(true);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
+  test('allows the [::1] alias when the server is reached via localhost', async () => {
+    const runtime = createRuntime();
+
+    expect(await runtime.isRequestOriginAllowed({
+      headers: { origin: 'http://[::1]:3000', host: 'localhost:3000' },
+      socket: {},
+    })).toBe(true);
+  });
+
   test('reads the slot for the request port when a browser shares jars across LAN ports', () => {
     const runtime = createRuntime();
     // Two instances on one LAN IP: the browser sends BOTH session cookies to
