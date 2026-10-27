@@ -21,7 +21,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
 import { loadIntegrationCatalog, peekIntegrationCatalog, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
-import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
+import { loadDisabledProviders, peekDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { requiresProviderAuth } from './providerAvailability';
 import { listConnectableProviders } from './connectableProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
@@ -151,10 +151,10 @@ export const ProvidersPage: React.FC = () => {
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
   // Null until read, and where the runtime has no OpenChamber server (VS Code).
-  const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(null);
+  const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(() => peekDisabledProviders());
   React.useEffect(() => {
     let active = true;
-    fetchDisabledProviders()
+    loadDisabledProviders()
       .then((list) => { if (active) setDisabledProviders(list); })
       .catch((error) => { console.warn('[providers] could not read disabled providers:', error); });
     return () => { active = false; };
