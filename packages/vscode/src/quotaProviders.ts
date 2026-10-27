@@ -417,9 +417,10 @@ const toNumber = (value: unknown): number | null => {
   return null;
 };
 
-const toTimestamp = (value: unknown): number | null => {
+export const toTimestamp = (value: unknown): number | null => {
   if (!value) return null;
   if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
     return value < 1_000_000_000_000 ? value * 1000 : value;
   }
   if (typeof value === 'string') {
@@ -2761,8 +2762,8 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
 };
 
 
-const normalizeTimestamp = (value: unknown) => {
-  if (typeof value !== 'number') return null;
+export const normalizeTimestamp = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value < 1_000_000_000_000 ? value * 1000 : value;
 };
 
