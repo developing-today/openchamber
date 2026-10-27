@@ -27,13 +27,14 @@ export const readScheduleList = (stored: ScheduleList | null | undefined): Sched
 export const scheduleListValue = (entries: readonly ScheduleEntry[]): ScheduleListValue =>
   entries.map((entry) => (entry.kind === 'schedule' ? entry.schedule : entry.stored));
 
-// OpenCode reads "9:30", "09:30" and "09:30:15" (`minutesOf` in packages/core/src/model-route-schedule.ts).
-const STORED_TIME = /^(\d{1,2}):(\d{1,2})(?::(\d{2}))?$/;
+// OpenCode reads "9:30", "09:30", "09:30:15" and "09:30:5" (`minutesOf` in packages/core/src/model-route-schedule.ts).
+const STORED_TIME = /^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/;
 
 /**
  * A stored time as `<input type="time">` holds it: zero-padded HH:mm, seconds
- * kept. Unset is ''. Null when the text is no time OpenCode could read; such a
- * value would show as an empty time input and be erased on the next blur.
+ * zero-padded and kept. Unset is ''. Null when the text is no time OpenCode
+ * could read; such a value would show as an empty time input and be erased on
+ * the next blur.
  */
 export const timeInputValue = (stored: string | undefined): string | null => {
   if (stored === undefined) return '';
@@ -42,7 +43,7 @@ export const timeInputValue = (stored: string | undefined): string | null => {
   const [, hours, minutes, seconds] = match;
   if (Number(hours) > 23 || Number(minutes) > 59 || (seconds !== undefined && Number(seconds) > 59)) return null;
   const padded = `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
-  return seconds === undefined ? padded : `${padded}:${seconds}`;
+  return seconds === undefined ? padded : `${padded}:${seconds.padStart(2, '0')}`;
 };
 
 /** The day names OpenCode accepts, by weekday number, 0 for Sunday. Written back as the short form. */
