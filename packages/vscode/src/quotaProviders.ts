@@ -3819,7 +3819,9 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
 
 // Meta Model API (Muse Code High Usage plan) quota. Mirrors
 // `packages/web/server/lib/quota/providers/meta.js` — the VS Code extension
-// duplicates this logic rather than importing the web provider.
+// duplicates this logic rather than importing the web provider. The VS Code
+// ProviderResult has no accountLabel field, so unlike the web provider this
+// port does not carry body.user_email — a deliberate surface difference.
 //
 // Data source: `POST https://api.meta.ai/muse-code/key` (`x-api-version: 1.0.0`,
 // body `{ "onboard": false }`), the endpoint Meta's Muse Code CLI reads for
@@ -3868,6 +3870,7 @@ type MetaKeyResponse = {
   subs_usage?: MetaSubscriptionUsage;
   quota?: MetaQuotaDetail;
   message?: string;
+  detail?: string;
   error?: { message?: string };
   resetsAtMs?: number;
   resets_at?: number;
@@ -3901,6 +3904,9 @@ const metaQuotaErrorDetail = (body: MetaKeyResponse | null) => {
     tier: asNonEmptyString(quota?.tier) ?? asNonEmptyString(body?.tier),
   };
 };
+
+const metaErrorMessage = (body: MetaKeyResponse | null): string | null =>
+  asNonEmptyString(asObject(body?.error)?.message) ?? asNonEmptyString(body?.message) ?? asNonEmptyString(body?.detail) ?? null;
 
 const requestMetaPlanUsage = async (
   bearer: string,
@@ -3951,7 +3957,7 @@ const requestMetaPlanUsage = async (
     return {
       kind: 'exhausted',
       ...metaQuotaErrorDetail(body),
-      message: asNonEmptyString(asObject(body?.error)?.message) ?? asNonEmptyString(body?.message) ?? null,
+      message: metaErrorMessage(body),
     };
   }
 
@@ -3961,7 +3967,7 @@ const requestMetaPlanUsage = async (
   if (!body) return { kind: 'error', message: 'Invalid response from provider' };
   if (body.is_subs_active === false) return { kind: 'inactive' };
   if (body.require_payment === true) {
-    return { kind: 'exhausted', ...metaQuotaErrorDetail(body), message: null };
+    return { kind: 'exhausted', ...metaQuotaErrorDetail(body), message: metaErrorMessage(body) };
   }
   return { kind: 'usage', body };
 };
