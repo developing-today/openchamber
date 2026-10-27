@@ -986,6 +986,14 @@ const codexUnauthorizedMessage = async (response: Response): Promise<string> => 
     : 'Session expired \u2014 please re-authenticate with OpenAI';
 };
 
+// The usage endpoint passes its own computed percentages through, and a spend
+// control or an exhausted overage can arrive outside 0-100. Clamp both bounds
+// like the Copilot and Ollama Cloud paths, and keep an absent value absent.
+const toCodexUsedPercent = (value: number | string | null | undefined): number | null => {
+  const percent = toNumber(value);
+  return percent === null ? null : clampPercent(percent);
+};
+
 const fetchCodexQuota = async (): Promise<ProviderResult> => {
   const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openai', 'codex', 'chatgpt'])) as Record<string, unknown> | null;
@@ -1031,7 +1039,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     if (primary) {
       const windowSeconds = toNumber(primary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(primary.used_percent),
+        usedPercent: toCodexUsedPercent(primary.used_percent),
         windowSeconds,
         resetAt: toTimestamp(primary.reset_at),
       });
@@ -1039,7 +1047,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     if (secondary) {
       const windowSeconds = toNumber(secondary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(secondary.used_percent),
+        usedPercent: toCodexUsedPercent(secondary.used_percent),
         windowSeconds,
         resetAt: toTimestamp(secondary.reset_at),
       });
@@ -1067,7 +1075,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
         ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
         : null;
       windows.credits = toUsageWindow({
-        usedPercent: toNumber(spendLimit.used_percent),
+        usedPercent: toCodexUsedPercent(spendLimit.used_percent),
         windowSeconds: null,
         resetAt: null,
         valueLabel,

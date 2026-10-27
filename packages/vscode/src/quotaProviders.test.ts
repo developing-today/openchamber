@@ -835,6 +835,51 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
   });
+
+  // The usage endpoint forwards its own percentages, and they can fall outside
+  // 0-100 on an exhausted overage or a spend control. Primary, secondary and
+  // spend control all clamp both bounds, and an absent value stays null.
+  for (const { label, usedPercent, expected, expectedRemaining } of [
+    { label: 'clamps above 100', usedPercent: 150, expected: 100, expectedRemaining: 0 },
+    { label: 'clamps below 0', usedPercent: -20, expected: 0, expectedRemaining: 100 },
+    { label: 'clamps a far overage', usedPercent: 200, expected: 100, expectedRemaining: 0 },
+    { label: 'keeps an in-range value', usedPercent: 42, expected: 42, expectedRemaining: 58 },
+    { label: 'keeps a missing value null', usedPercent: null, expected: null, expectedRemaining: null },
+  ]) {
+    test(`${label} on every Codex window`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        rate_limit: {
+          primary_window: { used_percent: usedPercent, limit_window_seconds: 18_000, reset_at: 1_700_000_000 },
+          secondary_window: { used_percent: usedPercent, limit_window_seconds: 604_800, reset_at: 1_700_000_000 },
+        },
+        spend_control: {
+          individual_limit: { limit: '7500', used: '100', used_percent: usedPercent },
+        },
+      })));
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, true);
+      for (const [name, window] of Object.entries(result.usage!.windows)) {
+        if (name === 'credits') continue;
+        assert.equal(window.usedPercent, expected, `${name} usedPercent`);
+        assert.equal(window.remainingPercent, expectedRemaining, `${name} remainingPercent`);
+      }
+      assert.equal(result.usage!.windows.credits!.usedPercent, expected);
+      assert.equal(result.usage!.windows.credits!.remainingPercent, expectedRemaining);
+    });
+  }
+
+  test('leaves a fractional in-range spend percent unrounded', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      rate_limit: null,
+      spend_control: { individual_limit: { limit: '7500', used: '1', used_percent: 36.5 } },
+    })));
+
+    const result = await fetchQuotaForProvider('codex');
+
+    assert.equal(result.usage!.windows.credits!.usedPercent, 36.5);
+  });
 });
 
 describe('GitHub Copilot quota provider (VS Code parity)', () => {
