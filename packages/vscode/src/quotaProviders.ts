@@ -1620,11 +1620,14 @@ const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
   const windows: Record<string, UsageWindow> = {};
   const models: Record<string, ProviderUsage> = {};
   const limits = Array.isArray(payload.limits) ? payload.limits : [];
+  const clampClaudeUsedPercent = (percent: number | null): number | null => {
+    return percent === null ? null : clampPercent(percent);
+  };
 
   for (const entry of limits) {
     const limit = asObject(entry);
     if (!limit) continue;
-    const usedPercent = toNumber(limit.percent);
+    const usedPercent = clampClaudeUsedPercent(toNumber(limit.percent));
     const resetAt = toTimestamp(limit.resets_at);
     if (limit.kind === 'session') {
       windows['5h'] = toUsageWindow({ usedPercent, windowSeconds: 5 * 60 * 60, resetAt });
@@ -1647,14 +1650,14 @@ const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
     const sevenDay = asObject(payload.seven_day);
     if (fiveHour) {
       windows['5h'] = toUsageWindow({
-        usedPercent: toNumber(fiveHour.utilization),
+        usedPercent: clampClaudeUsedPercent(toNumber(fiveHour.utilization)),
         windowSeconds: 5 * 60 * 60,
         resetAt: toTimestamp(fiveHour.resets_at),
       });
     }
     if (sevenDay) {
       windows['7d'] = toUsageWindow({
-        usedPercent: toNumber(sevenDay.utilization),
+        usedPercent: clampClaudeUsedPercent(toNumber(sevenDay.utilization)),
         windowSeconds: 7 * 24 * 60 * 60,
         resetAt: toTimestamp(sevenDay.resets_at),
       });
@@ -1673,7 +1676,7 @@ const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
     const used = usedMinor === null ? null : usedMinor / 10 ** exponent;
     const limit = limitMinor === null ? null : limitMinor / 10 ** (toNumber(limitMoney?.exponent) ?? 2);
     windows.extra_usage = toUsageWindow({
-      usedPercent: toNumber(spend.percent),
+      usedPercent: clampClaudeUsedPercent(toNumber(spend.percent)),
       windowSeconds: null,
       resetAt: null,
       valueLabel: used === null ? null : `${prefix}${formatMoney(used)}${limit === null ? '' : ` / ${prefix}${formatMoney(limit)}`}`,
