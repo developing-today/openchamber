@@ -177,8 +177,8 @@ const isTransportFailure = (error) => {
   let current = error;
   for (let depth = 0; current && depth < 8; depth += 1) {
     if (current.reason === 'Transport') return true;
-    if (typeof current.code === 'string' && TRANSPORT_ERROR_CODES.has(current.code)) return true;
-    const message = typeof current.message === 'string' ? current.message : '';
+    if (TRANSPORT_ERROR_CODES.has(asNonEmptyString(current.code) ?? '')) return true;
+    const message = asNonEmptyString(current.message) ?? '';
     if (message.startsWith('Transport:') || message === 'fetch failed') return true;
     current = current.cause;
   }
@@ -214,9 +214,9 @@ const createFallbackCredentialSource = (primary, fallback) => {
       }
     },
   };
-  if (typeof primary.create === 'function') source.create = (input) => primary.create(input);
-  if (typeof primary.remove === 'function') source.remove = (credentialID) => primary.remove(credentialID);
-  if (typeof primary.listEnvironmentKeys === 'function') source.listEnvironmentKeys = () => primary.listEnvironmentKeys();
+  if (primary.create) source.create = (input) => primary.create(input);
+  if (primary.remove) source.remove = (credentialID) => primary.remove(credentialID);
+  if (primary.listEnvironmentKeys) source.listEnvironmentKeys = () => primary.listEnvironmentKeys();
   return source;
 };
 
