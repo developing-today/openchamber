@@ -67,6 +67,7 @@ describe('timeInputValue', () => {
   test('pads a stored time to what a time input holds, keeping seconds', () => {
     expect(timeInputValue('9:30')).toBe('09:30');
     expect(timeInputValue('9:5')).toBe('09:05');
+    expect(timeInputValue('09:30:5')).toBe('09:30:05');
     expect(timeInputValue(' 17:05:15 ')).toBe('17:05:15');
     expect(timeInputValue(undefined)).toBe('');
   });
@@ -74,6 +75,8 @@ describe('timeInputValue', () => {
   test('is null for a time OpenCode could not read', () => {
     expect(timeInputValue('24:00')).toBeNull();
     expect(timeInputValue('12:60')).toBeNull();
+    expect(timeInputValue('09:30:60')).toBeNull();
+    expect(timeInputValue('09:30:99')).toBeNull();
     expect(timeInputValue('12:00:61')).toBeNull();
     expect(timeInputValue('noon')).toBeNull();
     expect(timeInputValue('')).toBeNull();
