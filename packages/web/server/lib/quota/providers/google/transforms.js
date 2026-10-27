@@ -71,9 +71,7 @@ export const transformModelData = (modelName, modelData, sourceId) => {
     ? Math.round(remainingFraction * 100)
     : null;
   const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
-  const resetAt = modelData?.quotaInfo?.resetTime
-    ? new Date(modelData.quotaInfo.resetTime).getTime()
-    : null;
+  const resetAt = toTimestamp(modelData?.quotaInfo?.resetTime);
   const window = resolveGoogleWindow();
 
   return {
