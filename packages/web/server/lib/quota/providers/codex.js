@@ -14,6 +14,8 @@ export const providerId = 'codex';
 export const providerName = 'Codex';
 export const aliases = ['openai', 'codex', 'chatgpt'];
 
+const clampPercent = (value) => value === null ? null : Math.min(100, Math.max(0, value));
+
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.access || entry?.token);
@@ -89,7 +91,7 @@ const fetchQuotaForEntry = async (entry) => {
     if (primary) {
       const windowSeconds = toNumber(primary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(primary.used_percent),
+        usedPercent: clampPercent(toNumber(primary.used_percent)),
         windowSeconds,
         resetAt: toTimestamp(primary.reset_at)
       });
@@ -97,7 +99,7 @@ const fetchQuotaForEntry = async (entry) => {
     if (secondary) {
       const windowSeconds = toNumber(secondary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(secondary.used_percent),
+        usedPercent: clampPercent(toNumber(secondary.used_percent)),
         windowSeconds,
         resetAt: toTimestamp(secondary.reset_at)
       });
@@ -129,7 +131,7 @@ const fetchQuotaForEntry = async (entry) => {
         ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
         : null;
       windows.credits = toUsageWindow({
-        usedPercent: toNumber(spendLimit.used_percent),
+        usedPercent: clampPercent(toNumber(spendLimit.used_percent)),
         windowSeconds: null,
         resetAt: null,
         valueLabel
