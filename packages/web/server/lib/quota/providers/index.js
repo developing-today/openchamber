@@ -13,6 +13,7 @@ import { asNonEmptyString, buildResult } from '../utils/index.js';
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
+import * as commandCode from './command-code.js';
 import * as copilot from './copilot.js';
 import * as cursor from './cursor.js';
 import * as deepinfra from './deepinfra.js';
@@ -71,6 +72,15 @@ const registry = {
     fetchQuota: codex.fetchQuota,
     credentialAliases: ['openai', 'codex', 'chatgpt'],
     fetchQuotaForCredential: codex.fetchQuotaForCredential
+  },
+  'command-code': {
+    providerId: commandCode.providerId,
+    providerName: commandCode.providerName,
+    aliases: commandCode.aliases,
+    isConfigured: commandCode.isConfigured,
+    fetchQuota: commandCode.fetchQuota,
+    credentialAliases: ['command-code'],
+    fetchQuotaForCredential: fetchWithCredentialRead(commandCode.fetchQuota)
   },
   cursor: {
     providerId: cursor.providerId,
