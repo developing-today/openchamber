@@ -141,11 +141,13 @@ describe('request security runtime', () => {
 
   test('allows the [::1] alias when the server is reached via localhost', async () => {
     const runtime = createRuntime();
-
-    expect(await runtime.isRequestOriginAllowed({
-      headers: { origin: 'http://[::1]:3000', host: 'localhost:3000' },
+    const viaLocalhost = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: 'localhost:3000' },
       socket: {},
-    })).toBe(true);
+    });
+
+    expect(await viaLocalhost('http://[::1]:3000')).toBe(true);
+    expect(await viaLocalhost('https://evil.example.com')).toBe(false);
   });
 
   test('reads the slot for the request port when a browser shares jars across LAN ports', () => {
