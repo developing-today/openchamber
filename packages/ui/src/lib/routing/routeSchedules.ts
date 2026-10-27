@@ -70,23 +70,32 @@ const DAY_NUMBERS = new Map<string, number>([
 
 export const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
 
-// A number is one of the seven weekdays; a string is one of the names OpenCode accepts.
-const dayNumber = (day: string | number): number | undefined =>
-  WEEKDAYS.find((weekday) => weekday === day) ?? DAY_NUMBERS.get(String(day));
+// OpenCode trims and lowercases names and accepts numeric strings from 0 to 6.
+const dayNumber = (day: string | number): number | undefined => {
+  const normalized = String(day).trim().toLowerCase();
+  const namedDay = DAY_NUMBERS.get(normalized);
+  if (namedDay !== undefined) return namedDay;
+  return /^[0-6]$/.test(normalized) ? Number(normalized) : undefined;
+};
 
-/** The weekdays a window names, as numbers; an entry the editor cannot read is left out. */
+/** The weekdays a window names, as numbers; entries the editor cannot read are left out. */
 export const windowWeekdays = (window: ScheduleWindow | undefined): number[] =>
   (window?.daysOfWeek ?? []).flatMap((day) => {
     const number = dayNumber(day);
     return number === undefined ? [] : [number];
   });
 
-/** Turns one weekday on or off. No day left means every day, so the field is removed. */
+/** Turns one weekday on or off, keeping stored days the editor cannot read. */
 export const toggleWeekday = (window: ScheduleWindow | undefined, day: number): ScheduleWindow => {
+  const storedDays = window?.daysOfWeek ?? [];
   const current = new Set(windowWeekdays(window));
+  const unreadableDays = storedDays.filter((storedDay) => dayNumber(storedDay) === undefined);
   if (current.has(day)) current.delete(day);
   else current.add(day);
-  const days = [...current].sort((left, right) => left - right).map((number) => SHORT_DAY_NAMES[number]);
+  const days: (string | number)[] = [...current]
+    .sort((left, right) => left - right)
+    .map((number) => SHORT_DAY_NAMES[number]);
+  days.push(...unreadableDays);
   return withWindowField(window, 'daysOfWeek', days.length > 0 ? days : undefined);
 };
 
