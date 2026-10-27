@@ -223,7 +223,8 @@ other.
   same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `integration-service-actions.js`,
-  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`)
+  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`,
+  `model-choice-actions.js`)
   are passed in as `actionModules` and dispatched by action name before the
   built-in actions; their definitions are part of
   `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
@@ -261,6 +262,11 @@ other.
   secret, so the whole call is refused and nothing is saved. A project change
   calls `invalidateProject`; the managed OpenCode reads a change when it
   restarts.
+- `models.choices` (`model-choice-actions.js`) returns the notes built from
+  the model and effort choices the user made by hand, the most recent choices
+  (`limit`, default 50) and whether recording is on
+  (`../model-choices/DOCUMENTATION.md`). Read only: turning recording off and
+  clearing the history stay with the user in Settings.
 - `projects.setup` returns a configured project's setup through
   `projectConfigRuntime.readProjectSetup`, the same read as
   `GET /api/projects/:projectId/config`; an unknown id is a 404. It is read

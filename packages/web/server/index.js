@@ -174,6 +174,9 @@ import { createIntegrationActions } from './lib/openchamber-control/integration-
 import { createIntegrationServiceActions } from './lib/openchamber-control/integration-service-actions.js';
 import { createEnvironmentActions } from './lib/openchamber-control/environment-actions.js';
 import { createProjectSetupActions } from './lib/openchamber-control/project-setup-actions.js';
+import { createModelChoiceActions } from './lib/openchamber-control/model-choice-actions.js';
+import { createModelChoiceStore } from './lib/model-choices/store.js';
+import { createModelChoiceService } from './lib/model-choices/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1429,6 +1432,12 @@ const clientPairingRuntime = createClientPairingRuntime({
 });
 // What each open window reports of its device-only settings (lib/device-settings).
 const deviceSettingsStore = createDeviceSettingsStore();
+// Manual model and effort choices and the notes built from them (lib/model-choices).
+const modelChoiceService = createModelChoiceService({
+  store: createModelChoiceStore({ dataDir: OPENCHAMBER_DATA_DIR }),
+  readSettings: () => readSettingsFromDiskMigrated(),
+  persistSettings: (changes) => persistSettings(changes),
+});
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
 });
@@ -1987,6 +1996,7 @@ const openChamberControlService = createOpenChamberControlService({
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
     createEnvironmentActions({ store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects }),
     createProjectSetupActions({ readProjectSetup: projectConfigRuntime.readProjectSetup, listProjects: listConfiguredProjects }),
+    createModelChoiceActions({ modelChoiceService }),
   ],
 });
 
@@ -2722,6 +2732,7 @@ async function main(options = {}) {
     openChamberSessionService,
     openChamberControlService,
     deviceSettingsStore,
+    modelChoiceService,
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,

@@ -359,6 +359,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.messageSearchReasoningEnabled === 'boolean') {
       result.messageSearchReasoningEnabled = candidate.messageSearchReasoningEnabled;
     }
+    if (candidate.modelChoiceRecordingEnabled === true || candidate.modelChoiceRecordingEnabled === false) {
+      result.modelChoiceRecordingEnabled = candidate.modelChoiceRecordingEnabled;
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }

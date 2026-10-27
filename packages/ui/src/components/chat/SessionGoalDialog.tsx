@@ -31,6 +31,7 @@ import { useGoalEditStore, type GoalEditDelivery, type GoalEditDraft } from '@/s
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { resolveSessionWriterModel } from '@/components/chat/goalWriterContext';
 import { GoalWriterPicker } from '@/components/chat/GoalWriterPicker';
+import { recordGoalWriterChoice } from '@/lib/modelChoices';
 import { useGoalWriterDefault } from '@/hooks/useGoalWriterDefault';
 
 interface SessionGoalDialogProps {
@@ -144,6 +145,10 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
   // The save runs after the dialog closes; the card above the composer shows
   // it and can cancel it or bring the edit back here.
   const handleSave = () => {
+    // The pick only writes when the objective is rewritten.
+    if (rewrites && writer) {
+      recordGoalWriterChoice({ writer, writerDefault, sessionModel, inputLength: trimmedObjective.length });
+    }
     startGoalEdit({
       sessionId,
       directory,

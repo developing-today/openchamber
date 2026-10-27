@@ -5,6 +5,7 @@ import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
 import type { GoalSpecResult, GoalSubmitChoice } from '@/lib/goalWriter';
 import type { GoalSpecDialogRequest } from './GoalSpecDialog';
+import { useConfigStore } from '@/stores/useConfigStore';
 
 // React DOM and the Base UI dialog probe for a DOM when first imported; without
 // one the dialog never mounts its popup. Give the probe a document, then
@@ -24,13 +25,13 @@ for (const [name, descriptor] of previousImportGlobals) {
 }
 void importWindow.happyDOM.close();
 
-const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'MutationObserver', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
   const win = new Window({ url: 'http://localhost' });
   const previous = DOM_GLOBAL_NAMES.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
     HTMLElement: win.HTMLElement, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
-    requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
+    requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), MutationObserver: win.MutationObserver, ResizeObserver: win.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -44,7 +45,7 @@ const installDom = () => {
 };
 
 const written: GoalSpecResult = { ok: true, spec: '## Objective\nDark mode', providerID: 'p', modelID: 'm', variant: null };
-const base = { sessionModel: null, directory: null } as const;
+const base = { sessionModel: null, directory: null, inputLength: 12 } as const;
 
 describe('GoalSpecDialog', () => {
   let root: Root;
@@ -157,5 +158,69 @@ describe('GoalSpecDialog', () => {
 
     expect(runs).toEqual([false, true]);
     expect(choices).toEqual([{ kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'with-message', ignoreLimit: true }]);
+  });
+
+  test('an effort picked in the window is recorded once per pick, when it writes', async () => {
+    const recorded: unknown[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/api/openchamber/model-choices')) recorded.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    }, { preconnect: async () => {} });
+    const previousProviders = useConfigStore.getState().providers;
+    useConfigStore.setState({ providers: [{
+      id: 'p', name: 'p', activation: 'enabled', package: 'p',
+      models: [{
+        id: 'm', modelID: 'm', providerID: 'p', name: 'm',
+        capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [{ id: 'low', settings: {} }, { id: 'high', settings: {} }],
+        time: { released: 0 }, cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }], status: 'active', enabled: true, limit: { context: 0, output: 0 },
+      }],
+    }] });
+    // A Base UI select opens on a press and commits an option only after a hover
+    // has highlighted it; each step runs in its own act (as in PoolAdvancedFields.test).
+    const fire = (target: Element, type: string) => {
+      const init = { bubbles: true, cancelable: true, button: 0 };
+      target.dispatchEvent(type.startsWith('pointer') ? new window.PointerEvent(type, { ...init, pointerType: 'mouse' }) : new window.MouseEvent(type, init));
+    };
+    const pickEffort = async (label: string) => {
+      const trigger = document.querySelector<HTMLElement>('[aria-label="Goal writer effort"]');
+      if (!trigger) throw new Error(`No effort select in: ${document.body.textContent}`);
+      await act(async () => {
+        fire(trigger, 'pointerdown');
+        fire(trigger, 'mousedown');
+      });
+      const option = Array.from(document.querySelectorAll('[role="option"]')).find((element) => element.textContent?.trim() === label);
+      if (!option) throw new Error(`No effort "${label}" in: ${document.body.textContent}`);
+      await act(async () => {
+        for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']) fire(option, type);
+      });
+      await act(async () => {
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) fire(option, type);
+      });
+      expect(trigger.textContent).toBe(label);
+    };
+    try {
+      await render({ ...base, sessionModel: { providerID: 'p', modelID: 'm' }, inputLength: 3_000, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: async () => written });
+      await pickEffort('Low');
+      expect(recorded).toEqual([]);
+      await click('Write again');
+      await click('Write again');
+      await pickEffort('High');
+      await click('Write again');
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    } finally {
+      globalThis.fetch = originalFetch;
+      useConfigStore.setState({ providers: previousProviders });
+    }
+
+    const choice = (variant: string) => ({
+      surface: 'goal-writer',
+      kind: 'effort',
+      chosen: { model: 'p/m', variant },
+      replaced: { model: 'p/m', variant: null },
+      sessionModel: 'p/m',
+      inputSize: 'long',
+    });
+    expect(recorded).toEqual([choice('low'), choice('high')]);
   });
 });

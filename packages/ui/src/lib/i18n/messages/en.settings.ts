@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -2586,6 +2587,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.en,
   ...extensionsSettingsI18n.en,
   ...messagingSettingsI18n.en,
+  ...modelChoicesSettingsI18n.en,
   ...settingsLayoutI18n.en,
   'settings.page.integrations.title': 'Integrations',
   'settings.page.integrations.description': 'Connect the services and subscriptions OpenChamber works with.',
