@@ -168,7 +168,7 @@ const formatZhipuaiCreditValueLabel = (limit: ZhipuaiLimit): string | null => {
   return `${formatZhipuaiCreditAmount(used)} / ${formatZhipuaiCreditAmount(total)} credits`;
 };
 
-const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
+const clampPercent = (value: number): number | null => (Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null);
 
 // `percentage` is the used percent; when the API omits it, derive it from
 // currentValue/usage (observed percentages are integers).

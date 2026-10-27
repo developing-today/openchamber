@@ -1230,6 +1230,29 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['MCP Tools']!.usedPercent, 100);
   });
 
+  test('reports non-finite percentages as unknown instead of clamping them', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: Number.POSITIVE_INFINITY },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: Number.NaN },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: Number.NEGATIVE_INFINITY },
+        ],
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(windows['5h']!.usedPercent, null);
+    assert.equal(windows['5h']!.remainingPercent, null);
+    assert.equal(windows.weekly!.usedPercent, null);
+    assert.equal(windows.weekly!.remainingPercent, null);
+    assert.equal(windows['MCP Tools']!.usedPercent, null);
+    assert.equal(windows['MCP Tools']!.remainingPercent, null);
+  });
+
   test('reports a z.ai business failure sent inside an HTTP 200 body', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({ code: 1001, msg: 'Token expired', success: false })));
 
@@ -1566,6 +1589,40 @@ describe('Zhipu AI Coding Plan quota provider (VS Code parity)', () => {
 
     assert.equal(fallback.ok, true);
     assert.equal(fallback.usage!.windows['5h']!.usedPercent, 100);
+  });
+
+  test('reports non-finite MCP Tools percentages as unknown instead of clamping them', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: Number.POSITIVE_INFINITY },
+        ],
+      },
+    })));
+
+    const infinite = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(infinite.ok, true);
+    assert.equal(infinite.usage!.windows['MCP Tools']!.usedPercent, null);
+    assert.equal(infinite.usage!.windows['MCP Tools']!.remainingPercent, null);
+
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: Number.NaN },
+        ],
+      },
+    })));
+
+    const nan = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(nan.ok, true);
+    assert.equal(nan.usage!.windows['MCP Tools']!.usedPercent, null);
+    assert.equal(nan.usage!.windows['MCP Tools']!.remainingPercent, null);
   });
 
   test('surfaces business failures reported inside HTTP 200 bodies', async () => {
