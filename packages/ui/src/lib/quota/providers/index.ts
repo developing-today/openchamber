@@ -15,6 +15,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'google', name: 'Google' },
   { id: 'antigravity', name: 'Antigravity' },
   { id: 'kimi-for-coding', name: 'Kimi for Coding' },
+  { id: 'meta', name: 'Meta Model API' },
   { id: 'nano-gpt', name: 'NanoGPT' },
   { id: 'openrouter', name: 'OpenRouter' },
   { id: 'zai-coding-plan', name: 'z.ai' },

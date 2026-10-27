@@ -54,7 +54,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchMetaQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -3015,4 +3015,79 @@ describe("Google quota provider (VS Code parity) - #545", () => {
       assert.equal(modelWindow?.remainingPercent, expectedRemaining);
     });
   }
+});
+describe('Meta quota provider', () => {
+  // Shape verified live against POST https://api.meta.ai/muse-code/key (2026-10-27).
+  const usagePayload = {
+    is_subs_active: true,
+    require_payment: false,
+    subs_tier_name: 'Muse Code High Usage',
+    subs_usage: {
+      window: { used_percent: 6, window_duration_mins: 300, resets_at: 1793090405 },
+      weekly: { used_percent: 10, resets_at: 1793577600 },
+    },
+  };
+
+  test('maps the rolling and weekly windows from the plan payload', async () => {
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse(usagePayload),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.planLabel, 'Muse Code High Usage');
+    assert.equal(result.usage?.windows['5h'].usedPercent, 6);
+    assert.equal(result.usage?.windows['5h'].windowSeconds, 18000);
+    assert.equal(result.usage?.windows.weekly.usedPercent, 10);
+    assert.equal(result.usage?.windows.weekly.windowSeconds, 604800);
+  });
+
+  test('falls back to the Muse CLI account token when the key endpoint refuses the minted key', async () => {
+    const requests: string[] = [];
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async (_url, options) => {
+        requests.push(new Headers(options.headers).get('Authorization') ?? '');
+        return requests.length === 1
+          ? mockResponse({ title: 'Authentication Error' }, { ok: false, status: 401 })
+          : mockResponse(usagePayload);
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requests, ['Bearer LLM|test-minted-key', 'Bearer dca:test-account-token']);
+  });
+
+  test('reports a 402 wall as a distinct quota-exhausted state', async () => {
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse(
+        { quota: { limitKind: 'weekly', resetsAtMs: 1793577600000 } },
+        { ok: false, status: 402 },
+      ),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.quotaExhausted, true);
+    assert.equal(result.quotaResetAt, 1793577600000);
+  });
+
+  test('reports not configured without a meta credential', async () => {
+    let requests = 0;
+    const result = await fetchMetaQuota({
+      readAuth: () => ({}),
+      readAccountToken: () => null,
+      fetchImpl: async () => {
+        requests += 1;
+        return mockResponse(usagePayload);
+      },
+    });
+
+    assert.equal(result.configured, false);
+    assert.equal(requests, 0);
+  });
 });

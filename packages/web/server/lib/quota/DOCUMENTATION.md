@@ -46,6 +46,7 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (first match wins) |
+| `meta` | Meta Model API | `providers/meta.js` | `meta` (OpenCode credential; plan usage also reads the Muse CLI OAuth store, see below) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
@@ -137,6 +138,16 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 - **Credentials are read-only.** OpenChamber never refreshes the xAI OAuth token. xAI rotates (and rejects the previous) refresh token on every exchange, and OpenCode 2.x owns the credential store without exposing a refresh route, so a quota-side refresh would consume the token OpenCode still holds and force the user to re-authorize ("Grok expired every morning"). The provider uses the stored access token while it is valid and returns an explicit expired error (no `auth.x.ai` call) once it is stale, matching the Claude provider's "sign in again" handling; OpenCode's own refresh persists the rotated pair.
 - **Skipping the standalone refresh also required OpenCode 2.x**: the pre-2.x `auth.json` write path no longer exists (`packages/web/server/lib/opencode/auth.js` is read-only), so there is nowhere correct to persist a rotated pair.
 - Keep `packages/web/server/lib/quota/providers/xai.js` and `packages/vscode/src/quotaProviders.ts` (`fetchXaiQuota`) in sync — the VS Code extension duplicates this logic rather than importing the web provider.
+
+## Meta (Muse Code High Usage) quota semantics
+
+`POST https://api.meta.ai/muse-code/key` (`x-api-version: 1.0.0`, body `{ "onboard": false }`) is the endpoint Meta's own Muse Code CLI reads for `/usage`; Meta publishes no separate usage REST route. The response carries the plan's own view: `subs_usage.window` (a rolling window: `used_percent`, `window_duration_mins`, `resets_at`), `subs_usage.weekly` (`used_percent`, `resets_at`), and `subs_tier_name` (for example "Muse Code High Usage"). The rolling window becomes a duration-labelled window (`window_duration_mins` × 60 → `5h`, …), `weekly` becomes the `weekly` window, and `subs_tier_name` becomes `planLabel`.
+
+**Credential sourcing.** The read authenticates with the Meta *account* OAuth token (the Muse Code device-login token, `dca:…`), not with the subscription's minted inference API key: the key endpoint refuses a minted key with 401, while `/v1/models` and `/v1/chat/completions` accept the minted key and carry no usage signal. The OpenCode `meta` credential is tried first, so an install that stores the account token there works directly. When OpenCode holds the minted inference key (the fleet's case: `META_API_KEY` is the `LLM|…` key the key endpoint mints), that read is rejected and the provider falls back to the account token in the Muse CLI's own OAuth store (`~/.config/muse/auth.json`, `providers.meta.access_token`) — the same login the fleet's muse-proxy uses for this pool. The token is read at fetch time and never logged or returned.
+
+**Failure classes stay distinct.** Not configured (no credential), unauthorized (the credential the read used is not an account token), subscription inactive (`is_subs_active === false`), a 402-class wall or a 429 (an exhausted plan, `require_payment`, or a rate-limited usage read), malformed response, and transport failure each return their own result. The wall is surfaced as `ok: false, configured: true, quotaExhausted: true` with `quotaResetAt` when the body carries one — a consumer that parks work on walls must not read it as a read failure.
+
+Keep `packages/web/server/lib/quota/providers/meta.js` and `packages/vscode/src/quotaProviders.ts` (`fetchMetaQuota`) in sync — the VS Code extension duplicates this logic rather than importing the web provider.
 
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:

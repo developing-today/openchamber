@@ -140,6 +140,25 @@ describe('disabled providers', () => {
   });
 });
 
+describe('meta provider listing', () => {
+  it('lists meta once the meta credential is present', async () => {
+    authState.projected = { meta: { type: 'api', key: 'LLM|test-minted-key' } };
+    await expect(listConfiguredQuotaProviders()).resolves.toContain('meta');
+  });
+
+  it('leaves meta out without a credential', async () => {
+    authState.projected = {};
+    await expect(listConfiguredQuotaProviders()).resolves.not.toContain('meta');
+  });
+
+  it('catalogues meta under its id with the meta alias', () => {
+    const meta = listQuotaProviderCatalogue().find((entry) => entry.id === 'meta');
+    expect(meta?.name).toBe('Meta Model API');
+    expect(meta?.aliases).toContain('meta');
+    expect(meta?.disabled).toBe(false);
+  });
+});
+
 describe('per-credential quota', () => {
   beforeEach(() => {
     authState.projected = { openai: sharingRow.value };
