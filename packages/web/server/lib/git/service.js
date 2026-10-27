@@ -32,6 +32,12 @@ const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 // diff.srcPrefix/dstPrefix would otherwise change them, and a hunk would no
 // longer match its file. Explicit prefixes win over all of those settings.
 const DIFF_PREFIX_ARGS = ['--src-prefix=a/', '--dst-prefix=b/'];
+// Only a non-negative integer is a valid unified-context count. Anything
+// else takes the default of 3: a fractional value reaching git as -U2.9
+// (or NaN as -UNaN) is rejected with exit 129 (#578). Normalizing here, in
+// the service, mirrors the getLog maxCount guard below (#463).
+const normalizeContextLines = (contextLines) =>
+  Number.isInteger(contextLines) && contextLines >= 0 ? contextLines : 3;
 const gitIndexMutationQueues = new Map();
 const remoteProvisioningQueues = new Map();
 
@@ -3324,9 +3330,7 @@ async function readStatus(normalizedDirectory, lightMode) {
 
 const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
   const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
-  if (Number.isFinite(contextLines)) {
-    args.push(`-U${Math.max(0, contextLines)}`);
-  }
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   args.push('--no-index', '--', '/dev/null', repoPath);
   const result = await runGitCommand(repoRoot, args);
   // Exit 1 means differences, even when Git also writes warnings to stderr.
@@ -3399,9 +3403,7 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
   try {
     const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
 
-    if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
-      args.push(`-U${Math.max(0, contextLines)}`);
-    }
+    args.push(`-U${normalizeContextLines(contextLines)}`);
 
     if (staged) {
       args.push('--cached');
@@ -3586,9 +3588,7 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
   await assertRangeRefsResolve(git, [baseRef, headRef]);
 
   const args = ['diff', '--no-color', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
-  if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
-    args.push(`-U${Math.max(0, contextLines)}`);
-  }
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   const paths = [];
   if (filePath) {
     try {
@@ -6710,7 +6710,7 @@ export async function getCommitDiff(directory, { hash, path: filePath, previousP
   const commit = await resolveCommitHash(git, hash);
   const paths = [filePath, previousPath].filter(Boolean).map((value) => `:(literal)${value}`);
   return git.raw([
-    ...commitShowArgs(commit), '--no-color', '--no-ext-diff', `-U${Math.max(0, contextLines)}`,
+    ...commitShowArgs(commit), '--no-color', '--no-ext-diff', `-U${normalizeContextLines(contextLines)}`,
     '--', ...paths,
   ]);
 }
