@@ -201,9 +201,12 @@ export const queryAttemptCountsPerTarget = async (dbPath, { hours = 24, now = Da
 };
 
 export const registerModelRouteStatsRoutes = (app, dependencies = {}) => {
-  const { resolveDbPath = resolveOpenCodeDbPath } = dependencies;
+  const { resolveDbPath = resolveOpenCodeDbPath, isOpenCodeLocal = () => true } = dependencies;
 
   app.get('/api/model-routes/stats', async (req, res) => {
+    // A remote OpenCode keeps its telemetry in its own database; a local file
+    // here could be a stale one from another install, so read nothing.
+    if (!isOpenCodeLocal()) return res.json({ available: false, reason: 'remote-opencode' });
     try {
       res.json(await queryRouteStats(resolveDbPath(), { hours: req.query?.hours }));
     } catch (error) {

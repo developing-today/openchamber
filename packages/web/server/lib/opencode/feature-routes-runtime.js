@@ -315,8 +315,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveOptionalProjectDirectory,
       readConfigSources,
     });
-    registerModelRouteStatsRoutes(app);
-    registerMessageModelAttributionRoutes(app);
+    registerModelRouteStatsRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
+    registerMessageModelAttributionRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
     registerPlanRoutes(app);
     registerPoolPlanLinkRoutes(app, { openchamberDataDir });
     registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir, isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });

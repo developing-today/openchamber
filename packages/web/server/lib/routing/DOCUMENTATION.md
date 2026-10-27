@@ -333,6 +333,9 @@ Separate from Jev/Auto above: read-only views over OpenCode's own
 `model-routes.js`'s concern), not OpenChamber's classifier. Both report
 `{ available: false, reason }` instead of an empty result when the database,
 its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
+When OpenCode's base URL is not a loopback address, both routes read no local
+file and answer `{ available: false, reason: "remote-opencode" }`, the same
+check pool health applies.
 
 - `model-route-stats.js` — `GET /api/model-routes/stats`: aggregate counts,
   latencies, grouped errors and hedge win rates per target over a trailing
