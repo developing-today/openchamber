@@ -157,11 +157,10 @@ export const createRequestSecurityRuntime = (deps) => {
       }
       const normalizedHost = typeof hostname === 'string' ? hostname.toLowerCase() : '';
       const portSuffix = typeof port === 'string' && port.length > 0 ? `:${port}` : '';
-      if (normalizedHost === 'localhost') {
+      if (normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost === '[::1]') {
+        origins.add(`${protocol}://localhost${portSuffix}`);
         origins.add(`${protocol}://127.0.0.1${portSuffix}`);
         origins.add(`${protocol}://[::1]${portSuffix}`);
-      } else if (normalizedHost === '127.0.0.1' || normalizedHost === '[::1]') {
-        origins.add(`${protocol}://localhost${portSuffix}`);
       }
     }
 
