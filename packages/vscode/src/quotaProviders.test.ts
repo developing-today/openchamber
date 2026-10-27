@@ -2951,3 +2951,40 @@ describe('xAI quota provider (VS Code parity)', () => {
     assert.equal(requests, 0);
   });
 });
+
+describe("Google quota provider (VS Code parity) - #545", () => {
+  beforeEach(() => {
+    configureOpenCodeCredentials({ list: async () => [oauth("google")] });
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+  });
+
+  for (const { label, remainingFraction, expectedUsed, expectedRemaining } of [
+    { label: "clamps a negative remainingFraction to 100 used", remainingFraction: -0.5, expectedUsed: 100, expectedRemaining: 0 },
+    { label: "keeps an in-range remainingFraction unclamped", remainingFraction: 0.75, expectedUsed: 25, expectedRemaining: 75 },
+  ]) {
+    test(label + " on the bucket and model-data paths", async () => {
+      stubFetchReturning(async (url) => {
+        if (url.endsWith(":retrieveUserQuota")) {
+          return mockResponse({ buckets: [{ modelId: "gemini-bucket", remainingFraction, resetTime: "2026-10-28T10:00:00Z" }] });
+        }
+        if (url.endsWith(":fetchAvailableModels")) {
+          return mockResponse({ models: { "gemini-model": { quotaInfo: { remainingFraction, resetTime: "2026-10-28T10:00:00Z" } } } });
+        }
+        return mockResponse({});
+      });
+
+      const result = await fetchQuotaForProvider("google");
+
+      assert.equal(result.ok, true);
+      const bucketWindow = result.usage?.models?.["gemini/gemini-bucket"]?.windows.daily;
+      assert.equal(bucketWindow?.usedPercent, expectedUsed);
+      assert.equal(bucketWindow?.remainingPercent, expectedRemaining);
+      const modelWindow = result.usage?.models?.["gemini/gemini-model"]?.windows.daily;
+      assert.equal(modelWindow?.usedPercent, expectedUsed);
+      assert.equal(modelWindow?.remainingPercent, expectedRemaining);
+    });
+  }
+});
