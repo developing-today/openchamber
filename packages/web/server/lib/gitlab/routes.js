@@ -143,6 +143,16 @@ function requestIssueNumber(value) {
   return Number.isSafeInteger(number) ? number : null;
 }
 
+// A binding revision is an exact count, so its query spelling is judged as
+// written: no trim, sign, fraction, exponent, radix prefix or leading zeros.
+// A loose Number(...) would reinterpret "1e3" as 1000 and pass the binding
+// authority check whenever that happened to be the current revision.
+function requestNonNegativeInteger(value) {
+  if (!isString(value) || !/^(0|[1-9]\d*)$/.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
 export function registerGitLabRoutes(app, options = {}) {
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? 10_000;
@@ -374,7 +384,7 @@ export function registerGitLabRoutes(app, options = {}) {
     provider: 'gitlab',
     instance: origin,
     accountId: req.query?.accountId,
-    bindingRevision: Number(req.query?.bindingRevision),
+    bindingRevision: requestNonNegativeInteger(req.query?.bindingRevision),
     primaryRemote: req.query?.primaryRemote,
   });
   const isReadContextError = (error) => error?.code?.startsWith('SOURCE_CONTROL_BINDING_')

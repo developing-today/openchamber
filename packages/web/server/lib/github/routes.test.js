@@ -568,3 +568,32 @@ describe('pull request head for a worktree made by number', () => {
       .rejects.toMatchObject({ status: 404, message: 'Pull request #42 was not found in example/project' });
   });
 });
+
+describe('GET /api/source-control/github/references bindingRevision parsing', () => {
+  it('hands the binding authority a strict non-negative integer or null', async () => {
+    const seen = [];
+    const app = express();
+    registerGitHubRoutes(app, {
+      validateReadContext: vi.fn(async (context) => {
+        seen.push(context.bindingRevision);
+        throw Object.assign(new Error('Stale binding'), { code: 'SOURCE_CONTROL_BINDING_STALE', status: 409 });
+      }),
+    });
+    const read = (bindingRevision) => request(app).get('/api/source-control/github/references')
+      .query({ directory: '/repo', kind: 'issue', repositoryId: 'repo-1', bindingRevision })
+      .expect(409);
+
+    // Each of these reinterprets to a plain revision under Number(...), so a
+    // loose parse would pass the authority check when that revision is current.
+    for (const spelling of ['1e3', '0x10', '2.0', ' 2 ', '+2', '', '01', '-1', '9007199254740993']) {
+      await read(spelling);
+    }
+    expect(seen).toEqual([null, null, null, null, null, null, null, null, null]);
+
+    seen.length = 0;
+    for (const spelling of ['0', '2', '1000']) {
+      await read(spelling);
+    }
+    expect(seen).toEqual([0, 2, 1000]);
+  });
+});
