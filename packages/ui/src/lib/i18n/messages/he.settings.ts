@@ -964,7 +964,7 @@ export const settingsDict = {
   'settings.skills.catalog.shared.auth.accountHint': 'נכנס עם החשבון המחובר',
   'settings.skills.catalog.shared.auth.sshHint': 'נכנס עם מפתח ה-SSH שלה',
   'settings.skills.catalog.shared.auth.footerHint': 'אפשר להגדיר זהויות בהגדרות - זהויות Git.',
-  'settings.skills.catalog.shared.auth.footerHintArrow': 'אפשר להגדיר זהויות בהגדרות → זהויות Git.',
+  'settings.skills.catalog.shared.auth.footerHintArrow': 'אפשר להגדיר זהויות בהגדרות ← זהויות Git.',
   'settings.skills.catalog.conflicts.title': 'המיומנויות כבר קיימות',
   'settings.skills.catalog.conflicts.description': 'חלק מהמיומנויות שנבחרו כבר מותקנות בטווח הזה. יש לבחור אם לדלג עליהן או לדרוס אותן.',
   'settings.skills.catalog.conflicts.count': 'התנגשויות: {count}',
