@@ -62,6 +62,11 @@ export interface ProviderResult {
   error?: string;
   /** Subscription tier reported by the provider, when it exposes one. */
   planLabel?: string | null;
+  /** Per-credential identity, present when the provider holds several stored credentials. */
+  credentialId?: string;
+  credentialLabel?: string;
+  credentialActive?: boolean;
+  accountLabel?: string;
   usage: ProviderUsage | null;
   fetchedAt: number;
 }

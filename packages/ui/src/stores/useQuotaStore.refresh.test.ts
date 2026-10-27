@@ -137,6 +137,33 @@ describe('quota refresh failure is not empty success', () => {
   });
 });
 
+describe('per-credential quota results', () => {
+  test('two stored credentials produce two labeled results for one provider', async () => {
+    handleRequest = async () => Response.json([
+      { ...result('codex'), credentialId: 'cred_main', credentialLabel: 'Main', credentialActive: true, accountLabel: 'main@example.com' },
+      { ...result('codex'), credentialId: 'cred_second', credentialLabel: 'Second', credentialActive: false },
+    ]);
+    expect(await useQuotaStore.getState().fetchProviderQuota('codex')).toBe(true);
+    const entries = useQuotaStore.getState().results.filter((entry) => entry.providerId === 'codex');
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ credentialId: 'cred_main', credentialLabel: 'Main', credentialActive: true, accountLabel: 'main@example.com' });
+    expect(entries[1]).toMatchObject({ credentialId: 'cred_second', credentialLabel: 'Second', credentialActive: false });
+    expect(useQuotaStore.getState().refreshErrors).toEqual({});
+  });
+
+  test('one failing credential keeps the other credential sample and surfaces its error', async () => {
+    handleRequest = async () => Response.json([
+      { ...result('codex'), credentialId: 'cred_main', credentialActive: true },
+      { ...result('codex'), credentialId: 'cred_second', credentialActive: false, ok: false, usage: null, error: 'Second account rejected' },
+    ]);
+    expect(await useQuotaStore.getState().fetchProviderQuota('codex')).toBe(true);
+    const entries = useQuotaStore.getState().results.filter((entry) => entry.providerId === 'codex');
+    expect(entries).toHaveLength(2);
+    expect(entries[0].usage?.windows.session.usedPercent).toBe(42);
+    expect(useQuotaStore.getState().refreshErrors.codex).toBe('Second account rejected');
+  });
+});
+
 describe('quota request deadline', () => {
   test('bounds a transport that never returns headers, even if it ignores abort', async () => {
     let signal: AbortSignal | null | undefined;
