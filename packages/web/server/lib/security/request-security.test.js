@@ -105,6 +105,40 @@ describe('request security runtime', () => {
     expect(await viaIpv6('https://evil.example.com')).toBe(false);
   });
 
+  test('allows cross-IP loopback aliases when the server is reached with a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv4 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '127.0.0.1:3000' },
+      socket: {},
+    });
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]:3000' },
+      socket: {},
+    });
+
+    expect(await viaIpv4('http://[::1]:3000')).toBe(true);
+    expect(await viaIpv6('http://127.0.0.1:3000')).toBe(true);
+    expect(await viaIpv4('https://evil.example.com')).toBe(false);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
+  test('allows cross-IP loopback aliases when the server is reached without a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv4 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '127.0.0.1' },
+      socket: {},
+    });
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]' },
+      socket: {},
+    });
+
+    expect(await viaIpv4('http://[::1]')).toBe(true);
+    expect(await viaIpv6('http://127.0.0.1')).toBe(true);
+    expect(await viaIpv4('https://evil.example.com')).toBe(false);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
   test('allows the [::1] alias when the server is reached via localhost', async () => {
     const runtime = createRuntime();
 
