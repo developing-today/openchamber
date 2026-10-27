@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
-import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -322,5 +326,93 @@ describe('renewStoredLogin', () => {
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('not connected');
     configureOpenCodeCredentials({ list: async () => rows });
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('cannot write');
+  });
+});
+
+describe('openCodeLocalCredentialSource', () => {
+  let dir;
+  let dbPath;
+
+  const createStore = (rows) => {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`create table credential (
+      id text primary key,
+      integration_id text,
+      label text not null,
+      value text not null,
+      connector_id text,
+      method_id text,
+      active integer,
+      time_created integer not null,
+      time_updated integer not null
+    )`);
+    const insert = db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)');
+    for (const row of rows) {
+      insert.run(row.id, row.integration, row.label ?? 'default', row.value, row.active ?? null, row.created, row.created);
+    }
+    db.close();
+  };
+
+  const keyRow = (id, integration, key, extra = {}) => ({
+    id,
+    integration,
+    value: JSON.stringify({ type: 'key', key }),
+    created: 100,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-auth-test-'));
+    dbPath = path.join(dir, 'opencode.db');
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('marks the newest legacy row active when no row carries the flag', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'old-key', { created: 100 }),
+      keyRow('cred_b', 'deepseek', 'new-key', { created: 200 }),
+    ]);
+    const entries = await openCodeLocalCredentialSource({ dbPath }).list();
+    expect(entries).toEqual([
+      { id: 'cred_a', integrationID: 'deepseek', label: 'default', active: false, value: { type: 'key', key: 'old-key' } },
+      { id: 'cred_b', integrationID: 'deepseek', label: 'default', active: true, value: { type: 'key', key: 'new-key' } },
+    ]);
+  });
+
+  it('honors an explicit active flag over creation order', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'pinned-key', { created: 100, active: 1 }),
+      keyRow('cred_b', 'deepseek', 'newer-key', { created: 200, active: 0 }),
+    ]);
+    const entries = await openCodeLocalCredentialSource({ dbPath }).list();
+    expect(entries.find((entry) => entry.id === 'cred_a')?.active).toBe(true);
+    expect(entries.find((entry) => entry.id === 'cred_b')?.active).toBe(false);
+  });
+
+  it('projects through the shared readers, skipping unreadable rows', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'live-key', { created: 100 }),
+      { id: 'cred_broken', integration: 'wafer', value: 'not json', created: 100 },
+      { id: 'cred_orphan', integration: null, value: JSON.stringify({ type: 'key', key: 'x' }), created: 100 },
+    ]);
+    configureOpenCodeCredentials(openCodeLocalCredentialSource({ dbPath }));
+    await expect(readOpenCodeCredentials()).resolves.toEqual({
+      deepseek: { type: 'api', key: 'live-key' },
+    });
+    const rows = await listStoredCredentials();
+    expect(rows.map((row) => row.id)).toEqual(['cred_a']);
+  });
+
+  it('fails clearly when the store file is missing', async () => {
+    await expect(openCodeLocalCredentialSource({ dbPath }).list()).rejects.toThrow('not found');
+  });
+
+  it('fails rather than answering empty when every stored row is unreadable', async () => {
+    createStore([{ id: 'cred_broken', integration: 'wafer', value: 'not json', created: 100 }]);
+    await expect(openCodeLocalCredentialSource({ dbPath }).list()).rejects.toThrow('none could be read');
   });
 });
