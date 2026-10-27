@@ -96,7 +96,15 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
     try {
       const { providerId } = req.params;
       if (!providerId) return res.status(400).json({ error: 'Provider ID is required' });
-      const { fetchQuotaForProvider } = await getQuotaProviders();
+      const { fetchQuotaForProvider, fetchQuotaForProviderInstances } = await getQuotaProviders();
+      // Per-credential providers answer one labeled result per stored
+      // credential (#474); the web route must carry all of them, not just the
+      // active credential (#481). A single result keeps the long-standing
+      // object shape so existing consumers see no change.
+      if (fetchQuotaForProviderInstances) {
+        const results = await fetchQuotaForProviderInstances(providerId);
+        return res.json(results.length === 1 ? results[0] : results);
+      }
       res.json(await fetchQuotaForProvider(providerId));
     } catch (error) {
       console.error('Failed to fetch quota:', error);
