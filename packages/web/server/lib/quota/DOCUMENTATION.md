@@ -10,7 +10,7 @@ extension applies the same policy in its own process at activation.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
-- The CLI (`packages/web/bin/lib/commands-quota.js`) imports the same entrypoint for `openchamber quota`. No server is running in that process, so the command wires the credential source itself from the external-OpenCode settings (`OPENCODE_HOST` / `OPENCODE_PORT` / `OPENCODE_SERVER_PASSWORD`) before dispatching.
+- The CLI (`packages/web/bin/lib/commands-quota.js`) imports the same entrypoint for `openchamber quota`. No server is running in that process, so the command wires the credential source itself from the external-OpenCode settings (`OPENCODE_HOST` / `OPENCODE_PORT` / `OPENCODE_SERVER_PASSWORD`) before dispatching. When the server is unreachable (a transport failure, never an answered refusal), the CLI falls back to OpenCode's local credential store for that run and stamps each result with the `credentialSource` that served it; its fetches run with bounded concurrency under a per-provider timeout, and each result carries `elapsedMs` (a timed-out provider answers a `status: 'timeout'` row). Those three fields are attached by the CLI, not by the providers.
 - `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.

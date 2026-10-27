@@ -32,6 +32,10 @@
  * after it, which is how OpenCode takes a login from outside.
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 
@@ -95,6 +99,103 @@ export const openCodeCredentialSource = ({
     },
   };
 };
+
+/**
+ * Where OpenCode keeps its database: `OPENCODE_DB` when set (absolute, or
+ * relative to the data directory), else `opencode.db` in the data
+ * directory, which follows `XDG_DATA_HOME` as OpenCode does.
+ */
+const resolveOpenCodeDbPath = (env) => {
+  const home = asNonEmptyString(env.HOME) ?? os.homedir();
+  const dataHome = asNonEmptyString(env.XDG_DATA_HOME) ?? path.join(home, '.local', 'share');
+  const dataDir = path.join(dataHome, 'opencode');
+  const configured = (env.OPENCODE_DB ?? '').trim();
+  if (configured && configured !== ':memory:') return path.resolve(dataDir, configured);
+  return path.join(dataDir, 'opencode.db');
+};
+
+// The driver is imported lazily, the way the routing telemetry reader does
+// it: a static import of `node:sqlite` would keep a runtime that lacks it
+// from loading this module at all, and only the local source needs SQLite.
+const loadLocalSqliteOpener = async () => {
+  try {
+    const { DatabaseSync } = await import('node:sqlite');
+    return (dbPath) => new DatabaseSync(dbPath, { readOnly: true });
+  } catch {
+    // fall through to bun:sqlite
+  }
+  try {
+    const { Database } = await import('bun:sqlite');
+    return (dbPath) => new Database(dbPath, { readonly: true });
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The rows of OpenCode's `credential` table in the order the server lists
+ * them: selection sorts each integration's chosen row last (the `active`
+ * flag first, then creation order, then id), and the listing marks that
+ * last row active. Rows the server would skip (no integration, a value
+ * that is not a credential) are skipped here too, with a warning; a table
+ * that holds rows but none readable is a failure, never an empty store.
+ */
+const readLocalCredentialEntries = (db, dbPath) => {
+  const rows = db
+    .prepare('select id, integration_id, label, value from credential order by active asc, time_created asc, id asc')
+    .all();
+  const entries = [];
+  let skipped = 0;
+  for (const row of rows) {
+    let value = null;
+    try {
+      value = JSON.parse(row.value);
+    } catch {
+      value = null;
+    }
+    if (!row.integration_id || !value || (value.type !== 'key' && value.type !== 'oauth')) {
+      skipped += 1;
+      continue;
+    }
+    entries.push({ id: row.id, integrationID: row.integration_id, label: row.label, value });
+  }
+  if (entries.length === 0 && rows.length > 0) {
+    throw new Error(`OpenCode credential store at ${dbPath} holds ${rows.length} rows but none could be read`);
+  }
+  if (skipped > 0) {
+    console.warn(`OpenCode credential store at ${dbPath}: skipped ${skipped} unreadable credential rows.`);
+  }
+  const selectedIndex = new Map();
+  entries.forEach((entry, index) => selectedIndex.set(entry.integrationID, index));
+  return entries.map((entry, index) => ({ ...entry, active: selectedIndex.get(entry.integrationID) === index }));
+};
+
+/**
+ * OpenCode's credential store read straight from its database file, with
+ * no server in between: the same rows `openCodeCredentialSource` asks the
+ * running OpenCode for, in the same shape. A fallback for readers on the
+ * same machine (the quota CLI) when no server is listening. Read-only —
+ * no create/remove — and it has no launch environment, so variable keys
+ * stay unknown exactly as they are for an external OpenCode.
+ */
+export const openCodeLocalCredentialSource = ({ env = process.env, dbPath, openDatabase } = {}) => ({
+  list: async () => {
+    const resolvedPath = dbPath ?? resolveOpenCodeDbPath(env);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`OpenCode credential store not found at ${resolvedPath}`);
+    }
+    const open = openDatabase ?? (await loadLocalSqliteOpener());
+    if (!open) {
+      throw new Error('Reading the local OpenCode credential store needs a runtime with node:sqlite or bun:sqlite');
+    }
+    const db = open(resolvedPath);
+    try {
+      return readLocalCredentialEntries(db, resolvedPath);
+    } finally {
+      db.close();
+    }
+  },
+});
 
 const metadataString = z.string();
 

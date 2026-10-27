@@ -144,6 +144,7 @@ exists in OpenCode's store.
 
 - `configureOpenCodeCredentials(source | null)`: wires the reader to a `{ list }` credential source; reads throw until it is wired.
 - `openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders, getLaunchEnvironment? })`: the running OpenCode as that source, URL and headers read per call; `getLaunchEnvironment` returns the managed launch environment or null.
+- `openCodeLocalCredentialSource({ env?, dbPath? })`: OpenCode's credential store read straight from its database file (`OPENCODE_DB`, else `opencode.db` under the XDG data directory), in the same row shape and order the server lists — selection sorts each integration's chosen row last and that row is marked active. Read-only, no launch environment. It exists for readers on the same machine when no server is listening (the quota CLI's fallback); the server and VS Code keep the running OpenCode as their only source.
 - `readOpenCodeCredentials()`: each integration's active credential, keyed by
   integration id (the provider id for providers), in the legacy `auth.json`
   entry shape (`{ type: 'api', key }` /

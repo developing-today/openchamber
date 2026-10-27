@@ -24,6 +24,10 @@ USAGE:
   A provider with several stored credentials prints one block per
   credential, labeled with the credential and the account it metered.
   Quota is read from the running OpenCode, the same read the Usage page makes.
+  When no OpenCode server answers, credentials are read from OpenCode's
+  local store on this machine instead; every result then names the
+  source that served it (credentialSource in --json, a note on stderr
+  otherwise), and one provider's failure or timeout never hides the rest.
 
 OUTPUT OPTIONS:
   --all                   Include providers OpenCode has turned off
@@ -34,9 +38,10 @@ OUTPUT OPTIONS:
   successful result at all.
 
 ENVIRONMENT:
-  OPENCODE_HOST               OpenCode server base URL (default: http://127.0.0.1:4096)
-  OPENCODE_PORT               OpenCode server port when OPENCODE_HOST is unset
-  OPENCODE_SERVER_PASSWORD    Password of a secured OpenCode server
+  OPENCODE_HOST                   OpenCode server base URL (default: http://127.0.0.1:4096)
+  OPENCODE_PORT                   OpenCode server port when OPENCODE_HOST is unset
+  OPENCODE_SERVER_PASSWORD        Password of a secured OpenCode server
+  OPENCHAMBER_QUOTA_TIMEOUT_MS    Per-provider fetch timeout in milliseconds (default: 10000)
 `;
 
 // The web server resolves the OpenCode endpoint from its own runtime state.
@@ -144,10 +149,150 @@ const defaultLoadQuotaRuntime = async () => {
   return {
     configureOpenCodeCredentials: authModule.configureOpenCodeCredentials,
     openCodeCredentialSource: authModule.openCodeCredentialSource,
+    openCodeLocalCredentialSource: authModule.openCodeLocalCredentialSource,
     listConfiguredQuotaProviders: quotaModule.listConfiguredQuotaProviders,
     listQuotaProviderCatalogue: quotaModule.listQuotaProviderCatalogue,
     fetchQuotaForProviderInstances: quotaModule.fetchQuotaForProviderInstances,
   };
+};
+
+const TRANSPORT_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+  'EPIPE',
+]);
+
+/**
+ * Whether a credential read failed because OpenCode could not be reached
+ * at all, as opposed to the server answering and refusing. The OpenCode
+ * client marks its own transport failures with `reason: 'Transport'` (an
+ * HTTP answer is a different reason and stays authoritative); the walk
+ * down the cause chain covers the fetch and socket errors underneath.
+ */
+const isTransportFailure = (error) => {
+  let current = error;
+  for (let depth = 0; current && depth < 8; depth += 1) {
+    if (current.reason === 'Transport') return true;
+    if (typeof current.code === 'string' && TRANSPORT_ERROR_CODES.has(current.code)) return true;
+    const message = typeof current.message === 'string' ? current.message : '';
+    if (message.startsWith('Transport:') || message === 'fetch failed') return true;
+    current = current.cause;
+  }
+  return false;
+};
+
+/**
+ * The server credential source with the local store behind it. The first
+ * transport failure switches every later read in the run to the local
+ * store — a server that is down does not come back mid-run — and
+ * `servedBy()` reports which source the run's reads came from, so the
+ * output never presents a store read as a live server read. Writes and
+ * the launch environment always stay with the server source.
+ */
+const createFallbackCredentialSource = (primary, fallback) => {
+  let fellBack = false;
+  const source = {
+    servedBy: () => (fellBack ? 'local' : 'server'),
+    list: async () => {
+      if (fellBack) return fallback.list();
+      try {
+        return await primary.list();
+      } catch (error) {
+        if (!isTransportFailure(error)) throw error;
+        fellBack = true;
+        try {
+          return await fallback.list();
+        } catch (fallbackError) {
+          const reason = error instanceof Error ? error.message : 'OpenCode server unreachable';
+          const storeReason = fallbackError instanceof Error ? fallbackError.message : 'local credential store unreadable';
+          throw new Error(`${reason}; the local credential store could not be read either (${storeReason})`);
+        }
+      }
+    },
+  };
+  if (typeof primary.create === 'function') source.create = (input) => primary.create(input);
+  if (typeof primary.remove === 'function') source.remove = (credentialID) => primary.remove(credentialID);
+  if (typeof primary.listEnvironmentKeys === 'function') source.listEnvironmentKeys = () => primary.listEnvironmentKeys();
+  return source;
+};
+
+const QUOTA_FETCH_CONCURRENCY = 6;
+const DEFAULT_QUOTA_TIMEOUT_MS = 10_000;
+
+const resolveQuotaTimeoutMs = (env) => {
+  const parsed = Number.parseInt(env.OPENCHAMBER_QUOTA_TIMEOUT_MS ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_QUOTA_TIMEOUT_MS;
+};
+
+/** Runs `worker` over `items` with at most `limit` in flight; results keep input order. */
+const mapWithConcurrency = async (items, limit, worker) => {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => runWorker()));
+  return results;
+};
+
+/**
+ * One provider's results with its elapsed time attached. A provider that
+ * outlives the timeout answers a `status: 'timeout'` row instead of
+ * holding the whole run; a dispatcher throw answers an error row for
+ * that provider alone. Either way the batch completes.
+ */
+const fetchProviderWithTimeout = async (runtime, providerId, providerName, timeoutMs) => {
+  const startedAt = Date.now();
+  let timer = null;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    const results = await Promise.race([runtime.fetchQuotaForProviderInstances(providerId), deadline]);
+    if (results === null) {
+      return [{
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        usage: null,
+        error: `Quota fetch timed out after ${timeoutMs} ms`,
+        status: 'timeout',
+        fetchedAt: startedAt,
+        elapsedMs: Date.now() - startedAt,
+      }];
+    }
+    const elapsedMs = Date.now() - startedAt;
+    return results.map((result) => ({ ...result, elapsedMs }));
+  } catch (error) {
+    return [{
+      providerId,
+      providerName,
+      ok: false,
+      configured: true,
+      usage: null,
+      error: error instanceof Error ? error.message : 'Request failed',
+      fetchedAt: startedAt,
+      elapsedMs: Date.now() - startedAt,
+    }];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const fetchProviders = async (runtime, providerIds, catalogue, timeoutMs) => {
+  const nameById = new Map(catalogue.map((entry) => [entry.id, entry.name]));
+  const groups = await mapWithConcurrency(providerIds, QUOTA_FETCH_CONCURRENCY, (id) =>
+    fetchProviderWithTimeout(runtime, id, nameById.get(id) ?? id, timeoutMs));
+  return groups.flat();
 };
 
 const hasWildcard = (token) => token.includes('*') || token.includes('?');
@@ -224,10 +369,13 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
     }
 
     const runtime = await loadQuotaRuntime();
-    runtime.configureOpenCodeCredentials(runtime.openCodeCredentialSource({
+    const serverSource = runtime.openCodeCredentialSource({
       buildOpenCodeUrl: (requestPath) => `${resolveOpenCodeBaseUrl(env)}${requestPath ?? ''}`,
       getOpenCodeAuthHeaders: () => buildOpenCodeAuthHeaders(env),
-    }));
+    });
+    const credentialSource = createFallbackCredentialSource(serverSource, runtime.openCodeLocalCredentialSource());
+    runtime.configureOpenCodeCredentials(credentialSource);
+    const timeoutMs = resolveQuotaTimeoutMs(env);
 
     let results;
     let requestedIds = null;
@@ -240,15 +388,18 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
         configuredIds: new Set(configured),
         includeDisabled: Boolean(options.all),
       });
-      const groups = [];
-      for (const id of requestedIds) {
-        groups.push(await runtime.fetchQuotaForProviderInstances(id));
-      }
-      results = groups.flat();
+      results = await fetchProviders(runtime, requestedIds, catalogue, timeoutMs);
     } else {
       const configured = await runtime.listConfiguredQuotaProviders({ includeDisabled: Boolean(options.all) });
-      const groups = await Promise.all(configured.map((id) => runtime.fetchQuotaForProviderInstances(id)));
-      results = groups.flat();
+      const catalogue = await runtime.listQuotaProviderCatalogue();
+      results = await fetchProviders(runtime, configured, catalogue, timeoutMs);
+    }
+
+    const credentialSourceName = credentialSource.servedBy();
+    results = results.map((result) => ({ ...result, credentialSource: credentialSourceName }));
+
+    if (credentialSourceName === 'local' && !isJsonMode(options)) {
+      process.stderr.write('note: the OpenCode server was unreachable, so credentials came from the local OpenCode store.\n');
     }
 
     if (isJsonMode(options)) {
@@ -279,4 +430,7 @@ export {
   buildOpenCodeAuthHeaders,
   formatQuotaResultLines,
   formatQuotaQuietLine,
+  isTransportFailure,
+  createFallbackCredentialSource,
+  resolveQuotaTimeoutMs,
 };

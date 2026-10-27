@@ -6,6 +6,9 @@ import {
   buildOpenCodeAuthHeaders,
   formatQuotaResultLines,
   formatQuotaQuietLine,
+  isTransportFailure,
+  createFallbackCredentialSource,
+  resolveQuotaTimeoutMs,
 } from './commands-quota.js';
 import { EXIT_CODE } from './cli-errors.js';
 
@@ -68,32 +71,64 @@ const fakeCatalogue = [
   { id: 'openrouter', name: 'OpenRouter', aliases: ['openrouter'], disabled: true },
 ];
 
-const createFakeRuntime = ({ configured = [], results = {}, catalogue = fakeCatalogue } = {}) => {
+const createFakeRuntime = ({
+  configured = [],
+  results = {},
+  catalogue = fakeCatalogue,
+  serverListError = null,
+  fetchDelays = {},
+} = {}) => {
   const calls = { fetch: [], list: [] };
+  const flight = { inFlight: 0, maxInFlight: 0 };
+  let activeSource = null;
   const runtime = {
-    configureOpenCodeCredentials: vi.fn(),
-    openCodeCredentialSource: vi.fn((deps) => ({ deps })),
+    configureOpenCodeCredentials: vi.fn((source) => {
+      activeSource = source;
+    }),
+    openCodeCredentialSource: vi.fn((deps) => ({
+      deps,
+      list: async () => {
+        if (serverListError) throw serverListError;
+        return [];
+      },
+    })),
+    openCodeLocalCredentialSource: vi.fn(() => ({
+      list: async () => [],
+    })),
     listQuotaProviderCatalogue: vi.fn(async () => catalogue),
     listConfiguredQuotaProviders: vi.fn(async (options) => {
       calls.list.push(options);
+      await activeSource.list();
       return configured;
     }),
     fetchQuotaForProviderInstances: vi.fn(async (id) => {
       calls.fetch.push(id);
-      const entry = results[id];
-      if (Array.isArray(entry)) return entry;
-      return [entry ?? {
-        providerId: id,
-        providerName: id,
-        ok: false,
-        configured: false,
-        usage: null,
-        error: 'Unsupported provider',
-        fetchedAt: 0,
-      }];
+      flight.inFlight += 1;
+      flight.maxInFlight = Math.max(flight.maxInFlight, flight.inFlight);
+      try {
+        const delay = fetchDelays[id] ?? 0;
+        if (delay > 0) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, delay);
+          });
+        }
+        const entry = results[id];
+        if (Array.isArray(entry)) return entry;
+        return [entry ?? {
+          providerId: id,
+          providerName: id,
+          ok: false,
+          configured: false,
+          usage: null,
+          error: 'Unsupported provider',
+          fetchedAt: 0,
+        }];
+      } finally {
+        flight.inFlight -= 1;
+      }
     }),
   };
-  return { runtime, calls };
+  return { runtime, calls, flight };
 };
 
 const codexLegacyResult = {
@@ -298,7 +333,11 @@ describe('quota command', () => {
     }
 
     const payload = JSON.parse(out.text());
-    expect(payload.providers).toEqual([codexResult]);
+    expect(payload.providers).toEqual([{
+      ...codexResult,
+      elapsedMs: expect.any(Number),
+      credentialSource: 'server',
+    }]);
   });
 
   it('emits one compact line per provider in quiet mode', async () => {
@@ -476,5 +515,193 @@ describe('quota provider arguments', () => {
     }
     const payload = JSON.parse(out.text());
     expect(payload.providers.map((entry) => entry.providerId)).toEqual(['github-copilot', 'codex']);
+  });
+});
+
+const captureStderr = () => {
+  const chunks = [];
+  const original = process.stderr.write;
+  process.stderr.write = vi.fn((chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  });
+  return {
+    text: () => chunks.join(''),
+    restore: () => {
+      process.stderr.write = original;
+    },
+  };
+};
+
+/** The error the OpenCode client throws when the server cannot be reached at all. */
+const transportError = () => {
+  const socket = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:4096'), { code: 'ECONNREFUSED' });
+  const fetchFailure = new TypeError('fetch failed');
+  fetchFailure.cause = socket;
+  const clientError = new Error('Transport: fetch failed');
+  clientError.name = 'ClientError';
+  clientError.reason = 'Transport';
+  clientError.cause = fetchFailure;
+  return clientError;
+};
+
+describe('quota transport failure detection', () => {
+  it('recognizes the client transport error and bare network failures', () => {
+    expect(isTransportFailure(transportError())).toBe(true);
+    expect(isTransportFailure(new TypeError('fetch failed'))).toBe(true);
+    const reset = new Error('read ECONNRESET');
+    reset.code = 'ECONNRESET';
+    expect(isTransportFailure(reset)).toBe(true);
+  });
+
+  it('does not treat an answered server or an unrelated error as transport failure', () => {
+    const answered = new Error('Unexpected status 500');
+    answered.reason = 'UnexpectedStatus';
+    expect(isTransportFailure(answered)).toBe(false);
+    expect(isTransportFailure(new Error('boom'))).toBe(false);
+    expect(isTransportFailure(null)).toBe(false);
+  });
+});
+
+describe('quota fallback credential source', () => {
+  it('serves from the server while it answers and reports the server as the source', async () => {
+    const primary = { list: vi.fn(async () => ['server-row']) };
+    const fallback = { list: vi.fn(async () => ['local-row']) };
+    const source = createFallbackCredentialSource(primary, fallback);
+    await expect(source.list()).resolves.toEqual(['server-row']);
+    expect(source.servedBy()).toBe('server');
+    expect(fallback.list).not.toHaveBeenCalled();
+  });
+
+  it('switches to the local store on a transport failure and stays there for the run', async () => {
+    const primary = { list: vi.fn(async () => { throw transportError(); }) };
+    const fallback = { list: vi.fn(async () => ['local-row']) };
+    const source = createFallbackCredentialSource(primary, fallback);
+    await expect(source.list()).resolves.toEqual(['local-row']);
+    await expect(source.list()).resolves.toEqual(['local-row']);
+    expect(primary.list).toHaveBeenCalledTimes(1);
+    expect(source.servedBy()).toBe('local');
+  });
+
+  it('lets a non-transport failure through without touching the local store', async () => {
+    const answered = new Error('Unexpected status 401');
+    answered.reason = 'UnexpectedStatus';
+    const primary = { list: vi.fn(async () => { throw answered; }) };
+    const fallback = { list: vi.fn(async () => ['local-row']) };
+    const source = createFallbackCredentialSource(primary, fallback);
+    await expect(source.list()).rejects.toBe(answered);
+    expect(fallback.list).not.toHaveBeenCalled();
+    expect(source.servedBy()).toBe('server');
+  });
+
+  it('names both failures when the server is down and the store cannot be read', async () => {
+    const primary = { list: vi.fn(async () => { throw transportError(); }) };
+    const fallback = { list: vi.fn(async () => { throw new Error('store missing'); }) };
+    const source = createFallbackCredentialSource(primary, fallback);
+    await expect(source.list()).rejects.toThrow('Transport: fetch failed');
+    await expect(source.list()).rejects.toThrow('store missing');
+  });
+});
+
+describe('quota command with the server down', () => {
+  it('reads credentials from the local store and says so on every result', async () => {
+    const { runtime } = createFakeRuntime({
+      configured: ['codex'],
+      results: { codex: codexResult },
+      serverListError: transportError(),
+    });
+    const quotaCommand = createCommand(runtime);
+    const out = captureStdout();
+    try {
+      await quotaCommand({ json: true }, null);
+    } finally {
+      out.restore();
+    }
+    const payload = JSON.parse(out.text());
+    expect(payload.providers).toHaveLength(1);
+    expect(payload.providers[0]).toMatchObject({ providerId: 'codex', ok: true, credentialSource: 'local' });
+  });
+
+  it('notes the local store on stderr in human mode', async () => {
+    const { runtime } = createFakeRuntime({
+      configured: ['codex'],
+      results: { codex: codexResult },
+      serverListError: transportError(),
+    });
+    const quotaCommand = createCommand(runtime);
+    const out = captureStdout();
+    const err = captureStderr();
+    try {
+      await quotaCommand({}, null);
+    } finally {
+      out.restore();
+      err.restore();
+    }
+    expect(out.text()).toContain('Codex (codex)');
+    expect(err.text()).toContain('local OpenCode store');
+  });
+
+  it('still fails the run when the server answers with an error', async () => {
+    const answered = new Error('Unexpected status 500');
+    answered.reason = 'UnexpectedStatus';
+    const { runtime } = createFakeRuntime({ serverListError: answered });
+    const quotaCommand = createCommand(runtime);
+    await expect(quotaCommand({}, null)).rejects.toBe(answered);
+  });
+});
+
+describe('quota fetch timeout and concurrency', () => {
+  it('parses the timeout from the environment with a sane default', () => {
+    expect(resolveQuotaTimeoutMs({})).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '250' })).toBe(250);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '0' })).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '-5' })).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: 'nope' })).toBe(10_000);
+  });
+
+  it('answers a timeout row for a slow provider and keeps the rest of the batch', async () => {
+    const catalogue = [
+      ...fakeCatalogue,
+      { id: 'slow', name: 'Slow Provider', aliases: ['slow'], disabled: false },
+    ];
+    const { runtime } = createFakeRuntime({
+      catalogue,
+      results: { codex: codexResult, slow: { ...codexResult, providerId: 'slow', providerName: 'Slow Provider' } },
+      fetchDelays: { slow: 200 },
+    });
+    const quotaCommand = createCommand(runtime, { OPENCHAMBER_QUOTA_TIMEOUT_MS: '25' });
+    const out = captureStdout();
+    const previousExitCode = process.exitCode;
+    try {
+      await quotaCommand({ json: true }, ['codex', 'slow']);
+    } finally {
+      out.restore();
+      process.exitCode = previousExitCode;
+    }
+    const payload = JSON.parse(out.text());
+    expect(payload.providers.map((entry) => entry.providerId)).toEqual(['codex', 'slow']);
+    expect(payload.providers[0]).toMatchObject({ ok: true, credentialSource: 'server' });
+    expect(payload.providers[0].elapsedMs).toEqual(expect.any(Number));
+    const slow = payload.providers[1];
+    expect(slow).toMatchObject({ providerId: 'slow', providerName: 'Slow Provider', ok: false, status: 'timeout' });
+    expect(slow.error).toContain('timed out after 25 ms');
+    expect(slow.elapsedMs).toBeLessThan(200);
+  });
+
+  it('fetches configured providers in parallel and keeps listing order', async () => {
+    const configured = ['codex', 'claude', 'deepseek', 'wafer', 'kilo'];
+    const fetchDelays = Object.fromEntries(configured.map((id) => [id, 50]));
+    const { runtime, flight } = createFakeRuntime({ configured, fetchDelays });
+    const quotaCommand = createCommand(runtime);
+    const out = captureStdout();
+    try {
+      await quotaCommand({ json: true }, null);
+    } finally {
+      out.restore();
+    }
+    const payload = JSON.parse(out.text());
+    expect(payload.providers.map((entry) => entry.providerId)).toEqual(configured);
+    expect(flight.maxInFlight).toBeGreaterThanOrEqual(3);
+    expect(flight.maxInFlight).toBeLessThanOrEqual(6);
   });
 });
