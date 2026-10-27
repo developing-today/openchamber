@@ -57,6 +57,60 @@ describe('Cursor quota', () => {
     expect(result.usage.windows.billing_cycle.valueLabel).toBe('$23.00');
   });
 
+  it('reports windowSeconds as the billing-cycle duration, not time until reset', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        billingCycleStart: '1700000000000',
+        billingCycleEnd: '1702592000000',
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBe(2592000);
+  });
+
+  it('reports windowSeconds as null when the billing-cycle start is missing', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        billingCycleEnd: 1702592000000,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
+    expect(result.usage.windows.billing_cycle.resetAt).toBe(1702592000000);
+  });
+
+  it('reports windowSeconds as null when the billing-cycle start is not before the end', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        billingCycleStart: 1702592000000,
+        billingCycleEnd: 1702592000000,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
+  });
+
   it('falls back to auth/usage and team-scoped GetHardLimit for enterprise accounts', async () => {
     const fetchMock = mockResponses(enterpriseRoutes);
 
@@ -69,6 +123,39 @@ describe('Cursor quota', () => {
     expect(result.usage.windows.on_demand).toBeUndefined();
     const hardLimitCall = fetchMock.mock.calls.find(([url]) => String(url).includes('GetHardLimit'));
     expect(JSON.parse(hardLimitCall[1].body)).toEqual({ teamId: '424242' });
+  });
+
+  it('reports enterprise windowSeconds as the billing-cycle duration', async () => {
+    mockResponses(enterpriseRoutes);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBe(288471);
+  });
+
+  it('reports enterprise windowSeconds as null when the billing-cycle start is missing', async () => {
+    mockResponses({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: ok({ billingCycleEnd: '1787932328088', displayThreshold: 100 })
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
+  });
+
+  it('reports enterprise windowSeconds as null when the billing-cycle start is not before the end', async () => {
+    mockResponses({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: ok({ billingCycleStart: '1788220800000', billingCycleEnd: '1787932328088', displayThreshold: 100 })
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
   });
 
   it('picks the largest request bucket and skips metadata', async () => {
