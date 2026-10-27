@@ -1,5 +1,5 @@
-import { readAuthFile } from '../../opencode/auth.js';
-import { asObject, buildResult, getAuthEntry, normalizeAuthEntry, toNumber, toUsageWindow } from '../utils/index.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { asNonEmptyString, asObject, buildResult, getAuthEntry, normalizeAuthEntry, toNumber, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'command-code';
 export const providerName = 'Command Code';
@@ -7,10 +7,10 @@ export const aliases = ['command-code', 'commandcode', 'command_code', 'command 
 
 const API_BASE_URL = 'https://api.commandcode.ai';
 
-const getApiKey = (auth = readAuthFile()) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const stored = entry?.key ?? entry?.access ?? entry?.token;
-  return (typeof stored === 'string' ? stored.trim() : '') || process.env.COMMAND_CODE_API_KEY?.trim() || null;
+const getApiKey = (auth) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth ?? {}, aliases));
+  const stored = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
+  return stored ?? asNonEmptyString(process.env.COMMAND_CODE_API_KEY) ?? null;
 };
 
 const requestJson = async (path, apiKey, fetchImpl) => {
@@ -67,7 +67,7 @@ export const parseCommandCodeCredits = (payload) => {
 export const fetchCommandCodeUsage = async (apiKey, fetchImpl = fetch) => {
   const identity = asObject(await requestJson('/alpha/whoami', apiKey, fetchImpl));
   const org = asObject(identity?.org);
-  const orgId = typeof org?.id === 'string' ? org.id.trim() : '';
+  const orgId = asNonEmptyString(org?.id) ?? '';
   const creditsPath = orgId
     ? `/alpha/billing/credits?orgId=${encodeURIComponent(orgId)}`
     : '/alpha/billing/credits';
@@ -77,13 +77,13 @@ export const fetchCommandCodeUsage = async (apiKey, fetchImpl = fetch) => {
   return windows;
 };
 
-export const isConfigured = () => Boolean(getApiKey());
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
-export const fetchQuota = async (auth = readAuthFile()) => {
-  const apiKey = getApiKey(auth);
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+  const apiKey = getApiKey(await readAuth());
   if (!apiKey) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
   try {
-    return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });
+    return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey, fetchImpl) } });
   } catch (error) {
     return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }

@@ -63,11 +63,12 @@ describe('Command Code quota provider', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ org: { id: 'org-1' } })))
       .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
-    vi.stubGlobal('fetch', fetchMock);
-    const result = await fetchQuota({ 'command-code': { type: 'oauth', access: 'test-token' } });
+    const result = await fetchQuota({
+      readAuth: async () => ({ 'command-code': { type: 'oauth', access: 'test-token' } }),
+      fetchImpl: fetchMock,
+    });
     expect(result).toMatchObject({ providerId: 'command-code', ok: true, configured: true });
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-token');
-    vi.unstubAllGlobals();
   });
 
   it('recognizes Command Code auth entries under supported provider ID variants', async () => {
@@ -75,11 +76,16 @@ describe('Command Code quota provider', () => {
       const fetchMock = vi.fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ org: { id: 'org-1' } })))
         .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
-      vi.stubGlobal('fetch', fetchMock);
-
-      const result = await fetchQuota({ [providerId]: { type: 'oauth', access: 'test-token' } });
+      const result = await fetchQuota({
+        readAuth: async () => ({ [providerId]: { type: 'oauth', access: 'test-token' } }),
+        fetchImpl: fetchMock,
+      });
       expect(result).toMatchObject({ providerId: 'command-code', ok: true, configured: true });
-      vi.unstubAllGlobals();
     }
+  });
+
+  it('reports not configured when no credential is stored', async () => {
+    const result = await fetchQuota({ readAuth: async () => ({}) });
+    expect(result).toMatchObject({ providerId: 'command-code', ok: false, configured: false });
   });
 });
