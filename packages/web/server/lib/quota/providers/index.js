@@ -23,6 +23,7 @@ import * as google from './google/index.js';
 import * as antigravity from './antigravity/index.js';
 import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
+import * as meta from './meta.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
 import * as openrouter from './openrouter.js';
@@ -155,6 +156,13 @@ const registry = {
     aliases: kimi.aliases,
     isConfigured: kimi.isConfigured,
     fetchQuota: kimi.fetchQuota
+  },
+  meta: {
+    providerId: meta.providerId,
+    providerName: meta.providerName,
+    aliases: meta.aliases,
+    isConfigured: meta.isConfigured,
+    fetchQuota: meta.fetchQuota
   },
   openrouter: {
     providerId: openrouter.providerId,
