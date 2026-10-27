@@ -2556,7 +2556,8 @@ const fetchCursorQuota = async (): Promise<ProviderResult> => {
       return buildResult({ providerId: 'cursor', providerName: planName ? `Cursor ${String(planName)}` : 'Cursor', ok: true, configured: true, usage: { windows } });
     }
     const planUsage = (usage.planUsage as Record<string, unknown> | undefined) ?? {};
-    const usedPercent = toNumber(planUsage.totalPercentUsed);
+    const rawUsedPercent = toNumber(planUsage.totalPercentUsed);
+    const usedPercent = rawUsedPercent === null ? null : Math.min(100, Math.max(0, rawUsedPercent));
     return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: true, configured: true, usage: { windows: { billing_cycle: toUsageWindow({ usedPercent, windowSeconds: null, resetAt: toTimestamp(usage.billingCycleEnd) }) } } });
   } catch (error) { return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' }); }
 };

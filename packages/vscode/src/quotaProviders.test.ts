@@ -2055,6 +2055,33 @@ describe('Cursor quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 42);
   });
 
+  test('clamps planUsage percentages above 100', async () => {
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: true, planUsage: { totalPercentUsed: 150 }, billingCycleEnd: '1788220800000' } } });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 100);
+  });
+
+  test('clamps negative planUsage percentages to zero', async () => {
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: true, planUsage: { totalPercentUsed: -20 }, billingCycleEnd: '1788220800000' } } });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 0);
+  });
+
+  test('keeps planUsage percentage null when it is missing', async () => {
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: true, planUsage: {}, billingCycleEnd: '1788220800000' } } });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, null);
+  });
+
   test('falls back to auth/usage and team-scoped GetHardLimit for enterprise accounts', async () => {
     let hardLimitBody = '';
     routeCursorApi(enterpriseRoutes, (url, body) => {
