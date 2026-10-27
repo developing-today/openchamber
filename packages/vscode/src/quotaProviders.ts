@@ -3965,6 +3965,11 @@ const requestMetaPlanUsage = async (
   return { kind: 'usage', body };
 };
 
+const toMetaUsedPercent = (value: MetaWindowPayload['used_percent']): number | null => {
+  const percent = toNumber(value);
+  return percent === null ? null : clampPercent(percent);
+};
+
 const metaWindowsFrom = (subsUsage: MetaSubscriptionUsage | undefined) => {
   const windows = new Map<string, UsageWindow>();
 
@@ -3973,7 +3978,7 @@ const metaWindowsFrom = (subsUsage: MetaSubscriptionUsage | undefined) => {
     const durationMinutes = toNumber(rolling.window_duration_mins);
     const windowSeconds = durationMinutes !== null && durationMinutes > 0 ? durationMinutes * 60 : null;
     windows.set(windowSeconds ? resolveWindowLabel(windowSeconds) : 'rolling', toUsageWindow({
-      usedPercent: toNumber(rolling.used_percent),
+      usedPercent: toMetaUsedPercent(rolling.used_percent),
       windowSeconds,
       resetAt: toTimestamp(rolling.resets_at),
     }));
@@ -3982,7 +3987,7 @@ const metaWindowsFrom = (subsUsage: MetaSubscriptionUsage | undefined) => {
   const weekly = subsUsage?.weekly;
   if (weekly) {
     windows.set('weekly', toUsageWindow({
-      usedPercent: toNumber(weekly.used_percent),
+      usedPercent: toMetaUsedPercent(weekly.used_percent),
       windowSeconds: META_WEEKLY_SECONDS,
       resetAt: toTimestamp(weekly.resets_at),
     }));

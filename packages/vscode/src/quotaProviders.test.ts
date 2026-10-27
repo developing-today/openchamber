@@ -3100,6 +3100,42 @@ describe('Meta quota provider', () => {
     assert.equal(result.usage?.windows.weekly.windowSeconds, 604800);
   });
 
+  test('clamps out-of-range percentages to [0, 100] and keeps a missing one unknown', async () => {
+    const clamped = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse({
+        is_subs_active: true,
+        subs_usage: {
+          window: { used_percent: 150, window_duration_mins: 300 },
+          weekly: { used_percent: -20 },
+        },
+      }),
+    });
+
+    assert.equal(clamped.ok, true);
+    assert.equal(clamped.usage?.windows['5h'].usedPercent, 100);
+    assert.equal(clamped.usage?.windows['5h'].remainingPercent, 0);
+    assert.equal(clamped.usage?.windows.weekly.usedPercent, 0);
+    assert.equal(clamped.usage?.windows.weekly.remainingPercent, 100);
+
+    const missing = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse({
+        is_subs_active: true,
+        subs_usage: {
+          window: { window_duration_mins: 300 },
+          weekly: {},
+        },
+      }),
+    });
+
+    assert.equal(missing.ok, true);
+    assert.equal(missing.usage?.windows['5h'].usedPercent, null);
+    assert.equal(missing.usage?.windows.weekly.usedPercent, null);
+  });
+
   test('falls back to the Muse CLI account token when the key endpoint refuses the minted key', async () => {
     const requests: string[] = [];
     const result = await fetchMetaQuota({

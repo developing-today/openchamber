@@ -71,6 +71,40 @@ describe('Meta quota windows', () => {
     expect(weekly.resetAt).toBe(1793577600 * 1000);
   });
 
+  it('clamps out-of-range percentages to [0, 100]', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
+      is_subs_active: true,
+      subs_usage: {
+        window: { used_percent: 150, window_duration_mins: 300 },
+        weekly: { used_percent: -20 },
+      },
+    }));
+
+    const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(100);
+    expect(result.usage.windows['5h'].remainingPercent).toBe(0);
+    expect(result.usage.windows.weekly.usedPercent).toBe(0);
+    expect(result.usage.windows.weekly.remainingPercent).toBe(100);
+  });
+
+  it('keeps a missing used_percent unknown instead of inventing a value', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
+      is_subs_active: true,
+      subs_usage: {
+        window: { window_duration_mins: 300 },
+        weekly: {},
+      },
+    }));
+
+    const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBeNull();
+    expect(result.usage.windows.weekly.usedPercent).toBeNull();
+  });
+
   it('labels an unnamed rolling window without guessing a duration', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
       is_subs_active: true,
