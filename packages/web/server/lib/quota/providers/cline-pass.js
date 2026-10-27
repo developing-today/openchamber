@@ -24,6 +24,8 @@ const WINDOW_KINDS = new Map([
   ['monthly', { key: 'monthly', windowSeconds: null }]
 ]);
 
+const clampPercent = (value) => Math.min(100, Math.max(0, value));
+
 const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
@@ -78,9 +80,10 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       if (!limit) continue;
       const kind = WINDOW_KINDS.get(asNonEmptyString(limit.type));
       if (!kind) continue;
-      const usedPercent = toNumber(asNonEmptyString(limit.percentUsed)
+      const rawUsedPercent = toNumber(asNonEmptyString(limit.percentUsed)
         ?? (Number.isFinite(limit.percentUsed) ? limit.percentUsed : null));
-      if (usedPercent === null) continue;
+      if (rawUsedPercent === null) continue;
+      const usedPercent = clampPercent(rawUsedPercent);
       windows[kind.key] = toUsageWindow({
         usedPercent,
         windowSeconds: kind.windowSeconds,
