@@ -205,18 +205,21 @@ describe('PoolAdvancedFields', () => {
     expect(changes.at(-1)).toEqual({ targets: ['p/cheap'] });
   });
 
-  test('shows a weight per model target only when the selection is weighted, and saves it by reference', async () => {
-    const plain = await renderFields({ targets: ['p/cheap'] }, onChange);
-    expect(plain.querySelector('input[aria-label="Weight: p/cheap"]')).toBeNull();
-    await act(async () => {
-      mounted?.root.unmount();
-    });
-    mounted?.restore();
-    mounted = null;
+  test('shows a weight per model target only when the selection draws by weight, and saves it by reference', async () => {
+    const container = await renderFields({ targets: ['p/cheap'] }, onChange);
+    expect(container.querySelector('input[aria-label="Weight: p/cheap"]')).toBeNull();
 
-    const weighted = await renderFields({ targets: ['p/cheap#high'], selection: 'weighted' }, onChange);
-    await typeInto(inputNamed(weighted, 'Weight: p/cheap'), '3');
+    await rerenderFields({ targets: ['p/cheap'], selection: 'ordered' }, onChange);
+    expect(container.querySelector('input[aria-label="Weight: p/cheap"]')).toBeNull();
+
+    await rerenderFields({ targets: ['p/cheap#high'], selection: 'weighted' }, onChange);
+    await typeInto(inputNamed(container, 'Weight: p/cheap'), '3');
     expect(changes.at(-1)).toMatchObject({ weights: { 'p/cheap': 3 } });
+
+    await rerenderFields({ targets: ['p/cheap#high'], selection: 'round-robin' }, onChange);
+    expect(container.querySelector('input[aria-label="Weight: p/cheap"]')).not.toBeNull();
+    await typeInto(inputNamed(container, 'Weight: p/cheap'), '2');
+    expect(changes.at(-1)).toMatchObject({ weights: { 'p/cheap': 2 } });
   });
 });
 

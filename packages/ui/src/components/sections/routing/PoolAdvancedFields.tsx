@@ -79,7 +79,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
         </Select>
       </SettingsFieldRow>
 
-      {route.selection === 'weighted' ? (
+      {route.selection === 'weighted' || route.selection === 'round-robin' ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {references.map((reference) => (
             <RangedNumberField
