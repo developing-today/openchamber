@@ -2486,9 +2486,18 @@ const cursorCreditsWindow = (credits: Record<string, unknown> | null): UsageWind
   return balance === null ? null : toUsageWindow({ usedPercent: null, windowSeconds: null, resetAt: null, valueLabel: `$${formatMoney(balance / 100)}` });
 };
 
+const cursorCycleMs = (value: unknown): number | null => normalizeTimestamp(toNumber(value)) ?? toTimestamp(value);
+
+const cursorCycleWindowSeconds = (startValue: unknown, endValue: unknown): number | null => {
+  const start = cursorCycleMs(startValue);
+  const end = cursorCycleMs(endValue);
+  return start !== null && end !== null && end > start ? Math.floor((end - start) / 1000) : null;
+};
+
 const cursorEnterpriseWindows = (usage: Record<string, unknown> | null, plan: Record<string, unknown> | null, authUsage: Record<string, unknown> | null, hardLimit: Record<string, unknown> | null, memberSpend: Record<string, unknown> | null): Record<string, UsageWindow> => {
-  const resetAt = toTimestamp((plan?.planInfo as Record<string, unknown> | undefined)?.billingCycleEnd ?? usage?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const planInfo = (plan?.planInfo as Record<string, unknown> | undefined);
+  const resetAt = toTimestamp(planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
+  const windowSeconds = cursorCycleWindowSeconds(planInfo?.billingCycleStart ?? usage?.billingCycleStart, planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
   const windows: Record<string, UsageWindow> = {};
   const requestUsage = cursorRequestUsage(authUsage);
   if (requestUsage) {

@@ -1924,6 +1924,32 @@ describe('Cursor quota provider (VS Code parity)', () => {
     assert.equal(hardLimitBody, JSON.stringify({ teamId: '424242' }));
   });
 
+  test('reports enterprise windowSeconds as the billing-cycle duration, not time until reset', async () => {
+    routeCursorApi({
+      ...enterpriseRoutes,
+      GetTeamSpend: { body: { teamMemberSpend: [{ userId: 424242, spendCents: 672 }] } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    // planInfo.billingCycleEnd 1788220800000 - usage.billingCycleStart 1787932328088 = 288471s
+    assert.equal(result.usage!.windows.billing_cycle!.windowSeconds, 288471);
+    assert.equal(result.usage!.windows.on_demand!.windowSeconds, 288471);
+  });
+
+  test('reports enterprise windowSeconds as null when the billing-cycle start is missing', async () => {
+    routeCursorApi({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: { body: { billingCycleEnd: '1787932328088', displayThreshold: 100 } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.windowSeconds, null);
+  });
+
   test('reports on-demand spend from GetTeamSpend matched by userId', async () => {
     routeCursorApi({
       ...enterpriseRoutes,
