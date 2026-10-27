@@ -294,6 +294,28 @@ describe('computePoolHealth', () => {
     expect(health.pools.pool1.targets.map(({ suggestion }) => suggestion)).toEqual([null, null]);
   });
 
+  it('offers no lower-weight suggestion for a pattern target, whose weight OpenCode never reads', async () => {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 0; i < 24; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'a' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, {
+        routes: { pool1: { selection: 'weighted', targets: ['openai/*', 'anthropic/b'] } },
+        plans,
+        links: { 'openai/*': 'openai-plus' },
+      }),
+      now,
+    });
+    const [pattern, concrete] = health.pools.pool1.targets;
+    // The pattern's plan is projected over, so every other suggestion
+    // condition holds; the pattern itself is the only reason for no offer.
+    expect(pattern.plan.projection.status).toBe('over');
+    expect(pattern.suggestion).toBeNull();
+    expect(concrete.suggestion).toBeNull();
+  });
+
   it('gives a request to the most specific link when overlapping links name different plans', async () => {
     const now = Date.now();
     const rows = [];
