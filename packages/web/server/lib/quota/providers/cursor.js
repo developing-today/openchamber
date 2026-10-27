@@ -6,6 +6,7 @@ import { readManagedCredential, writeManagedCredential } from '../credentials/pr
 import {
   buildResult,
   formatMoney,
+  normalizeTimestamp,
   toNumber,
   toTimestamp,
   toUsageWindow
@@ -213,11 +214,22 @@ const percentFromSpend = (planUsage) => {
   return Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100));
 };
 
+const toCycleMs = (value) => normalizeTimestamp(toNumber(value)) ?? toTimestamp(value);
+
+const cycleWindowSeconds = (startValue, endValue) => {
+  const start = toCycleMs(startValue);
+  const end = toCycleMs(endValue);
+  return start !== null && end !== null && end > start ? Math.floor((end - start) / 1000) : null;
+};
+
 const buildWindows = (usage, plan) => {
   const planUsage = usage?.planUsage ?? {};
   const spendLimitUsage = usage?.spendLimitUsage ?? {};
   const resetAt = toTimestamp(usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windowSeconds = cycleWindowSeconds(
+    usage?.billingCycleStart,
+    usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd
+  );
   const windows = {};
 
   windows.billing_cycle = toUsageWindow({
@@ -287,7 +299,10 @@ const pickTeamMemberSpendByUserId = (teamSpend, userId) => {
 
 const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpend) => {
   const resetAt = toTimestamp(plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windowSeconds = cycleWindowSeconds(
+    usage?.billingCycleStart,
+    plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd
+  );
   const windows = {};
   const requestUsage = pickRequestUsage(authUsage);
 
