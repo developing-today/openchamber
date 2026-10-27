@@ -54,7 +54,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -114,6 +114,34 @@ const stubFetchReturning = (resolver: (url: string, init?: RequestInit) => Promi
 const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit): void => {
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
+
+describe('quota timestamp helpers', () => {
+  test('toTimestamp rejects non-finite numeric inputs', () => {
+    assert.equal(toTimestamp(Infinity), null);
+    assert.equal(toTimestamp(-Infinity), null);
+    assert.equal(toTimestamp(NaN), null);
+  });
+
+  test('toTimestamp preserves finite numbers and date-string parsing', () => {
+    assert.equal(toTimestamp(1_700_000_000), 1_700_000_000_000);
+    assert.equal(toTimestamp(1_700_000_000_000), 1_700_000_000_000);
+    assert.equal(toTimestamp('2023-11-14T22:13:20.000Z'), 1_700_000_000_000);
+    assert.equal(toTimestamp('garbage'), null);
+  });
+
+  test('normalizeTimestamp rejects non-finite numeric inputs', () => {
+    assert.equal(normalizeTimestamp(Infinity), null);
+    assert.equal(normalizeTimestamp(-Infinity), null);
+    assert.equal(normalizeTimestamp(NaN), null);
+  });
+
+  test('normalizeTimestamp preserves finite scaling and rejects non-numeric inputs', () => {
+    assert.equal(normalizeTimestamp(1_700_000_000), 1_700_000_000_000);
+    assert.equal(normalizeTimestamp(1_700_000_000_000), 1_700_000_000_000);
+    assert.equal(normalizeTimestamp('2023-11-14T22:13:20.000Z'), null);
+    assert.equal(normalizeTimestamp(null), null);
+  });
+});
 
 test('dispatches Charm Hyper through the generic quota API', async () => {
   stubFetchReturning(async () => Response.json({ balance: 100 }));
