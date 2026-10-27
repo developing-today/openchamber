@@ -3178,6 +3178,37 @@ describe('Meta quota provider', () => {
     assert.equal(result.quotaResetAt, 1793577600000);
   });
 
+  test('surfaces the provider message on the require_payment wall instead of a bare error', async () => {
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse({
+        is_subs_active: true,
+        require_payment: true,
+        message: 'Payment required to continue the Meta plan',
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.quotaExhausted, true);
+    assert.match(result.error ?? '', /Payment required to continue the Meta plan/);
+  });
+
+  test('falls back to detail for the 402/429 exhausted message', async () => {
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse(
+        { detail: 'Meta weekly limit reached', quota: { limitKind: 'weekly', resetsAtMs: 1793577600000 } },
+        { ok: false, status: 429 },
+      ),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.quotaExhausted, true);
+    assert.match(result.error ?? '', /Meta weekly limit reached/);
+  });
+
   test('reports not configured without a meta credential', async () => {
     let requests = 0;
     const result = await fetchMetaQuota({
