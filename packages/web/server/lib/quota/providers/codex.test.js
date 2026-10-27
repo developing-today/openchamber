@@ -17,6 +17,13 @@ const mockUsage = (rateLimit) => {
   }));
 };
 
+const mockPayload = (payload) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => payload,
+  }));
+};
+
 describe('Codex quota windows', () => {
   it.each([
     { balance: 62500, unlimited: false, expected: '62500' },
@@ -73,6 +80,34 @@ describe('Codex quota windows', () => {
 
     expect(result.usage.windows['5h'].usedPercent).toBe(10);
     expect(result.usage.windows.weekly.usedPercent).toBe(20);
+  });
+
+  it.each([
+    { usedPercent: 150, expected: 100 },
+    { usedPercent: -20, expected: 0 },
+    { usedPercent: 200, expected: 100 },
+    { usedPercent: 42, expected: 42 },
+    { usedPercent: undefined, expected: null },
+  ])('clamps all Codex usage windows for used_percent=$usedPercent', async ({ usedPercent, expected }) => {
+    mockPayload({
+      rate_limit: {
+        primary_window: { used_percent: usedPercent, limit_window_seconds: 18000 },
+        secondary_window: { used_percent: usedPercent, limit_window_seconds: 604800 },
+      },
+      spend_control: {
+        individual_limit: {
+          limit: '7500',
+          used: '2674',
+          used_percent: usedPercent,
+        },
+      },
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.usage.windows['5h'].usedPercent).toBe(expected);
+    expect(result.usage.windows.weekly.usedPercent).toBe(expected);
+    expect(result.usage.windows.credits.usedPercent).toBe(expected);
   });
 
   it('surfaces spend_control individual limit for business accounts', async () => {
