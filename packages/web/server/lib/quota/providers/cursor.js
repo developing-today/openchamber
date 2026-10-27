@@ -205,13 +205,15 @@ const centsLabel = (cents) => {
   return value === null ? null : `$${formatMoney(value / 100)}`;
 };
 
+const clampPercent = (value) => Math.min(100, Math.max(0, value));
+
 const percentFromSpend = (planUsage) => {
   const explicit = toNumber(planUsage?.totalPercentUsed);
-  if (explicit !== null) return explicit;
+  if (explicit !== null) return clampPercent(explicit);
   const limit = toNumber(planUsage?.limit);
   const remaining = toNumber(planUsage?.remaining);
   if (!limit || remaining === null) return null;
-  return Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100));
+  return clampPercent(((limit - remaining) / limit) * 100);
 };
 
 const toCycleMs = (value) => normalizeTimestamp(toNumber(value)) ?? toTimestamp(value);
@@ -241,12 +243,12 @@ const buildWindows = (usage, plan) => {
 
   const autoPercent = toNumber(planUsage.autoPercentUsed);
   if (autoPercent !== null) {
-    windows.auto = toUsageWindow({ usedPercent: autoPercent, windowSeconds, resetAt });
+    windows.auto = toUsageWindow({ usedPercent: clampPercent(autoPercent), windowSeconds, resetAt });
   }
 
   const apiPercent = toNumber(planUsage.apiPercentUsed);
   if (apiPercent !== null) {
-    windows.api = toUsageWindow({ usedPercent: apiPercent, windowSeconds, resetAt });
+    windows.api = toUsageWindow({ usedPercent: clampPercent(apiPercent), windowSeconds, resetAt });
   }
 
   const planLimit = centsLabel(planUsage.limit);
@@ -255,7 +257,7 @@ const buildWindows = (usage, plan) => {
     const remaining = toNumber(planUsage.remaining);
     windows.plan_limit = toUsageWindow({
       usedPercent: limit && remaining !== null
-        ? Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100))
+        ? clampPercent(((limit - remaining) / limit) * 100)
         : null,
       windowSeconds,
       resetAt,
@@ -267,7 +269,7 @@ const buildWindows = (usage, plan) => {
   if (onDemandLimit && onDemandLimit > 0) {
     const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining) ?? 0;
     windows.on_demand = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, ((onDemandLimit - remaining) / onDemandLimit) * 100)),
+      usedPercent: clampPercent(((onDemandLimit - remaining) / onDemandLimit) * 100),
       windowSeconds,
       resetAt,
       valueLabel: `${centsLabel(remaining) ?? '$0.00'} remaining of ${centsLabel(onDemandLimit)}`
@@ -309,7 +311,7 @@ const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpe
   if (requestUsage) {
     const { used, limit } = requestUsage;
     windows.billing_cycle = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, (used / limit) * 100)),
+      usedPercent: clampPercent((used / limit) * 100),
       windowSeconds,
       resetAt,
       valueLabel: `${Math.round(used)} / ${Math.round(limit)}`
@@ -321,7 +323,7 @@ const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpe
   if (onDemandLimitDollars > 0 && onDemandUsedCents !== null) {
     const onDemandLimitCents = onDemandLimitDollars * 100;
     windows.on_demand = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, (onDemandUsedCents / onDemandLimitCents) * 100)),
+      usedPercent: clampPercent((onDemandUsedCents / onDemandLimitCents) * 100),
       windowSeconds,
       resetAt,
       valueLabel: `${centsLabel(onDemandUsedCents)} / ${centsLabel(onDemandLimitCents)}`

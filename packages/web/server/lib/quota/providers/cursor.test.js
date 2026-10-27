@@ -57,6 +57,83 @@ describe('Cursor quota', () => {
     expect(result.usage.windows.billing_cycle.valueLabel).toBe('$23.00');
   });
 
+  it.each([
+    [150, 100],
+    [-20, 0],
+    [200, 100],
+    [42, 42]
+  ])('clamps billing_cycle totalPercentUsed %s to %s', async (totalPercentUsed, expectedUsedPercent) => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({ enabled: true, planUsage: { totalPercentUsed, totalSpend: 2300 } }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.usedPercent).toBe(expectedUsedPercent);
+  });
+
+  it.each([
+    [150, 100],
+    [-20, 0],
+    [200, 100],
+    [42, 42]
+  ])('clamps autoPercentUsed %s to %s', async (autoPercentUsed, expectedUsedPercent) => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, autoPercentUsed, apiPercentUsed: 10, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.auto.usedPercent).toBe(expectedUsedPercent);
+    expect(result.usage.windows.auto.remainingPercent).toBe(100 - expectedUsedPercent);
+  });
+
+  it.each([
+    [150, 100],
+    [-20, 0],
+    [200, 100],
+    [42, 42]
+  ])('clamps apiPercentUsed %s to %s', async (apiPercentUsed, expectedUsedPercent) => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, autoPercentUsed: 10, apiPercentUsed, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.api.usedPercent).toBe(expectedUsedPercent);
+    expect(result.usage.windows.api.remainingPercent).toBe(100 - expectedUsedPercent);
+  });
+
+  it('omits the auto and api windows when their percentages are missing', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({ enabled: true, planUsage: { totalPercentUsed: 42, totalSpend: 2300 } }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.usedPercent).toBe(42);
+    expect(result.usage.windows.auto).toBeUndefined();
+    expect(result.usage.windows.api).toBeUndefined();
+  });
+
   it('reports windowSeconds as the billing-cycle duration, not time until reset', async () => {
     mockResponses({
       GetCurrentPeriodUsage: ok({
