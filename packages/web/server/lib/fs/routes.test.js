@@ -2687,6 +2687,25 @@ describe('GET /api/fs/find-in-files', () => {
     expect(unignored.body.matches.map((match) => match.relativePath)).toContain('ignored.log');
   });
 
+  it('defaults malformed limits and clamps valid limits', async () => {
+    await nativeFs.writeFile(path.join(repo, 'src', 'many.ts'), `${Array.from({ length: 505 }, (_value, index) => `needle ${index}`).join('\n')}\n`);
+    const ask = await register();
+
+    for (const limit of ['10junk', '2.9', '1e3']) {
+      const result = await ask({ query: 'needle', limit });
+      expect(result.body.matches).toHaveLength(200);
+      expect(result.body.stopped).toBe('limit');
+    }
+
+    const ten = await ask({ query: 'needle', limit: '10' });
+    expect(ten.body.matches).toHaveLength(10);
+    expect(ten.body.stopped).toBe('limit');
+
+    const capped = await ask({ query: 'needle', limit: '500' });
+    expect(capped.body.matches).toHaveLength(500);
+    expect(capped.body.stopped).toBe('limit');
+  });
+
   it('builds result paths under the root the client asked for when it is a symlink', async () => {
     const link = `${repo}-link`;
     await nativeFs.symlink(repo, link);

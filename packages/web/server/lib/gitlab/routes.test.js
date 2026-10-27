@@ -823,7 +823,7 @@ describe('GitLab routes', () => {
       primaryRemote: 'upstream',
     };
 
-    await request(app).get('/api/source-control/gitlab/pulls/list').query(query).expect(200);
+    await request(app).get('/api/source-control/gitlab/pulls/list').query({ ...query, page: '2.9' }).expect(200);
     await request(app).get('/api/source-control/gitlab/pulls/context')
       .query({ ...query, number: 5, owner: 'team', repo: 'repo', diff: '1', checkDetails: '1' }).expect(200);
 
@@ -940,6 +940,10 @@ describe('GitLab routes', () => {
       .query({ ...base, owner: 'team' }).expect(400);
     await request(app).get('/api/source-control/gitlab/pulls/context')
       .query({ ...base, number: 3, repo: 'repo' }).expect(400);
+    for (const number of ['10junk', '2.9']) {
+      await request(app).get('/api/source-control/gitlab/pulls/context')
+        .query({ ...base, number, owner: 'team', repo: 'repo' }).expect(400);
+    }
 
     expect(validateReadContext).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();

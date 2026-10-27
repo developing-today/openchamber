@@ -1033,9 +1033,10 @@ export const registerFsRoutes = (app, dependencies) => {
     if (!query.trim() || query.length > CONTENT_SEARCH_MAX_QUERY_LENGTH) {
       return res.status(400).json({ error: 'A search query is required' });
     }
-    const requestedLimit = isString(req.query.limit) ? Number.parseInt(String(req.query.limit), 10) : Number.NaN;
-    const limit = Number.isInteger(requestedLimit)
-      ? Math.min(Math.max(1, requestedLimit), CONTENT_SEARCH_MAX_LIMIT)
+    const requestedLimitText = isString(req.query.limit) ? String(req.query.limit) : '';
+    const requestedLimit = /^[1-9]\d*$/.test(requestedLimitText) ? Number(requestedLimitText) : null;
+    const limit = Number.isSafeInteger(requestedLimit)
+      ? Math.min(requestedLimit, CONTENT_SEARCH_MAX_LIMIT)
       : CONTENT_SEARCH_DEFAULT_LIMIT;
     const project = await resolveProjectDirectory(req);
     if (!project.directory) {
