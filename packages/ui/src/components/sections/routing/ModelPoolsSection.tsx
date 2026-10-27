@@ -244,7 +244,7 @@ const PoolRow: React.FC<{
             </Select>
           </SettingsStackedField>
           <p className={SETTINGS_HELPER_CLASS}>{t(`settings.pools.autonomyHelp.${route.autonomy ?? 'unset'}`)}</p>
-          <div className="space-y-1">
+          <div className="space-y-1" data-settings-item="routing.pools-targets">
             {targets.map((target, index) => {
               const until = targetUntil(target);
               const concrete = concreteTarget(target);

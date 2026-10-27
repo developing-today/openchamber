@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { I18nKey } from '@/lib/i18n/store';
 import { buildSettingsSearchResults } from './search';
 
@@ -187,5 +189,35 @@ describe('settings search', () => {
       getPageTitle: (page) => page,
     });
     expect(results.some((result) => result.id === 'integrations.guests')).toBe(false);
+  });
+});
+
+describe('settings search anchors', () => {
+  test('every routing entry id exists as a settings-item anchor in the component sources', () => {
+    const searchSource = readFileSync(join(__dirname, 'search.ts'), 'utf-8');
+    const routingIds = Array.from(searchSource.matchAll(/id: '([^']+)',\s+page: 'routing'/g), (match) => match[1]);
+    expect(routingIds.length).toBeGreaterThan(0);
+
+    // Settings search reveals a result by finding [data-settings-item="<id>"]
+    // on the page, so every entry needs a literal anchor in a component:
+    // a settingsItem prop, or a data-settings-item attribute (#325).
+    const anchors = new Set<string>();
+    const collect = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const entryPath = join(dir, entry.name);
+        if (entry.isDirectory()) collect(entryPath);
+        else if (entry.name.endsWith('.tsx')) {
+          const source = readFileSync(entryPath, 'utf-8');
+          for (const match of source.matchAll(/(?:settingsItem|data-settings-item)=\{?["']([^"']+)["']/g)) {
+            anchors.add(match[1]);
+          }
+        }
+      }
+    };
+    collect(join(__dirname, '..', '..', 'components'));
+
+    for (const id of routingIds) {
+      expect(anchors.has(id)).toBe(true);
+    }
   });
 });

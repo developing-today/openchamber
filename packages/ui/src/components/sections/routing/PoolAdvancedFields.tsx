@@ -62,7 +62,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
     <div className="space-y-4">
       <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.advanced.help')}</p>
 
-      <SettingsFieldRow label={t('settings.pools.advanced.selection')} description={t('settings.pools.advanced.selectionInfo')} settingsItem="pools.selection">
+      <SettingsFieldRow label={t('settings.pools.advanced.selection')} description={t('settings.pools.advanced.selectionInfo')} settingsItem="routing.pools-advanced">
         <Select
           value={route.selection ?? '__unset__'}
           onValueChange={(next) => onChange(setRouteField(route, 'selection', pickedValue(next)))}
