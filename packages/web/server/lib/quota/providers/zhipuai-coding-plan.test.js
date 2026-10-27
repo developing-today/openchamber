@@ -95,6 +95,46 @@ describe('Zhipu AI Coding Plan quota provider', () => {
     expect(result.usage.windows['5h'].valueLabel).toBe('900 / 2k credits');
   });
 
+  it('clamps out-of-range percentages to [0, 100] on credit and MCP windows', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 900, percentage: 150 },
+          { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 10000, currentValue: 6000, percentage: -20 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 150 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuota();
+    const windows = result.usage.windows;
+
+    expect(result.ok).toBe(true);
+    expect(windows['5h']).toMatchObject({ usedPercent: 100, remainingPercent: 0 });
+    expect(windows.weekly).toMatchObject({ usedPercent: 0, remainingPercent: 100 });
+    expect(windows['MCP Tools']).toMatchObject({ usedPercent: 100, remainingPercent: 0 });
+  });
+
+  it('clamps the derived currentValue/usage percentage to [0, 100] when percentage is missing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 100, currentValue: 200 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(100);
+    expect(result.usage.windows['5h'].remainingPercent).toBe(0);
+  });
+
   it('surfaces business failures reported inside HTTP 200 bodies', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
       code: 401,
