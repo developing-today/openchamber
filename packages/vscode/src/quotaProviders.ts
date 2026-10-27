@@ -1295,7 +1295,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
         const remainingPercent = remainingFraction !== null
           ? Math.round(remainingFraction * 100)
           : null;
-        const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+        const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
         const resetAt = toTimestamp(bucket.resetTime);
         const window = resolveGoogleWindow(source.sourceId, resetAt);
 
@@ -1324,7 +1324,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
         const remainingPercent = typeof remainingFraction === 'number'
           ? Math.round(remainingFraction * 100)
           : null;
-        const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+        const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
         const resetAt = toTimestamp(quotaInfo?.resetTime);
         const window = resolveGoogleWindow(source.sourceId, resetAt);
         models[scopedName] = {
@@ -1470,7 +1470,7 @@ const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
     for (const b of group.buckets ?? []) {
       const remainingFraction = toNumber(b.remainingFraction);
       const remainingPercent = remainingFraction !== null ? Math.round(remainingFraction * 100) : null;
-      const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+      const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
       const resetAt = toTimestamp(b.resetTime);
       const windowStr = (b.window ?? b.bucketId ?? '').toLowerCase();
 
@@ -1547,7 +1547,7 @@ const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
       const quotaInfo = modelData?.quotaInfo;
       const remainingFraction = quotaInfo?.remainingFraction;
       const remainingPercent = typeof remainingFraction === 'number' ? Math.round(remainingFraction * 100) : null;
-      const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+      const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
       const resetAt = toTimestamp(quotaInfo?.resetTime);
       const window = resolveGoogleWindow('antigravity', resetAt);
 
