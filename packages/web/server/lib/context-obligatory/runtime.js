@@ -4,6 +4,17 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_FETCH_LIMIT = 20;
 
+// A stored pin is only usable when its createdAt can become a Date:
+// buildContextPrompt renders it with toISOString(), which throws on
+// non-finite or out-of-range values, and one bad pin must not disable
+// re-injection for the whole session. Mirrors the UI reader's finite
+// check in contextObligatoryMessages.ts, plus the Date range that
+// reader never has to exercise.
+const isUsableCreatedAt = (value) =>
+  typeof value === 'number'
+  && Number.isFinite(value)
+  && !Number.isNaN(new Date(value).getTime());
+
 const readContextState = (session) => {
   const metadata = isRecord(session?.metadata) ? session.metadata : {};
   const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
@@ -11,7 +22,7 @@ const readContextState = (session) => {
     ? openchamber.context_obligatory_messages.filter((item) =>
       isRecord(item)
       && typeof item.id === 'string'
-      && typeof item.createdAt === 'number'
+      && isUsableCreatedAt(item.createdAt)
       && (item.role === 'user' || item.role === 'assistant'))
     : [];
   return { metadata, openchamber, messages };
