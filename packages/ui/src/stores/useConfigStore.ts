@@ -26,6 +26,7 @@ import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier
 import type { ModelRef } from "@/lib/settings/parsers";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { ensureDisabledProviders } from "@/lib/disabledProviders";
 import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
@@ -1158,6 +1159,9 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
     const context = captureConfigRuntimeContext();
     const cached = await readCachedCatalog(context.runtimeKey, directoryKey);
     if (!cached || !isConfigRuntimeContextCurrent(context)) return;
+    const disabledProviders = await ensureDisabledProviders();
+    if (!isConfigRuntimeContextCurrent(context)) return;
+    const disabledProviderIds = disabledProviders && disabledProviders.length > 0 ? new Set(disabledProviders) : null;
     const loadKey = getConfigLoadKey(context, directoryKey);
     useConfigStore.setState((state) => {
         const snapshot = state.directoryScoped[directoryKey] ?? createEmptyDirectoryScopedConfig();
@@ -1166,7 +1170,12 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
             || (isActive && (state.providersLoaded || state.providers.length > 0));
         const agentsLive = snapshot.agentsLoaded === true || snapshot.agents.length > 0
             || (isActive && (state.agentsLoaded || state.agents.length > 0));
-        const providers = !providersLive && cached.providers?.length ? cached.providers : null;
+        // The cache can predate a provider being turned off; the disabled
+        // list read for this runtime applies to it the same way it applies
+        // to a live catalog.
+        const providers = !providersLive && cached.providers?.length
+            ? (disabledProviderIds ? cached.providers.filter((provider) => !disabledProviderIds.has(provider.id)) : cached.providers)
+            : null;
         const agents = !agentsLive && cached.agents?.length ? cached.agents : null;
         if (!providers && !agents) return state;
         if (providers) _providersShownFromCache.set(loadKey, countCatalogModels(providers));
@@ -2296,8 +2305,15 @@ export const useConfigStore = create<ConfigStore>()(
                             // A provider the user switched off, or one with no usable
                             // model, is not offerable — v2 replaced the `connected` list
                             // with these two facts.
+                            // A location OpenCode has not reloaded since a provider
+                            // was turned off still lists that provider. The list
+                            // read once per runtime filters it here, for every
+                            // location, until OpenCode catches up.
+                            const disabledProviders = await ensureDisabledProviders();
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            const disabledProviderIds = disabledProviders && disabledProviders.length > 0 ? new Set(disabledProviders) : null;
                             const processedProviders: ProviderWithModelList[] = providers
-                                .filter((provider) => provider.activation !== "disabled" && modelsByProvider.has(provider.id))
+                                .filter((provider) => provider.activation !== "disabled" && !disabledProviderIds?.has(provider.id) && modelsByProvider.has(provider.id))
                                 .map((provider) => ({
                                     ...provider,
                                     models: modelsByProvider.get(provider.id) ?? [],

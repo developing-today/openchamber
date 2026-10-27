@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const disabledProvidersSchema = z.object({ providers: z.array(z.string()) });
 const errorSchema = z.object({ error: z.string().min(1) });
@@ -11,11 +12,78 @@ const errorSchema = z.object({ error: z.string().min(1) });
  * way Settings can show them again. Null where the runtime has no OpenChamber
  * server to ask (VS Code): the feature is not offered there.
  */
-export const fetchDisabledProviders = async (): Promise<string[] | null> => {
+const fetchDisabledProviders = async (): Promise<string[] | null> => {
   const response = await runtimeFetch('/api/provider/disabled');
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Could not read disabled providers (${response.status})`);
   return disabledProvidersSchema.parse(await response.json()).providers;
+};
+
+// The last list read from the current runtime, kept so every part of the app
+// filters from the same read. A location OpenCode has not reloaded since a
+// provider was turned off still lists that provider; this list is what keeps
+// it out of that location's picker. The snapshot belongs to the runtime it
+// was read from; after a runtime switch it is ignored until a read from the
+// new runtime lands. A `null` list is a read answer too: the runtime has no
+// OpenChamber server, so there is nothing to filter with.
+let snapshot: { runtimeKey: string; providers: string[] | null } | null = null;
+let inFlight: { runtimeKey: string; promise: Promise<string[] | null> } | null = null;
+let latestRead = 0;
+
+/** The last list read from the current runtime, or `null` when there is none. */
+export const peekDisabledProviders = (): string[] | null =>
+  snapshot?.runtimeKey === getRuntimeKey() ? snapshot.providers : null;
+
+/** Keeps a list the caller just read or wrote, so later reads reuse it. */
+export const rememberDisabledProviders = (providers: string[] | null): void => {
+  snapshot = { runtimeKey: getRuntimeKey(), providers };
+};
+
+/**
+ * Reads the list again and keeps it. A read started earlier never replaces
+ * one started later, so a slow first read cannot bring back the state from
+ * before a Settings change. Throws when the list cannot be read; a failed
+ * read is never an empty list.
+ */
+export const loadDisabledProviders = async (): Promise<string[] | null> => {
+  const runtimeKey = getRuntimeKey();
+  const read = ++latestRead;
+  const providers = await fetchDisabledProviders();
+  if (read === latestRead && runtimeKey === getRuntimeKey()) {
+    snapshot = { runtimeKey, providers };
+  }
+  return providers;
+};
+
+/**
+ * The current runtime's list, reading it once when no read has landed yet.
+ * Callers that arrive while that read runs share it. A failure answers
+ * `null`, the caller keeps the providers it has, and the failure is not
+ * kept: the next caller reads again.
+ */
+export const ensureDisabledProviders = (): Promise<string[] | null> => {
+  const runtimeKey = getRuntimeKey();
+  if (snapshot?.runtimeKey === runtimeKey) return Promise.resolve(snapshot.providers);
+  if (inFlight?.runtimeKey === runtimeKey) return inFlight.promise;
+  const promise = loadDisabledProviders()
+    .catch((error) => {
+      console.warn('[providers] could not read disabled providers:', error instanceof Error ? error.message : String(error));
+      return null;
+    })
+    .finally(() => {
+      if (inFlight?.promise === promise) inFlight = null;
+    });
+  inFlight = { runtimeKey, promise };
+  return promise;
+};
+
+/**
+ * Reads the list once the app has started, so the first catalog a picker
+ * shows is already filtered. A failure is left for the next catalog load
+ * or Settings visit to retry.
+ */
+export const prefetchDisabledProviders = (): void => {
+  void ensureDisabledProviders();
 };
 
 /** Turns a provider off or back on; answers with the new list. */
@@ -30,5 +98,7 @@ export const setProviderDisabled = async (providerId: string, disabled: boolean)
     const failure = errorSchema.safeParse(payload);
     throw new Error(failure.success ? failure.data.error : `Could not update the provider (${response.status})`);
   }
-  return disabledProvidersSchema.parse(payload).providers;
+  const providers = disabledProvidersSchema.parse(payload).providers;
+  rememberDisabledProviders(providers);
+  return providers;
 };
