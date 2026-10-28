@@ -40,7 +40,7 @@ const extractSessionStatusUpdate = (payload) => {
 
 const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
-export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
+export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent, getSessionModelProvider }) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
@@ -55,6 +55,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // leave when the call stops waiting (`trackWaitingPage`).
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
+  // False until the watcher stream delivers its first payload in this
+  // process; part of the session-activity v1 contract (design #612) so an
+  // empty read is distinguishable from a watcher that has not started.
+  let watcherReady = false;
 
   const getOrCreatePendingRequests = (sessionId) => {
     let entry = pendingRequestsBySession.get(sessionId);
@@ -363,12 +367,30 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     };
   };
 
+  // External observability contract v1 (design #612, phase 1 - #524): the
+  // per-session { type } phase is frozen; every other field is additive and
+  // an unknown is an explicit null, never a fabricated value. toolInFlight
+  // has no in-process per-session source today, so it ships null.
   const getSessionActivitySnapshot = () => {
-    const result = {};
+    const sessions = {};
     for (const [sessionId, data] of sessionActivityPhases) {
-      result[sessionId] = { type: data.phase };
+      const modelProvider = getSessionModelProvider ? getSessionModelProvider(sessionId) : null;
+      sessions[sessionId] = {
+        type: data.phase,
+        lastActivityAt: data.updatedAt,
+        status: sessionStates.get(sessionId)?.status ?? null,
+        model: modelProvider
+          ? { modelID: modelProvider.modelID ?? null, providerID: modelProvider.providerID ?? null }
+          : null,
+        toolInFlight: null,
+      };
     }
-    return result;
+    return {
+      version: 1,
+      serverTime: Date.now(),
+      watcherReady,
+      sessions,
+    };
   };
 
   const getActiveSessionCount = () => activeSessionCount;
@@ -447,6 +469,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
   const processOpenCodeSsePayload = (payload) => {
+    watcherReady = true;
     processBlockingRequestPayload(payload);
     const update = extractSessionStatusUpdate(payload);
     if (!update) return;
@@ -475,6 +498,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     sessionAttentionStates.clear();
     pendingRequestsBySession.clear();
     activeSessionCount = 0;
+    watcherReady = false;
   };
 
   return {
