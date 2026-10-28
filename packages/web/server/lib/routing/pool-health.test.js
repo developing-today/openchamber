@@ -115,6 +115,58 @@ describe('computePoolHealth', () => {
     expect(health.pools.pool1.targets[0].plan.projection).toMatchObject({ unit: 'tokens', projected: 2400, status: 'over' });
   });
 
+  it('labels a projection as a traffic estimate', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    expect(health.pools.pool1.targets[0].plan.projection).toMatchObject({ unit: 'requests', source: 'traffic-estimate' });
+    expect(health.pools.pool1.targets[0].plan.unprojectedQuotas).toEqual([]);
+  });
+
+  it('explains why usd and percent windows get no projection instead of silence', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('openai-metered', [
+      { name: 'monthly cost', unit: 'usd', limit: 20, windowHours: 720 },
+      { name: 'weekly share', unit: 'percent', limit: 80, windowHours: 168 },
+    ])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-metered' } }),
+      now,
+      hours: 24,
+    });
+    const target = health.pools.pool1.targets[0];
+    expect(target.plan.projection).toBeNull();
+    expect(target.plan.unprojectedQuotas).toEqual([
+      { quotaName: 'monthly cost', unit: 'usd', reason: 'needs-pricing' },
+      { quotaName: 'weekly share', unit: 'percent', reason: 'needs-provider-meter' },
+    ]);
+  });
+
+  it('still names an unprojected usd window beside a projected token window', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a', tokensIn: 10, tokensOut: 0, tokensReasoning: 0 }]);
+    const plans = [plan('openai-mixed', [
+      { name: 'daily tokens', unit: 'tokens', limit: 2000, windowHours: 24 },
+      { name: 'monthly cost', unit: 'usd', limit: 20, windowHours: 720 },
+    ])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-mixed' } }),
+      now,
+      hours: 24,
+    });
+    const target = health.pools.pool1.targets[0];
+    expect(target.plan.projection).toMatchObject({ unit: 'tokens', source: 'traffic-estimate' });
+    expect(target.plan.unprojectedQuotas).toEqual([
+      { quotaName: 'monthly cost', unit: 'usd', reason: 'needs-pricing' },
+    ]);
+  });
+
   it('reports the tightest of several quota windows', async () => {
     const now = Date.now();
     const rows = [];
