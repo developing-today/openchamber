@@ -352,7 +352,7 @@ const execGitReal = (args, cwd) => new Promise((resolve) => {
     resolve({
       stdout: String(stdout ?? ''),
       stderr: String(stderr ?? ''),
-      exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+      exitCode: error ? 1 : 0,
     });
   });
 });
