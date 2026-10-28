@@ -933,8 +933,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const sidebarLayout = useSessionDisplayStore((state) => state.sidebarLayout);
-  const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
-  const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
+  const zoneRowLines = useSessionDisplayStore((state) => state.sessionRowDisplay.zoneLines);
+  const setSessionRowDisplay = useSessionDisplayStore((state) => state.setSessionRowDisplay);
     // Branch per directory, for the second line of timeline-style rows (In
   // work, the List view): worktree sessions read their worktree's
   // branch, root sessions the project root's checked-out branch, which only
@@ -1830,9 +1830,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   };
 
   const handleToggleDetailedZoneRows = () => {
-    const next = !detailedZoneRows;
-    setDetailedZoneRows(next);
-    void updateDesktopSettings({ sidebarDetailedZoneRows: next });
+    // The phone keeps its own rows; the toggle only follows the Tree zone
+    // line count, like the old Detailed rows switch did.
+    const zoneLines = zoneRowLines === 'two' ? 'one' : 'two';
+    setSessionRowDisplay({ zoneLines });
+    void updateDesktopSettings({ sidebarSessionRowDisplay: { ...useSessionDisplayStore.getState().sessionRowDisplay, zoneLines } });
   };
 
   // List layout and attention sections: the same sidebarLayout value as the
@@ -1988,11 +1990,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const compactTimelineRows = timelineActive && sidebarLayout.timelineCompactRows;
 
   // Pinned and In work use the timeline's rows (two lines with the project's
-  // icon in List, one line in Tree unless detailed rows are on), so their
+  // icon in List, one line in Tree unless two-line zone rows are on), so their
   // branch and project context resolve whenever the list (not search or
   // reorder) is on screen. Attention zones use the same rows.
   const listActive = !normalizedQuery && !editingOrder;
-  const compactZoneRows = sidebarViewMode !== 'timeline' && !detailedZoneRows;
+  const compactZoneRows = sidebarViewMode !== 'timeline' && zoneRowLines !== 'two';
   const attentionZoneCount = [...zonePartition.sessionsByZone.keys()].filter((zone) => zone !== 'pinned' && zone !== 'work').length;
   const needsTimelineContext = timelineActive || (listActive && (workBucket.sessions.length > 0 || pinnedBucket.sessions.length > 0 || attentionZoneCount > 0));
 
@@ -2604,7 +2606,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {renderMenuChoice('pinned', 'sessions.sidebar.header.displayMode.showPinned', showPinnedSection, handleTogglePinnedSection)}
         {sessionWorkEnabled ? renderMenuChoice('work', 'sessions.sidebar.header.displayMode.showWork', showWorkSection, handleToggleWorkSection) : null}
         {/* List rows always carry two lines; Tree keeps Pinned and In work on one unless asked. */}
-        {sidebarViewMode === 'timeline' ? null : renderMenuChoice('detailed', 'sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, handleToggleDetailedZoneRows)}
+        {sidebarViewMode === 'timeline' ? null : renderMenuChoice('detailed', 'sessions.sidebar.header.displayMode.detailedZoneRows', zoneRowLines === 'two', handleToggleDetailedZoneRows)}
         {sidebarViewMode === 'timeline' && listSessionGrouping === 'project' ? (
           <>
             <DropdownMenuSeparator />

@@ -545,6 +545,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Bereich In Arbeit anzeigen',
   'sessions.sidebar.header.displayMode.showPinned': 'Bereich Angeheftet anzeigen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ausführliche Zeilen',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Seitenleisten-Zeilen…',
   'sessions.sidebar.activity.pinnedTitle': 'Angeheftet',
   'sessions.sidebar.header.displayMode.showArchived': 'Archivierte Sitzungen anzeigen',
   'sessions.sidebar.header.displayMode.collapseAll': 'Alle einklappen',

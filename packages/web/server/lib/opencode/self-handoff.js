@@ -29,7 +29,11 @@ const SUCCESSOR_EXEC_SCRIPT = 'export LISTEN_PID=$$ LISTEN_FDS=1; exec "$@"';
 export const isSelfHandoffEnabled = (env = process.env) => env.OPENCHAMBER_SELF_HANDOFF !== '0';
 
 export const resolveHandoffTimeoutMs = (env = process.env) => {
-  const value = Number(env.OPENCHAMBER_HANDOFF_TIMEOUT_MS);
+  // Only a plain decimal spelling counts: a bare Number(...) would silently
+  // honour '1e3' (a 1 s grace period), '0x10' (16 ms), '+5000', and '5000.0'.
+  const raw = String(env.OPENCHAMBER_HANDOFF_TIMEOUT_MS ?? '').trim();
+  if (!/^\d+$/.test(raw)) return DEFAULT_HANDOFF_TIMEOUT_MS;
+  const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : DEFAULT_HANDOFF_TIMEOUT_MS;
 };
 

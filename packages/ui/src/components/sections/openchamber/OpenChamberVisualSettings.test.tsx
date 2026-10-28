@@ -47,6 +47,7 @@ describe('OpenChamberVisualSettings', () => {
       await act(async () => root.unmount());
     } finally {
       useSessionDisplayStore.setState({ animatedActivityIndicators: initialAnimatedActivityIndicators });
+      useSessionDisplayStore.getState().setSessionRowDisplay({ zoneLines: 'one' });
       windowInstance.close();
       for (const [name, descriptor] of globalDescriptors) {
         if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -67,5 +68,31 @@ describe('OpenChamberVisualSettings', () => {
     ));
 
     expect(host.querySelector('[data-settings-item="appearance.session-activity"]')).not.toBeNull();
+  });
+
+  test('renders the sidebar rows section with a live preview row', async () => {
+    await act(async () => root.render(
+      <RuntimeAPIContext.Provider value={runtimeAPIs}>
+        <ThemeSystemProvider>
+          <I18nProvider>
+            <OpenChamberVisualSettings visibleSettings={['sidebarRows']} />
+          </I18nProvider>
+        </ThemeSystemProvider>
+      </RuntimeAPIContext.Provider>,
+    ));
+
+    expect(host.querySelector('[data-settings-item="appearance.sidebar-rows"]')).not.toBeNull();
+    expect(host.querySelector('[data-settings-item="appearance.sidebar-rows-lines"]')).not.toBeNull();
+    const branchRow = host.querySelector('[data-settings-item="appearance.sidebar-rows-branch"]');
+    expect(branchRow?.getAttribute('aria-pressed')).toBe('true');
+    // One line by default: the title and time show, the branch has no slot.
+    const section = host.querySelector('[data-settings-item="appearance.sidebar-rows"]');
+    expect(section?.textContent).toContain('Design the empty states');
+    expect(section?.textContent).not.toContain('feature/rows');
+    await act(async () => {
+      useSessionDisplayStore.getState().setSessionRowDisplay({ zoneLines: 'two' });
+    });
+    // Two lines: the branch gets its slot back.
+    expect(host.querySelector('[data-settings-item="appearance.sidebar-rows"]')?.textContent).toContain('feature/rows');
   });
 });

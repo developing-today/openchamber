@@ -116,6 +116,19 @@ export const createSettingsHelpers = (dependencies) => {
     chatsGroupIndex: z.number().int().min(0).max(10_000).optional(),
   });
   const SIDEBAR_LIST_SESSION_GROUPING_VALUES = new Set(['project', 'time']);
+  // The sidebar row display (`packages/ui/src/stores/useSessionDisplayStore.ts`
+  // `sessionRowDisplaySchema`). Like the sidebar layout above, the server
+  // checks shape only: a value a newer client adds must not drop the whole
+  // display here.
+  const sessionRowDisplaySchema = z.object({
+    zoneLines: z.enum(['one', 'two']).optional().catch(undefined),
+    showBranch: z.boolean().optional().catch(undefined),
+    showPrBadge: z.boolean().optional().catch(undefined),
+    showProviderLogo: z.boolean().optional().catch(undefined),
+    showProjectIcon: z.boolean().optional().catch(undefined),
+    showGoal: z.boolean().optional().catch(undefined),
+    showTime: z.boolean().optional().catch(undefined),
+  });
   // The interface languages (`LOCALES` in packages/ui/src/lib/i18n/runtime.ts);
   // settings-helpers.test.js fails when the two lists drift apart.
   const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
@@ -398,8 +411,13 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
       result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
     }
-    if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
-      result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
+    const sessionRowDisplay = sessionRowDisplaySchema.safeParse(candidate.sidebarSessionRowDisplay);
+    if (sessionRowDisplay.success) {
+      const display = {};
+      for (const [key, value] of Object.entries(sessionRowDisplay.data)) {
+        if (value !== undefined) display[key] = value;
+      }
+      if (Object.keys(display).length > 0) result.sidebarSessionRowDisplay = display;
     }
     const sidebarLayout = sidebarLayoutSchema.safeParse(candidate.sidebarLayout);
     if (sidebarLayout.success) {

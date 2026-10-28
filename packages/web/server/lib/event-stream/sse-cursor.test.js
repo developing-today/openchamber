@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createSseCursor, isResyncBlock, parseSseBlock } from './sse-cursor.js';
+import { createSseCursor, decodeOpenChamberCursor, encodeOpenChamberCursor, isOpenChamberCursor, isOpenCodeEventId, isResyncBlock, parseSseBlock } from './sse-cursor.js';
 
 describe('SSE cursor', () => {
   it('tracks the id of the last complete block and reports every block in order', () => {
@@ -72,6 +72,49 @@ describe('SSE cursor', () => {
 
   it('starts from the id the browser already holds', () => {
     expect(createSseCursor('ws:7').lastEventId()).toBe('ws:7');
+  });
+});
+
+describe('OpenChamber cursor', () => {
+  const INSTANCE = '6b1f3c2e-8d4a-4f7b-9c3e-2a5d7e9f1b40';
+
+  it('round-trips a stream position and its upstream OpenCode id', () => {
+    const cursor = encodeOpenChamberCursor({ stream: 'global', position: 42, upstream: `${INSTANCE}:7` });
+    expect(cursor).toBe(`occ1.global.42.${INSTANCE}:7`);
+    expect(decodeOpenChamberCursor(cursor)).toEqual({
+      version: 1,
+      stream: 'global',
+      position: 42,
+      upstream: `${INSTANCE}:7`,
+    });
+  });
+
+  it('round-trips a position with no upstream id yet', () => {
+    expect(decodeOpenChamberCursor(encodeOpenChamberCursor({ stream: 'global', position: 0 })))
+      .toEqual({ version: 1, stream: 'global', position: 0, upstream: '' });
+  });
+
+  it('cannot be mistaken for an OpenCode event id', () => {
+    const cursor = encodeOpenChamberCursor({ stream: 'global', position: 3, upstream: `${INSTANCE}:9` });
+    expect(isOpenCodeEventId(cursor)).toBe(false);
+    expect(isOpenChamberCursor(cursor)).toBe(true);
+    expect(isOpenChamberCursor(`${INSTANCE}:9`)).toBe(false);
+  });
+
+  it('rejects a wrong version, stream token, position or upstream form', () => {
+    expect(decodeOpenChamberCursor(`occ2.global.1.${INSTANCE}:1`)).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.GLOBAL.1.')).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.global.-1.')).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.global.1.2')).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.global.1.not-an-id')).toBeNull();
+    expect(decodeOpenChamberCursor('')).toBeNull();
+    expect(decodeOpenChamberCursor(undefined)).toBeNull();
+  });
+
+  it('refuses to encode a cursor the decoder would reject', () => {
+    expect(() => encodeOpenChamberCursor({ stream: 'global', position: -1 })).toThrow(TypeError);
+    expect(() => encodeOpenChamberCursor({ stream: 'Global', position: 1 })).toThrow(TypeError);
+    expect(() => encodeOpenChamberCursor({ stream: 'global', position: 1, upstream: 'nope' })).toThrow(TypeError);
   });
 });
 

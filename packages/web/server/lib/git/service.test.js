@@ -48,6 +48,7 @@ import {
   snapshotWorktree,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel,
+  ensureOpenCodeProjectId,
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
@@ -6326,5 +6327,53 @@ describe('git environment inside an AppImage', () => {
         else process.env[key] = value;
       }
     }
+  });
+});
+
+describe.runIf(canRunGit())('ensureOpenCodeProjectId', () => {
+  const initRepoWithCommit = (dir) => {
+    runGit(dir, ['init', '-b', 'main']);
+    runGit(dir, ['config', 'user.email', 'test@example.com']);
+    runGit(dir, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(dir, 'README.md'), '# Test');
+    runGit(dir, ['add', 'README.md']);
+    runGit(dir, ['commit', '-m', 'init']);
+    return runGit(dir, ['rev-list', '--max-parents=0', '--all']).trim();
+  };
+
+  it('caches the ID in .git/opencode for a plain checkout', async () => {
+    const repository = createTempDir();
+    const root = initRepoWithCommit(repository);
+    const commonDir = path.join(repository, '.git');
+    const id = await ensureOpenCodeProjectId(repository, commonDir);
+    expect(id).toBe(root);
+    expect(fs.readFileSync(path.join(commonDir, 'opencode'), 'utf8')).toBe(root);
+    await expect(ensureOpenCodeProjectId(repository, commonDir)).resolves.toBe(root);
+  });
+
+  it('caches the ID at the top of a bare repository without creating a .git entry', async () => {
+    const { remote } = createRepositoryWithRemote({ defaultBranch: 'main' });
+    const commonDir = runGit(remote, ['rev-parse', '--absolute-git-dir']).trim();
+    const id = await ensureOpenCodeProjectId(remote, commonDir);
+    expect(id).toMatch(/^[0-9a-f]{40}$/);
+    expect(fs.readFileSync(path.join(commonDir, 'opencode'), 'utf8')).toBe(id);
+    expect(fs.existsSync(path.join(remote, '.git'))).toBe(false);
+    await expect(ensureOpenCodeProjectId(remote, commonDir)).resolves.toBe(id);
+  });
+
+  it('caches the ID in a separate git dir, not through the .git pointer file', async () => {
+    const parent = createTempDir();
+    const separateGitDir = path.join(parent, 'separate.git');
+    const worktree = path.join(parent, 'worktree');
+    runGit(parent, ['init', '--separate-git-dir=' + separateGitDir, '-b', 'main', worktree]);
+    runGit(worktree, ['config', 'user.email', 'test@example.com']);
+    runGit(worktree, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(worktree, 'README.md'), '# Test');
+    runGit(worktree, ['add', 'README.md']);
+    runGit(worktree, ['commit', '-m', 'init']);
+    expect(fs.statSync(path.join(worktree, '.git')).isFile()).toBe(true);
+    const id = await ensureOpenCodeProjectId(worktree, separateGitDir);
+    expect(fs.readFileSync(path.join(separateGitDir, 'opencode'), 'utf8')).toBe(id);
+    await expect(ensureOpenCodeProjectId(worktree, separateGitDir)).resolves.toBe(id);
   });
 });

@@ -63,6 +63,15 @@ other.
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP, at most 12). The
   image grant route (`../markdown-image-grants/`) allows exactly those, and the
   chat reads them with the same rule.
+- `tier-chooser-card.js` builds the standardized `render.page` cards for the
+  model tier chooser (`Select Execution Tier`, one tile per tier submitting
+  `{ tier, model }`) and the quota fallback (`Quota Limit Reached`, tiles for
+  switch-provider, downgrade-tier and wait-for-reset submitting
+  `{ action: 'fallback', provider, tier }`). Pure helper: plain data in
+  (tiers, models.dev pricing, quota context), an HTML document string out;
+  pricing lookup stays with the caller. Every interpolated value is
+  HTML-escaped, and styling uses the `font-sans` class with `--bg-base`,
+  `--text-primary`, `--border-base` and `--accent-primary`.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.

@@ -181,12 +181,13 @@ file directly while iterating (`bun test <file>`).
 Do not treat a bare `bun test <directory>` over the UI suites as signal. Bun
 keeps one module registry for the whole invocation, so `mock.module`
 registrations and module-level singletons leak across files: a combined run
-over `packages/ui`'s sidebar, i18n, and hooks suites currently reports dozens
-of phantom failures in files that pass on their own. Issue #46 tracks the
-root-cause work and names the polluting files. To run a combined subtree
-today, pass `--isolate` (`bun test --isolate <paths>`), which gives each file
-a fresh global object and module registry; the per-file runner above remains
-the canonical full-suite command.
+over parts of `packages/ui` reports phantom failures in files that pass on
+their own. Issue #46 tracks the root-cause work and names the polluting files.
+The sidebar, i18n, and hooks suites restore their module mocks and pass
+together; the other trees do not yet. To run a combined subtree outside those,
+pass `--isolate` (`bun test --isolate <paths>`), which gives each file a fresh
+global object and module registry; the per-file runner above remains the
+canonical full-suite command.
 
 UI tests run on happy-dom, where DOMPurify stops visiting the siblings of a node
 it removed: test each malicious payload in its own call, or a combined payload

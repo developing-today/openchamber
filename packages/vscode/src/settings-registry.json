@@ -316,7 +316,7 @@
       "scope": "profile",
       "perSurface": true
     },
-    "sidebarDetailedZoneRows": {
+    "sidebarSessionRowDisplay": {
       "scope": "profile",
       "perSurface": true
     },

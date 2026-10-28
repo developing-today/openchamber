@@ -596,6 +596,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Show in work section',
   'sessions.sidebar.header.displayMode.showPinned': 'Show pinned section',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Detailed rows',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Sidebar rows…',
   'sessions.sidebar.activity.pinnedTitle': 'Pinned',
   'sessions.sidebar.header.displayMode.showArchived': 'Show archived sessions',
   'sessions.sidebar.header.displayMode.collapseAll': 'Collapse all',

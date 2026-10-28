@@ -419,6 +419,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Afficher la section en cours',
   'sessions.sidebar.header.displayMode.showPinned': 'Afficher la section épinglées',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Lignes détaillées',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Lignes de la barre latérale…',
   'sessions.sidebar.activity.pinnedTitle': 'Épinglées',
   'sessions.sidebar.header.displayMode.collapseAll': 'Tout réduire',
   'sessions.sidebar.header.displayMode.expandAll': 'Tout développer',

@@ -74,11 +74,14 @@ elapsed counters retain their existing precedence and behavior. A session
 row's title carries its state too: semibold at full strength while a finished
 turn is unseen or a permission or question waits on the user, full strength
 while it runs, muted otherwise; the active row keeps the selection colors. The display
-store is at version 10 (v10 dropped the Recent toggle): missing preferences inherit the default during hydration,
-while an explicitly saved choice survives reload. Version 11 adds
-`sidebarLayout`; a missing one takes the default, a stored one keeps what
-this version understands field by field, and anything that is not a layout is
-dropped.
+store is at version 12 (v10 dropped the Recent toggle, v12 folded the
+Detailed rows toggle into `sessionRowDisplay`): missing preferences inherit
+the default during hydration, while an explicitly saved choice survives
+reload. Version 11 adds `sidebarLayout`; a missing one takes the default, a
+stored one keeps what this version understands field by field, and anything
+that is not a layout is dropped. The row display parses the same way: a
+missing one takes the default, a stored one keeps what this version
+understands field by field.
 
 Full-app active records remain in the collection when their directory is no
 longer in known topology, such as a deleted worktree. Grouping first uses
@@ -138,7 +141,8 @@ virtualized, so the rows arrive 40 at a time as the end scrolls near (an
 intersection sentinel in `MobileTimelineList.tsx`), with no Show more row. The
 phone's Tree view follows the desktop tree: Chats, Pinned, In work and the
 attention zones list
-tree rows at level 0 (two-line timeline rows when Detailed rows is on, the
+tree rows at level 0 (two-line timeline rows when two-line zone rows are
+on, the
 zones showing all their sessions at once), and project sessions are
 tree rows (12px per level, subsession chevron on the left with a
 thumb-sized target) with the desktop's guide lines, worked out while the
@@ -350,16 +354,20 @@ and offer no Track action. An empty zone is not rendered. In List, rows use
 `renderContext: 'timeline-mixed'`: two lines, the project's icon before the
 branch; sorted by time, the list's three-line `'timeline-by-time'` rows. In Tree they use `'mixed-compact'` by default: one line like a Chats
 row, the PR or issue as a coloured mark without its number (its tooltip lists
-the links), the branch, project and model in the whole-row tooltip. The display
-menu's Detailed rows toggle (`detailedZoneRows`, `sidebarDetailedZoneRows`, per
-surface, off by default, offered in Tree only) gives Tree the two-line rows.
-The one-line Tree rows open to their subsessions like the project tree, with
+the links), the branch, project and model in the whole-row tooltip. The
+row display (`sessionRowDisplay`, `sidebarSessionRowDisplay`, per surface,
+one-line Tree zones and every element shown by default) lives in Settings →
+Appearance → Sidebar rows, with a live preview row and a display-menu
+shortcut; the display menu's Detailed rows toggle is its Tree zone line
+preset, offered in Tree only. Hidden elements leave their slots: the
+two-line rows keep their fixed heights whatever the display shows, so the
+virtualizer's per-kind estimates stay exact. The one-line Tree rows open to their subsessions like the project tree, with
 their own expansion state; in search they show the branches that lead to a
 match (`pruneSessionTreeForSidebarQuery`). The two-line rows, in List and with
-Detailed rows, never expand: their node drops its children, which feed the
+two-line zone rows, never expand: their node drops its children, which feed the
 badges instead. A run row in either opens its overview. Search in Tree
 keeps a root whose subsession matches: those subsessions are nowhere else in
-the sidebar, and the one-line rows open to them; with Detailed rows the root
+the sidebar, and the one-line rows open to them; with two-line zone rows the root
 stays listed too, though its row cannot open. Search in List matches the
 root itself only, as its project lists do, because List rows never show
 subsessions; the phone's search lists top-level
@@ -428,8 +436,9 @@ session list of their server, when they move into metadata, a pin whose
 session is gone is dropped, and one that fails to write stays for the next
 load. The phone sheet
 mirrors both toggles: its display menu offers Show pinned section and, in
-Tree, Detailed rows, and its Pinned and In work sections render tree rows in
-Tree unless detailed rows are on. VS Code
+Tree, the Detailed rows preset for the Tree zone line count, and its Pinned
+and In work sections render tree rows in Tree unless two-line zone rows are
+on. VS Code
 shows no section toggles, so it has no Pinned zone and its In work rows stay on
 one line.
 
@@ -442,7 +451,8 @@ pair as the changes file tree). VS Code has no switch and always renders
 the project sort, worktree sort and project display as submenus that name the
 current choice (Tree only; VS Code keeps the project sort), or in List the
 Sessions submenu (by project or by time), then the section toggles (Chats,
-Pinned, In work) and, in Tree, Detailed rows, then the List layout (List only:
+Pinned, In work) and, in Tree, the Detailed rows preset plus a Sidebar rows
+shortcut into Settings, then the List layout (List only:
 Chats in the list, Group by project, One line per session), the Section order, Needs attention, Open session and Layout
 submenus (not in VS Code), then Collapse all / Expand all.
 
@@ -837,3 +847,16 @@ The session tree frames a group instead: the line starts under the open row
 and stops at its last child with a corner, so where a worktree's or a
 session's children end reads at a glance, and a long tree is not striped by
 lines that run through rows they do not belong to.
+
+### Why sidebar test files put their module mocks back
+
+Bun keeps a `mock.module` replacement for the rest of the process and
+`mock.restore()` does not remove it. The sidebar suites replace stores, the
+session row and the activity state to keep a rendered surface small, and those
+replacements reached every later file in a combined `bun test` run:
+`useSessionListSync.test.tsx` alone left `useGlobalSessionsStore` as a bare
+selector, so `getState` was undefined for every subtree test that ran after it.
+A file that mocks a module another file imports now snapshots the real exports
+before the mock and restores them in `afterAll` through
+`test-utils/moduleMocks.ts`. The per-file runner hides the problem because
+every file gets a fresh process, so only the combined run proves the fix.

@@ -14,8 +14,49 @@ export const SSE_RESYNC_PAYLOAD_TYPE = 'server.resync';
 // (packages/server/src/event-feed.ts). Only such a cursor can be replayed from upstream.
 const OPENCODE_EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\d+$/i;
 
+// An OpenChamber cursor names a position in one OpenChamber stream and the OpenCode id that
+// position sits after. The `occ1.` prefix cannot collide with OpenCode's `<uuid>:<sequence>` form,
+// and the stream token lets the server reject a cursor minted for another stream before replay.
+const OPENCHAMBER_CURSOR_VERSION = 1;
+const OPENCHAMBER_CURSOR_PATTERN = /^occ1\.([a-z0-9-]+)\.(0|[1-9]\d*)\.(.*)$/;
+
 export function isOpenCodeEventId(id) {
   return OPENCODE_EVENT_ID.test(id ?? '');
+}
+
+/**
+ * Encodes the position of one OpenChamber stream and the OpenCode cursor it sits after.
+ * `position` counts state frames committed to the stream; `upstream` is empty until OpenCode
+ * has sent an event with an id. Throws on inputs the decoder would reject, so the two functions
+ * cannot drift into producing cursors that never resolve.
+ */
+export function encodeOpenChamberCursor({ stream, position, upstream = '' }) {
+  if (!/^[a-z0-9-]+$/.test(`${stream ?? ''}`)) {
+    throw new TypeError('OpenChamber cursor stream must be a lowercase token');
+  }
+  if (!Number.isSafeInteger(position) || position < 0) {
+    throw new TypeError('OpenChamber cursor position must be a nonnegative safe integer');
+  }
+  if (upstream !== '' && !isOpenCodeEventId(upstream)) {
+    throw new TypeError('OpenChamber cursor upstream must be an OpenCode event id or empty');
+  }
+  return `occ1.${stream}.${position}.${upstream}`;
+}
+
+/** Decodes a versioned OpenChamber cursor, or returns null for anything else. */
+export function decodeOpenChamberCursor(cursor) {
+  const text = `${cursor ?? ''}`;
+  const match = OPENCHAMBER_CURSOR_PATTERN.exec(text);
+  if (!match) return null;
+  const position = Number(match[2]);
+  if (!Number.isSafeInteger(position)) return null;
+  const upstream = match[3];
+  if (upstream !== '' && !isOpenCodeEventId(upstream)) return null;
+  return { version: OPENCHAMBER_CURSOR_VERSION, stream: match[1], position, upstream };
+}
+
+export function isOpenChamberCursor(cursor) {
+  return decodeOpenChamberCursor(cursor) !== null;
 }
 
 export function parseSseBlock(block) {

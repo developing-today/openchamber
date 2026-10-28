@@ -16,7 +16,7 @@ import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
 import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
 import { GoalSpecDialog, type GoalSpecDialogRequest } from '@/components/chat/GoalSpecDialog';
 import { GoalEditStrip } from '@/components/chat/GoalEditStrip';
-import { useSessionUIStore, type SessionUIState } from '@/sync/session-ui-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
@@ -498,10 +498,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const largeTextPasteOfferIdRef = React.useRef(0);
     const [largeTextPasteGesture] = React.useState(() => new LargeTextPasteGesture());
 
-    // Looked up per call, so the store's current implementation is the one used.
-    const sendMessage = React.useRef<SessionUIState['sendMessage']>(
-        (...args) => useSessionUIStore.getState().sendMessage(...args),
-    ).current;
     // Inside the chat column the composer follows the session the timeline is
     // showing (see chatColumnSession.ts); elsewhere it follows the live one.
     const liveSessionId = useSessionUIStore((s) => (chatColumnSession ? null : s.currentSessionId));
@@ -1982,7 +1978,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     }, {
                         fork: sessionActions.forkFromLastCompletedTurn,
                         directoryFor: (session) => useSessionUIStore.getState().getDirectoryForSession(session.id) || session.directory || null,
-                        send: (text, selection, target) => useSessionUIStore.getState().sendMessage(
+                        send: (text, selection, target) => sessionActions.sendMessage(
                             text,
                             selection.providerID,
                             selection.modelID,
@@ -2216,7 +2212,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     const instructionsText = await renderMagicPrompt(command.instructionsPrompt, variables.instructions);
                     // Before the sent row commits, as for a plain send below.
                     scrollToBottom?.();
-                    await sendMessage(
+                    await sessionActions.sendMessage(
                         visibleText,
                         providerIdToSend,
                         modelIdToSend,
@@ -2377,7 +2373,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // early return above can leave a stale arm behind.
         applyGoalChoice(options?.goal);
 
-        const sendPromise = sendMessage(
+        const sendPromise = sessionActions.sendMessage(
             primaryText,
             providerIdToSend,
             modelIdToSend,

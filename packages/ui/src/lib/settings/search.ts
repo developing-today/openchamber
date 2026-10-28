@@ -132,6 +132,19 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['spinner', 'animation', 'session', 'activity', 'motion', 'running', 'indicator'],
   },
   {
+    id: 'appearance.sidebar-rows',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.section.sidebarRows',
+    descriptionKey: 'settings.openchamber.visual.field.sidebarRowsInfo',
+    keywords: ['sidebar', 'session row', 'rows', 'lines', 'one line', 'two lines', 'branch', 'badge', 'provider', 'logo', 'project icon', 'goal', 'detailed rows'],
+  },
+  {
+    id: 'appearance.sidebar-rows-lines',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.zoneLines',
+    keywords: ['sidebar', 'rows', 'lines', 'one line', 'two lines', 'detailed rows', 'zone'],
+  },
+  {
     id: 'appearance.interface-font-size',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.interfaceFontSize',
