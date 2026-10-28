@@ -503,7 +503,16 @@ export async function handleSpecialGitBridgeMessage(
           const mergeHead = mergeHeadResult.stdout.trim();
           let mergeMsg = '';
           try {
-            const mergeMsgPath = path.join(directory, '.git', 'MERGE_MSG');
+            // Resolve MERGE_MSG through git: in a linked worktree `.git` is
+            // a file pointing at the real git dir, so joining it as a
+            // directory always fails and the merge message is lost.
+            // `--git-path` returns the per-worktree path (relative to the
+            // working tree in a main worktree, absolute in a linked one).
+            const mergeMsgPathResult = await deps.execGit(['rev-parse', '--git-path', 'MERGE_MSG'], directory);
+            const mergeMsgPathRaw = mergeMsgPathResult.exitCode === 0 ? mergeMsgPathResult.stdout.trim() : '';
+            const mergeMsgPath = mergeMsgPathRaw
+              ? path.resolve(directory, mergeMsgPathRaw)
+              : path.join(directory, '.git', 'MERGE_MSG');
             mergeMsg = await fs.promises.readFile(mergeMsgPath, 'utf8');
           } catch {
             // MERGE_MSG may not exist

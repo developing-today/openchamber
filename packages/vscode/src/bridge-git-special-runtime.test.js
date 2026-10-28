@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { execFile, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const gitService = {
   getGitRangeFiles: mock(),
@@ -338,4 +342,109 @@ describe('bridge git special runtime', () => {
       setUnavailableRetryDelaysForTest();
     });
   });
+});
+
+// Real-git helpers for the conflict-details tests: the MERGE_MSG bug only
+// exists against a real on-disk git layout, so these tests use real repos
+// (including a real linked worktree) and a real execGit instead of mocks.
+const execGitReal = (args, cwd) => new Promise((resolve) => {
+  execFile('git', args, { cwd }, (error, stdout, stderr) => {
+    resolve({
+      stdout: String(stdout ?? ''),
+      stderr: String(stderr ?? ''),
+      exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+    });
+  });
+});
+
+const runGitSync = (cwd, args, allowFail = false) => {
+  try {
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    if (!allowFail) throw error;
+    return String(error.stdout || '');
+  }
+};
+
+const initTempRepo = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-conflict-'));
+  runGitSync(dir, ['init', '-b', 'main']);
+  runGitSync(dir, ['config', 'user.email', 'test@example.com']);
+  runGitSync(dir, ['config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(dir, 'file.txt'), 'base\n');
+  runGitSync(dir, ['add', '.']);
+  runGitSync(dir, ['commit', '-m', 'init']);
+  return dir;
+};
+
+const makeMergeConflict = (dir, baseBranch) => {
+  runGitSync(dir, ['checkout', '-b', 'feature']);
+  fs.writeFileSync(path.join(dir, 'file.txt'), 'feature\n');
+  runGitSync(dir, ['commit', '-am', 'feature']);
+  runGitSync(dir, ['checkout', baseBranch]);
+  fs.writeFileSync(path.join(dir, 'file.txt'), 'main\n');
+  runGitSync(dir, ['commit', '-am', 'main change']);
+  runGitSync(dir, ['merge', 'feature'], true);
+};
+
+const callConflictDetails = (directory) => handleSpecialGitBridgeMessage({
+  id: 'cd1',
+  type: 'api:git/conflict-details',
+  payload: { directory },
+}, undefined, {
+  readSettings: () => ({}),
+  execGit: execGitReal,
+  readPromptOverrides: () => ({}),
+});
+
+describe('bridge git conflict-details MERGE_MSG resolution', () => {
+  it('includes the merge message in a main worktree', async () => {
+    const dir = initTempRepo();
+    try {
+      makeMergeConflict(dir, 'main');
+      const response = await callConflictDetails(dir);
+      expect(response.success).toBe(true);
+      expect(response.data.operation).toBe('merge');
+      expect(response.data.headInfo).toContain("Merge branch 'feature'");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it('includes the merge message in a linked worktree', async () => {
+    const baseDir = initTempRepo();
+    const wtDir = path.join(os.tmpdir(), `bridge-conflict-linked-${Date.now()}`);
+    try {
+      runGitSync(baseDir, ['worktree', 'add', '-b', 'wtbranch', wtDir, 'main']);
+      runGitSync(wtDir, ['config', 'user.email', 'test@example.com']);
+      runGitSync(wtDir, ['config', 'user.name', 'Test']);
+      // `.git` in a linked worktree is a file, not a directory: this is the
+      // layout the old path.join(directory, '.git', 'MERGE_MSG') read missed.
+      expect(fs.statSync(path.join(wtDir, '.git')).isFile()).toBe(true);
+      makeMergeConflict(wtDir, 'wtbranch');
+      const response = await callConflictDetails(wtDir);
+      expect(response.success).toBe(true);
+      expect(response.data.operation).toBe('merge');
+      expect(response.data.unmergedFiles).toEqual(['file.txt']);
+      expect(response.data.headInfo).toContain("Merge branch 'feature'");
+    } finally {
+      fs.rmSync(wtDir, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it('degrades to the bare MERGE_HEAD line when MERGE_MSG is genuinely absent', async () => {
+    const dir = initTempRepo();
+    try {
+      makeMergeConflict(dir, 'main');
+      const mergeMsgPath = path.resolve(dir, runGitSync(dir, ['rev-parse', '--git-path', 'MERGE_MSG']).trim());
+      fs.rmSync(mergeMsgPath, { force: true });
+      const mergeHead = runGitSync(dir, ['rev-parse', 'MERGE_HEAD']).trim();
+      const response = await callConflictDetails(dir);
+      expect(response.success).toBe(true);
+      expect(response.data.headInfo).toBe(`MERGE_HEAD: ${mergeHead}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
 });
