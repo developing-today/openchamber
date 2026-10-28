@@ -69,12 +69,19 @@ describe('readGuestUploadBody', () => {
   test('reads the cap from the environment', () => {
     const previous = process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES;
     try {
-      delete process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES;
-      expect(guestUploadMaxBytes()).toBe(50 * 1024 * 1024);
-      process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = '1234';
-      expect(guestUploadMaxBytes()).toBe(1234);
-      process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = 'nope';
-      expect(guestUploadMaxBytes()).toBe(50 * 1024 * 1024);
+      const readWith = (value) => {
+        if (value === undefined) delete process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES;
+        else process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = value;
+        return guestUploadMaxBytes();
+      };
+      const fallback = 50 * 1024 * 1024;
+      expect(readWith(undefined)).toBe(fallback);
+      expect(readWith('1234')).toBe(1234);
+      expect(readWith(' 5000 ')).toBe(5000);
+      expect(readWith('nope')).toBe(fallback);
+      for (const invalid of ['1e3', '0x10', '5.9', '+5000', '5000.0']) {
+        expect(readWith(invalid)).toBe(fallback);
+      }
     } finally {
       if (previous === undefined) delete process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES;
       else process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = previous;

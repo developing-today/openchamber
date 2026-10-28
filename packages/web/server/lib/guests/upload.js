@@ -8,9 +8,22 @@
 
 const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
+// A whole number from the environment, else null. Only a plain decimal
+// spelling counts: a bare Number(...) would silently honour '1e3' as 1000,
+// '0x10' as 16, and '5.9' as a fractional value. Same strict judgement as
+// parsePlainDecimalInt for the fs upload cap (#696).
+const parsePlainDecimalInt = (raw) => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
 export const guestUploadMaxBytes = () => {
-  const raw = Number(process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES);
-  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES);
+  if (raw !== null && raw > 0) return raw;
   return DEFAULT_UPLOAD_MAX_BYTES;
 };
 
