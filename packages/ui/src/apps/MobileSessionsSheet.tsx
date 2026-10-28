@@ -2617,7 +2617,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         <DropdownMenuLabel>{t('sessions.sidebar.header.layout.otherSessions')}</DropdownMenuLabel>
         {OTHER_SCOPE_OPTIONS.map(([scope, labelKey]) => renderMenuChoice(`other-${scope}`, labelKey, sidebarLayout.otherAttention === scope, () => saveSidebarLayout({ otherAttention: scope })))}
         {sidebarLayout.otherAttention === 'separate' ? (
-          <>{OTHER_GROUPING_OPTIONS.map(([grouping, labelKey]) => renderMenuChoice(`other-grouping-${grouping}`, labelKey, sidebarLayout.otherAttentionGrouping === grouping, () => saveSidebarLayout({ otherAttentionGrouping: grouping }))}</>
+          <>{OTHER_GROUPING_OPTIONS.map(([grouping, labelKey]) => renderMenuChoice(`other-grouping-${grouping}`, labelKey, sidebarLayout.otherAttentionGrouping === grouping, () => saveSidebarLayout({ otherAttentionGrouping: grouping })))}</>
         ) : null}
         {renderMenuChoice('otherActive', 'sessions.sidebar.header.layout.otherActive', sidebarLayout.otherActive, () => saveSidebarLayout({ otherActive: !sidebarLayout.otherActive }))}
         {canEditOrder ? (
