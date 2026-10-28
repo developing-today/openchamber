@@ -2594,7 +2594,7 @@ export async function getGitRangeDiff(
   const baseRef = (base || '').trim();
   const headRef = (head || '').trim();
   if (!baseRef || !headRef) {
-    return { diff: '' };
+    throw new Error('base and head are required');
   }
 
   let resolvedBase = baseRef;
@@ -2609,6 +2609,9 @@ export async function getGitRangeDiff(
 
   const args = ['diff', '--no-color', `-U${normalizeContextLines(contextLines)}`, `${resolvedBase}...${headRef}`, '--', filePath];
   const result = await execGit(args, directory);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Failed to get Git range diff');
+  }
   return { diff: result.stdout };
 }
 
@@ -2623,7 +2626,7 @@ export async function getGitRangeFiles(
   const baseRef = (base || '').trim();
   const headRef = (head || '').trim();
   if (!baseRef || !headRef) {
-    return [];
+    throw new Error('base and head are required');
   }
 
   let resolvedBase = baseRef;
@@ -2638,7 +2641,9 @@ export async function getGitRangeFiles(
 
   const args = ['diff', '--name-only', `${resolvedBase}...${headRef}`];
   const result = await execGit(args, directory);
-  if (result.exitCode !== 0) return [];
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Failed to get Git range files');
+  }
   return String(result.stdout || '')
     .split('\n')
     .map((l) => l.trim())
