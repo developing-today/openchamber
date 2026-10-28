@@ -283,3 +283,44 @@ describe('unregisterManagedProcess', () => {
     expect(rmMock).not.toHaveBeenCalled();
   });
 });
+
+describe('readAllEntries (read-only consumer reader)', () => {
+  const makeRegistry = () =>
+    createManagedProcessRegistry({
+      fs: {
+        readdir: readdirMock,
+        readFile: readFileMock,
+        rm: rmMock,
+        mkdir: mkdirMock,
+        writeFile: writeFileMock,
+        rename: renameMock,
+      },
+      execFileAsync: async () => ({ stdout: '', stderr: '' }),
+    });
+
+  it('returns entries without ever deleting a corrupt or invalid file', async () => {
+    readdirMock.mockResolvedValue(['111.json', '222.json', '333.json']);
+    readFileMock.mockImplementation(async (filePath) => {
+      if (filePath.endsWith('111.json')) return JSON.stringify({ pid: 111, port: 4001 });
+      if (filePath.endsWith('222.json')) return 'not json';
+      return JSON.stringify({ noPid: true });
+    });
+
+    const entries = await makeRegistry().readAllEntries();
+
+    expect(entries).toEqual([{ pid: 111, port: 4001 }]);
+    expect(rmMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates a failed registry directory read instead of posing as empty', async () => {
+    readdirMock.mockRejectedValue(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+
+    await expect(makeRegistry().readAllEntries()).rejects.toThrow('EACCES');
+  });
+
+  it('reads a missing registry directory as empty', async () => {
+    readdirMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+    await expect(makeRegistry().readAllEntries()).resolves.toEqual([]);
+  });
+});

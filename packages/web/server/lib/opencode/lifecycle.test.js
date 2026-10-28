@@ -195,6 +195,37 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('does not pair a replacement process with its predecessor version in the managed-servers read', async () => {
+    const pids = [process.pid, process.ppid];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      child.pid = pids.shift() ?? child.pid;
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.19' }),
+    }));
+    const runtime = createRuntime();
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+    try {
+      await runtime.triggerHealthCheck();
+      const before = await runtime.getManagedServersSnapshot();
+      expect(before.servers.find((server) => server.pid === process.pid)?.version).toBe('2.0.19');
+
+      await runtime.restartOpenCode();
+
+      const after = await runtime.getManagedServersSnapshot();
+      const replacement = after.servers.find((server) => server.pid === process.ppid);
+      expect(replacement?.status).toBe('ready');
+      expect(replacement?.version).toBeNull();
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
   it('journals managed launch, readiness, exit and restart as fixed actions only', async () => {
     const journal = createServerDiagnosticJournal();
     spawnMock.mockImplementation(() => {

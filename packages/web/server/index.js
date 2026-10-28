@@ -2531,6 +2531,7 @@ async function main(options = {}) {
     writeSseEvent,
     pluginNotificationEmitter,
     sessionRuntime,
+    getManagedServersSnapshot: () => openCodeLifecycleRuntime.getManagedServersSnapshot(),
     setPushInitialized,
     fs,
     os,

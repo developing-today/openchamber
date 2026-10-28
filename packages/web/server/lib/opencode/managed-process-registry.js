@@ -145,12 +145,16 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     }
   };
 
-  const readAllEntries = async () => {
+  const readAllEntries = async ({ pruneInvalid = true, throwOnDirError = false } = {}) => {
     const dir = resolveRegistryDir();
     let names = [];
     try {
       names = await fs.readdir(dir);
-    } catch {
+    } catch (error) {
+      // A missing registry directory is an empty registry; any other failure
+      // is a failed read, and read-only consumers asked to hear about it
+      // instead of mistaking it for "no servers".
+      if (throwOnDirError && error?.code !== 'ENOENT') throw error;
       return [];
     }
     const out = [];
@@ -160,15 +164,18 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
         const entry = JSON.parse(await fs.readFile(filePath, 'utf8'));
         if (entry && Number.isInteger(entry.pid)) {
           out.push({ entry, filePath });
-        } else {
+        } else if (pruneInvalid) {
           await fs.rm(filePath, { force: true });
         }
       } catch {
-        // Corrupt/partial file — drop it.
-        try {
-          await fs.rm(filePath, { force: true });
-        } catch {
-          // ignore
+        // Corrupt/partial file — the reaper drops it; a read-only read
+        // (pruneInvalid false) must never delete another instance's file.
+        if (pruneInvalid) {
+          try {
+            await fs.rm(filePath, { force: true });
+          } catch {
+            // ignore
+          }
         }
       }
     }
@@ -334,7 +341,17 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     return { inspected: records.length, reaped };
   };
 
-  return { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses };
+  return {
+    registerManagedProcess,
+    unregisterManagedProcess,
+    reapOrphanedProcesses,
+    // The validated reader exposed for read-only consumers (the
+    // managed-servers read): entries only, never the file paths, never a
+    // deletion, and a failed directory read propagates instead of posing
+    // as an empty registry.
+    readAllEntries: async () =>
+      (await readAllEntries({ pruneInvalid: false, throwOnDirError: true })).map(({ entry }) => entry),
+  };
 };
 
 const defaultRegistry = createManagedProcessRegistry();
@@ -342,3 +359,4 @@ const defaultRegistry = createManagedProcessRegistry();
 export const registerManagedProcess = defaultRegistry.registerManagedProcess;
 export const unregisterManagedProcess = defaultRegistry.unregisterManagedProcess;
 export const reapOrphanedProcesses = defaultRegistry.reapOrphanedProcesses;
+export const readManagedProcessEntries = defaultRegistry.readAllEntries;

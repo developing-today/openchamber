@@ -43,6 +43,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     getUiNotificationClients,
     writeSseEvent,
     getSessionActivitySnapshot,
+    getManagedServersSnapshot = async () => ({ version: 1, serverTime: Date.now(), servers: [] }),
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
     getSessionAttentionSnapshot,
@@ -299,6 +300,18 @@ export const registerNotificationRoutes = (app, dependencies) => {
   app.get('/api/session-activity', (_req, res) => {
     void ensureSessionWatcher();
     res.json(getSessionActivitySnapshot());
+  });
+
+  // Managed-server registry read for external tooling (design #612 phase 2,
+  // #525): versioned, read-only, and projected through an allowlist in the
+  // lifecycle runtime, so no auth material can reach this response.
+  app.get('/api/managed-servers', async (_req, res) => {
+    try {
+      return res.json(await getManagedServersSnapshot());
+    } catch (error) {
+      console.warn('[managed-servers] Failed to read managed servers:', error?.message ?? error);
+      return res.status(500).json({ error: 'Failed to read managed servers' });
+    }
   });
 
   app.get('/api/sessions/snapshot', async (_req, res) => {
