@@ -3854,16 +3854,29 @@ export async function setGitIdentity(
     }
   }
 
-  // Fallback to raw git
-  await execGit(['config', 'user.name', userName], directory);
-  await execGit(['config', 'user.email', userEmail], directory);
+  // Fallback to raw git. Every write is checked: `git config` exits non-zero
+  // when it cannot write (not a repository, a locked config file), and the
+  // caller must not receive an identity the repository does not have.
+  const writeConfig = async (key: string, value: string): Promise<void> => {
+    const result = await execGit(['config', key, value], directory);
+    if (result.exitCode !== 0) {
+      throw new Error(
+        result.stderr.trim()
+          || result.stdout.trim()
+          || `git config ${key} failed with exit code ${result.exitCode}`,
+      );
+    }
+  };
+
+  await writeConfig('user.name', userName);
+  await writeConfig('user.email', userEmail);
   if (sshCommand) {
-    await execGit(['config', 'core.sshCommand', sshCommand], directory);
+    await writeConfig('core.sshCommand', sshCommand);
   }
   if (shouldSignCommits) {
-    await execGit(['config', 'gpg.format', 'ssh'], directory);
-    await execGit(['config', 'user.signingkey', signingKey.trim()], directory);
-    await execGit(['config', 'commit.gpgsign', 'true'], directory);
+    await writeConfig('gpg.format', 'ssh');
+    await writeConfig('user.signingkey', signingKey.trim());
+    await writeConfig('commit.gpgsign', 'true');
   }
 
   return { success: true };
