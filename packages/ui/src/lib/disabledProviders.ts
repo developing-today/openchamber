@@ -36,14 +36,19 @@ export const peekDisabledProviders = (): string[] | null =>
 
 /** Keeps a list the caller just read or wrote, so later reads reuse it. */
 export const rememberDisabledProviders = (providers: string[] | null): void => {
+  // A write is newer than every read already in flight: advancing the read
+  // generation is what stops such a read from writing its pre-write list
+  // back over this one when it lands.
+  latestRead += 1;
   snapshot = { runtimeKey: getRuntimeKey(), providers };
 };
 
 /**
  * Reads the list again and keeps it. A read started earlier never replaces
- * one started later, so a slow first read cannot bring back the state from
- * before a Settings change. Throws when the list cannot be read; a failed
- * read is never an empty list.
+ * one started later, and a Settings write (rememberDisabledProviders)
+ * advances the same generation, so a slow first read cannot bring back the
+ * state from before a Settings change either. Throws when the list cannot
+ * be read; a failed read is never an empty list.
  */
 export const loadDisabledProviders = async (): Promise<string[] | null> => {
   const runtimeKey = getRuntimeKey();
@@ -51,8 +56,13 @@ export const loadDisabledProviders = async (): Promise<string[] | null> => {
   const providers = await fetchDisabledProviders();
   if (read === latestRead && runtimeKey === getRuntimeKey()) {
     snapshot = { runtimeKey, providers };
+    return providers;
   }
-  return providers;
+  // Superseded while in flight - by a newer read, a provider toggle, or a
+  // runtime switch. The fetched list is stale: answer with the latest
+  // snapshot for the current runtime instead, so no caller filters a
+  // catalog with the pre-toggle list.
+  return peekDisabledProviders();
 };
 
 /**
