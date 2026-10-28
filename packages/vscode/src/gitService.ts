@@ -2970,6 +2970,17 @@ export interface GitCommitResult {
   };
 }
 
+function assertGitCommandSucceeded(
+  result: { stdout: string; stderr: string; exitCode: number },
+  action: string,
+): void {
+  if (result.exitCode === 0) {
+    return;
+  }
+  const detail = result.stderr.trim() || result.stdout.trim();
+  throw new Error(detail ? `${action}: ${detail}` : action);
+}
+
 /**
  * Create a git commit
  */
@@ -2981,6 +2992,7 @@ export async function createGitCommit(
   if (options?.files?.length && options.stageFiles) {
     const selectedFiles = new Set(options.files);
     const stagedResult = await execGit(['diff', '--cached', '--name-only'], directory);
+    assertGitCommandSucceeded(stagedResult, 'Failed to read staged files');
     const temporarilyUnstagedFiles = stagedResult.stdout
       .split('\n')
       .map((line) => line.trim())
@@ -2988,10 +3000,12 @@ export async function createGitCommit(
 
     try {
       if (temporarilyUnstagedFiles.length > 0) {
-        await execGit(['restore', '--staged', '--', ...temporarilyUnstagedFiles], directory);
+        const unstageResult = await execGit(['restore', '--staged', '--', ...temporarilyUnstagedFiles], directory);
+        assertGitCommandSucceeded(unstageResult, 'Failed to unstage files outside the selection');
       }
       if (options.stageFiles.length > 0) {
-        await execGit(['add', '--', ...options.stageFiles], directory);
+        const stageResult = await execGit(['add', '--', ...options.stageFiles], directory);
+        assertGitCommandSucceeded(stageResult, 'Failed to stage selected files');
       }
 
       const result = await execGit(['commit', '-m', message], directory);
@@ -3014,7 +3028,13 @@ export async function createGitCommit(
       };
     } finally {
       if (temporarilyUnstagedFiles.length > 0) {
-        await execGit(['add', '--', ...temporarilyUnstagedFiles], directory);
+        const restoreResult = await execGit(['add', '--', ...temporarilyUnstagedFiles], directory);
+        if (restoreResult.exitCode !== 0) {
+          console.error(
+            '[GitService] Failed to restore temporarily unstaged files:',
+            restoreResult.stderr.trim() || restoreResult.stdout.trim() || `git add exited with code ${restoreResult.exitCode}`,
+          );
+        }
       }
     }
   }
@@ -3048,11 +3068,11 @@ export async function createGitCommit(
 
   // Fallback to raw git
   if (options?.addAll) {
-    await execGit(['add', '-A'], directory);
+    assertGitCommandSucceeded(await execGit(['add', '-A'], directory), 'Failed to stage all changes');
   } else if (options?.files?.length) {
     const filesToStage = options.stageFiles ?? options.files;
     if (filesToStage.length > 0) {
-      await execGit(['add', ...filesToStage], directory);
+      assertGitCommandSucceeded(await execGit(['add', ...filesToStage], directory), 'Failed to stage selected files');
     }
   }
 
