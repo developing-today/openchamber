@@ -25,6 +25,13 @@ const plan = (id, overrides = {}) => ({
   ...overrides,
 });
 
+const expectAllOk = (results) => {
+  // Name the failing children's errors in the failure output: a bare
+  // every((result) => result.ok) assertion discards them, which left the
+  // 2026-10-28 CI failure of this test undiagnosable (issue #667).
+  expect(results.filter((result) => !result.ok).map((result) => result.error ?? result)).toEqual([]);
+};
+
 afterEach(async () => {
   await Promise.all(children.splice(0).map((child) => child.stop()));
   await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
@@ -42,7 +49,7 @@ describe('source-control audit storage', () => {
           : [id, { state: 'succeeded', errorCode: null, steps: ['provider-request'] }];
         return child.call(method, args).result;
       }));
-      expect(results.every((result) => result.ok)).toBe(true);
+      expectAllOk(results);
     }
     expect((await store.list()).map((record) => record.state)).toEqual(['succeeded', 'succeeded']);
     await store.plan(plan('same'));

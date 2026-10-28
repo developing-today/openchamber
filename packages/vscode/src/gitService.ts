@@ -3890,7 +3890,14 @@ export async function setGitIdentity(
 export async function getRemotes(directory: string): Promise<GitRemote[]> {
   const result = await execGit(['remote', '-v'], directory);
   if (result.exitCode !== 0) {
-    return [];
+    // Only a directory that is not a repository authoritatively has no
+    // remotes - the same distinction the web getRemotes makes. Any other
+    // failure (corrupt config, dubious ownership) must surface with git's
+    // stderr instead of reading as a repository with no remotes.
+    if (/not a git repository/i.test(result.stderr || result.stdout)) {
+      return [];
+    }
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `git remote failed with exit code ${result.exitCode}`);
   }
   return parseGitRemoteListing(result.stdout);
 }
