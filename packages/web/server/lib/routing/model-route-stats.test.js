@@ -98,6 +98,47 @@ describe('GET /api/model-routes/stats', () => {
     expect(response.body.targets).toHaveLength(2);
   });
 
+  // Seed plus one attempt 100h ago: inside a reinterpreted 1e3-hour
+  // (clamped 336h) window, outside the 24h default and a 2h window.
+  const seedDbWithOldAttempt = () => {
+    const dbPath = seedDb(tempDir());
+    const db = new DatabaseSync(dbPath);
+    const now = Date.now();
+    db.prepare(`insert into route_attempt
+      (time_started, time_ended, assistant_message_id, route_id, provider_id, model_id,
+       outcome, error_tag, error_status, error_message, output_started, hedged,
+       first_token_ms, tokens_per_second)
+      values (?, ?, 'm-old', 'r', 'openai', 'x', 'success', null, null, null, 1, null, 100, 50)`)
+      .run(now - 100 * 3_600_000, now - 100 * 3_600_000 + 100);
+    db.close();
+    return dbPath;
+  };
+
+  const openaiAttempts = (body) => body.targets.find((row) => row.providerID === 'openai')?.attempts;
+
+  it.each(['1e3', '0x10', '2.0', '-5', '+2', ' 2 ', '01', '2.50'])(
+    'falls back to the 24h default for the reinterpreted hours spelling %j',
+    async (spelling) => {
+      const dbPath = seedDbWithOldAttempt();
+      const response = await request(createApp(() => dbPath)).get(
+        `/api/model-routes/stats?hours=${encodeURIComponent(spelling)}`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.body.windowHours).toBe(24);
+      expect(openaiAttempts(response.body)).toBe(4);
+    },
+  );
+
+  it('honours canonical hours spellings, including a fractional window', async () => {
+    const dbPath = seedDbWithOldAttempt();
+    const wide = await request(createApp(() => dbPath)).get('/api/model-routes/stats?hours=200');
+    expect(wide.body.windowHours).toBe(200);
+    expect(openaiAttempts(wide.body)).toBe(5);
+    const fractional = await request(createApp(() => dbPath)).get('/api/model-routes/stats?hours=1.5');
+    expect(fractional.body.windowHours).toBe(1.5);
+    expect(openaiAttempts(fractional.body)).toBe(4);
+  });
+
   it('returns available:false when telemetry is absent', async () => {
     const response = await request(createApp(() => path.join(tempDir(), 'missing.db'))).get(
       '/api/model-routes/stats',
