@@ -1231,7 +1231,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   onPayload: (payload, { spaceId }) => {
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
-    sessionRuntime.processOpenCodeSsePayload(payload);
+    sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
   },
 });
 
@@ -1558,6 +1558,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  getActiveHostSessionCount: () => sessionRuntime.getActiveHostSessionCount(),
   listBusySessionIds: () => Object.entries(sessionRuntime.getSessionStateSnapshot())
     .filter(([, sessionState]) => sessionState?.status === 'busy' || sessionState?.status === 'retry')
     .map(([sessionId]) => sessionId),

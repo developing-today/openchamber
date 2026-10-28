@@ -263,6 +263,33 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('reports the host-only session count for its own server in the managed-servers read', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      child.pid = process.pid;
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.19' }),
+    }));
+    const runtime = createRuntime({
+      getActiveSessionCount: () => 5,
+      getActiveHostSessionCount: () => 2,
+    });
+    const server = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = server;
+    try {
+      await runtime.triggerHealthCheck();
+      const snapshot = await runtime.getManagedServersSnapshot();
+      const own = snapshot.servers.find((entry) => entry.pid === process.pid);
+      expect(own?.sessionCount).toBe(2);
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
   it('journals managed launch, readiness, exit and restart as fixed actions only', async () => {
     const journal = createServerDiagnosticJournal();
     spawnMock.mockImplementation(() => {

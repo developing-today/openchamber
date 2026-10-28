@@ -2541,6 +2541,18 @@ export async function snapshotWorktree(directory: string, input: { ref?: string 
   }
 }
 
+// Only a non-negative integer is a valid unified-context count. Anything
+// else takes the default of 3: a fractional value reaching git as -U2.5
+// (or NaN as -UNaN) is rejected, which made getGitDiff throw and
+// getGitRangeDiff silently return an empty diff (#640). Normalizing here,
+// in the service, mirrors the web git service (#578).
+const normalizeContextLines = (contextLines?: number): number => {
+  if (contextLines === undefined || !Number.isInteger(contextLines) || contextLines < 0) {
+    return 3;
+  }
+  return contextLines;
+};
+
 // ============== Diff Operations ==============
 
 /**
@@ -2558,7 +2570,7 @@ export async function getGitDiff(
 
   const args = ['diff'];
   if (staged) args.push('--cached');
-  if (typeof contextLines === 'number') args.push(`-U${contextLines}`);
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   args.push('--', target.repoPath);
 
   const result = await execGit(args, directory);
@@ -2595,7 +2607,7 @@ export async function getGitRangeDiff(
     // ignore
   }
 
-  const args = ['diff', '--no-color', `-U${Math.max(0, contextLines)}`, `${resolvedBase}...${headRef}`, '--', filePath];
+  const args = ['diff', '--no-color', `-U${normalizeContextLines(contextLines)}`, `${resolvedBase}...${headRef}`, '--', filePath];
   const result = await execGit(args, directory);
   return { diff: result.stdout };
 }
@@ -3409,6 +3421,18 @@ async function resolveBaseRefForLog(
   return normalized;
 }
 
+// Only a positive integer caps the history. Anything else takes the
+// default of 50: a negative reaching git as --max-count=-5 means
+// unlimited, and a fractional value is rejected as not-an-integer, so an
+// invalid value must never pass through (#641). Normalizing here, in the
+// service, mirrors the web git service (#463).
+const normalizeMaxCount = (maxCount?: number): number => {
+  if (maxCount === undefined || !Number.isInteger(maxCount) || maxCount <= 0) {
+    return 50;
+  }
+  return maxCount;
+};
+
 /**
  * Get git log
  */
@@ -3416,7 +3440,7 @@ export async function getGitLog(
   directory: string,
   options?: { maxCount?: number; from?: string; to?: string; file?: string; all?: boolean }
 ): Promise<{ all: GitLogEntry[]; latest: GitLogEntry | null; total: number }> {
-  const maxCount = options?.maxCount || 50;
+  const maxCount = normalizeMaxCount(options?.maxCount);
 
   if (options?.all) {
     const logArgs = [
