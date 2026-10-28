@@ -473,9 +473,14 @@ makes that visible so the user can spread them.
   model its pattern matches, each session once. `requests` and `messages`
   windows count attempts; `tokens` windows count input, output and reasoning
   tokens, as OpenCode's `model-usage.ts` meters plans. `usd`, `percent` and
-  `other` windows get no projection. The projection is an estimate from
-  recent traffic and cannot see usage outside OpenCode; a window of zero or
-  negative hours gets none. A weighted or round-robin pool (OpenCode's
+  `other` windows get no projection. Every projection carries
+  `source: 'traffic-estimate'` (a provider reading, if one ever arrives
+  through an existing in-repo source, would carry `'provider-reading'`), and
+  the plan also lists each unprojectable window in `unprojectedQuotas` with
+  its reason (`needs-pricing`, `needs-provider-meter`, `unsupported-unit`),
+  which the panel renders instead of silence. The projection is an estimate
+  from recent traffic and cannot see usage outside OpenCode; a window of zero
+  or negative hours gets none. A weighted or round-robin pool (OpenCode's
   round-robin is smooth weighted round robin, so both draw by weight) with a
   target at 70 percent or more gets a `lower-weight` suggestion while the
   target's weight is above 0.1, which the panel turns into a button that
