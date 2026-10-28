@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 import { createGlobalMessageStreamHub } from './global-hub.js';
+import { decodeOpenChamberCursor } from './sse-cursor.js';
 import { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
 
 // OpenCode's cursor form, `<instance>:<sequence>`, as its feed puts it in `id:` lines. Only such ids
@@ -56,13 +57,15 @@ it('delivers oversized events live, but reports a replay gap instead of replayin
   try {
     runtime.wsServer.emit('connection', first, { url: '/api/global/event/ws' });
     await expect.poll(() => first.sent.filter(frame => frame.type === 'event').length).toBe(3);
-    expect(first.sent.find(frame => frame.eventId === `${INSTANCE}:2`).payload.properties.text).toHaveLength(1024);
+    expect(first.sent.find(frame => decodeOpenChamberCursor(frame.eventId)?.upstream === `${INSTANCE}:2`).payload.properties.text).toHaveLength(1024);
     expect(hub.replayAfter(`${INSTANCE}:1`)).toBeNull();
     expect(hub.replayAfter(`${INSTANCE}:3`)).toEqual([]);
     // A legacy cursor from before OpenCode ids is one the buffer cannot answer: it gets a reset.
     runtime.wsServer.emit('connection', reconnect, { url: '/api/global/event/ws?lastEventId=first' });
     await expect.poll(() => reconnect.sent.length).toBeGreaterThan(0);
-    expect(reconnect.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true, headEventId: `${INSTANCE}:3` }]);
+    expect(reconnect.sent).toHaveLength(1);
+    expect(reconnect.sent[0]).toMatchObject({ type: 'ready', scope: 'global', replayReset: true });
+    expect(decodeOpenChamberCursor(reconnect.sent[0].headEventId)?.upstream).toBe(`${INSTANCE}:3`);
   } finally {
     first.close(); reconnect.close(); hub.stop(); await runtime.close();
   }
@@ -231,18 +234,16 @@ describe('message stream websocket runtime', () => {
     expect(fetchCalls).toBe(1);
     expect(firstSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
     expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
-    expect(firstSocket.sent).toContainEqual({
-      type: 'event',
-      payload: { id: 'evt-1', type: 'server.connected', data: {} },
-      eventId: `${INSTANCE}:1`,
-      directory: 'global',
-    });
-    expect(secondSocket.sent).toContainEqual({
-      type: 'event',
-      payload: { id: 'evt-1', type: 'server.connected', data: {} },
-      eventId: `${INSTANCE}:1`,
-      directory: 'global',
-    });
+    for (const socket of [firstSocket, secondSocket]) {
+      const greeting = socket.sent.find((frame) => frame.payload?.type === 'server.connected');
+      expect(greeting).toEqual(expect.objectContaining({
+        type: 'event',
+        payload: { id: 'evt-1', type: 'server.connected', data: {} },
+        directory: 'global',
+      }));
+      // A greeting that carries an OpenCode id line is an ordinary upstream event and gets a cursor.
+      expect(decodeOpenChamberCursor(greeting.eventId)?.upstream).toBe(`${INSTANCE}:1`);
+    }
 
     firstSocket.close();
     secondSocket.close();
@@ -273,8 +274,8 @@ describe('message stream websocket runtime', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"server.connected","data":{}}\n\n`,
-              `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1","title":"t"}}\n\n`,
+              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1","title":"t"}}\n\n`,
+              `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"session.updated","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1"}}\n\n`,
             ],
           });
         }
@@ -299,15 +300,15 @@ describe('message stream websocket runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     // The buffer holds the cursor's successors, so the client resumed: it needs no refetch.
-    expect(secondSocket.sent).toEqual([
-      { type: 'ready', scope: 'global', resumed: true, headEventId: `${INSTANCE}:2` },
-      {
-        type: 'event',
-        payload: { id: 'evt-2', type: 'session.renamed', location: { directory: '/tmp/project' }, data: { sessionID: 's1', title: 't' } },
-        eventId: `${INSTANCE}:2`,
-        directory: '/tmp/project',
-      },
-    ]);
+    expect(secondSocket.sent[0].type).toBe('ready');
+    expect(secondSocket.sent[0].resumed).toBe(true);
+    expect(decodeOpenChamberCursor(secondSocket.sent[0].headEventId)?.upstream).toBe(`${INSTANCE}:2`);
+    expect(secondSocket.sent[1]).toEqual(expect.objectContaining({
+      type: 'event',
+      payload: { id: 'evt-2', type: 'session.updated', location: { directory: '/tmp/project' }, data: { sessionID: 's1' } },
+      directory: '/tmp/project',
+    }));
+    expect(decodeOpenChamberCursor(secondSocket.sent[1].eventId)?.upstream).toBe(`${INSTANCE}:2`);
 
     secondSocket.close();
     await runtime.close();
@@ -496,7 +497,7 @@ describe('message stream websocket runtime', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"server.connected","data":{}}\n\n`,
+              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"session.updated","data":{"sessionID":"s1"}}\n\n`,
             ],
           });
         }
@@ -505,7 +506,7 @@ describe('message stream websocket runtime', () => {
           signal: options.signal,
           holdOpen: true,
           blocks: [
-            `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"server.connected","data":{}}\n\n`,
+            `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"session.updated","data":{"sessionID":"s1"}}\n\n`,
           ],
         });
       },
@@ -518,10 +519,11 @@ describe('message stream websocket runtime', () => {
       // Wait for the reconnect event itself; a 35ms sleep raced the event
       // loop when the workspace build and test workers ran together.
       await expect.poll(() => socket.sent.filter((frame) => frame.type === 'ready').length).toBeGreaterThanOrEqual(2);
-      const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'server.connected');
+      const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'session.updated');
       expect(eventFrames.length).toBeGreaterThanOrEqual(2);
       // The first two events arrive in order, the second on the connection that resumed from the first.
-      expect(eventFrames.slice(0, 2).map((frame) => frame.eventId)).toEqual([`${INSTANCE}:1`, `${INSTANCE}:2`]);
+      expect(eventFrames.slice(0, 2).map((frame) => decodeOpenChamberCursor(frame.eventId)?.upstream))
+        .toEqual([`${INSTANCE}:1`, `${INSTANCE}:2`]);
       expect(fetchCalls.slice(0, 2)).toEqual([null, `${INSTANCE}:1`]);
       expect(triggerHealthCheckCalls).toBe(0);
     } finally {
@@ -566,12 +568,14 @@ describe('message stream websocket runtime', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    expect(socket.sent).toContainEqual({
+    expect(socket.sent).toContainEqual(expect.objectContaining({
       type: 'event',
       payload: { id: 'evt-1', type: 'session.renamed', location: { directory: '/tmp/project' }, data: { sessionID: 's1', title: 't' } },
-      eventId: `${INSTANCE}:1`,
       directory: '/tmp/project',
-    });
+    }));
+    expect(decodeOpenChamberCursor(
+      socket.sent.find((frame) => frame.payload?.type === 'session.renamed').eventId,
+    )?.upstream).toBe(`${INSTANCE}:1`);
     expect(socket.sent).toContainEqual({
       type: 'event',
       payload: { type: 'openchamber:session-status', sessionID: 'ses_1' },
