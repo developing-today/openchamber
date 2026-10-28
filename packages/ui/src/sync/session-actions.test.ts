@@ -182,6 +182,10 @@ mock.module("@/stores/useConfigStore", () => ({
 
 // Mock useSessionUIStore
 mock.module("./session-ui-store", () => ({
+  routeMessage: async () => {},
+  materializeOpenDraftSession: async () => { throw new Error("materializeOpenDraftSession is not stubbed for a send") },
+  resolveVariantToRecord: () => undefined,
+  expandSlashCommandGoalObjective: (content: string) => content,
   useSessionUIStore: {
     getState: () => ({
       getDirectoryForSession: (sessionId: string) => {
@@ -247,6 +251,72 @@ mock.module("@/stores/useInlineCommentDraftStore", () => ({
 mock.module("@/lib/messages/contextParts", () => ({
   draftFromContextPayload: () => null,
   readContextPart: () => null,
+}))
+
+mock.module("@/stores/useSessionGoalArmStore", () => ({
+  useSessionGoalArmStore: {
+    getState: () => ({
+      consume: () => ({ armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }),
+      setArmed: () => {},
+    }),
+  },
+}))
+
+mock.module("@/stores/useUIStore", () => ({
+  useUIStore: {
+    getState: () => ({ sessionGoalDefaultBudgetEnabled: false, sessionGoalDefaultBudget: null }),
+  },
+}))
+
+mock.module("@/stores/useCommandsStore", () => ({
+  useCommandsStore: { getState: () => ({}) },
+  selectCommandsForDirectory: () => [],
+}))
+
+mock.module("@/stores/useInputHistoryStore", () => ({
+  useInputHistoryStore: { getState: () => ({ appendSubmissions: () => {} }) },
+  createInputHistoryIdentity: () => ({}),
+}))
+
+mock.module("@/stores/useSessionTabsStore", () => ({
+  useSessionTabsStore: { getState: () => ({ pinTab: () => {} }) },
+}))
+
+mock.module("@/lib/sessionGoalActions", () => ({
+  setSessionGoal: async () => null,
+}))
+
+mock.module("@/lib/goalWriter", () => ({
+  buildGoalIntroReminder: () => "",
+}))
+
+mock.module("@/lib/sessionKnowledgeApi", () => ({
+  syncSessionKnowledge: async () => {},
+}))
+
+mock.module("@/lib/userSendAnimation", () => ({
+  markPendingUserSendAnimation: () => {},
+}))
+
+mock.module("./user-message-resume", () => ({
+  prepareUserMessageResume: () => null,
+}))
+
+mock.module("./selection-store", () => ({
+  useSelectionStore: {
+    getState: () => ({
+      getSessionAgentSelection: () => null,
+      saveSessionModelSelection: () => {},
+      saveSessionAgentSelection: () => {},
+      saveAgentModelVariantForSession: () => {},
+    }),
+  },
+}))
+
+mock.module("./viewport-store", () => ({
+  useViewportStore: { getState: () => ({}) },
+  getViewportSessionMemory: () => new Map(),
+  viewportSessionKey: (sessionId: string) => sessionId,
 }))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
