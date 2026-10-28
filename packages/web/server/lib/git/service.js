@@ -3470,15 +3470,18 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
  * Callers that only need this list should not pay for `getStatus`, which also
  * computes ahead/behind, diff stats, and merge state — an order of magnitude
  * more work for an answer they throw away.
+ *
+ * A failed `ls-files` throws instead of returning []: the repository context
+ * above has already proven this is a repository, so a failure here is a real
+ * failure, and [] would present a tracked-only listing as complete.
  */
 export async function listUntrackedPaths(directory) {
   const { repoRoot } = await createRepositoryGitContext(directory);
-  const result = await runGitCommand(repoRoot, [
-    'ls-files',
-    '--others',
-    '--exclude-standard',
-  ]);
-  if (!result.success) return [];
+  const result = await runGitCommandOrThrow(
+    repoRoot,
+    ['ls-files', '--others', '--exclude-standard'],
+    'Failed to list untracked files'
+  );
   return String(result.stdout || '')
     .split('\n')
     .map((line) => line.trim())

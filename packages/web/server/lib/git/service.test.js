@@ -65,6 +65,7 @@ import {
   getPathDiffs,
   revertFile,
   getUntrackedDiffs,
+  listUntrackedPaths,
   getFileDiff,
   hasLocalIdentity,
   validateWorktreeCreate,
@@ -298,6 +299,27 @@ describe('diff contextLines guard (#578)', () => {
     for (const bad of [2.9, -1, Number.NaN]) {
       expect((await getUntrackedDiffs(tmpDir, ['new.txt'], { contextLines: bad }))[0]).toBe(untrackedDefault);
     }
+  });
+});
+
+describe('listUntrackedPaths (#665)', () => {
+  it('lists untracked files, returns [] when there are none, and throws when ls-files fails', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'tracked.txt'), 'tracked\n');
+    await git.add('tracked.txt');
+    await git.commit('Initial');
+
+    expect(await listUntrackedPaths(tmpDir)).toEqual([]);
+
+    fs.writeFileSync(path.join(tmpDir, 'new.txt'), 'new\n');
+    fs.writeFileSync(path.join(tmpDir, 'another.txt'), 'another\n');
+    expect(await listUntrackedPaths(tmpDir)).toEqual(['another.txt', 'new.txt']);
+
+    // A corrupt index leaves rev-parse (repository context) working while
+    // ls-files fails: that failure must surface, not read as "no untracked".
+    fs.writeFileSync(path.join(tmpDir, '.git', 'index'), 'garbage-not-an-index');
+    await expect(listUntrackedPaths(tmpDir)).rejects.toThrow(/index file smaller than expected/);
   });
 });
 
