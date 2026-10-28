@@ -584,14 +584,13 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
   const statusResult = await execGit(['--no-optional-locks', 'status', '--porcelain=v1', '-b', '-uall'], directory);
   
   if (statusResult.exitCode !== 0) {
-    return {
-      current: '',
-      tracking: null,
-      ahead: 0,
-      behind: 0,
-      files: [],
-      isClean: true,
-    };
+    // A failed status read is not a clean repository: surface git's error
+    // instead of fabricating an empty success. For a directory that is not
+    // a git repository, git's stderr is the plain
+    // `fatal: not a git repository (or any of the parent directories): .git`
+    // message consumers match on — the same contract the web readStatus
+    // throws with.
+    throw new Error(statusResult.stderr.trim() || `git status failed with exit code ${statusResult.exitCode}`);
   }
 
   const lines = statusResult.stdout.trim().split('\n').filter(Boolean);
