@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import { createCommandTimeoutMs, createGitReadCacheTtlMs, createUploadMaxBytes, mintOutsideFileGrant, registerFsRoutes } from './routes.js';
 import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
 
 const createRouteRegistry = () => {
@@ -2740,5 +2740,47 @@ describe('GET /api/fs/find-in-files', () => {
     const res = await ask({ query: 'needle' });
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toBe('No workspace');
+  });
+});
+
+describe('fs env readers (#696)', () => {
+  const readers = [
+    ['OPENCHAMBER_FS_EXEC_TIMEOUT_MS', createCommandTimeoutMs, 5 * 60 * 1000],
+    ['OPENCHAMBER_GIT_READ_CACHE_TTL_MS', createGitReadCacheTtlMs, 30 * 1000],
+    ['OPENCHAMBER_FS_UPLOAD_MAX_BYTES', createUploadMaxBytes, 100 * 1024 * 1024],
+  ];
+
+  const readWith = (name, value, reader) => {
+    const previous = process.env[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+    try {
+      return reader();
+    } finally {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }
+  };
+
+  it('honours plain decimal spellings and returns the default when unset', () => {
+    for (const [name, reader, fallback] of readers) {
+      expect(readWith(name, '5000', reader)).toBe(5000);
+      expect(readWith(name, ' 5000 ', reader)).toBe(5000);
+      expect(readWith(name, undefined, reader)).toBe(fallback);
+    }
+  });
+
+  it('falls back to the default for non-plain-decimal spellings', () => {
+    for (const [name, reader, fallback] of readers) {
+      for (const invalid of ['', ' ', '1e3', '0x10', '5.9', '5000junk']) {
+        expect(readWith(name, invalid, reader)).toBe(fallback);
+      }
+    }
+  });
+
+  it("keeps an explicit '0' only where zero is documented", () => {
+    expect(readWith('OPENCHAMBER_GIT_READ_CACHE_TTL_MS', '0', createGitReadCacheTtlMs)).toBe(0);
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '0', createCommandTimeoutMs)).toBe(5 * 60 * 1000);
+    expect(readWith('OPENCHAMBER_FS_UPLOAD_MAX_BYTES', '0', createUploadMaxBytes)).toBe(100 * 1024 * 1024);
   });
 });
