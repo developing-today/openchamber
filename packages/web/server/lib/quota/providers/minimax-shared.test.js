@@ -87,7 +87,7 @@ describe('MiniMax shared provider', () => {
     });
     const result = await provider.fetchQuota();
     expect(result.usage.windows['5h'].usedPercent).toBe(90);
-    expect(result.usage.windows['5h'].windowSeconds).toBe(7200);
+    expect(result.usage.windows['5h'].windowSeconds).toBeNull();
   });
 
   it('falls back to the first entry when nothing else matches', async () => {
@@ -99,7 +99,7 @@ describe('MiniMax shared provider', () => {
     });
     const result = await provider.fetchQuota();
     expect(result.ok).toBe(true);
-    expect(result.usage.windows['5h'].windowSeconds).toBe(3600);
+    expect(result.usage.windows['5h'].windowSeconds).toBeNull();
   });
 
   it('inverts the usage count for the token-plan endpoint (total - usage)', async () => {
@@ -191,7 +191,7 @@ describe('MiniMax shared provider', () => {
     expect(result.usage.windows.weekly).toBeUndefined();
   });
 
-  it('derives window seconds from start/end before remains_time', async () => {
+  it('derives window seconds from the start/end timestamps', async () => {
     stubFetchByUrl({
       [TOKEN_URL]: okPayload([
         model({
@@ -206,13 +206,20 @@ describe('MiniMax shared provider', () => {
     expect(result.usage.windows['5h'].windowSeconds).toBe(18000);
   });
 
-  it('falls back to remains_time in milliseconds for window seconds', async () => {
+  it('reports null window seconds when only remains_time is present', async () => {
     stubFetchByUrl({
       [TOKEN_URL]: okPayload([
-        model({ current_interval_remaining_percent: 50, remains_time: 9_664_502 }),
+        model({
+          current_interval_remaining_percent: 50,
+          remains_time: 9_664_502,
+          current_weekly_remaining_percent: 50,
+          current_weekly_total_count: 100,
+          weekly_remains_time: 9_664_502,
+        }),
       ]),
     });
     const result = await provider.fetchQuota();
-    expect(result.usage.windows['5h'].windowSeconds).toBe(9664);
+    expect(result.usage.windows['5h'].windowSeconds).toBeNull();
+    expect(result.usage.windows.weekly.windowSeconds).toBeNull();
   });
 });

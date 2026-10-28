@@ -75,16 +75,16 @@ const isWindowActive = (status) => {
 };
 
 /**
- * Calculate window duration in seconds from API timestamps or remains_time.
- * MiniMax API returns remains_time in milliseconds (confirmed via live API testing:
- * 9664502 ms = 2.68h in a 5h window, consistent with remaining_percent).
+ * Calculate window duration in seconds from the API start/end timestamps.
+ * remains_time is deliberately not a fallback: it is the time until the
+ * window resets (confirmed via live API testing: 9664502 ms = 2.68h remaining
+ * in a 5h window, consistent with remaining_percent), not the window's
+ * duration, so reporting it as windowSeconds fabricates the duration. With
+ * no usable start/end pair the duration is unknown and stays null.
  */
-const calculateWindowSeconds = (startAt, resetAt, remainsTimeMs) => {
+const calculateWindowSeconds = (startAt, resetAt) => {
   if (startAt && resetAt && resetAt > startAt) {
     return Math.floor((resetAt - startAt) / 1000);
-  }
-  if (remainsTimeMs && remainsTimeMs > 0) {
-    return Math.floor(remainsTimeMs / 1000);
   }
   return null;
 };
@@ -94,14 +94,12 @@ const calculateUsage = (model, isTokenPlan) => {
   const intervalUsageRaw = toNumber(model.current_interval_usage_count);
   const intervalStartAt = toTimestamp(model.start_time);
   const intervalResetAt = toTimestamp(model.end_time);
-  const intervalRemainsTime = toNumber(model.remains_time);
   const intervalRemainingPercent = coercePercent(model.current_interval_remaining_percent);
 
   const weeklyTotal = toNumber(model.current_weekly_total_count);
   const weeklyUsageRaw = toNumber(model.current_weekly_usage_count);
   const weeklyStartAt = toTimestamp(model.weekly_start_time);
   const weeklyResetAt = toTimestamp(model.weekly_end_time);
-  const weeklyRemainsTime = toNumber(model.weekly_remains_time);
   const weeklyRemainingPercent = coercePercent(model.current_weekly_remaining_percent);
 
   let intervalUsedPercent = null;
@@ -124,8 +122,8 @@ const calculateUsage = (model, isTokenPlan) => {
     weeklyUsedPercent = Math.max(0, Math.min(100, (weeklyUsed / weeklyTotal) * 100));
   }
 
-  const intervalWindowSeconds = calculateWindowSeconds(intervalStartAt, intervalResetAt, intervalRemainsTime);
-  const weeklyWindowSeconds = calculateWindowSeconds(weeklyStartAt, weeklyResetAt, weeklyRemainsTime);
+  const intervalWindowSeconds = calculateWindowSeconds(intervalStartAt, intervalResetAt);
+  const weeklyWindowSeconds = calculateWindowSeconds(weeklyStartAt, weeklyResetAt);
 
   return {
     intervalUsedPercent,
