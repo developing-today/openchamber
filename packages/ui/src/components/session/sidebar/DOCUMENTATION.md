@@ -823,3 +823,17 @@ The session tree frames a group instead: the line starts under the open row
 and stops at its last child with a corner, so where a worktree's or a
 session's children end reads at a glance, and a long tree is not striped by
 lines that run through rows they do not belong to.
+
+### Why sidebar test files put their module mocks back
+
+Bun keeps a `mock.module` replacement for the rest of the process and
+`mock.restore()` does not remove it. The sidebar suites replace stores, the
+session row and the activity state to keep a rendered surface small, and those
+replacements reached every later file in a combined `bun test` run:
+`useSessionListSync.test.tsx` alone left `useGlobalSessionsStore` as a bare
+selector, so `getState` was undefined for every subtree test that ran after it.
+A file that mocks a module another file imports now snapshots the real exports
+before the mock and restores them in `afterAll` through
+`test-utils/moduleMocks.ts`. The per-file runner hides the problem because
+every file gets a fresh process, so only the combined run proves the fix.
+
