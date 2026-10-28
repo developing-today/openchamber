@@ -321,6 +321,12 @@ function isValidCommitHash(hash: string): boolean {
   return /^[0-9a-fA-F]{7,40}$/.test(hash);
 }
 
+function assertNotOptionLikeRef(value: string, label: string): void {
+  if (typeof value === 'string' && value.startsWith('-')) {
+    throw new Error(`Invalid ${label}: option-like values starting with '-' are not allowed: ${value}`);
+  }
+}
+
 function extractGitStatusPath(status: string, pathPart: string): string {
   if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
     return pathPart.split('\t').pop() || pathPart;
@@ -771,6 +777,7 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
  * Checkout a branch
  */
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
+  assertNotOptionLikeRef(branch, 'branch');
   const repo = await getRepository(directory);
 
   if (repo) {
@@ -791,6 +798,8 @@ export async function checkoutBranch(directory: string, branch: string): Promise
  * Create a new branch
  */
 export async function createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }> {
+  assertNotOptionLikeRef(name, 'branch name');
+  if (startPoint) assertNotOptionLikeRef(startPoint, 'start point');
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -813,6 +822,7 @@ export async function createBranch(directory: string, name: string, startPoint?:
  * Delete a local branch
  */
 export async function deleteGitBranch(directory: string, branch: string, force = false): Promise<{ success: boolean }> {
+  assertNotOptionLikeRef(branch, 'branch');
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -3301,6 +3311,7 @@ export async function listGitStashes(directory: string): Promise<Array<{ ref: st
 
 export async function countGitStashFiles(directory: string, refs: string[]): Promise<Record<string, number>> {
   const uniqueRefs = Array.from(new Set(refs.map((ref) => String(ref || '').trim()).filter(Boolean)));
+  for (const ref of uniqueRefs) assertNotOptionLikeRef(ref, 'stash ref');
   const counts: Record<string, number> = {};
   const concurrency = 4;
   let cursor = 0;
@@ -3328,6 +3339,7 @@ export async function stashGitChanges(directory: string, options: { message?: st
 
 export async function applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const ref = options.ref || 'stash@{0}';
+  assertNotOptionLikeRef(ref, 'stash ref');
   // Prefer --index so the staged/unstaged split captured in the stash is restored
   // faithfully. Fall back to a plain apply when the index can't be reinstated
   // cleanly (e.g. conflicts), which is the prior behavior.
@@ -3342,6 +3354,7 @@ export async function applyGitStash(directory: string, options: { ref: string })
 
 export async function dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const ref = options.ref || 'stash@{0}';
+  assertNotOptionLikeRef(ref, 'stash ref');
   const result = await execGit(['stash', 'drop', ref], directory);
   if (result.exitCode !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to drop stash');
   return { success: true, ref };
@@ -3349,6 +3362,7 @@ export async function dropGitStash(directory: string, options: { ref: string }):
 
 export async function popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const ref = options.ref || 'stash@{0}';
+  assertNotOptionLikeRef(ref, 'stash ref');
   await applyGitStash(directory, { ref });
   await dropGitStash(directory, { ref });
   return { success: true, ref };
@@ -3884,6 +3898,7 @@ export async function rebase(
   directory: string,
   options: { onto: string }
 ): Promise<GitRebaseResult> {
+  assertNotOptionLikeRef(options.onto, 'rebase target');
   const result = await execGit(['rebase', options.onto], directory);
 
   if (result.exitCode === 0) {
@@ -3924,6 +3939,7 @@ export async function merge(
   directory: string,
   options: { branch: string }
 ): Promise<GitMergeResult> {
+  assertNotOptionLikeRef(options.branch, 'merge branch');
   const result = await execGit(['merge', options.branch], directory);
 
   if (result.exitCode === 0) {
