@@ -413,6 +413,16 @@ describe('ui auth client credential seam', () => {
     expect(await maxAgeFor(true)).toBe('3600');
   });
 
+  it('reads login rate-limit attempt budgets from the environment', async () => {
+    const { readRateLimitMaxAttempts } = await import('./ui-auth.js');
+    expect(readRateLimitMaxAttempts('5', 10)).toBe(5);
+    expect(readRateLimitMaxAttempts(' 12 ', 3)).toBe(12);
+    for (const invalid of [undefined, '', 'abc', '0', '-5', '2.9', '1e3']) {
+      expect(readRateLimitMaxAttempts(invalid, 10)).toBe(10);
+      expect(readRateLimitMaxAttempts(invalid, 3)).toBe(3);
+    }
+  });
+
   it('reads session lifetimes from the environment', async () => {
     const { readSessionTtlMs } = await import('./ui-auth.js');
     expect(readSessionTtlMs('24', 1000, 5)).toBe(24_000);
