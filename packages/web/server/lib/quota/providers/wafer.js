@@ -79,9 +79,18 @@ export const fetchQuota = async () => {
     }
 
     const hasOverage = overage !== null && overage > 0;
-    const usedPercent = hasOverage
-      ? Math.max(0, usedPercentRaw ?? 0)
-      : Math.max(0, Math.min(100, usedPercentRaw ?? 0));
+    // A present percent keeps the deliberate overage behaviour (no 100 clamp
+    // when overage is present). An absent percent must not be fabricated as
+    // 0: derive it from the remaining/limit counts in the same payload when
+    // both are present, and report null when there is nothing to derive from.
+    let usedPercent = null;
+    if (usedPercentRaw !== null) {
+      usedPercent = hasOverage
+        ? Math.max(0, usedPercentRaw)
+        : Math.max(0, Math.min(100, usedPercentRaw));
+    } else if (remaining !== null && limit !== null && limit > 0) {
+      usedPercent = Math.max(0, Math.min(100, ((limit - remaining) / limit) * 100));
+    }
 
     const windowSeconds = windowStart !== null && windowEnd !== null
       ? Math.round((windowEnd - windowStart) / 1000)
