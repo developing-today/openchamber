@@ -3617,10 +3617,14 @@ export async function getCommitFiles(
   directory: string,
   hash: string
 ): Promise<{ files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> }> {
+  if (!hash || !hash.trim()) {
+    throw new Error('A commit hash is required');
+  }
+
   const numstatResult = await execGit(['show', '--numstat', '--format=', hash], directory);
 
   if (numstatResult.exitCode !== 0) {
-    return { files: [] };
+    throw new Error(numstatResult.stderr.trim() || `Failed to get files for commit ${hash}`);
   }
 
   const files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> = [];
