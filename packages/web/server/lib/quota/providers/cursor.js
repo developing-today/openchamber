@@ -261,18 +261,29 @@ const buildWindows = (usage, plan) => {
         : null,
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(planUsage.remaining) ?? '$0.00'} remaining of ${planLimit}`
+      // An absent remaining is unknown, not zero: claim no remaining
+      // amount instead of inventing '$0.00 remaining'.
+      valueLabel: remaining !== null
+        ? `${centsLabel(remaining)} remaining of ${planLimit}`
+        : `${planLimit} limit`
     });
   }
 
   const onDemandLimit = toNumber(spendLimitUsage.individualLimit) ?? toNumber(spendLimitUsage.pooledLimit);
   if (onDemandLimit && onDemandLimit > 0) {
-    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining) ?? 0;
+    // An absent remaining is unknown, not zero: defaulting it to 0 would
+    // report a fully exhausted window the payload never claimed. A
+    // reported remaining of 0 still reads 100%.
+    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining);
     windows.on_demand = toUsageWindow({
-      usedPercent: clampPercent(((onDemandLimit - remaining) / onDemandLimit) * 100),
+      usedPercent: remaining === null
+        ? null
+        : clampPercent(((onDemandLimit - remaining) / onDemandLimit) * 100),
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(remaining) ?? '$0.00'} remaining of ${centsLabel(onDemandLimit)}`
+      valueLabel: remaining === null
+        ? `${centsLabel(onDemandLimit)} limit`
+        : `${centsLabel(remaining)} remaining of ${centsLabel(onDemandLimit)}`
     });
   }
 
