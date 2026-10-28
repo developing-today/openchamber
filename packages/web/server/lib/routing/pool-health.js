@@ -207,6 +207,22 @@ export const isLocalOpenCode = (buildOpenCodeUrl) => {
   }
 };
 
+// A pool-health window is judged by its spelling as written, like every
+// other numeric query parameter in this server (#463-#592): only a canonical
+// decimal is honoured. Exponent (1e3), radix-prefixed (0x10, 0b101), signed
+// (+2), whitespace-padded (' 2 '), leading-zero (01), trailing-junk (2junk)
+// and non-canonical fraction (2.0, 2.50) spellings fall back to the defaults
+// in computePoolHealth instead of being reinterpreted by a loose Number(...).
+// A canonical fraction (1.5, 0.5) stays valid: the compute layer supports
+// sub-hour windows down to 0.1h.
+const CANONICAL_DECIMAL_QUERY = /^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/;
+
+const parseCanonicalDecimalQuery = (value) => {
+  if (Object.prototype.toString.call(value) !== '[object String]' || !CANONICAL_DECIMAL_QUERY.test(value)) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+};
+
 export const registerPoolHealthRoutes = (app, dependencies) => {
   const { readConfigLayers, openchamberDataDir, isOpenCodeLocal = () => true } = dependencies;
 
@@ -217,8 +233,8 @@ export const registerPoolHealthRoutes = (app, dependencies) => {
           readConfigLayers,
           openchamberDataDir,
           telemetryLocal: isOpenCodeLocal(),
-          hours: req.query?.hours ? Number(req.query.hours) : undefined,
-          activeMinutes: req.query?.activeMinutes ? Number(req.query.activeMinutes) : undefined,
+          hours: parseCanonicalDecimalQuery(req.query?.hours),
+          activeMinutes: parseCanonicalDecimalQuery(req.query?.activeMinutes),
         }),
       );
     } catch (error) {
