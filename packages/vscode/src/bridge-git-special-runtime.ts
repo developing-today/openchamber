@@ -399,8 +399,9 @@ export async function handleSpecialGitBridgeMessage(
       try {
         const listed = await gitService.getGitRangeFiles(directory, base, head);
         files = Array.isArray(listed) ? listed : [];
-      } catch {
-        files = [];
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: `Failed to list changed files for ${base}...${head}: ${message}` };
       }
 
       if (files.length === 0) {
