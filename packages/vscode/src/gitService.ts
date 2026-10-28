@@ -3421,6 +3421,18 @@ async function resolveBaseRefForLog(
   return normalized;
 }
 
+// Only a positive integer caps the history. Anything else takes the
+// default of 50: a negative reaching git as --max-count=-5 means
+// unlimited, and a fractional value is rejected as not-an-integer, so an
+// invalid value must never pass through (#641). Normalizing here, in the
+// service, mirrors the web git service (#463).
+const normalizeMaxCount = (maxCount?: number): number => {
+  if (maxCount === undefined || !Number.isInteger(maxCount) || maxCount <= 0) {
+    return 50;
+  }
+  return maxCount;
+};
+
 /**
  * Get git log
  */
@@ -3428,7 +3440,7 @@ export async function getGitLog(
   directory: string,
   options?: { maxCount?: number; from?: string; to?: string; file?: string; all?: boolean }
 ): Promise<{ all: GitLogEntry[]; latest: GitLogEntry | null; total: number }> {
-  const maxCount = options?.maxCount || 50;
+  const maxCount = normalizeMaxCount(options?.maxCount);
 
   if (options?.all) {
     const logArgs = [
