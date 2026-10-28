@@ -49,6 +49,23 @@ import { toast } from '@/components/ui';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
 import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { ACTIVITY_TITLE_KEY } from '@/components/session/sidebar/sessionSidebarActivityTitles';
+import {
+  isSidebarAttentionZoneKey,
+  watchesOtherSessions,
+  type SidebarAttentionZoneKey,
+  type SidebarSectionKey,
+} from '@/stores/sidebarLayout';
+import { partitionSidebarZones, reuseUnchangedPartition } from '@/components/session/sidebar/zones/sidebarZones';
+import { useSidebarLiveStates } from '@/components/session/sidebar/zones/useSidebarLiveStates';
+import { saveSidebarLayout } from '@/components/session/sidebar/zones/saveSidebarLayout';
+import { reorderSectionsByDrop } from '@/components/session/sidebar/zones/sectionDrag';
+import {
+  excludeRoots,
+  expandZoneSessions,
+  insertChatsGroupIndex,
+  phoneSectionsInUse,
+} from './mobileSessionsSheetSections';
 import { getDescendantIds, partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
 import { rankByLatestActivity, sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { collectSessionSubtreeIds, runSessionSubtreeAction, type SessionSubtreeAction } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
@@ -250,8 +267,32 @@ const treeTextLeft = (depth: number): number => treeRowLeft(depth) + 20;
 const PINNED_SECTION_ID = 'openchamber:pinned';
 const WORK_SECTION_ID = 'openchamber:work';
 const TIME_LIST_SECTION_ID = 'openchamber:time-list';
+const ALL_SESSIONS_SECTION_ID = 'openchamber:all-sessions';
 // Chats are flat rows in both views, aligned with the timeline rows' text.
 const TIMELINE_CHAT_INDENT = 12;
+
+/** Zone header icons, the same marks the desktop sidebar's zone headers use. */
+const ATTENTION_ZONE_ICON: Record<SidebarAttentionZoneKey, IconName> = {
+  approvals: 'shield',
+  questions: 'question',
+  blocked: 'alert',
+  attention: 'alarm-warning',
+  pending: 'time',
+  errors: 'error-warning',
+  stopped: 'stop',
+  'other-approvals': 'shield',
+  'other-questions': 'question',
+  'other-blocked': 'alert',
+  'other-attention': 'alarm-warning',
+  'other-errors': 'error-warning',
+  'other-stopped': 'stop',
+  'other-active': 'pulse',
+};
+
+/** The display-menu title of a section, shared with the desktop sidebar. */
+const sectionTitleKey = (key: SidebarSectionKey): I18nKey => (
+  key === 'projects' ? 'sessions.sidebar.zone.projects' : ACTIVITY_TITLE_KEY[key]
+);
 
 const pathBelongsToRoot = (path: string, root: string): boolean => {
   const normalizedPath = normalizePath(path);
@@ -802,6 +843,35 @@ const SortableProjectRow: React.FC<{
   );
 };
 
+/** One draggable section row in the reorder mode: drag handle reorders the
+    sheet's sections the way dragging a project reorders projects. */
+const SortableSectionReorderRow: React.FC<{ sectionId: string; icon: React.ReactNode; label: string }> = ({ sectionId, icon, label }) => {
+  const { t } = useI18n();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: sectionId });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : 1 }}
+      className={cn(
+        'flex items-center gap-1 rounded-xl bg-background px-1 py-1',
+        isDragging && 'shadow-lg shadow-black/20',
+      )}
+    >
+      <button
+        type="button"
+        className="flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-muted-foreground/70 transition-colors hover:text-foreground active:cursor-grabbing"
+        aria-label={t('mobile.sessions.dragHandleAria', { label })}
+        {...attributes}
+        {...listeners}
+      >
+        <RiDragMove2Line className="size-4" />
+      </button>
+      {icon}
+      <span className="block min-w-0 flex-1 truncate typography-ui-label font-bold text-muted-foreground">{label}</span>
+    </div>
+  );
+};
+
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
@@ -858,8 +928,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setListSessionGrouping = useSessionDisplayStore((state) => state.setListSessionGrouping);
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
+  const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
+  const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
+  const sidebarLayout = useSessionDisplayStore((state) => state.sidebarLayout);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
     // Branch per directory, for the second line of timeline-style rows (In
@@ -1177,6 +1250,50 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       ? orderSessionsByLifecycleScopes(sessions.filter((session) => workSessionIds.has(session.id) && !pinnedZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
       : [],
   }), [pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions, workSessionIds]);
+  // Attention zones, fed by the same live states and partition as the desktop
+  // sidebar. The sheet closes when a session opens, so the open session keeps
+  // no held place: the partition always draws the live zone. After Done or
+  // Archive the sheet closes and opens nothing in its place.
+  const showWorkZone = sessionWorkEnabled && showWorkSection;
+  const zoneRoots = React.useMemo(
+    () => orderSessionsByLifecycleScopes(sessions.filter((session) => !getParentId(session)), pinnedSessionIds, sessionOrderRanks),
+    [pinnedSessionIds, sessionOrderRanks, sessions],
+  );
+  const isFollowedSession = React.useCallback((session: Session) => !isChatDirectoryPath(getSessionDirectory(session)) && (
+    (showPinnedSection && isSessionPinned(pinnedSessionIds, getSessionDirectory(session), session.id))
+    || (showWorkZone && isSessionInWork(session))
+  ), [pinnedSessionIds, showPinnedSection, showWorkZone]);
+  const watchOthers = watchesOtherSessions(sidebarLayout);
+  const watchesLiveState = sidebarLayout.attention !== 'off' || watchOthers;
+  const liveStateCandidates = React.useMemo(() => {
+    if (!watchesLiveState) return [];
+    return zoneRoots
+      .filter((session) => watchOthers || isFollowedSession(session))
+      .map((session) => ({ id: session.id, treeIds: [session.id, ...getDescendantIds(childrenBySessionId, session.id)] }));
+  }, [childrenBySessionId, isFollowedSession, watchOthers, watchesLiveState, zoneRoots]);
+  const liveStateById = useSidebarLiveStates(liveStateCandidates, { enabled: watchesLiveState, readUnread: sidebarLayout.otherActive });
+  const previousZonePartitionRef = React.useRef<ReturnType<typeof partitionSidebarZones> | null>(null);
+  const zonePartition = React.useMemo(() => {
+    const next = partitionSidebarZones({
+      roots: zoneRoots,
+      layout: sidebarLayout,
+      showPinnedZone: showPinnedSection,
+      showWorkZone,
+      isPinned: (session) => isSessionPinned(pinnedSessionIds, getSessionDirectory(session), session.id),
+      isInWork: (session) => isSessionInWork(session),
+      isChat: (session) => isChatDirectoryPath(getSessionDirectory(session)),
+      liveStateById,
+      held: null,
+    });
+    const stable = reuseUnchangedPartition(previousZonePartitionRef.current, next);
+    previousZonePartitionRef.current = stable;
+    return stable;
+  }, [liveStateById, pinnedSessionIds, showPinnedSection, showWorkZone, sidebarLayout, zoneRoots]);
+  const zoneSessionIds = React.useMemo(() => new Set(zonePartition.zoneBySessionId.keys()), [zonePartition]);
+  const pinnedTimelineIds = React.useMemo(
+    () => new Set((zonePartition.sessionsByZone.get('pinned') ?? []).map((session) => session.id)),
+    [zonePartition],
+  );
   const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
   const chatRootCount = React.useMemo(
     () => sectionChatSessions.filter((session) => !getParentId(session)).length,
@@ -1589,6 +1706,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const runSubtreeAction = (action: SessionSubtreeAction, session: Session) => {
     setRevealedSessionId(null);
     setConfirmingDeleteSessionId(null);
+    // After Done or Archive the sheet closes and opens nothing in its place:
+    // the phone list is a sheet that closes when a session opens, so keeping
+    // the row or opening the next session, as the desktop sidebar can, would
+    // fight the closing sheet.
+    if (session.id === currentSessionId) onOpenChange(false);
     return runSessionSubtreeAction(
       action,
       session,
@@ -1701,10 +1823,55 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     void updateDesktopSettings({ sidebarShowPinnedSection: next });
   };
 
+  const handleToggleChatsSection = () => {
+    const next = !showChatsSection;
+    setShowChatsSection(next);
+    void updateDesktopSettings({ sidebarShowChatsSection: next });
+  };
+
   const handleToggleDetailedZoneRows = () => {
     const next = !detailedZoneRows;
     setDetailedZoneRows(next);
     void updateDesktopSettings({ sidebarDetailedZoneRows: next });
+  };
+
+  // List layout and attention sections: the same sidebarLayout value as the
+  // desktop sidebar, stored per surface kind, so the phone keeps its own.
+  const ATTENTION_OPTIONS = [
+    ['off', 'sessions.sidebar.header.layout.attention.off'],
+    ['separate', 'sessions.sidebar.header.layout.attention.separate'],
+    ['blocked', 'sessions.sidebar.header.layout.attention.blocked'],
+    ['combined', 'sessions.sidebar.header.layout.attention.combined'],
+    ['pending', 'sessions.sidebar.header.layout.attention.pending'],
+  ] as const;
+  const OTHER_SCOPE_OPTIONS = [
+    ['off', 'sessions.sidebar.header.layout.other.off'],
+    ['shared', 'sessions.sidebar.header.layout.other.shared'],
+    ['separate', 'sessions.sidebar.header.layout.other.separate'],
+  ] as const;
+  const OTHER_GROUPING_OPTIONS = [
+    ['separate', 'sessions.sidebar.header.layout.attention.separate'],
+    ['blocked', 'sessions.sidebar.header.layout.attention.blocked'],
+    ['combined', 'sessions.sidebar.header.layout.attention.combined'],
+  ] as const;
+  const LIST_CHATS_OPTIONS = [
+    ['group', 'sessions.sidebar.header.layout.listChats.group'],
+    ['section', 'sessions.sidebar.header.layout.listChats.section'],
+  ] as const;
+
+  const handleSectionDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const activeKey = String(active.id) as SidebarSectionKey;
+    const overKey = String(over.id) as SidebarSectionKey;
+    const drawn = phoneSectionsInUse(sidebarLayout, {
+      showChatsSection,
+      showPinnedSection,
+      showWorkSection: showWorkZone,
+      chatsInListProjects: timelineActive && !timeListActive && sidebarLayout.timelineChats === 'group',
+    });
+    if (!drawn.includes(activeKey) || !drawn.includes(overKey)) return;
+    saveSidebarLayout({ sectionOrder: reorderSectionsByDrop(sidebarLayout.sectionOrder, drawn, activeKey, overKey) });
   };
 
   /** One choice or switch in the display menu, checked when it is in effect. */
@@ -1803,20 +1970,28 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Timeline mode: each project's root sessions from every worktree and
   // space in one lifecycle-ordered list under the project header, two-line
   // rows, no worktree groups. Search keeps the grouped behaviour, and reorder
-  // mode shows the project list to drag.
+  // mode shows the project list to drag. The List layout comes from the same
+  // sidebarLayout value as the desktop sidebar (per surface kind): Chats with
+  // the projects or in their own section, one group per project or one
+  // combined list, one or two lines per session.
   const timelineActive = sidebarViewMode === 'timeline' && !normalizedQuery && !editingOrder;
   // List by time: every project's root sessions in one list under a
   // Projects section, three-line rows naming the project, revealed a page at
-  // a time as the end scrolls near. Sessions Pinned or In work list leave it.
+  // a time as the end scrolls near. Every session a zone lists leaves it, so
+  // each session shows once.
   const timeListActive = timelineActive && listSessionGrouping === 'time';
+  const chatsInListProjects = timelineActive && !timeListActive && sidebarLayout.timelineChats === 'group';
+  const combinedListActive = timelineActive && !timeListActive && !sidebarLayout.timelineProjectGroups;
+  const compactTimelineRows = timelineActive && sidebarLayout.timelineCompactRows;
 
   // Pinned and In work use the timeline's rows (two lines with the project's
   // icon in List, one line in Tree unless detailed rows are on), so their
   // branch and project context resolve whenever the list (not search or
-  // reorder) is on screen.
+  // reorder) is on screen. Attention zones use the same rows.
   const listActive = !normalizedQuery && !editingOrder;
   const compactZoneRows = sidebarViewMode !== 'timeline' && !detailedZoneRows;
-  const needsTimelineContext = timelineActive || (listActive && (workBucket.sessions.length > 0 || pinnedBucket.sessions.length > 0));
+  const attentionZoneCount = [...zonePartition.sessionsByZone.keys()].filter((zone) => zone !== 'pinned' && zone !== 'work').length;
+  const needsTimelineContext = timelineActive || (listActive && (workBucket.sessions.length > 0 || pinnedBucket.sessions.length > 0 || attentionZoneCount > 0));
 
   // The git store only knows directories something asked about. The grouped
   // project tree never needs project root branches, so the timeline-style
@@ -1874,9 +2049,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const timelineEntriesByProject = React.useMemo(() => {
     const byProject = new Map<string, TimelineEntry[]>();
-    if (!timelineActive || timeListActive) return byProject;
+    if (!timelineActive || timeListActive || combinedListActive) return byProject;
+    // A session the Pinned zone lists leaves its project in List; the other
+    // zones keep it in both places, as on the desktop sidebar.
     const roots = orderSessionsByLifecycleScopes(
-      projectSessions.filter((session) => !getParentId(session) && timelineContextById.has(session.id)),
+      projectSessions.filter((session) => !getParentId(session) && !pinnedTimelineIds.has(session.id) && timelineContextById.has(session.id)),
       pinnedSessionIds,
       sessionOrderRanks,
     );
@@ -1886,16 +2063,25 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       else byProject.set(entry.project.id, [entry]);
     }
     return byProject;
-  }, [pinnedSessionIds, projectSessions, sessionOrderRanks, timeListActive, timelineActive, timelineContextById, toTimelineEntries]);
-  const timeListEntries = React.useMemo(() => {
-    if (!timeListActive) return [];
-    const zoneIds = new Set([...pinnedBucket.sessions, ...workBucket.sessions].map((session) => session.id));
+  }, [combinedListActive, pinnedSessionIds, pinnedTimelineIds, projectSessions, sessionOrderRanks, timeListActive, timelineActive, timelineContextById, toTimelineEntries]);
+  // Without project groups: one heading over every project's root sessions in
+  // lifecycle order, 20 at a time, as on the desktop sidebar.
+  const combinedTimelineEntries = React.useMemo(() => {
+    if (!combinedListActive) return [];
     return toTimelineEntries(orderSessionsByLifecycleScopes(
-      projectSessions.filter((session) => !getParentId(session) && !zoneIds.has(session.id) && timelineContextById.has(session.id)),
+      projectSessions.filter((session) => !getParentId(session) && !pinnedTimelineIds.has(session.id) && timelineContextById.has(session.id)),
       pinnedSessionIds,
       sessionOrderRanks,
     ));
-  }, [pinnedBucket, pinnedSessionIds, projectSessions, sessionOrderRanks, timeListActive, timelineContextById, toTimelineEntries, workBucket]);
+  }, [combinedListActive, pinnedSessionIds, pinnedTimelineIds, projectSessions, sessionOrderRanks, timelineContextById, toTimelineEntries]);
+  const timeListEntries = React.useMemo(() => {
+    if (!timeListActive) return [];
+    return toTimelineEntries(orderSessionsByLifecycleScopes(
+      projectSessions.filter((session) => !getParentId(session) && !zoneSessionIds.has(session.id) && timelineContextById.has(session.id)),
+      pinnedSessionIds,
+      sessionOrderRanks,
+    ));
+  }, [pinnedSessionIds, projectSessions, sessionOrderRanks, timeListActive, timelineContextById, toTimelineEntries, zoneSessionIds]);
   const workTimelineEntries = React.useMemo(
     () => (listActive ? toTimelineEntries(workBucket.sessions.filter((session) => !getParentId(session))) : []),
     [listActive, toTimelineEntries, workBucket],
@@ -1903,6 +2089,55 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const pinnedTimelineEntries = React.useMemo(
     () => (listActive ? toTimelineEntries(pinnedBucket.sessions.filter((session) => !getParentId(session))) : []),
     [listActive, toTimelineEntries, pinnedBucket],
+  );
+  // Attention zone rows: the same buckets the Tree renders (each zone root
+  // with its whole subtree) and the same timeline entries the List renders.
+  const attentionBucketByZone = React.useMemo(() => {
+    const byZone = new Map<SidebarAttentionZoneKey, WorktreeBucket>();
+    for (const [zone, zoneSessions] of zonePartition.sessionsByZone) {
+      if (zone === 'pinned' || zone === 'work' || !isSidebarAttentionZoneKey(zone)) continue;
+      const rootIds = new Set(zoneSessions.map((session) => session.id));
+      byZone.set(zone, {
+        key: `openchamber:${zone}`,
+        label: '',
+        path: '',
+        worktree: null,
+        space: null,
+        sessions: expandZoneSessions(sessions, rootIds, descendantIdsOf),
+      });
+    }
+    return byZone;
+  }, [descendantIdsOf, sessions, zonePartition]);
+  const attentionEntriesByZone = React.useMemo(() => {
+    const byZone = new Map<SidebarAttentionZoneKey, TimelineEntry[]>();
+    for (const [zone, zoneSessions] of zonePartition.sessionsByZone) {
+      if (zone === 'pinned' || zone === 'work' || !isSidebarAttentionZoneKey(zone)) continue;
+      byZone.set(zone, listActive ? toTimelineEntries(zoneSessions.filter((session) => !getParentId(session))) : []);
+    }
+    return byZone;
+  }, [listActive, toTimelineEntries, zonePartition]);
+  // The sections the sheet draws now, in the layout's order. Chats join the
+  // projects block while the List layout puts them there.
+  const sectionsInUse = React.useMemo(
+    () => phoneSectionsInUse(sidebarLayout, {
+      showChatsSection,
+      showPinnedSection,
+      showWorkSection: showWorkZone,
+      chatsInListProjects,
+    }),
+    [chatsInListProjects, showChatsSection, showPinnedSection, showWorkZone, sidebarLayout],
+  );
+  // The timeline's project groups with Chats among them at the layout's
+  // index, while Chats keep their own section everywhere else.
+  const projectNodesWithChats = React.useMemo<Array<ProjectNode | 'chats'>>(
+    () => {
+      if (!chatsInListProjects || combinedListActive) return orderedNodes;
+      const byId = new Map(orderedNodes.map((node) => [node.project.id, node]));
+      return insertChatsGroupIndex(orderedNodes.map((node) => node.project.id), CHAT_DRAFT_PROJECT_ID, sidebarLayout.chatsGroupIndex)
+        .map((id) => (id === CHAT_DRAFT_PROJECT_ID ? 'chats' : byId.get(id)))
+        .filter((entry): entry is ProjectNode | 'chats' => entry !== undefined);
+    },
+    [chatsInListProjects, combinedListActive, orderedNodes, sidebarLayout.chatsGroupIndex],
   );
 
   /**
@@ -2031,7 +2266,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const remaining = entries.length - visibleEntries.length;
     return (
       <>
-        <MobileTimelineRows entries={visibleEntries} showProject={showProject} handlers={timelineHandlers} />
+        <MobileTimelineRows entries={visibleEntries} showProject={showProject} compact={compactTimelineRows} handlers={timelineHandlers} />
         {remaining > 0 ? (
           <ShowMoreRow indent={TIMELINE_ROW_INDENT} onClick={() => showMoreBucketSessions(listKey, visibleEntries.length, SESSIONS_PER_BUCKET)} />
         ) : entries.length > SESSIONS_PER_BUCKET ? (
@@ -2042,10 +2277,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   };
 
   /**
-   * Pinned or In work: a collapsible section; nothing when empty. Tree lists
-   * it as tree rows, with the state on the left and subsessions under a
-   * chevron, like the projects below; List and detailed rows use the
-   * timeline's flat rows.
+   * Pinned, In work or an attention zone: a collapsible section; nothing when
+   * empty. Tree lists it as tree rows, with the state on the left and
+   * subsessions under a chevron, like the projects below; List and detailed
+   * rows use the timeline's flat rows, one line while the List layout asks.
    */
   const renderZoneSection = (
     sectionId: string,
@@ -2053,10 +2288,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     label: string,
     bucket: WorktreeBucket,
     entries: readonly TimelineEntry[],
+    /** Attention zones pass their root count: chats only join them through
+        the other-sessions scope and have no timeline rows. */
+    count = entries.length,
   ): React.ReactNode => {
     // The count is the rows: a run's lanes share one, and a session whose
     // project is unresolved has none.
-    if (entries.length === 0) return null;
+    if (count === 0) return null;
     const expanded = projectExpandedMap[sectionId] ?? true;
     return (
       <section>
@@ -2085,7 +2323,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             {label}
           </span>
           <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
-            {entries.length}
+            {count}
           </span>
         </button>
         <MobileDisclosure open={expanded}>{() => (
@@ -2093,8 +2331,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             {compactZoneRows
               // The whole zone shows at once, as the timeline rows do.
               ? renderBucketSessions(sectionId, bucket, 0, { pageSize: Number.MAX_SAFE_INTEGER })
-              // Over the list by time they take its three-line rows.
-              : <MobileTimelineRows entries={entries} showProject projectLine={timeListActive} compact={false} pinMarker={sectionId !== PINNED_SECTION_ID} handlers={timelineHandlers} />}
+              // Over the list by time they take its three-line rows. A zone
+              // of chats alone has no timeline rows and lists its flat rows.
+              : entries.length > 0
+                ? <MobileTimelineRows entries={entries} showProject projectLine={timeListActive} compact={timeListActive ? false : compactTimelineRows} pinMarker={sectionId !== PINNED_SECTION_ID} handlers={timelineHandlers} />
+                : renderBucketSessions(sectionId, bucket, null, { pageSize: Number.MAX_SAFE_INTEGER })}
           </div>
         )}</MobileDisclosure>
       </section>
@@ -2158,6 +2399,133 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         )}</MobileDisclosure>
       </section>
     );
+  };
+
+  /**
+   * List without project groups: one All sessions section over every
+   * project's root sessions in lifecycle order, 20 at a time, as on the
+   * desktop sidebar.
+   */
+  const COMBINED_PAGE_SIZE = 20;
+  const renderCombinedSection = (): React.ReactNode => {
+    if (combinedTimelineEntries.length === 0) return null;
+    const expanded = projectExpandedMap[ALL_SESSIONS_SECTION_ID] ?? true;
+    const label = t('sessions.sidebar.zone.all');
+    const rowsKey = `${ALL_SESSIONS_SECTION_ID}::rows`;
+    const visibleCount = visibleCountByBucket.get(rowsKey) ?? COMBINED_PAGE_SIZE;
+    const visibleEntries = combinedTimelineEntries.slice(0, visibleCount);
+    const remaining = combinedTimelineEntries.length - visibleEntries.length;
+    return (
+      <section>
+        <button
+          type="button"
+          className="flex min-h-12 w-full min-w-0 items-center gap-2 px-3 py-1.5 text-start transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          onClick={() => {
+            if (revealedRowId) {
+              handleRowKeyRevealedChange(revealedRowId, false);
+              return;
+            }
+            toggleProject(ALL_SESSIONS_SECTION_ID, expanded);
+          }}
+          aria-expanded={expanded}
+          aria-label={
+            expanded
+              ? t('sessions.sidebar.group.collapseAria', { label })
+              : t('sessions.sidebar.group.expandAria', { label })
+          }
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="flex size-8 shrink-0 items-center justify-center text-muted-foreground">
+            <Icon name="list-unordered" className="size-5" />
+          </span>
+          <span className="block min-w-0 flex-1 truncate typography-ui-header font-semibold text-foreground">
+            {label}
+          </span>
+          <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+            {combinedTimelineEntries.length}
+          </span>
+        </button>
+        <MobileDisclosure open={expanded}>{() => (
+          <div className="pb-2">
+            <MobileTimelineRows entries={visibleEntries} showProject compact={compactTimelineRows} handlers={timelineHandlers} />
+            {remaining > 0 ? (
+              <ShowMoreRow indent={TIMELINE_ROW_INDENT} onClick={() => showMoreBucketSessions(rowsKey, visibleEntries.length, COMBINED_PAGE_SIZE)} />
+            ) : combinedTimelineEntries.length > COMBINED_PAGE_SIZE ? (
+              <ShowFewerRow indent={TIMELINE_ROW_INDENT} onClick={() => resetBucketVisibleCount(rowsKey)} />
+            ) : null}
+          </div>
+        )}</MobileDisclosure>
+      </section>
+    );
+  };
+
+  /** Chats in their own section, above the attention zones and projects. */
+  const renderChatsSection = (): React.ReactNode => {
+    if (!showChatsSection) return null;
+    const chatsExpanded = projectExpandedMap[CHAT_DRAFT_PROJECT_ID] ?? true;
+    const chatsLabel = t('mobile.sessions.section.chats');
+    return (
+      <section>
+        <div className="flex min-h-12 w-full items-center">
+          <button
+            type="button"
+            className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-start transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            onClick={() => {
+              if (revealedRowId) {
+                handleRowKeyRevealedChange(revealedRowId, false);
+                return;
+              }
+              toggleProject(CHAT_DRAFT_PROJECT_ID, chatsExpanded);
+            }}
+            aria-expanded={chatsExpanded}
+            aria-label={
+              chatsExpanded
+                ? t('sessions.sidebar.group.collapseAria', { label: chatsLabel })
+                : t('sessions.sidebar.group.expandAria', { label: chatsLabel })
+            }
+            style={{ touchAction: 'manipulation' }}
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center text-muted-foreground">
+              <Icon name="chat-4" className="size-5" />
+            </span>
+            <span className="block min-w-0 flex-1 truncate typography-ui-header font-semibold text-foreground">
+              {chatsLabel}
+            </span>
+            <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+              {chatRootCount}
+            </span>
+          </button>
+          {/* No "+" here: the header's New chat starts the same chat. */}
+        </div>
+        <MobileDisclosure open={chatsExpanded}>{() => (
+          <div className="pb-2">
+            {chatsBucket.sessions.length > 0 ? (
+              renderBucketSessions(
+                chatsBucketKey,
+                chatsBucket,
+                // Tree rows in Tree, state on the left as in the
+                // zones and projects below; flat rows in List.
+                sidebarViewMode === 'timeline' ? null : 0,
+                { pageSize: CHAT_PAGE_SIZE, alwaysVisibleIds: pinnedChatIds },
+              )
+            ) : (
+              <p className="px-3 pb-1 typography-micro text-muted-foreground" style={{ paddingInlineStart: sidebarViewMode === 'timeline' ? TIMELINE_CHAT_INDENT : treeTextLeft(0) }}>
+                {t('sessions.sidebar.activity.chatsEmpty')}
+              </p>
+            )}
+          </div>
+        )}</MobileDisclosure>
+      </section>
+    );
+  };
+
+  /** One attention zone from the shared partition, or nothing when empty. */
+  const renderAttentionZoneSection = (zone: SidebarAttentionZoneKey): React.ReactNode => {
+    const bucket = attentionBucketByZone.get(zone);
+    const entries = attentionEntriesByZone.get(zone) ?? [];
+    const roots = zonePartition.sessionsByZone.get(zone) ?? [];
+    if (!bucket || roots.length === 0) return null;
+    return renderZoneSection(`openchamber:${zone}`, ATTENTION_ZONE_ICON[zone], t(ACTIVITY_TITLE_KEY[zone]), bucket, entries, roots.length);
   };
 
   const timelineHandlers: TimelineRowHandlers = {
@@ -2229,10 +2597,29 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           </>
         )}
         <DropdownMenuSeparator />
+        {renderMenuChoice('chats', 'sessions.sidebar.header.displayMode.showChats', showChatsSection, handleToggleChatsSection)}
         {renderMenuChoice('pinned', 'sessions.sidebar.header.displayMode.showPinned', showPinnedSection, handleTogglePinnedSection)}
         {sessionWorkEnabled ? renderMenuChoice('work', 'sessions.sidebar.header.displayMode.showWork', showWorkSection, handleToggleWorkSection) : null}
         {/* List rows always carry two lines; Tree keeps Pinned and In work on one unless asked. */}
         {sidebarViewMode === 'timeline' ? null : renderMenuChoice('detailed', 'sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, handleToggleDetailedZoneRows)}
+        {sidebarViewMode === 'timeline' && listSessionGrouping === 'project' ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t('sessions.sidebar.header.layout.listChats')}</DropdownMenuLabel>
+            {LIST_CHATS_OPTIONS.map(([placement, labelKey]) => renderMenuChoice(placement, labelKey, sidebarLayout.timelineChats === placement, () => saveSidebarLayout({ timelineChats: placement })))}
+            {renderMenuChoice('projectGroups', 'sessions.sidebar.header.layout.projectGroups', sidebarLayout.timelineProjectGroups, () => saveSidebarLayout({ timelineProjectGroups: !sidebarLayout.timelineProjectGroups }))}
+            {renderMenuChoice('compactRows', 'sessions.sidebar.header.layout.compactRows', sidebarLayout.timelineCompactRows, () => saveSidebarLayout({ timelineCompactRows: !sidebarLayout.timelineCompactRows }))}
+          </>
+        ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>{t('sessions.sidebar.header.layout.attention')}</DropdownMenuLabel>
+        {ATTENTION_OPTIONS.map(([grouping, labelKey]) => renderMenuChoice(`attention-${grouping}`, labelKey, sidebarLayout.attention === grouping, () => saveSidebarLayout({ attention: grouping })))}
+        <DropdownMenuLabel>{t('sessions.sidebar.header.layout.otherSessions')}</DropdownMenuLabel>
+        {OTHER_SCOPE_OPTIONS.map(([scope, labelKey]) => renderMenuChoice(`other-${scope}`, labelKey, sidebarLayout.otherAttention === scope, () => saveSidebarLayout({ otherAttention: scope })))}
+        {sidebarLayout.otherAttention === 'separate' ? (
+          <>{OTHER_GROUPING_OPTIONS.map(([grouping, labelKey]) => renderMenuChoice(`other-grouping-${grouping}`, labelKey, sidebarLayout.otherAttentionGrouping === grouping, () => saveSidebarLayout({ otherAttentionGrouping: grouping }))}</>
+        ) : null}
+        {renderMenuChoice('otherActive', 'sessions.sidebar.header.layout.otherActive', sidebarLayout.otherActive, () => saveSidebarLayout({ otherActive: !sidebarLayout.otherActive }))}
         {canEditOrder ? (
           <>
             <DropdownMenuSeparator />
@@ -2417,6 +2804,37 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               <p className="px-1 typography-micro text-muted-foreground">
                 {t('mobile.sessions.editOrderHint')}
               </p>
+              <p className="px-1 pt-1 typography-micro font-semibold uppercase tracking-wider text-muted-foreground">
+                {t('sessions.sidebar.header.layout.sections')}
+              </p>
+              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleSectionDragEnd}>
+                <SortableContext
+                  items={sectionsInUse}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="flex flex-col gap-1.5">
+                    {sectionsInUse.map((sectionKey) => (
+                      <SortableSectionReorderRow
+                        key={sectionKey}
+                        sectionId={sectionKey}
+                        icon={sectionKey === 'chats'
+                          ? <Icon name="chat-4" className="size-4 shrink-0 text-muted-foreground" />
+                          : sectionKey === 'pinned'
+                            ? <Icon name="pushpin" className="size-4 shrink-0 text-muted-foreground" />
+                            : sectionKey === 'work'
+                              ? <Icon name="eye" className="size-4 shrink-0 text-muted-foreground" />
+                              : sectionKey === 'projects'
+                                ? <Icon name="folder" className="size-4 shrink-0 text-muted-foreground" />
+                                : <Icon name={ATTENTION_ZONE_ICON[sectionKey as SidebarAttentionZoneKey]} className="size-4 shrink-0 text-muted-foreground" />}
+                        label={t(sectionTitleKey(sectionKey))}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+              <p className="px-1 pt-1 typography-micro font-semibold uppercase tracking-wider text-muted-foreground">
+                {t('sessions.sidebar.header.actions.sortProjects')}
+              </p>
               <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleReorderDragEnd}>
                 <SortableContext
                   items={projectsMeta.map((p) => p.id)}
@@ -2440,66 +2858,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
-              {(() => {
-                const chatsExpanded = projectExpandedMap[CHAT_DRAFT_PROJECT_ID] ?? true;
-                const chatsLabel = t('mobile.sessions.section.chats');
-                return (
-                  <section>
-                    <div className="flex min-h-12 w-full items-center">
-                      <button
-                        type="button"
-                        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-start transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                        onClick={() => {
-                          if (revealedRowId) {
-                            handleRowKeyRevealedChange(revealedRowId, false);
-                            return;
-                          }
-                          toggleProject(CHAT_DRAFT_PROJECT_ID, chatsExpanded);
-                        }}
-                        aria-expanded={chatsExpanded}
-                        aria-label={
-                          chatsExpanded
-                            ? t('sessions.sidebar.group.collapseAria', { label: chatsLabel })
-                            : t('sessions.sidebar.group.expandAria', { label: chatsLabel })
-                        }
-                        style={{ touchAction: 'manipulation' }}
-                      >
-                        <span className="flex size-8 shrink-0 items-center justify-center text-muted-foreground">
-                          <Icon name="chat-4" className="size-5" />
-                        </span>
-                        <span className="block min-w-0 flex-1 truncate typography-ui-header font-semibold text-foreground">
-                          {chatsLabel}
-                        </span>
-                        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
-                          {chatRootCount}
-                        </span>
-                      </button>
-                      {/* No "+" here: the header's New chat starts the same chat. */}
-                    </div>
-                    <MobileDisclosure open={chatsExpanded}>{() => (
-                      <div className="pb-2">
-                        {chatsBucket.sessions.length > 0 ? (
-                          renderBucketSessions(
-                            chatsBucketKey,
-                            chatsBucket,
-                            // Tree rows in Tree, state on the left as in the
-                            // zones and projects below; flat rows in List.
-                            sidebarViewMode === 'timeline' ? null : 0,
-                            { pageSize: CHAT_PAGE_SIZE, alwaysVisibleIds: pinnedChatIds },
-                          )
-                        ) : (
-                          <p className="px-3 pb-1 typography-micro text-muted-foreground" style={{ paddingInlineStart: sidebarViewMode === 'timeline' ? TIMELINE_CHAT_INDENT : treeTextLeft(0) }}>
-                            {t('sessions.sidebar.activity.chatsEmpty')}
-                          </p>
-                        )}
-                      </div>
-                    )}</MobileDisclosure>
-                  </section>
-                );
-              })()}
-              {renderZoneSection(PINNED_SECTION_ID, 'pushpin', t('sessions.sidebar.activity.pinnedTitle'), pinnedBucket, pinnedTimelineEntries)}
-              {renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries)}
-              {timeListActive ? renderTimeListSection() : orderedNodes.map((node) => {
+              {sectionsInUse.map((sectionKey) => {
+                if (sectionKey === 'chats') return <React.Fragment key="chats">{renderChatsSection()}</React.Fragment>;
+                if (sectionKey === 'pinned') return <React.Fragment key="pinned">{renderZoneSection(PINNED_SECTION_ID, 'pushpin', t('sessions.sidebar.activity.pinnedTitle'), pinnedBucket, pinnedTimelineEntries)}</React.Fragment>;
+                if (sectionKey === 'work') return <React.Fragment key="work">{renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries)}</React.Fragment>;
+                if (sectionKey === 'projects') return (
+                  <React.Fragment key="projects">
+                    {timeListActive ? renderTimeListSection() : combinedListActive ? (<>{renderCombinedSection()}{chatsInListProjects ? renderChatsSection() : null}</>) : projectNodesWithChats.map((item) => {
+                      if (item === 'chats') return <React.Fragment key="chats-group">{renderChatsSection()}</React.Fragment>;
+                      const node = item;
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
                   ? node.buckets.filter((bucket) =>
@@ -2643,6 +3010,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                     )}</MobileDisclosure>
                   </section>
                 );
+                      })}
+                  </React.Fragment>
+                );
+                if (isSidebarAttentionZoneKey(sectionKey)) return <React.Fragment key={sectionKey}>{renderAttentionZoneSection(sectionKey)}</React.Fragment>;
+                return null;
               })}
             </div>
           )}

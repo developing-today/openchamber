@@ -104,11 +104,18 @@ projects. Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
-`partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree. Its header has no title: close, Add project, the display menu
-(a dropdown with the view, the project sort, the section toggles and Reorder
-projects, which swaps the menu's button for Done while it runs) and New chat;
-Chats has no "+" of its own, as New chat starts the same chat. Its footer
+`partitionSidebarSessions` and draws the same `sidebarLayout` value as the
+desktop and web sidebar, stored per surface kind: the attention sections from
+the shared `useSidebarLiveStates` hook and `partitionSidebarZones` partition,
+in the layout's section order, with Chats as a collapsible section except
+while the List layout puts Chats among the projects. Its header has no title: close, Add project, the display menu
+(a dropdown with the view, the project sort, the section toggles, the List
+layout and Needs attention choices, and Reorder, which swaps the menu's button
+for Done while it runs and drags sections as well as projects) and New chat;
+Chats has no "+" of its own, as New chat starts the same chat. The sheet closes
+when a session opens, so the open session keeps no held place and the zones
+always show the live state; After Done or Archive the sheet closes and opens
+nothing in its place. Its footer
 keeps Issues and PRs and Settings as buttons and puts Scheduled tasks,
 Archive and Usage in a "More" menu. Rows that span projects are labelled "project · branch" through
 `resolveSidebarSessionLocations` (live root branch included; the branch map is
@@ -120,13 +127,17 @@ the space's group carries, never with the branch icon. The phone's timeline
 manual project order with reordering, one header per project over its root
 sessions from every worktree and space, 7 at a time with Show more / Show
 fewer (collapsing a project resets it), two-line rows with a fixed-height
-second line, and the project's icon on that line in In work. Sorted by time
+second line, and the project's icon on that line in In work, one line while
+the List layout asks for compact rows. With Chats among the projects the Chats
+group takes its place at the layout's index; without project groups one All
+sessions section lists every project's sessions, 20 at a time. Sorted by time
 (the display menu's Sessions choice), it lists every project's sessions under
-one Projects section in the desktop's three-line rows, without the sessions
-Pinned and In work list and without Reorder projects; the sheet is not
+one Projects section in the desktop's three-line rows, leaving out every
+session a zone lists, without Reorder; the sheet is not
 virtualized, so the rows arrive 40 at a time as the end scrolls near (an
 intersection sentinel in `MobileTimelineList.tsx`), with no Show more row. The
-phone's Tree view follows the desktop tree: Chats, Pinned and In work list
+phone's Tree view follows the desktop tree: Chats, Pinned, In work and the
+attention zones list
 tree rows at level 0 (two-line timeline rows when Detailed rows is on, the
 zones showing all their sessions at once), and project sessions are
 tree rows (12px per level, subsession chevron on the left with a
@@ -151,9 +162,12 @@ rows have no menu, and the swipe actions already hold the five actions a phone
 uses most; folders are edited on the desktop or the web, and the phone shows
 the change at once. Collapsing a folder there is the phone's own, as
 everywhere. A search lists its matches without folders, and List has none,
-as on the desktop. Its display menu offers the Pinned and In work toggles and, in Tree,
+as on the desktop. Its display menu offers the Chats, Pinned and In work
+toggles and, in Tree,
 Detailed rows; pinned sessions and sessions in work stay under their project
-in both views. VS Code excludes
+in Tree, while List leaves a pinned session out of its project. A session an
+attention zone lists stays in its project too, except in the list by time,
+which leaves every zoned session out so each shows once. VS Code excludes
 worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
@@ -222,9 +236,9 @@ and held Enter does not submit repeatedly.
 ## Section order, attention zones and the open session
 
 The display menu's layout (`sidebarLayout`, `stores/sidebarLayout.ts`, profile
-setting stored per surface) arranges the desktop and web sidebar. VS Code
-always draws the classic layout and offers none of these controls; the phone
-sheet keeps its own sections and is unchanged. The menu's Layout submenu has
+setting stored per surface) arranges the desktop and web sidebar and the
+phone sheet, each keeping its own value. VS Code always draws the classic
+layout and offers none of these controls. The menu's Layout submenu has
 Restore the default layout and Classic layout, which is the sidebar as it was
 before: no attention zones, nothing held, Chats in their own section, Done
 moves the row at once.
