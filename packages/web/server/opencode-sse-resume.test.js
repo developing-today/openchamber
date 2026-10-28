@@ -354,32 +354,55 @@ describe.skipIf(!upstreamDriver)('against a real OpenCode that emits and replays
   let proxyServer = null;
   const streams = [];
 
+  // The driver takes its port through OC_PORT, so the port has to be chosen before it starts.
+  // A probed port is released before the driver binds it, and another process can take it in
+  // between (#685, the race #666 fixed for the gatekeeper suite): the driver then exits before
+  // it listens, or the readiness loop waits on a stranger's listener. The start below retries
+  // with a fresh port when the child exits before listening, up to five attempts. A child that
+  // stays up but never listens is not retried, and the fifth early exit throws with the child's
+  // own output, so a real startup failure still fails loudly after the bound. The first attempt
+  // reuses upstreamPort when one is already chosen, because the restart in the test below has
+  // to come back on the port its proxy was built with.
   const startUpstream = async () => {
-    const child = spawn('bun', ['run', upstreamDriver], {
-      cwd: path.dirname(upstreamDriver),
-      env: {
-        ...process.env,
-        HOME: tempHome,
-        XDG_DATA_HOME: path.join(tempHome, '.local', 'share'),
-        XDG_CONFIG_HOME: path.join(tempHome, '.config'),
-        XDG_STATE_HOME: path.join(tempHome, '.local', 'state'),
-        OC_PORT: String(upstreamPort),
-        OPENCODE_PASSWORD: upstreamPassword,
-      },
-      stdio: 'ignore',
-    });
-    const deadline = Date.now() + 120_000;
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null) throw new Error('OpenCode exited before it listened');
-      try {
-        const response = await fetch(`http://127.0.0.1:${upstreamPort}/api/info`, { headers: { Authorization: upstreamAuth } });
-        if (response.ok) return child;
-      } catch {
-        // Not listening yet.
+    for (let attempt = 1; ; attempt += 1) {
+      if (attempt > 1 || upstreamPort === null) upstreamPort = await freePort();
+      let childOutput = '';
+      const child = spawn('bun', ['run', upstreamDriver], {
+        cwd: path.dirname(upstreamDriver),
+        env: {
+          ...process.env,
+          HOME: tempHome,
+          XDG_DATA_HOME: path.join(tempHome, '.local', 'share'),
+          XDG_CONFIG_HOME: path.join(tempHome, '.config'),
+          XDG_STATE_HOME: path.join(tempHome, '.local', 'state'),
+          OC_PORT: String(upstreamPort),
+          OPENCODE_PASSWORD: upstreamPassword,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      // Both pipes are read, always: a full pipe blocks the child, and the kept tail is what
+      // the failure errors below report.
+      const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
+      child.stdout.on('data', keep);
+      child.stderr.on('data', keep);
+      const deadline = Date.now() + 120_000;
+      let exited = false;
+      while (Date.now() < deadline) {
+        if (child.exitCode !== null) { exited = true; break; }
+        try {
+          const response = await fetch(`http://127.0.0.1:${upstreamPort}/api/info`, { headers: { Authorization: upstreamAuth } });
+          if (response.ok && child.exitCode === null) return child;
+        } catch {
+          // Not listening yet.
+        }
+        await sleep(250);
       }
-      await sleep(250);
+      if (!exited) {
+        child.kill('SIGKILL');
+        throw new Error(`OpenCode did not start in time:\n${childOutput}`);
+      }
+      if (attempt >= 5) throw new Error(`OpenCode exited before it listened:\n${childOutput}`);
     }
-    throw new Error('OpenCode did not start in time');
   };
 
   const stopUpstream = (child) => new Promise((resolve) => {
