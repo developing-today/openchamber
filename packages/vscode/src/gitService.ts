@@ -4294,13 +4294,17 @@ export async function canonicalizeWorktreeState(
       attentionReason = 'merge';
     } else {
       const fsp = fs.promises;
-      const rebaseMerge = await fsp.stat(path.join(directoryPath, '.git', 'rebase-merge')).then(() => true).catch(() => false);
-      const rebaseApply = await fsp.stat(path.join(directoryPath, '.git', 'rebase-apply')).then(() => true).catch(() => false);
+      // In a linked worktree `.git` is a file, not a directory, so resolve
+      // the real per-worktree git dir through git itself (as
+      // checkInProgressOperations does) instead of joining `.git` here.
+      const gitDir = await resolveGitDir(directoryPath);
+      const rebaseMerge = await fsp.stat(path.join(gitDir, 'rebase-merge')).then(() => true).catch(() => false);
+      const rebaseApply = await fsp.stat(path.join(gitDir, 'rebase-apply')).then(() => true).catch(() => false);
       if (rebaseMerge || rebaseApply) {
         attentionReason = 'rebase';
       } else {
-        const cherryPickHead = await fsp.stat(path.join(directoryPath, '.git', 'CHERRY_PICK_HEAD')).then(() => true).catch(() => false);
-        const revertHead = await fsp.stat(path.join(directoryPath, '.git', 'REVERT_HEAD')).then(() => true).catch(() => false);
+        const cherryPickHead = await fsp.stat(path.join(gitDir, 'CHERRY_PICK_HEAD')).then(() => true).catch(() => false);
+        const revertHead = await fsp.stat(path.join(gitDir, 'REVERT_HEAD')).then(() => true).catch(() => false);
         if (cherryPickHead) attentionReason = 'cherry-pick';
         else if (revertHead) attentionReason = 'revert';
       }
