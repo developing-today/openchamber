@@ -767,7 +767,13 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
   const result = await execGit(['branch', '-a', '-v', '--format=%(refname:short)|%(objectname:short)|%(upstream:short)|%(HEAD)'], directory);
   
   if (result.exitCode !== 0) {
-    return { all: [], current: '', branches: {} };
+    // A failed branch read is not a repository with no branches: surface
+    // git's error instead of fabricating an empty success. For a directory
+    // that is not a git repository, git's stderr is the plain
+    // `fatal: not a git repository (or any of the parent directories): .git`
+    // message consumers match on. That is the contract getGitStatusRaw
+    // throws with after #650, and the web getBranches throws with.
+    throw new Error(result.stderr.trim() || `git branch failed with exit code ${result.exitCode}`);
   }
 
   const lines = result.stdout.trim().split('\n').filter(Boolean);
