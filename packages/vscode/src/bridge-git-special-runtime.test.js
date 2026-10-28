@@ -387,13 +387,13 @@ const makeMergeConflict = (dir, baseBranch) => {
   runGitSync(dir, ['merge', 'feature'], true);
 };
 
-const callConflictDetails = (directory) => handleSpecialGitBridgeMessage({
+const callConflictDetails = (directory, execGit = execGitReal) => handleSpecialGitBridgeMessage({
   id: 'cd1',
   type: 'api:git/conflict-details',
   payload: { directory },
 }, undefined, {
   readSettings: () => ({}),
-  execGit: execGitReal,
+  execGit,
   readPromptOverrides: () => ({}),
 });
 
@@ -447,4 +447,70 @@ describe('bridge git conflict-details MERGE_MSG resolution', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 20000);
+
+  it('answers an idle repository with no operation in progress as a success', async () => {
+    const dir = initTempRepo();
+    try {
+      const response = await callConflictDetails(dir);
+      expect(response.success).toBe(true);
+      expect(response.data).toEqual({
+        statusPorcelain: '',
+        unmergedFiles: [],
+        diff: '',
+        headInfo: '',
+        operation: 'merge',
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+});
+
+describe('bridge git conflict-details git read failures', () => {
+  it('rejects a directory that is not a git repository instead of reporting an empty merge', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-conflict-nonrepo-'));
+    try {
+      const response = await callConflictDetails(dir);
+      expect(response.success).toBe(false);
+      expect(response.error).toContain('not a git repository');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it('rejects a failing status read and surfaces the git error', async () => {
+    const execGit = mock(async () => ({
+      stdout: '',
+      stderr: 'fatal: index file smaller than expected',
+      exitCode: 128,
+    }));
+    const response = await callConflictDetails('/repo', execGit);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain('git status --porcelain failed');
+    expect(response.error).toContain('fatal: index file smaller than expected');
+  });
+
+  it('does not read a failed unmerged list as no conflicts', async () => {
+    const execGit = mock(async (args) => {
+      if (args.includes('--diff-filter=U')) {
+        return { stdout: '', stderr: 'fatal: bad revision', exitCode: 128 };
+      }
+      return { stdout: args[0] === 'status' ? 'UU file.txt\n' : '', stderr: '', exitCode: 0 };
+    });
+    const response = await callConflictDetails('/repo', execGit);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain('git diff --name-only --diff-filter=U failed');
+  });
+
+  it('does not read a failed diff as an empty diff', async () => {
+    const execGit = mock(async (args) => {
+      if (args.length === 1 && args[0] === 'diff') {
+        return { stdout: '', stderr: 'fatal: unable to read tree', exitCode: 128 };
+      }
+      return { stdout: args[0] === 'status' ? 'UU file.txt\n' : 'file.txt\n', stderr: '', exitCode: 0 };
+    });
+    const response = await callConflictDetails('/repo', execGit);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain('git diff failed');
+  });
 });
