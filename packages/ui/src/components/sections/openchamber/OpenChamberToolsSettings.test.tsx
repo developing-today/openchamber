@@ -21,7 +21,7 @@ describe('OpenChamberToolsSettings prompt cache note', () => {
   let fetchSpy: ReturnType<typeof spyOn>;
   let globalDescriptors: Map<string, PropertyDescriptor | undefined>;
 
-  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT'];
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'localStorage', 'sessionStorage', 'requestAnimationFrame', 'cancelAnimationFrame', 'MutationObserver', 'IS_REACT_ACT_ENVIRONMENT'];
   const direct = settingsDict['settings.openchamber.tools.cacheNote.direct'];
   const codeMode = settingsDict['settings.openchamber.tools.cacheNote.codeMode'];
 
@@ -38,6 +38,15 @@ describe('OpenChamberToolsSettings prompt cache note', () => {
       Node: windowInstance.Node,
       localStorage: windowInstance.localStorage,
       sessionStorage: windowInstance.sessionStorage,
+      // happy-dom 21 no longer leaks a global requestAnimationFrame into
+      // the test realm, and Base UI's animation-completion hook calls the
+      // bare global. Run frames synchronously, as in TerminalViewport.
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      },
+      cancelAnimationFrame: () => undefined,
+      MutationObserver: windowInstance.MutationObserver,
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     // The page loads the extension catalog on mount; no server answers here.
