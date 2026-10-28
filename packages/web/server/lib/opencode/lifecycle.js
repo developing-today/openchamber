@@ -1121,6 +1121,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.isShuttingDown) throw new Error('OpenCode startup cancelled during shutdown');
       if (ready) {
         setOpenCodePort(port);
+        if (lastReadyOwnServer?.pid !== serverInstance.pid) {
+          // The cached version was reported by the predecessor process.
+          // Pairing it with this process would present a fabricated
+          // version for the new pid; report null until a health probe
+          // against this process establishes its version.
+          lastKnownOpenCodeVersion = null;
+        }
         lastReadyOwnServer = { pid: serverInstance.pid, port };
         setDetectedOpenCodeApiPrefix(prefix);
 
