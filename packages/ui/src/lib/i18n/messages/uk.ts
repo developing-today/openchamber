@@ -606,6 +606,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.showWork": "Показувати «В роботі»",
   "sessions.sidebar.header.displayMode.showPinned": "Показувати «Закріплені»",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Детальні рядки",
+  "sessions.sidebar.header.displayMode.sidebarRows": "Рядки бічної панелі…",
   "sessions.sidebar.activity.pinnedTitle": "Закріплені",
   "sessions.sidebar.header.displayMode.showArchived": "Показувати архівовані сесії",
   "sessions.sidebar.header.displayMode.collapseAll": "Згорнути все",

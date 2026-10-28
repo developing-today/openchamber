@@ -1,4 +1,5 @@
 import type { Session } from '@/lib/opencode/model';
+import type { SessionRowLines } from '@/stores/useSessionDisplayStore';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import { isSessionPinned } from '@/lib/sessionPins';
@@ -195,8 +196,8 @@ export type SessionSidebarRowModelArgs = {
    * the chats that join the one combined list.
    */
   timelineLayout?: { chats: TimelineChatsPlacement; projectGroups: boolean; compactRows: boolean; chatsGroupIndex: number };
-  /** Pinned and In work rows in the Tree view: two lines when set, one otherwise. */
-  detailedZoneRows?: boolean;
+  /** Pinned and In work rows in the Tree view: two lines with branch, PR and model when set, one otherwise. */
+  zoneRowLines?: SessionRowLines;
   foldersMap: SessionFoldersMap;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
   normalizedQuery: string;
@@ -848,13 +849,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   // The zones list sessions of every project together: two-line rows with
   // the project's icon in List (one line with the icon first when List shows
   // one line per session), one-line rows in Tree unless the user asked for
-  // detailed rows. Over the list by time they take its three-line rows, so
+  // two-line zone rows. Over the list by time they take its three-line rows, so
   // the zones and the list below share one row height.
   const zoneRenderContext: SessionSidebarRenderContext = timeList
     ? 'timeline-by-time'
     : timelineMode
       ? (compactTimeline ? 'mixed-flat' : 'timeline-mixed')
-      : args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
+      : args.zoneRowLines === 'two' ? 'timeline-mixed' : 'mixed-compact';
   const countZoneMatches = (item: SessionSidebarActivityItem): number => (
     item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery)
   );

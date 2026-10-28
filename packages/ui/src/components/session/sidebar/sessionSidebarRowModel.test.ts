@@ -96,11 +96,11 @@ describe('buildSessionSidebarRowModel', () => {
     expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
   });
 
-  test('detailed zone rows give the Tree view the two-line row', () => {
+  test('two-line zone rows give the Tree view the two-line row', () => {
     const input = args([project([group([node('working')])])]);
     input.workItems = [timelineItem('working')];
     input.zoneSessionIds = new Set(['working']);
-    input.detailedZoneRows = true;
+    input.zoneRowLines = 'two';
 
     const rows = buildSessionSidebarRowModel(input).rows;
     const zoneRow = rows.find((row) => row.kind === 'session');

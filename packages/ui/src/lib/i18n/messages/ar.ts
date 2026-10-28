@@ -559,6 +559,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'إظهار قسم قيد العمل',
   'sessions.sidebar.header.displayMode.showPinned': 'إظهار قسم المثبّتة',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'صفوف مفصّلة',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'صفوف الشريط الجانبي…',
   'sessions.sidebar.activity.pinnedTitle': 'المثبّتة',
   'sessions.sidebar.header.displayMode.showArchived': 'إظهار الجلسات المؤرشفة',
   'sessions.sidebar.header.displayMode.collapseAll': 'طي الكل',

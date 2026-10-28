@@ -559,6 +559,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'הצג את קטע בעבודה',
   'sessions.sidebar.header.displayMode.showPinned': 'הצג את קטע המוצמדות',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'שורות מפורטות',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'שורות סרגל הצד…',
   'sessions.sidebar.activity.pinnedTitle': 'מוצמדות',
   'sessions.sidebar.header.displayMode.showArchived': 'הצג הפעלות בארכיון',
   'sessions.sidebar.header.displayMode.collapseAll': 'כווץ הכול',

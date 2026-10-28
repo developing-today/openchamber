@@ -625,6 +625,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': '顯示進行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '顯示已釘選部分',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細列',
+  'sessions.sidebar.header.displayMode.sidebarRows': '側邊列…',
   'sessions.sidebar.activity.pinnedTitle': '已釘選',
   'sessions.sidebar.header.displayMode.showArchived': '顯示已封存會話',
   'sessions.sidebar.header.displayMode.collapseAll': '全部摺疊',

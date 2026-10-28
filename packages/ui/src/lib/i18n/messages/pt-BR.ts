@@ -606,6 +606,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.showWork": "Mostrar em andamento",
   "sessions.sidebar.header.displayMode.showPinned": "Mostrar fixadas",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Linhas detalhadas",
+  "sessions.sidebar.header.displayMode.sidebarRows": "Linhas da barra lateral…",
   "sessions.sidebar.activity.pinnedTitle": "Fixadas",
   "sessions.sidebar.header.displayMode.showArchived": "Mostrar sessões arquivadas",
   "sessions.sidebar.header.displayMode.collapseAll": "Recolher tudo",

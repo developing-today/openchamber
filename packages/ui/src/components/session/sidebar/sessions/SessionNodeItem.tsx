@@ -424,6 +424,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isZoneRow = isMixedZoneContext(renderContext);
   const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
   const hidePinnedMarker = isZoneRow && pinnedSectionShown;
+  // Optional row elements (branch, PR badge, provider logo, project icon,
+  // goal, time). Live status and permission/question badges always show.
+  const rowElements = useSessionDisplayStore((state) => state.sessionRowDisplay);
   // List rows in the zones, the combined list and the list by time show the
   // project's own icon (a chat its chat mark); the row reads exactly that one
   // project record, and `find` keeps the reference stable between renders.
@@ -997,6 +1000,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             goal={sessionGoalGlyph}
             badges={null}
             hideMetaOnHoverClass=""
+            elements={rowElements}
           />
         </div>
       );
@@ -1747,6 +1751,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       hideMetaOnHoverClass={alwaysShowActions && !isVSCode ? '' : coveredMetaFadeClass}
       actionsReserveClass={actionsReserveClass}
       actionsMaskClass={actionsMaskClass}
+      elements={rowElements}
     />
   );
 

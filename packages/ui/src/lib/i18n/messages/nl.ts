@@ -596,6 +596,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Sectie In bewerking tonen',
   'sessions.sidebar.header.displayMode.showPinned': 'Sectie Vastgezet tonen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Gedetailleerde rijen',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Zijbalkrijen…',
   'sessions.sidebar.activity.pinnedTitle': 'Vastgezet',
   'sessions.sidebar.header.displayMode.showArchived': 'Gearchiveerde sessies tonen',
   'sessions.sidebar.header.displayMode.collapseAll': 'Alles inklappen',

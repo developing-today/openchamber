@@ -114,7 +114,7 @@ describe('useSessionDisplayStore animated activity', () => {
       await useSessionDisplayStore.persist.rehydrate();
       expect(useSessionDisplayStore.getState().animatedActivityIndicators).toBe(false);
       expect(useSessionDisplayStore.getState().sidebarViewMode).toBe('timeline');
-      expect(useSessionDisplayStore.persist.getOptions().version).toBe(11);
+      expect(useSessionDisplayStore.persist.getOptions().version).toBe(12);
       useSessionDisplayStore.getState().setAnimatedActivityIndicators(true);
       const enabledSnapshot = stored;
       useSessionDisplayStore.setState({ animatedActivityIndicators: false });
@@ -156,5 +156,32 @@ describe('useSessionDisplayStore sidebar layout', () => {
   test('drops a stored layout that is not a layout', () => {
     const current = useSessionDisplayStore.getState();
     expect(merge({ sidebarLayout: 'tree' }).sidebarLayout).toBe(current.sidebarLayout);
+  });
+});
+
+describe('useSessionDisplayStore session row display', () => {
+  test('defaults to one-line Tree zone rows with every element shown', () => {
+    expect(useSessionDisplayStore.getState().sessionRowDisplay).toEqual({
+      zoneLines: 'one',
+      showBranch: true,
+      showPrBadge: true,
+      showProviderLogo: true,
+      showProjectIcon: true,
+      showGoal: true,
+      showTime: true,
+    });
+  });
+
+  test('v11→v12 folds detailed rows into the zone line count and drops the old key', () => {
+    expect(migrateSessionDisplayState({ detailedZoneRows: true }, 11).sessionRowDisplay?.zoneLines).toBe('two');
+    expect(migrateSessionDisplayState({ detailedZoneRows: false }, 11).sessionRowDisplay?.zoneLines).toBe('one');
+    expect(migrateSessionDisplayState({}, 11).sessionRowDisplay?.zoneLines).toBe('one');
+    const migrated = migrateSessionDisplayState({ detailedZoneRows: true }, 11);
+    expect('detailedZoneRows' in migrated).toBe(false);
+  });
+
+  test('v11→v12 keeps a stored row display and completes it with the defaults', () => {
+    const migrated = migrateSessionDisplayState({ sessionRowDisplay: { zoneLines: 'two', showBranch: false } }, 11);
+    expect(migrated.sessionRowDisplay).toMatchObject({ zoneLines: 'two', showBranch: false, showPrBadge: true });
   });
 });
