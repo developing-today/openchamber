@@ -474,10 +474,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
-  const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
+  const zoneRowLines = useSessionDisplayStore((state) => state.sessionRowDisplay.zoneLines);
   // The zones in Tree, on one line: the rows the row model renders as
   // 'mixed-compact', which open to their subsessions.
-  const zoneRowsExpand = !timelineMode && !detailedZoneRows;
+  const zoneRowsExpand = !timelineMode && zoneRowLines !== 'two';
   const showWorkZone = sessionWorkEnabled && showWorkSection;
   const zoneRoots = React.useMemo(
     () => collection.orderedSessions.filter((session) => !session.parentID && !session.time?.archived),
@@ -984,7 +984,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     zoneSessionIds,
     sectionOrder: sidebarLayout.sectionOrder,
     timelineLayout,
-    detailedZoneRows,
+    zoneRowLines,
     foldersMap,
     groupSearchDataByGroup,
     normalizedQuery: view.normalizedSessionSearchQuery,
@@ -1005,7 +1005,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hideDirectoryControls: view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
-  }), [runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, timelineItems, timelineMode, listSessionGrouping, pinnedItems, workItems, attentionItems, zoneSessionIds, sidebarLayout.sectionOrder, timelineLayout, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+  }), [runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, timelineItems, timelineMode, listSessionGrouping, pinnedItems, workItems, attentionItems, zoneSessionIds, sidebarLayout.sectionOrder, timelineLayout, zoneRowLines, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);

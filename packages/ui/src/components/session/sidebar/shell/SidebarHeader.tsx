@@ -217,8 +217,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
-  const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
-  const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
+  const zoneRowLines = useSessionDisplayStore((state) => state.sessionRowDisplay.zoneLines);
+  const setSessionRowDisplay = useSessionDisplayStore((state) => state.setSessionRowDisplay);
+  const openSidebarRowsSettings = React.useCallback(() => {
+    useUIStore.getState().setSettingsPage('appearance');
+    useUIStore.getState().setSettingsDialogOpen(true);
+  }, []);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
@@ -355,10 +359,17 @@ export function SidebarHeader(props: Props): React.ReactNode {
         void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });
       }) : null}
       {/* List rows always carry two lines; Tree keeps Pinned and In work on one unless asked. */}
-      {!timelineView ? toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
-        setDetailedZoneRows(!detailedZoneRows);
-        void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
+      {!timelineView ? toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', zoneRowLines === 'two', () => {
+        const zoneLines = zoneRowLines === 'two' ? 'one' : 'two';
+        setSessionRowDisplay({ zoneLines });
+        void updateDesktopSettings({ sidebarSessionRowDisplay: { ...useSessionDisplayStore.getState().sessionRowDisplay, zoneLines } });
       }) : null}
+      {!timelineView ? (
+        <DropdownMenuItem onClick={openSidebarRowsSettings} className="flex items-center gap-2">
+          <Icon name="equalizer-2" className="h-4 w-4" />
+          <span>{t('sessions.sidebar.header.displayMode.sidebarRows')}</span>
+        </DropdownMenuItem>
+      ) : null}
     </>);
   }
   if (showSectionControls) {

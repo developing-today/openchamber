@@ -438,6 +438,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': 'Pokaż sekcję W toku',
   'sessions.sidebar.header.displayMode.showPinned': 'Pokaż sekcję Przypięte',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Szczegółowe wiersze',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Wiersze paska bocznego…',
   'sessions.sidebar.activity.pinnedTitle': 'Przypięte',
   'sessions.sidebar.header.displayMode.showArchived': 'Pokaż zarchiwizowane sesje',
   'sessions.sidebar.header.displayMode.collapseAll': 'Zwiń wszystkie',
