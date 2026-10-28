@@ -7,8 +7,9 @@
 // lifecycle.js). A paired client running against a live server applies
 // the same assertions to the HTTP JSON: pinned envelope and entry key
 // sets, version + serverTime presence, explicit unknowns, secret-field
-// absence by key set, empty-but-ready semantics, and a stopped server
-// leaving the registry read on the next poll. The contract itself is
+// absence by key set, empty-but-ready semantics, recorded-pid identity
+// gating (#638), and a stopped server leaving the registry read on the
+// next poll. The contract itself is
 // documented in DOCUMENTATION.md, section "External observability
 // contract v1".
 
@@ -161,6 +162,7 @@ describe('observability contract v1 conformance (design #612, #614)', () => {
         ready: true, startedAt: '2026-10-28T01:00:00.000Z', sessionCount: 3,
       },
       isPidAlive: () => true,
+      isRecordedPidVerified: () => true,
       now: 1_700_000_000_000,
     });
 
@@ -203,6 +205,7 @@ describe('observability contract v1 conformance (design #612, #614)', () => {
     const firstPoll = buildManagedServersResponse({
       registryEntries,
       isPidAlive: () => true,
+      isRecordedPidVerified: () => true,
       now: 1_700_000_000_000,
     });
     expect(firstPoll.servers.map((entry) => entry.pid)).toEqual([777, 4242]);
@@ -212,10 +215,52 @@ describe('observability contract v1 conformance (design #612, #614)', () => {
     const nextPoll = buildManagedServersResponse({
       registryEntries,
       isPidAlive: (pid) => pid !== 4242,
+      isRecordedPidVerified: () => true,
       now: 1_700_000_060_000,
     });
     expect(nextPoll.servers.map((entry) => entry.pid)).toEqual([777]);
     expectNoSecretKeys(nextPoll);
+  });
+
+  it('managed-servers: a recorded pid whose identity is not verified is never listed (#638)', () => {
+    const registryEntries = [
+      { pid: 777, port: 5001, startedAt: '2026-10-28T00:30:00.000Z' },
+    ];
+
+    // No verifier wired in: identity cannot be established, so the
+    // recorded entry is rejected by default — signal-0 liveness
+    // alone never presents a recorded pid as a live server.
+    const noVerifier = buildManagedServersResponse({
+      registryEntries,
+      isPidAlive: () => true,
+      now: 1_700_000_000_000,
+    });
+    expect(noVerifier.servers).toEqual([]);
+
+    // The pid is alive but the live process is not the recorded
+    // `opencode serve` for the recorded port (recycled pid): not listed.
+    const recycled = buildManagedServersResponse({
+      registryEntries,
+      isPidAlive: () => true,
+      isRecordedPidVerified: () => false,
+      now: 1_700_000_000_000,
+    });
+    expect(recycled.servers).toEqual([]);
+
+    // The hosting instance's own entry is exempt: it comes from live
+    // lifecycle state, not from a record, so no verifier is consulted.
+    const ownOnly = buildManagedServersResponse({
+      registryEntries,
+      own: {
+        pid: 777, port: 5001, directory: '/projects/alpha', version: '2.0.19',
+        ready: true, startedAt: '2026-10-28T00:30:00.000Z', sessionCount: 0,
+      },
+      isPidAlive: () => true,
+      now: 1_700_000_000_000,
+    });
+    expect(ownOnly.servers.map((entry) => entry.pid)).toEqual([777]);
+    expect(ownOnly.servers[0].status).toBe('ready');
+    expectNoSecretKeys(ownOnly);
   });
 
   it('both reads share the version + serverTime envelope a poller keys on', () => {

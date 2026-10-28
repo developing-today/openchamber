@@ -345,7 +345,7 @@ The runtime maintains active-session count incrementally from idempotent activit
 
 ## External observability contract v1 (design #612)
 
-Two read-only endpoints expose this OpenChamber instance's state to external consumers — the babysitter poller is the first, and any paired client can build on the same shapes. Both responses are versioned envelopes built from explicit allowlist projections, and a conformance fixture (`observability-contract.test.js`, beside the server tests in this directory) pins the shapes described here: it runs the same builders the routes serve and asserts the key sets, the empty-but-ready state, secret-field absence, and a stopped server leaving the registry read. A paired client running against a live server applies the same assertions to the HTTP JSON.
+Two read-only endpoints expose this OpenChamber instance's state to external consumers — the babysitter poller is the first, and any paired client can build on the same shapes. Both responses are versioned envelopes built from explicit allowlist projections, and a conformance fixture (`observability-contract.test.js`, beside the server tests in this directory) pins the shapes described here: it runs the same builders the routes serve and asserts the key sets, the empty-but-ready state, secret-field absence, an identity-unverified recorded pid never being listed, and a stopped server leaving the registry read. A paired client running against a live server applies the same assertions to the HTTP JSON.
 
 ### The five contract rules
 
@@ -388,19 +388,19 @@ The envelope is `{ version: 1, serverTime, servers }`, with the same `version` a
 | `port` | number \| null | The port the server was recorded on, or `null` when no valid port was recorded. |
 | `directory` | string \| null | The hosting instance's validated default directory. Only the hosting instance's own entry carries it; other instances' entries are `null`. |
 | `version` | string \| null | That server's reported OpenCode version (from its health payload), or `null` when unverifiable. This is **not** the contract version: the envelope's top-level `version` is the contract's, this per-entry `version` is the server's. |
-| `status` | string | `ready` (the hosting instance's own server, healthy), `starting` (its own server, not yet ready), `draining` (a replaced server still finishing its sessions), or `unknown` (another instance's server, which this instance cannot verify). |
+| `status` | string | `ready` (the hosting instance's own server, healthy), `starting` (its own server, not yet ready), `draining` (a replaced server still finishing its sessions), or `unknown` (another instance's server: listed because its identity verified, but its details are not visible to this instance). |
 | `startedAt` | string \| null | When the server started (ISO 8601, from its registry record), or `null` when unrecorded. |
 | `sessionCount` | number \| null | Live session count for the hosting instance's own server, or `null` for other instances' servers (and for an own server that has not reported one). |
 
 Discovery comes from the managed-process registry alone; no process table is scanned for servers nobody recorded. The hosting instance completes its own entry from lifecycle state (directory, version, readiness, session count). Every other instance's entry reports only registry facts — `pid`, `port`, `startedAt` — with the remaining fields `null` under `status: "unknown"`.
 
-Liveness as landed: an entry appears only while a signal-0 probe (`process.kill(pid, 0)`, with `EPERM` counting as alive) succeeds for its recorded pid at read time, so a stopped server is absent from the very next poll rather than lingering as a zombie. The probe proves that *some* process lives at the recorded pid; it does not by itself prove the process is still the recorded OpenCode server. Lifecycle verifies command identity before it ever *signals* a recorded pid (see "Managed OpenCode across OpenChamber restarts"), and identity-verified liveness for this read specifically is the follow-up tracked in #638.
+Liveness as landed: a recorded entry appears only while two checks pass for its recorded pid at read time — a signal-0 probe (`process.kill(pid, 0)`, with `EPERM` counting as alive) succeeds, and the pid's identity is verified: the live command at that pid must be an `opencode serve` for the recorded port, the same identity check the orphan reaper uses, wired into this read by lifecycle (#638). Signal-0 alone proves only that *some* process lives at the recorded pid, and the OS can recycle a dead server's pid onto an unrelated process, so where identity cannot be verified — including a platform with no command read — a recorded entry is not listed at all. A stopped server is therefore absent from the very next poll rather than lingering as a zombie, and so is a live but unrelated process that inherited its pid. The hosting instance's own entry is the one exemption: it comes from live lifecycle state for a process this instance is running, not from a record, so it does not go through the recorded-pid check.
 
 ### Building a poller from this contract
 
 - Poll both endpoints, require `version: 1`, and key timing decisions on `serverTime`, not the local clock.
 - Treat `watcherReady: false` as "activity unknown yet" and keep polling; treat an empty `sessions` map with `watcherReady: true` as "no active sessions".
-- A managed server disappearing between polls means it stopped (or its pid died). A server sitting at `status: "unknown"` is another instance's server this instance cannot verify — it is not evidence the server is down.
+- A managed server disappearing between polls means it stopped, its pid died, or the pid's identity could no longer be verified as the recorded server (for example, the pid was recycled onto another process). A server sitting at `status: "unknown"` is another instance's identity-verified server whose details this instance cannot see — it is not evidence the server is down.
 - Read every `null` as "unknown" per rule 2; in particular a `null` entry `version` or `sessionCount` is not a zero value.
 
 
