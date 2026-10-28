@@ -54,8 +54,8 @@ describe('managed OpenCode password resolution', () => {
 
     const result = await runtime.ensureLocalOpenCodeServerPassword({ rotateManaged: true, reusePassword: null });
 
-    expect(typeof result).toBe('string');
     expect(result.length).toBeGreaterThan(0);
+    expect(state.password).toBe(result);
     expect(sha256(result)).not.toBe(sha256(SAVED_PASSWORD));
     expect(state.source).toBe('rotated');
   });

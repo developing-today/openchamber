@@ -484,13 +484,9 @@ async function handoffCommand(options) {
 // for that start and writes a fresh pair. Credential values are never read
 // or printed here.
 async function rotateCredentialsCommand(options, serveCommand) {
-    const commandContext = this && typeof this === 'object' ? this : {};
-    const runStop = typeof commandContext.stop === 'function'
-      ? commandContext.stop.bind(commandContext)
-      : stopCommand;
-    const runServe = typeof commandContext.serve === 'function'
-      ? commandContext.serve.bind(commandContext)
-      : serveCommand;
+    const commandContext = this ?? {};
+    const runStop = commandContext.stop ? commandContext.stop.bind(commandContext) : stopCommand;
+    const runServe = commandContext.serve ? commandContext.serve.bind(commandContext) : serveCommand;
     const showOutput = shouldRenderHumanOutput(options);
     const rotated = [];
 
