@@ -343,6 +343,67 @@ The runtime maintains active-session count incrementally from idempotent activit
 
 `getSessionActivitySnapshot()` returns the external observability contract v1 (design #612, phase 1 - #524): `{ version: 1, serverTime, watcherReady, sessions }`, where each session entry keeps the frozen `{ type }` phase and adds `lastActivityAt` (the phase map's recorded `updatedAt`), `status` (session-state map), `model` (the observed `{ modelID, providerID }` pair remembered by the notifications runtime from the session's latest assistant message, or null), and `toolInFlight` (null while no in-process source tracks it). Unknowns are explicit nulls, never fabricated values, and `watcherReady` stays false until the watcher stream delivers its first payload in the process, so an empty read is distinguishable from a watcher that has not started. The bare `{ [sessionId]: { type } }` map was rejected for the envelope because external consumers cannot version, timestamp, or readiness-mark a bare map without colliding with session IDs.
 
+## External observability contract v1 (design #612)
+
+Two read-only endpoints expose this OpenChamber instance's state to external consumers — the babysitter poller is the first, and any paired client can build on the same shapes. Both responses are versioned envelopes built from explicit allowlist projections, and a conformance fixture (`observability-contract.test.js`, beside the server tests in this directory) pins the shapes described here: it runs the same builders the routes serve and asserts the key sets, the empty-but-ready state, secret-field absence, an identity-unverified recorded pid never being listed, and a stopped server leaving the registry read. A paired client running against a live server applies the same assertions to the HTTP JSON.
+
+### The five contract rules
+
+1. **Additive-only, versioned.** Every response carries a top-level `version` (currently `1`) and `serverTime`. A future breaking change ships as a new version; within v1, fields are only added, never renamed or removed, and consumers must ignore keys they do not know.
+2. **Explicit unknowns.** A value the server cannot verify is `null`, never a fabricated default — no invented `0`, empty string, or guessed status stands in for an unknown. Consumers must treat `null` as "unknown", not as "none".
+3. **Empty is not unknown.** An empty collection with its readiness marker set is a real answer ("nothing to report"); a not-ready read says so instead of looking empty. The markers are `watcherReady` for session activity and `status: "unknown"` per registry entry (below).
+4. **Allowlist projection, no auth material.** Responses are built by projecting source records onto a fixed key set, never by serializing the records. The managed state file and registry entries hold a managed password, an agent-tool token, a launch fingerprint, launch args, a binary path, and an owner pid; none of those keys — nor any password/token/secret/fingerprint/credential-shaped key — ever appears in either response, at any nesting depth.
+5. **Authoritative sources only.** Every field comes from the record that owns it: session phases and their timestamps from the watcher-fed activity map, session status from the session-state map, the model pair from the notifications runtime's observation of the session's latest assistant message, registry facts from the managed-process registry, and the hosting instance's own entry from lifecycle state. Nothing is inferred from the process table or from another field.
+
+### `GET /api/session-activity`
+
+The envelope:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `version` | number | Contract version, always `1`. |
+| `serverTime` | number | The server's clock when the snapshot was built, epoch milliseconds. |
+| `watcherReady` | boolean | `false` until the OpenCode watcher stream delivers its first payload in this process. An empty `sessions` map with `watcherReady: false` means "the watcher has not started", not "no sessions exist"; with `watcherReady: true` it means no session has reported activity. |
+| `sessions` | object | Map of session ID to activity entry (below). Entries are pruned after 24 hours without a phase change. |
+
+Each entry in `sessions` has exactly these five keys:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `type` | string | The session's current activity phase (for example `busy` or `idle`), frozen from the phase-1 contract. |
+| `lastActivityAt` | number | When the phase last changed, epoch milliseconds. |
+| `status` | string \| null | The session-state map's status for this session, or `null` when no state has been recorded for it. |
+| `model` | object \| null | The **observed** model pair `{ modelID, providerID }` (each a string or `null` when unreported) from the session's latest assistant message — observed, not the configured model — or `null` when no assistant message has been observed for the session. There is no separate `provider` key. |
+| `toolInFlight` | null | Pinned `null` in v1 today: no in-process source tracks a per-session in-flight tool, and rule 2 forbids fabricating one. The key exists so a future source can fill it without a version break. |
+
+This read is a pollable snapshot, not a stream guarantee: phases are the latest recorded state at `serverTime`, and a phase that starts and ends between two polls may never appear.
+
+### `GET /api/managed-servers`
+
+The envelope is `{ version: 1, serverTime, servers }`, with the same `version` and `serverTime` (epoch milliseconds) meanings as above. `servers` is an array sorted by `pid` ascending. Each entry has exactly these seven keys:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `pid` | number | The recorded pid of a managed OpenCode server. |
+| `port` | number \| null | The port the server was recorded on, or `null` when no valid port was recorded. |
+| `directory` | string \| null | The hosting instance's validated default directory. Only the hosting instance's own entry carries it; other instances' entries are `null`. |
+| `version` | string \| null | That server's reported OpenCode version (from its health payload), or `null` when unverifiable. This is **not** the contract version: the envelope's top-level `version` is the contract's, this per-entry `version` is the server's. |
+| `status` | string | `ready` (the hosting instance's own server, healthy), `starting` (its own server, not yet ready), `draining` (a replaced server still finishing its sessions), or `unknown` (another instance's server: listed because its identity verified, but its details are not visible to this instance). |
+| `startedAt` | string \| null | When the server started (ISO 8601, from its registry record), or `null` when unrecorded. |
+| `sessionCount` | number \| null | Live session count for the hosting instance's own server, or `null` for other instances' servers (and for an own server that has not reported one). |
+
+Discovery comes from the managed-process registry alone; no process table is scanned for servers nobody recorded. The hosting instance completes its own entry from lifecycle state (directory, version, readiness, session count). Every other instance's entry reports only registry facts — `pid`, `port`, `startedAt` — with the remaining fields `null` under `status: "unknown"`.
+
+Liveness as landed: a recorded entry appears only while two checks pass for its recorded pid at read time — a signal-0 probe (`process.kill(pid, 0)`, with `EPERM` counting as alive) succeeds, and the pid's identity is verified: the live command at that pid must be an `opencode serve` for the recorded port, the same identity check the orphan reaper uses, wired into this read by lifecycle (#638). Signal-0 alone proves only that *some* process lives at the recorded pid, and the OS can recycle a dead server's pid onto an unrelated process, so where identity cannot be verified — including a platform with no command read — a recorded entry is not listed at all. A stopped server is therefore absent from the very next poll rather than lingering as a zombie, and so is a live but unrelated process that inherited its pid. The hosting instance's own entry is the one exemption: it comes from live lifecycle state for a process this instance is running, not from a record, so it does not go through the recorded-pid check.
+
+### Building a poller from this contract
+
+- Poll both endpoints, require `version: 1`, and key timing decisions on `serverTime`, not the local clock.
+- Treat `watcherReady: false` as "activity unknown yet" and keep polling; treat an empty `sessions` map with `watcherReady: true` as "no active sessions".
+- A managed server disappearing between polls means it stopped, its pid died, or the pid's identity could no longer be verified as the recorded server (for example, the pid was recycled onto another process). A server sitting at `status: "unknown"` is another instance's identity-verified server whose details this instance cannot see — it is not evidence the server is down.
+- Read every `null` as "unknown" per rule 2; in particular a `null` entry `version` or `sessionCount` is not a zero value.
+
+
 ## Public exports (lifecycle.js)
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) is fired after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), then calls `interruptBusySessionsAfterRestart()` and broadcasts one `opencode-restart-interrupted` UI notification when interrupted turns exist (#2943).
 - Returned API:
