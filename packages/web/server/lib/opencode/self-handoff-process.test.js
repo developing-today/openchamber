@@ -56,6 +56,14 @@ const isAlive = (pid) => {
   }
 };
 
+// Probe-and-release, the same shape gatekeeper-program.test.js raced on (#666). Two of this
+// file's call sites never bind the port at all: it only names a pid file in readiness-timeout
+// tests whose child has already exited or never listens, so those cannot collide. The server
+// starts below can in principle lose the same race, but the port there keys the CLI's pid
+// file, state and handoff arguments, so a respawn has to restart the whole sandbox handoff
+// sequence rather than one spawn. That is its own change, filed as #676. A
+// loss here surfaces as one test's readiness timeout with the diagnostics waitForReady
+// attaches, not as a whole suite file failing in beforeAll.
 const freePort = () => new Promise((resolve, reject) => {
   const probe = net.createServer();
   probe.once('error', reject);
