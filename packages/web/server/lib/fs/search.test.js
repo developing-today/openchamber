@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createFsSearchRuntime } from './search.js';
+import { createFsSearchRuntime, createGitCheckIgnoreTimeoutMs } from './search.js';
 
 // i, n, d, e and x in order, each buried under filler characters with the
 // maximum gap penalty: a weak in-order subsequence of "index".
@@ -103,6 +103,36 @@ describe('filesystem search', () => {
         process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS = previousTimeout;
       }
       await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('git check-ignore timeout env reader (#696)', () => {
+  const NAME = 'OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS';
+
+  const readWith = (value) => {
+    const previous = process.env[NAME];
+    if (value === undefined) delete process.env[NAME];
+    else process.env[NAME] = value;
+    try {
+      return createGitCheckIgnoreTimeoutMs();
+    } finally {
+      if (previous === undefined) delete process.env[NAME];
+      else process.env[NAME] = previous;
+    }
+  };
+
+  it('honours plain decimal spellings, including an explicit 0, and defaults when unset', () => {
+    expect(readWith('5000')).toBe(5000);
+    expect(readWith('50')).toBe(50);
+    expect(readWith(' 250 ')).toBe(250);
+    expect(readWith('0')).toBe(0);
+    expect(readWith(undefined)).toBe(2500);
+  });
+
+  it('falls back to the default for non-plain-decimal spellings', () => {
+    for (const invalid of ['', ' ', '1e3', '0x10', '5.9', '5000junk']) {
+      expect(readWith(invalid)).toBe(2500);
     }
   });
 });
