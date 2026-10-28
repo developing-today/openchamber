@@ -82,6 +82,9 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - File search walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`), mirroring the web server's `search.js`; an empty query still stops at the result limit. The module imports `vscode`, which the isolated runner cannot resolve, so `bridge-fs-helpers-runtime.test.ts` pins the ceiling and the two runtimes' agreement on the source text.
   - Read paths are authorized in the requested workspace path space before symlink resolution, matching the web runtime; directly requested outside-workspace paths remain denied.
 
+- `bridge-fs-env-runtime.ts`
+  - Whole-number env readers shared by `bridge-fs-runtime.ts` and `bridge-fs-helpers-runtime.ts`: the git read-cache TTL and the git check-ignore timeout. Only a plain decimal spelling counts, matching the web fs readers fixed in #696; `''`, `' '`, `1e3`, `0x10`, `5.9`, `+5000` and `5000.0` fall back to the defaults. An explicit `0` keeps its documented meaning: it disables the read cache or the check-ignore kill timeout, depending on the variable.
+
 The sidebar installs a script-free CSP bootstrap document before changing webview options, so VS Code does not diagnose the transient blank document as an extension webview without CSP. The final webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
 
 The webview build emits each worker as one self-contained file. VS Code webviews cannot load workers directly from extension resource URLs or load module imports from inside a worker. The shared Shiki client therefore fetches the built worker, starts it from a `blob:` URL, and relies on the worker CSP allowance above.

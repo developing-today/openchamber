@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { BridgeResponse } from './bridge';
+import { createGitCheckIgnoreTimeoutMs, createGitReadCacheTtlMs } from './bridge-fs-env-runtime';
 
 type BridgeMessageInput = {
   id: string;
@@ -43,18 +44,6 @@ type FsExecCommandResult = {
   stdout?: string;
   stderr?: string;
   error?: string;
-};
-
-const createGitReadCacheTtlMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
-  return 30 * 1000;
-};
-
-const createGitCheckIgnoreTimeoutMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
-  return 2500;
 };
 
 const normalizeCommand = (command: unknown): string =>
