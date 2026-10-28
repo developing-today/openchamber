@@ -42,7 +42,7 @@ const findWorktreeRootForSkills = (workingDirectory?: string): string | null => 
     const gitPath = path.join(current, '.git');
     try {
       const stat = fs.statSync(gitPath);
-      if (stat.isFile()) {
+      if (stat.isFile() || stat.isDirectory()) {
         return current;
       }
     } catch {

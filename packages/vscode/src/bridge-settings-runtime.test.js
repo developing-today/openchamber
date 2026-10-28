@@ -117,3 +117,62 @@ describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
     expect(await fetchOpenCodeSkillsFromApi({ manager: { getApiUrl: () => null } }, 'dir')).toBeNull();
   });
 });
+
+describe('fetchOpenCodeSkillsFromApi skill scope for subdirectory sessions', () => {
+  const makeRepo = (gitKind) => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-skill-scope-'));
+    if (gitKind === 'directory') {
+      fs.mkdirSync(path.join(repoRoot, '.git'));
+    } else if (gitKind === 'file') {
+      fs.writeFileSync(path.join(repoRoot, '.git'), 'gitdir: /elsewhere/worktrees/demo\n');
+    }
+    const workingDirectory = path.join(repoRoot, 'packages', 'foo');
+    fs.mkdirSync(workingDirectory, { recursive: true });
+    return { repoRoot, workingDirectory };
+  };
+
+  const skillsFor = async (workingDirectory, skillPaths) => {
+    stubSkillListResponse(
+      skillPaths.map((skillPath, index) => ({
+        id: `skill-${index}`,
+        name: `skill-${index}`,
+        path: skillPath,
+        description: `skill ${index}`,
+        content: '',
+      })),
+    );
+    const skills = await fetchOpenCodeSkillsFromApi(createCtx(workingDirectory), workingDirectory);
+    return new Map(skills.map((skill) => [skill.path, skill]));
+  };
+
+  test('classifies repo-root skills as project when the working directory is a subdirectory of a normal repository (.git directory)', async () => {
+    const { repoRoot, workingDirectory } = makeRepo('directory');
+    const agentsSkill = path.join(repoRoot, '.agents', 'skills', 'demo-agents');
+    const opencodeSkill = path.join(repoRoot, '.opencode', 'skills', 'demo-opencode');
+
+    const byPath = await skillsFor(workingDirectory, [agentsSkill, opencodeSkill]);
+
+    expect(byPath.get(agentsSkill)?.scope).toBe('project');
+    expect(byPath.get(agentsSkill)?.source).toBe('agents');
+    expect(byPath.get(opencodeSkill)?.scope).toBe('project');
+    expect(byPath.get(opencodeSkill)?.source).toBe('opencode');
+  });
+
+  test('keeps classifying repo-root skills as project for a subdirectory of a linked worktree (.git file)', async () => {
+    const { repoRoot, workingDirectory } = makeRepo('file');
+    const agentsSkill = path.join(repoRoot, '.agents', 'skills', 'demo-agents');
+
+    const byPath = await skillsFor(workingDirectory, [agentsSkill]);
+
+    expect(byPath.get(agentsSkill)?.scope).toBe('project');
+  });
+
+  test('does not promote skills outside any repository: a parent directory without .git is not a project ancestor', async () => {
+    const { repoRoot, workingDirectory } = makeRepo(null);
+    const agentsSkill = path.join(repoRoot, '.agents', 'skills', 'demo-agents');
+
+    const byPath = await skillsFor(workingDirectory, [agentsSkill]);
+
+    expect(byPath.get(agentsSkill)?.scope).toBe('user');
+  });
+});
