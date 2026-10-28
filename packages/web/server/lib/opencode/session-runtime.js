@@ -153,11 +153,20 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     return state;
   };
 
-  const setSessionActivityPhase = (sessionId, phase) => {
+  const setSessionActivityPhase = (sessionId, phase, spaceId = undefined) => {
     if (!sessionId || typeof sessionId !== 'string') return false;
 
     const current = sessionActivityPhases.get(sessionId);
-    if (current?.phase === phase) return false;
+    // A caller that knows the session's space (the SSE payload path) passes
+    // it explicitly, including null for a host session; internal callers
+    // that do not pass it must not erase a tag an earlier payload set.
+    const nextSpaceId = spaceId === undefined ? (current?.spaceId ?? null) : spaceId;
+    if (current?.phase === phase) {
+      if (current && current.spaceId !== nextSpaceId) {
+        sessionActivityPhases.set(sessionId, { ...current, spaceId: nextSpaceId });
+      }
+      return false;
+    }
     if (phase === 'cooldown' && current?.phase !== 'busy') {
       return false;
     }
@@ -173,7 +182,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     if (wasActive !== isActive) {
       activeSessionCount = Math.max(0, activeSessionCount + (isActive ? 1 : -1));
     }
-    sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now() });
+    sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now(), spaceId: nextSpaceId });
 
     if (phase === 'cooldown') {
       const timer = setTimeout(() => {
@@ -373,6 +382,18 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
   const getActiveSessionCount = () => activeSessionCount;
 
+  // Host-only counterpart for the managed-servers read: busy sessions that
+  // belong to an isolated space run on the same OpenCode process but are not
+  // sessions of the host server itself. Derived from the phase records so
+  // cooldown, cleanup, and reset paths cannot drift from the tags.
+  const getActiveHostSessionCount = () => {
+    let count = 0;
+    for (const data of sessionActivityPhases.values()) {
+      if (data.phase === 'busy' && !data.spaceId) count += 1;
+    }
+    return count;
+  };
+
   const resetAllSessionActivityToIdle = () => {
     for (const timer of sessionActivityCooldowns.values()) {
       clearTimeout(timer);
@@ -380,8 +401,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     sessionActivityCooldowns.clear();
     activeSessionCount = 0;
     const now = Date.now();
-    for (const [sessionId] of sessionActivityPhases) {
-      sessionActivityPhases.set(sessionId, { phase: 'idle', updatedAt: now });
+    for (const [sessionId, data] of sessionActivityPhases) {
+      sessionActivityPhases.set(sessionId, { phase: 'idle', updatedAt: now, spaceId: data.spaceId ?? null });
     }
   };
 
@@ -446,15 +467,16 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
-  const processOpenCodeSsePayload = (payload) => {
+  const processOpenCodeSsePayload = (payload, { spaceId = null } = {}) => {
     processBlockingRequestPayload(payload);
     const update = extractSessionStatusUpdate(payload);
     if (!update) return;
 
+    const activitySpaceId = spaceId || null;
     if (update.type === 'busy' || update.type === 'retry') {
-      setSessionActivityPhase(update.sessionId, 'busy');
+      setSessionActivityPhase(update.sessionId, 'busy', activitySpaceId);
     } else if (update.type === 'idle') {
-      setSessionActivityPhase(update.sessionId, 'cooldown');
+      setSessionActivityPhase(update.sessionId, 'cooldown', activitySpaceId);
     }
 
     updateSessionState(update.sessionId, update.type, update.eventId || `sse-${Date.now()}`, {
@@ -481,6 +503,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     processOpenCodeSsePayload,
     getSessionActivitySnapshot,
     getActiveSessionCount,
+    getActiveHostSessionCount,
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
     trackWaitingPage,

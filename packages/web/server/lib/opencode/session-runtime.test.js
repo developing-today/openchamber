@@ -239,6 +239,35 @@ describe('session runtime', () => {
     expect(runtime.getActiveSessionCount()).toBe(0);
   });
 
+  it('counts only host sessions in the host active count', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent() {},
+    });
+    runtimes.push(runtime);
+    const status = (sessionID, type, spaceId) => runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID, status: { type } },
+    }, { spaceId });
+
+    status('space-session', 'busy', 'space-1');
+    expect(runtime.getActiveSessionCount()).toBe(1);
+    expect(runtime.getActiveHostSessionCount()).toBe(0);
+
+    status('host-session', 'busy', null);
+    expect(runtime.getActiveSessionCount()).toBe(2);
+    expect(runtime.getActiveHostSessionCount()).toBe(1);
+
+    status('space-session', 'idle', 'space-1');
+    expect(runtime.getActiveSessionCount()).toBe(1);
+    expect(runtime.getActiveHostSessionCount()).toBe(1);
+
+    status('host-session', 'idle', null);
+    expect(runtime.getActiveSessionCount()).toBe(0);
+    expect(runtime.getActiveHostSessionCount()).toBe(0);
+  });
+
   it('interrupts busy sessions after restart and broadcasts terminal events once', () => {
     const events = [];
     const runtime = createSessionRuntime({
