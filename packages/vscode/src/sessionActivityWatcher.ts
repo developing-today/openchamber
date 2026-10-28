@@ -9,11 +9,53 @@ interface SessionActivity {
   phase: ActivityPhase;
 }
 
+// External observability contract v1: design #612, phase 1 on the web server
+// in #524, this parity snapshot in #621. The extension host tracks a
+// session's phase and when that phase last changed, so lastActivityAt comes
+// from the phase map. The host has no source for the session-state status,
+// the observed model, or an in-flight tool, so those fields are explicit
+// nulls. watcherReady turns true when the event stream delivers its first
+// frame and stays true until the watcher stops, so an empty sessions map
+// with watcherReady false means the watcher has not started yet.
+interface SessionActivityV1Entry {
+  type: ActivityPhase;
+  lastActivityAt: number;
+  status: null;
+  model: null;
+  toolInFlight: null;
+}
+
+interface SessionActivityV1Snapshot {
+  version: 1;
+  serverTime: number;
+  watcherReady: boolean;
+  sessions: Record<string, SessionActivityV1Entry>;
+}
+
+export const buildSessionActivityV1Snapshot = (
+  phases: ReadonlyMap<string, { phase: ActivityPhase; updatedAt: number }>,
+  watcherReady: boolean,
+  serverTime: number,
+): SessionActivityV1Snapshot => {
+  const sessions: Record<string, SessionActivityV1Entry> = {};
+  for (const [sessionId, data] of phases) {
+    sessions[sessionId] = {
+      type: data.phase,
+      lastActivityAt: data.updatedAt,
+      status: null,
+      model: null,
+      toolInFlight: null,
+    };
+  }
+  return { version: 1, serverTime, watcherReady, sessions };
+};
+
 const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
 const sessionActivityCooldowns = new Map<string, NodeJS.Timeout>();
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 
 let globalEventWatcherAbortController: AbortController | null = null;
+let sessionActivityWatcherReady = false;
 let chatViewProvider: { postMessage: (message: unknown) => void } | null = null;
 let globalEventWatcherRetryTimer: NodeJS.Timeout | null = null;
 let globalEventWatcherStartToken = 0;
@@ -92,13 +134,8 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 };
 
-export const getSessionActivitySnapshot = (): Record<string, { type: ActivityPhase }> => {
-  const snapshot: Record<string, { type: ActivityPhase }> = {};
-  for (const [sessionId, data] of sessionActivityPhases.entries()) {
-    snapshot[sessionId] = { type: data.phase };
-  }
-  return snapshot;
-};
+export const getSessionActivitySnapshot = (): SessionActivityV1Snapshot =>
+  buildSessionActivityV1Snapshot(sessionActivityPhases, sessionActivityWatcherReady, Date.now());
 
 /**
  * Live activity comes from the live channel only.
@@ -212,6 +249,7 @@ export const startGlobalEventWatcher = async (
         for await (const event of client.event.subscribe({ signal })) {
           if (!connected) {
             connected = true;
+            sessionActivityWatcherReady = true;
             // A healthy connection clears the backoff, so a long-lived watcher
             // does not carry a 30s delay into its next reconnect.
             attempt = 0;
@@ -254,6 +292,7 @@ export const stopGlobalEventWatcher = (): void => {
     }
   }
   globalEventWatcherAbortController = null;
+  sessionActivityWatcherReady = false;
   chatViewProvider = null;
 
   for (const timer of sessionActivityCooldowns.values()) {
