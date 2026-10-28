@@ -1,11 +1,11 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { accessSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, openSync, realpathSync, statSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
-import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries } from './managed-process-registry.js';
+import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries, commandIdentifiesOurServer } from './managed-process-registry.js';
 import {
   clearManagedOpenCodeState,
   createLaunchFingerprint,
@@ -35,6 +35,15 @@ import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 const withoutInheritedListenFds = (command, args) => (process.platform === 'win32'
   ? { command, args }
   : { command: '/bin/sh', args: ['-c', 'exec 3>&-; exec "$0" "$@"', command, ...args] });
+
+// Callback-to-promise execFile, shaped like the registry's injected
+// `execFileAsync` ({ stdout, stderr }); an explicit wrapper instead of
+// `promisify(execFile)`, whose custom resolution shape only exists on the
+// real builtin and silently differs under test doubles.
+const execFileAsync = (file, args, options) =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => (error ? reject(error) : resolve({ stdout, stderr })));
+  });
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -195,6 +204,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     listBusySessionIds = () => [],
     spawnProcess = spawn,
     spawnSyncProcess = spawnSync,
+    execFileProcess = execFileAsync,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     readRegistryEntries = readManagedProcessEntries,
     getWarmupDirectories = async () => [],
@@ -411,6 +421,27 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const result = spawnSyncProcess('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, windowsHide: true });
     const command = String(result?.stdout ?? '').trim();
     return command.includes(path.basename(binary)) && /\bserve\b/.test(command);
+  };
+
+  // Identity check for the managed-servers read: a recorded pid can be
+  // recycled onto an unrelated process, so signal-0 liveness is not
+  // enough to list it. Read the live command and apply the orphan
+  // reaper's identity check (opencode + serve + the recorded port).
+  // Where the command cannot be read (win32, a failed ps, empty output)
+  // identity is unverified and the entry is not listed. The read is
+  // asynchronous: this runs on the managed-servers read path, and a
+  // synchronous `ps` per recorded entry would block the event loop for
+  // every other request (the regression managed-process-registry.js
+  // documents for the reaper). Callers await this before building the
+  // response; the builder itself stays synchronous.
+  const readRecordedProcessCommand = async (pid) => {
+    if (process.platform === 'win32' || !Number.isInteger(pid) || pid <= 0) return '';
+    try {
+      const { stdout } = await execFileProcess('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, windowsHide: true });
+      return String(stdout ?? '').trim();
+    } catch {
+      return '';
+    }
   };
 
   const terminateRecordedOpenCodeProcess = async (pid) => {
@@ -1944,11 +1975,40 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
               sessionCount: null,
             }
           : null;
+    // Verify recorded pids before building the response, in parallel:
+    // the projected port for a pid is its registry port, falling back to
+    // its draining record's port when the registry has none (the same
+    // precedence the builder applies). The hosting instance's own pid is
+    // exempt — it is verified by this instance's live lifecycle state.
+    const recordedPorts = new Map();
+    for (const entry of Array.isArray(registryEntries) ? registryEntries : []) {
+      if (Number.isInteger(entry?.pid) && !recordedPorts.has(entry.pid)) {
+        recordedPorts.set(entry.pid, Number.isInteger(entry.port) && entry.port > 0 ? entry.port : null);
+      }
+    }
+    for (const record of Array.isArray(drainingRecords) ? drainingRecords : []) {
+      if (!Number.isInteger(record?.pid)) continue;
+      if (!recordedPorts.has(record.pid)) {
+        recordedPorts.set(record.pid, Number.isInteger(record.port) && record.port > 0 ? record.port : null);
+      } else if (recordedPorts.get(record.pid) === null && Number.isInteger(record.port) && record.port > 0) {
+        recordedPorts.set(record.pid, record.port);
+      }
+    }
+    const verifiedRecordedPids = new Set();
+    await Promise.all(
+      [...recordedPorts.entries()]
+        .filter(([pid]) => pid !== own?.pid && isPidAlive(pid))
+        .map(async ([pid, port]) => {
+          const command = await readRecordedProcessCommand(pid);
+          if (commandIdentifiesOurServer(command, { port })) verifiedRecordedPids.add(pid);
+        }),
+    );
     return buildManagedServersResponse({
       registryEntries,
       drainingRecords,
       own,
       isPidAlive,
+      isRecordedPidVerified: (server) => verifiedRecordedPids.has(server.pid),
       now: now(),
     });
   };

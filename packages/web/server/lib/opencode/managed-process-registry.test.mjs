@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createManagedProcessRegistry } from './managed-process-registry.js';
+import { commandIdentifiesOurServer, createManagedProcessRegistry } from './managed-process-registry.js';
 
 // The registry takes its filesystem and child-process helpers as dependencies,
 // so these tests inject fakes instead of mocking node builtins.
@@ -322,5 +322,26 @@ describe('readAllEntries (read-only consumer reader)', () => {
     readdirMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
 
     await expect(makeRegistry().readAllEntries()).resolves.toEqual([]);
+  });
+});
+
+describe('commandIdentifiesOurServer', () => {
+  it('matches an opencode serve command on the recorded port', () => {
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port 4096', { port: 4096 })).toBe(true);
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port=4096', { port: 4096 })).toBe(true);
+  });
+
+  it('rejects a port that merely contains the recorded port as a substring', () => {
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port 50010', { port: 5001 })).toBe(false);
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port 15001', { port: 5001 })).toBe(false);
+  });
+
+  it('rejects a command with no --port argument when a port is recorded', () => {
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve', { port: 4096 })).toBe(false);
+  });
+
+  it('rejects commands that are not an opencode server', () => {
+    expect(commandIdentifiesOurServer('sleep 30', { port: 4096 })).toBe(false);
+    expect(commandIdentifiesOurServer('/usr/bin/opencode --port 4096', { port: 4096 })).toBe(false);
   });
 });

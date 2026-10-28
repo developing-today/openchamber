@@ -5,9 +5,16 @@
 // managed-process registry, one file per process. This module turns those
 // records, plus the hosting instance's own lifecycle state, into the
 // GET /api/managed-servers response. Discovery comes from the registry
-// alone: liveness is a signal-0 probe of a pid the registry already
-// recorded, the same check the orphan reaper uses, and no process table
-// is ever scanned for servers nobody recorded.
+// alone, and no process table is ever scanned for servers nobody
+// recorded. A recorded pid is listed only after its identity is
+// verified: signal-0 liveness alone is not enough, because the OS can
+// recycle a dead server's pid onto an unrelated process. The verifier
+// (wired in lifecycle.js) applies the same identity check the orphan
+// reaper uses — the live command must be an `opencode serve` for the
+// recorded port — and where identity cannot be verified (for example a
+// platform with no command read) the entry is not listed at all. The
+// hosting instance's own entry is exempt: it comes from live lifecycle
+// state for a process this instance is running, not from a record.
 //
 // The projection is an explicit allowlist. A server entry carries exactly
 // the keys built below, in this order, and nothing else: the managed
@@ -33,8 +40,16 @@ const countOrNull = (value) => (Number.isInteger(value) && value >= 0 ? value : 
  * - isPidAlive: signal-0 liveness for a recorded pid. An entry whose pid
  *   is gone leaves the list, so a stopped server disappears on the next
  *   read instead of lingering as a zombie.
+ * - isRecordedPidVerified: identity check for a recorded (registry or
+ *   draining) entry, called with the projected { pid, port } entry. It
+ *   must return true only when the live process at that pid is still
+ *   the recorded OpenCode server. It defaults to rejecting every
+ *   recorded entry: without a verifier, identity cannot be established,
+ *   so a recorded pid is never presented as a live server on signal-0
+ *   liveness alone. The own entry (pid === own.pid) does not go through
+ *   this check — it is verified by this instance's live lifecycle state.
  */
-export const buildManagedServersResponse = ({ registryEntries = [], drainingRecords = [], own = null, isPidAlive = () => true, now = Date.now() } = {}) => {
+export const buildManagedServersResponse = ({ registryEntries = [], drainingRecords = [], own = null, isPidAlive = () => true, isRecordedPidVerified = () => false, now = Date.now() } = {}) => {
   const byPid = new Map();
 
   for (const entry of Array.isArray(registryEntries) ? registryEntries : []) {
@@ -82,8 +97,10 @@ export const buildManagedServersResponse = ({ registryEntries = [], drainingReco
     });
   }
 
+  const ownPid = own && Number.isInteger(own.pid) ? own.pid : null;
   const servers = [...byPid.values()]
     .filter((server) => isPidAlive(server.pid))
+    .filter((server) => server.pid === ownPid || isRecordedPidVerified(server))
     .sort((left, right) => left.pid - right.pid);
 
   return { version: 1, serverTime: now, servers };
