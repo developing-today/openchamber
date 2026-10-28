@@ -6,7 +6,7 @@ import {
 } from '@/stores/sidebarLayout';
 
 /** Options the phone sheet needs to decide which sections of the layout are drawn. */
-export type PhoneSectionsVisibility = {
+type PhoneSectionsVisibility = {
   showChatsSection: boolean;
   showPinnedSection: boolean;
   /** Pinned to the feature flag: the In work zone only exists while it is on. */

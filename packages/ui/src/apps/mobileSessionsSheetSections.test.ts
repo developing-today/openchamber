@@ -10,6 +10,8 @@ import {
   phoneSectionsInUse,
 } from './mobileSessionsSheetSections';
 
+// SAFETY: the helpers under test read only id, directory, title and time;
+// the rest of the Session shape is irrelevant here.
 const session = (id: string): Session => ({ id, directory: '/repo', title: id, time: { created: 1, updated: 1 } } as Session);
 
 describe('phoneSectionsInUse', () => {

@@ -52,6 +52,7 @@ import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectorie
 import { ACTIVITY_TITLE_KEY } from '@/components/session/sidebar/sessionSidebarActivityTitles';
 import {
   isSidebarAttentionZoneKey,
+  isSidebarSectionKey,
   watchesOtherSessions,
   type SidebarAttentionZoneKey,
   type SidebarSectionKey,
@@ -61,7 +62,6 @@ import { useSidebarLiveStates } from '@/components/session/sidebar/zones/useSide
 import { saveSidebarLayout } from '@/components/session/sidebar/zones/saveSidebarLayout';
 import { reorderSectionsByDrop } from '@/components/session/sidebar/zones/sectionDrag';
 import {
-  excludeRoots,
   expandZoneSessions,
   insertChatsGroupIndex,
   phoneSectionsInUse,
@@ -272,7 +272,7 @@ const ALL_SESSIONS_SECTION_ID = 'openchamber:all-sessions';
 const TIMELINE_CHAT_INDENT = 12;
 
 /** Zone header icons, the same marks the desktop sidebar's zone headers use. */
-const ATTENTION_ZONE_ICON: Record<SidebarAttentionZoneKey, IconName> = {
+const ATTENTION_ZONE_ICON = {
   approvals: 'shield',
   questions: 'question',
   blocked: 'alert',
@@ -287,7 +287,7 @@ const ATTENTION_ZONE_ICON: Record<SidebarAttentionZoneKey, IconName> = {
   'other-errors': 'error-warning',
   'other-stopped': 'stop',
   'other-active': 'pulse',
-};
+} satisfies Record<SidebarAttentionZoneKey, IconName>;
 
 /** The display-menu title of a section, shared with the desktop sidebar. */
 const sectionTitleKey = (key: SidebarSectionKey): I18nKey => (
@@ -1862,8 +1862,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const handleSectionDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const activeKey = String(active.id) as SidebarSectionKey;
-    const overKey = String(over.id) as SidebarSectionKey;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    if (!isSidebarSectionKey(activeId) || !isSidebarSectionKey(overId)) return;
+    const activeKey = activeId;
+    const overKey = overId;
     const drawn = phoneSectionsInUse(sidebarLayout, {
       showChatsSection,
       showPinnedSection,
@@ -2825,7 +2828,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                               ? <Icon name="eye" className="size-4 shrink-0 text-muted-foreground" />
                               : sectionKey === 'projects'
                                 ? <Icon name="folder" className="size-4 shrink-0 text-muted-foreground" />
-                                : <Icon name={ATTENTION_ZONE_ICON[sectionKey as SidebarAttentionZoneKey]} className="size-4 shrink-0 text-muted-foreground" />}
+                                : <Icon name={ATTENTION_ZONE_ICON[isSidebarAttentionZoneKey(sectionKey) ? sectionKey : 'other-active']} className="size-4 shrink-0 text-muted-foreground" />}
                         label={t(sectionTitleKey(sectionKey))}
                       />
                     ))}
