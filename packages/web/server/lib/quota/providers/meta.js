@@ -37,6 +37,9 @@
  *     reset when the body carries one — a wall the babysitter must not confuse
  *     with a read failure,
  *   - malformed response and transport failure.
+ * A 200 response with `is_subs_active: true` and no `subs_usage` is the
+ * post-roll empty state (a window open with no usage yet), not a failure:
+ * it returns `ok: true` with both windows present and unknown percentages.
  *
  * Keep this in sync with `packages/vscode/src/quotaProviders.ts` (`fetchMetaQuota`).
  */
@@ -220,15 +223,25 @@ const buildWindows = (subsUsage) => {
 };
 
 const usageResult = (body) => {
-  const windows = buildWindows(asObject(body.subs_usage));
+  let windows = buildWindows(asObject(body.subs_usage));
   if (Object.keys(windows).length === 0) {
-    return buildResult({
-      providerId,
-      providerName,
-      ok: false,
-      configured: true,
-      error: 'No quota data in response'
-    });
+    // Post-roll state, captured live on 2026-10-28: after a window rolls
+    // unspent, the endpoint answers 200 with an active subscription and no
+    // subs_usage at all. That is a window open with no usage yet, so report
+    // the plan's two windows with unknown percentages, the same shape an
+    // empty window object already maps to, instead of a read failure. A
+    // body that does not say the subscription is active carries no such
+    // signal and stays a failure.
+    if (body.is_subs_active !== true) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: 'No quota data in response'
+      });
+    }
+    windows = buildWindows({ window: {}, weekly: {} });
   }
 
   return buildResult({

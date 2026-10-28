@@ -3210,6 +3210,55 @@ describe('Meta quota provider', () => {
     assert.match(result.error ?? '', /Meta weekly limit reached/);
   });
 
+  test('reports an empty reading when an active payload carries no subs_usage (post-roll shape)', async () => {
+    // Shape captured live on 2026-10-28 in the post-roll state: 200,
+    // is_subs_active true, require_payment false, tier named, subs_usage
+    // absent entirely.
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse({
+        is_subs_active: true,
+        require_payment: false,
+        subs_tier_name: 'Muse Code High Usage',
+      }),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.error, undefined);
+    assert.equal(result.planLabel, 'Muse Code High Usage');
+    assert.equal(result.usage?.windows.rolling.usedPercent, null);
+    assert.equal(result.usage?.windows.rolling.windowSeconds, null);
+    assert.equal(result.usage?.windows.weekly.usedPercent, null);
+    assert.equal(result.usage?.windows.weekly.windowSeconds, 604800);
+  });
+
+  test('reports an empty reading when subs_usage is empty or its windows are null', async () => {
+    for (const subsUsage of [{}, { window: null, weekly: null }]) {
+      const result = await fetchMetaQuota({
+        readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+        readAccountToken: () => 'dca:test-account-token',
+        fetchImpl: async () => mockResponse({ is_subs_active: true, subs_usage: subsUsage }),
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows.rolling.usedPercent, null);
+      assert.equal(result.usage?.windows.weekly.usedPercent, null);
+    }
+  });
+
+  test('reports no quota data when the payload carries no usage windows and no active flag', async () => {
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => mockResponse({}),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'No quota data in response');
+  });
+
   test('reports not configured without a meta credential', async () => {
     let requests = 0;
     const result = await fetchMetaQuota({

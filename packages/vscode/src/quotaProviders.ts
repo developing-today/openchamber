@@ -4045,9 +4045,19 @@ const metaOutcomeToResult = (outcome: MetaPlanOutcome): ProviderResult => {
   }
 
   const body = outcome.body;
-  const windows = metaWindowsFrom(body.subs_usage);
+  let windows = metaWindowsFrom(body.subs_usage);
   if (Object.keys(windows).length === 0) {
-    return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'No quota data in response' });
+    // Post-roll state, captured live on 2026-10-28: after a window rolls
+    // unspent, the endpoint answers 200 with an active subscription and no
+    // subs_usage at all. That is a window open with no usage yet, so report
+    // the plan's two windows with unknown percentages, the same shape an
+    // empty window object already maps to, instead of a read failure. A
+    // body that does not say the subscription is active carries no such
+    // signal and stays a failure.
+    if (body.is_subs_active !== true) {
+      return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'No quota data in response' });
+    }
+    windows = metaWindowsFrom({ window: {}, weekly: {} });
   }
   return buildResult({
     providerId: 'meta',
