@@ -156,6 +156,10 @@ describe('TerminalViewport integration', () => {
     focusCount = 0;
     useTerminalStore.getState().clearAll();
     windowInstance = new Window({ url: 'http://localhost/' });
+    // happy-dom 21 implements getAnimations(), but a detached window's
+    // animations never finish, so Base UI's close completion (which returns
+    // focus on menu close) would never run. Disable Base UI animations here.
+    Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: true });
     Object.assign(globalThis, {
       window: windowInstance,
       document: windowInstance.document,
