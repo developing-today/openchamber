@@ -29,7 +29,7 @@ vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createOpenCodeLifecycleRuntime, parsePositiveInt } = await import('./lifecycle.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
@@ -1784,3 +1784,18 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
   });
 });
 
+
+describe('parsePositiveInt health env parsing (#689)', () => {
+  it('honours plain decimal spellings', () => {
+    expect(parsePositiveInt('5000', 5000)).toBe(5000);
+    expect(parsePositiveInt('250', 5000)).toBe(250);
+    expect(parsePositiveInt(' 12 ', 5000)).toBe(12);
+  });
+
+  it('falls back for non-plain-decimal spellings instead of truncating them', () => {
+    for (const invalid of [undefined, '', 'abc', '5000junk', '5000ms', '5.9', '1e3', '0x10', '-5', '0']) {
+      expect(parsePositiveInt(invalid, 5000)).toBe(5000);
+      expect(parsePositiveInt(invalid, 20)).toBe(20);
+    }
+  });
+});
