@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { promisify } from 'node:util';
 
 const execCalls = [];
@@ -33,7 +33,12 @@ mock.module('vscode', () => ({
   window: {},
 }));
 
-const { clearGitReadCacheForTests, handleFsBridgeMessage } = await import('./bridge-fs-runtime');
+const {
+  clearGitReadCacheForTests,
+  createGitCheckIgnoreTimeoutMs,
+  createGitReadCacheTtlMs,
+  handleFsBridgeMessage,
+} = await import('./bridge-fs-runtime');
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -85,4 +90,43 @@ describe('bridge fs exec git read cache', () => {
 
     expect(execCalls).toHaveLength(2);
   });
+});
+
+describe('bridge fs env readers', () => {
+  const readers = [
+    ['OPENCHAMBER_GIT_READ_CACHE_TTL_MS', createGitReadCacheTtlMs, 30_000],
+    ['OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS', createGitCheckIgnoreTimeoutMs, 2500],
+  ];
+
+  for (const [name, read, fallback] of readers) {
+    describe(name, () => {
+      let saved;
+      beforeEach(() => {
+        saved = process.env[name];
+      });
+      afterEach(() => {
+        if (saved === undefined) delete process.env[name];
+        else process.env[name] = saved;
+      });
+
+      it('falls back when the variable is unset or not a plain decimal', () => {
+        delete process.env[name];
+        expect(read()).toBe(fallback);
+        // '' and ' ' read as 0 under bare Number(...): that would disable the
+        // cache / disarm the kill timeout. Exponent, hex and fractional
+        // spellings are numbers the user never wrote.
+        for (const value of ['', ' ', '1e3', '0x10', '5.9', '-5', '10ms']) {
+          process.env[name] = value;
+          expect(read()).toBe(fallback);
+        }
+      });
+
+      it('honours a plain decimal value, including an explicit 0', () => {
+        process.env[name] = '0';
+        expect(read()).toBe(0);
+        process.env[name] = '1500';
+        expect(read()).toBe(1500);
+      });
+    });
+  }
 });
