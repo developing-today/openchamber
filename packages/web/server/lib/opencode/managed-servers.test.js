@@ -134,6 +134,23 @@ describe('buildManagedServersResponse', () => {
     ]);
   });
 
+  it('ties a starting own entry to its own registry record, never a predecessor port', () => {
+    const response = buildManagedServersResponse({
+      registryEntries: [
+        { pid: 111, port: 4001, startedAt: '2026-10-28T00:30:00.000Z' },
+        { pid: 999, port: 4002, startedAt: '2026-10-28T00:35:00.000Z' },
+      ],
+      own: { pid: 999, port: null, directory: '/projects/alpha', version: null, ready: false, startedAt: null, sessionCount: null },
+      isPidAlive: aliveExcept([]),
+      now: 5,
+    });
+
+    expect(response.servers).toEqual([
+      { pid: 111, port: 4001, directory: null, version: null, status: 'unknown', startedAt: '2026-10-28T00:30:00.000Z', sessionCount: null },
+      { pid: 999, port: 4002, directory: '/projects/alpha', version: null, status: 'starting', startedAt: '2026-10-28T00:35:00.000Z', sessionCount: null },
+    ]);
+  });
+
   it('answers an empty list when nothing is recorded', () => {
     expect(buildManagedServersResponse({ now: 5 })).toEqual({ version: 1, serverTime: 5, servers: [] });
   });

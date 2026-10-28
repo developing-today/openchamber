@@ -211,6 +211,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // The version the managed OpenCode last reported in its health payload,
   // kept for the managed-servers read; null until a probe has seen one.
   let lastKnownOpenCodeVersion = null;
+  // The last managed process that actually became ready, with the port it
+  // became ready on. The managed-servers read reports this process as the
+  // own server, so a replacement that is still starting never inherits its
+  // predecessor's port or readiness in the snapshot.
+  let lastReadyOwnServer = null;
   // The environment the managed OpenCode was launched with. Keys OpenCode
   // takes from environment variables are never stored in it, so this is the
   // only place their values can be read back (see auth.js).
@@ -1116,6 +1121,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.isShuttingDown) throw new Error('OpenCode startup cancelled during shutdown');
       if (ready) {
         setOpenCodePort(port);
+        lastReadyOwnServer = { pid: serverInstance.pid, port };
         setDetectedOpenCodeApiPrefix(prefix);
 
         state.isOpenCodeReady = true;
@@ -1879,23 +1885,54 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // in managed-servers.js is the allowlist; state.json fields beyond the
   // own pid/port/startedAt never leave this runtime.
   const getManagedServersSnapshot = async () => {
-    const registryEntries = await readRegistryEntries().catch(() => []);
+    // A failed registry read propagates: the route answers 500 rather than
+    // presenting an unavailable registry as an empty server list.
+    const registryEntries = await readRegistryEntries();
     const drainingRecords = [
       ...readDrainingOpenCodeRecords(managedPaths.drainingPath),
       ...drainingOpenCode.snapshot(),
     ];
-    const ownPid = state.openCodeProcess?.pid ?? ownRecord?.pid ?? null;
-    const own = !state.isExternalOpenCode && Number.isInteger(ownPid)
-      ? {
-          pid: ownPid,
-          port: state.openCodePort ?? ownRecord?.port ?? null,
-          directory: getValidatedDefaultDirectory(),
-          version: lastKnownOpenCodeVersion,
-          ready: state.isOpenCodeReady === true,
-          startedAt: ownRecord?.startedAt ?? null,
-          sessionCount: getActiveSessionCount(),
-        }
-      : null;
+    // Adopt the live state as the ready own server when no ready transition
+    // was observed in this runtime (e.g. an HMR-reused process).
+    if (
+      !lastReadyOwnServer &&
+      state.isOpenCodeReady === true &&
+      Number.isInteger(state.openCodeProcess?.pid) &&
+      Number.isInteger(state.openCodePort)
+    ) {
+      lastReadyOwnServer = { pid: state.openCodeProcess.pid, port: state.openCodePort };
+    }
+    const readyOwn =
+      lastReadyOwnServer && isPidAlive(lastReadyOwnServer.pid) ? lastReadyOwnServer : null;
+    const startingPid = state.openCodeProcess?.pid ?? ownRecord?.pid ?? null;
+    const own = state.isExternalOpenCode
+      ? null
+      : readyOwn
+        ? {
+            pid: readyOwn.pid,
+            port: readyOwn.port,
+            directory: getValidatedDefaultDirectory(),
+            version: lastKnownOpenCodeVersion,
+            ready: true,
+            startedAt: ownRecord?.pid === readyOwn.pid ? (ownRecord?.startedAt ?? null) : null,
+            sessionCount: getActiveSessionCount(),
+          }
+        : Number.isInteger(startingPid)
+          ? {
+              // Still starting, and no predecessor is ready: report only
+              // what belongs to this pid. Port and session count stay null
+              // (the projection falls back to this pid's own registry
+              // entry for the port) instead of borrowing another
+              // process's values.
+              pid: startingPid,
+              port: null,
+              directory: getValidatedDefaultDirectory(),
+              version: null,
+              ready: false,
+              startedAt: ownRecord?.pid === startingPid ? (ownRecord?.startedAt ?? null) : null,
+              sessionCount: null,
+            }
+          : null;
     return buildManagedServersResponse({
       registryEntries,
       drainingRecords,
