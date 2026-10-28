@@ -510,6 +510,28 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
 }
 
 /**
+ * Resolve the real git directory for a working tree through git itself.
+ * In a linked worktree `<directory>/.git` is a file pointing at
+ * `<main>/.git/worktrees/<name>`, so assuming it is a directory makes
+ * every git-internal read (MERGE_HEAD, rebase-merge, ...) fail silently.
+ * `git rev-parse --git-dir` returns the per-worktree git dir (relative
+ * to `directory` or absolute); fall back to the classic path when git
+ * cannot answer (e.g. not a repository).
+ */
+async function resolveGitDir(directory: string): Promise<string> {
+  try {
+    const result = await execGit(['rev-parse', '--git-dir'], directory);
+    const resolved = result.stdout.trim();
+    if (result.exitCode === 0 && resolved) {
+      return path.resolve(directory, resolved);
+    }
+  } catch {
+    // ignore — fall through to the classic path
+  }
+  return path.join(directory, '.git');
+}
+
+/**
  * Check for in-progress merge/rebase operations
  */
 async function checkInProgressOperations(directory: string): Promise<{
@@ -521,7 +543,7 @@ async function checkInProgressOperations(directory: string): Promise<{
     rebaseInProgress?: GitRebaseInProgress | null;
   } = {};
 
-  const gitDir = path.join(directory, '.git');
+  const gitDir = await resolveGitDir(directory);
 
   try {
     // Check MERGE_HEAD for merge in progress
