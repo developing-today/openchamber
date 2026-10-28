@@ -135,8 +135,46 @@ describe('Meta quota windows', () => {
     expect(readAccountToken).not.toHaveBeenCalled();
   });
 
-  it('reports no quota data when the payload carries no usage windows', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ is_subs_active: true }));
+  it('reports an empty reading when an active payload carries no subs_usage (post-roll shape)', async () => {
+    // Shape captured live on 2026-10-28 in the post-roll state: 200,
+    // is_subs_active true, require_payment false, tier named, subs_usage
+    // absent entirely.
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
+      is_subs_active: true,
+      require_payment: false,
+      subs_tier_name: 'Muse Code High Usage',
+      user_email: 'user@example.com',
+    }));
+
+    const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+    expect(result.ok).toBe(true);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.planLabel).toBe('Muse Code High Usage');
+    expect(result.usage.windows.rolling.usedPercent).toBeNull();
+    expect(result.usage.windows.rolling.windowSeconds).toBeNull();
+    expect(result.usage.windows.weekly.usedPercent).toBeNull();
+    expect(result.usage.windows.weekly.windowSeconds).toBe(604800);
+  });
+
+  it('reports an empty reading when subs_usage is empty or its windows are null', async () => {
+    for (const subsUsage of [{}, { window: null, weekly: null }]) {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
+        is_subs_active: true,
+        subs_usage: subsUsage,
+      }));
+
+      const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+      expect(result.ok).toBe(true);
+      expect(result.usage.windows.rolling.usedPercent).toBeNull();
+      expect(result.usage.windows.weekly.usedPercent).toBeNull();
+    }
+  });
+
+  it('reports no quota data when the payload carries no usage windows and no active flag', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}));
 
     const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
 
