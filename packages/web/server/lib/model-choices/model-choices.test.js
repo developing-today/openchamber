@@ -262,6 +262,23 @@ describe('model choice routes', () => {
     expect((await request(app).get('/api/openchamber/model-choices').expect(200)).body.total).toBe(0);
   });
 
+  it('judges the limit strictly, so malformed spellings fall back to the service default', async () => {
+    const { service } = makeService({});
+    const app = createApp(service);
+    for (let index = 0; index < 60; index += 1) {
+      await request(app).post('/api/openchamber/model-choices').send(choice()).expect(200, { recorded: true });
+    }
+    // 60 events separate the answers: the default shows 50, a reinterpreted
+    // '1e3' would clamp to 500 and show all 60, '' / '-5' would show none.
+    const cases = [['1e3', 50], ['0x10', 50], ['2.0', 50], ['', 50], ['-5', 50], ['0', 0], ['2', 2]];
+    for (const [limit, expected] of cases) {
+      const read = await request(app).get(`/api/openchamber/model-choices?limit=${limit}`).expect(200);
+      expect(read.body.events).toHaveLength(expected);
+    }
+    const missing = await request(app).get('/api/openchamber/model-choices').expect(200);
+    expect(missing.body.events).toHaveLength(50);
+  });
+
   it('answers 400 for an invalid choice or decision', async () => {
     const app = createApp(makeService({}).service);
     await request(app).post('/api/openchamber/model-choices').send({ surface: 'composer' }).expect(400);

@@ -24,6 +24,16 @@ const statusOf = (error) => (Number.isInteger(error?.statusCode) ? error.statusC
 
 const fail = (res, error, fallback) => res.status(statusOf(error)).json({ error: error?.message || fallback });
 
+// The limit is judged the strict way the git routes judge their numeric
+// parameters (#554 class): the value's whole text must be digits, else
+// undefined so the service applies its default. z.coerce reinterpreted
+// '1e3' as 1000 and '' / '-5' as 0 / -5 (read as no-events) instead of the
+// default 50. A plain '0' stays 0: the service's deliberate no-events answer.
+const parseLimit = (value) => {
+  const text = String(value ?? '');
+  return /^\d+$/.test(text) ? Number(text) : undefined;
+};
+
 export const registerModelChoiceRoutes = (app, { modelChoiceService }) => {
   app.post('/api/openchamber/model-choices', express.json({ limit: '16kb' }), async (req, res) => {
     try {
@@ -34,7 +44,7 @@ export const registerModelChoiceRoutes = (app, { modelChoiceService }) => {
   });
 
   app.get('/api/openchamber/model-choices', async (req, res) => {
-    const limit = z.coerce.number().int().catch(undefined).parse(req.query.limit);
+    const limit = parseLimit(req.query.limit);
     try {
       return res.json(await modelChoiceService.summary({ limit }));
     } catch (error) {
