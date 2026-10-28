@@ -49,6 +49,7 @@ const baseCredentialList = (): CredentialEntry[] => [
   key('deepinfra'),
   key('hyper'),
   key('nano-gpt'),
+  key('wafer'),
   oauth('github-copilot', copilotEnterpriseUrl ? { enterpriseUrl: copilotEnterpriseUrl } : undefined),
   oauth('anthropic'),
 ];
@@ -3222,5 +3223,53 @@ describe('Meta quota provider', () => {
 
     assert.equal(result.configured, false);
     assert.equal(requests, 0);
+  });
+});
+
+describe('Wafer quota provider (VS Code parity) - #616', () => {
+  const run = async (payload: {
+    remaining_included_requests?: number;
+    included_request_limit?: number;
+    overage_request_count?: number;
+    current_period_used_percent?: number;
+  }) => {
+    stubFetchReturning(async () => mockResponse(payload));
+    return fetchQuotaForProvider('wafer');
+  };
+
+  test('derives usedPercent from remaining/limit when the percent is absent', async () => {
+    const result = await run({ remaining_included_requests: 40, included_request_limit: 100 });
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows['5h'].usedPercent, 60);
+    assert.equal(result.usage?.windows['5h'].remainingPercent, 40);
+    assert.equal(result.usage?.windows['5h'].valueLabel, '40 / 100 left');
+  });
+
+  test('clamps the derived usedPercent when remaining exceeds the limit', async () => {
+    const result = await run({ remaining_included_requests: 120, included_request_limit: 100 });
+    assert.equal(result.usage?.windows['5h'].usedPercent, 0);
+  });
+
+  test('reports a null usedPercent when the percent is absent and no counts can derive it', async () => {
+    const result = await run({ overage_request_count: 5 });
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows['5h'].usedPercent, null);
+    assert.equal(result.usage?.windows['5h'].remainingPercent, null);
+  });
+
+  test('keeps a present percent, including overage above 100', async () => {
+    const withinLimit = await run({ current_period_used_percent: 140 });
+    assert.equal(withinLimit.usage?.windows['5h'].usedPercent, 100);
+
+    const withOverage = await run({ current_period_used_percent: 140, overage_request_count: 5 });
+    assert.equal(withOverage.usage?.windows['5h'].usedPercent, 140);
+  });
+
+  test('clamps a negative present percent at 0 in both cases', async () => {
+    const withOverage = await run({ current_period_used_percent: -5, overage_request_count: 3 });
+    assert.equal(withOverage.usage?.windows['5h'].usedPercent, 0);
+
+    const withoutOverage = await run({ current_period_used_percent: -5 });
+    assert.equal(withoutOverage.usage?.windows['5h'].usedPercent, 0);
   });
 });
