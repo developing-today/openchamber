@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Collez le jeton',
   'settings.providers.page.quotaCredentials.platformApiKey': 'Clé API de plateforme',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'L’usage nécessite une clé API de plateforme depuis la console ZenMux. La clé qu’OpenCode utilise pour le chat est distincte et n’est pas utilisée ici.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'Cookie de session',
+  'settings.providers.page.quotaCredentials.workspaceId': 'ID de l’espace de travail',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'Collez le cookie de session',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'Collez l’ID de l’espace de travail',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'L’utilisation nécessite le cookie de session Open Design de votre navigateur et votre ID d’espace de travail. Copiez le cookie depuis les outils de développement du navigateur ; OpenChamber ne scanne jamais le stockage de cookies du navigateur.',
   'settings.providers.page.openCodeGo.saveFailed': 'Impossible de valider les identifiants OpenCode Go.',
   'settings.providers.page.openCodeGo.valid': 'Les identifiants OpenCode Go sont valides.',
   'settings.providers.page.openCodeGo.invalid': 'Les identifiants OpenCode Go sont invalides ou expirés.',
@@ -1146,6 +1152,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Exécuter via Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Exécuter les outils OpenChamber via Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Désactivé : le modèle voit chaque outil directement. Activé : ils passent derrière un outil qui exécute un court script. Économise un peu de contexte, mais le modèle peut les manquer, surtout les petits. L’outil de rendu reste toujours direct, car le chat dessine la page à partir de son propre appel.",
+  "settings.openchamber.tools.cacheNote.direct": "Activer ou désactiver un outil ou Code Mode empêche le prochain tour d’une session en cours d’utiliser le cache du prompt.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Activer ou désactiver l’outil d’affichage ou Code Mode empêche le prochain tour d’une session en cours d’utiliser le cache du prompt.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Chemin absolu facultatif vers le',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binaire.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'Chemin binaire OpenCode',
@@ -1772,6 +1780,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'Importer une configuration complète du serveur MCP à partir d\'un extrait de code JSON',
   'settings.mcp.page.server.enable': 'Activer le serveur',
   'settings.mcp.page.server.enableAria': 'Activer le serveur',
+  "settings.mcp.page.server.enableCacheNote": "Code Mode est désactivé pour ce serveur : l’activer ou le désactiver empêche le prochain tour d’une session en cours d’utiliser le cache du prompt.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Avec Code Mode sur Par défaut, OpenCode donne des outils simples à un serveur qui a son propre Code Mode : activer ou désactiver celui-ci peut donc empêcher le prochain tour d’une session en cours d’utiliser le cache du prompt.",
   'settings.mcp.page.server.transportMode': 'Mode de transport',
   'settings.mcp.page.connection.command': 'Commande',
   'settings.mcp.page.connection.serverUrl': 'URL du serveur',
@@ -2587,6 +2597,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.fr,
   ...extensionsSettingsI18n.fr,
   ...messagingSettingsI18n.fr,
+  ...modelChoicesSettingsI18n.fr,
   ...settingsLayoutI18n.fr,
   'settings.page.integrations.title': 'Intégrations',
   'settings.page.integrations.description': 'Connectez les services et abonnements avec lesquels OpenChamber travaille.',
@@ -2611,6 +2622,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "Par défaut (OpenCode décide)",
   "settings.mcp.page.advanced.codemodeOption.on": "Activé",
   "settings.mcp.page.advanced.codemodeOption.off": "Désactivé",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Changer Code Mode ajoute ou retire les outils de ce serveur de la liste d’outils du modèle : le prochain tour d’une session en cours n’utilise donc pas le cache du prompt.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode activé",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode désactivé",
   'settings.mcp.page.advanced.protocol': 'Protocole',

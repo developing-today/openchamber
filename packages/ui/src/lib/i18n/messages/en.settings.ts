@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Paste token',
   'settings.providers.page.quotaCredentials.platformApiKey': 'Platform API key',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Usage needs a Platform API key from the ZenMux console. The key OpenCode uses for chat is separate and is not used here.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'Session cookie',
+  'settings.providers.page.quotaCredentials.workspaceId': 'Workspace ID',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'Paste session cookie',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'Paste workspace ID',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'Usage needs the Open Design session cookie from your browser and your workspace ID. Copy the cookie from your browser developer tools; OpenChamber never scans browser cookie storage.',
   'settings.providers.page.openCodeGo.saveFailed': 'Could not validate OpenCode Go credentials.',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go credentials are valid.',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go credentials are invalid or expired.',
@@ -1272,6 +1278,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Run through code mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Run OpenChamber tools through code mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Off: the model sees each tool directly. On: they sit behind one tool that runs a short script calling them. Saves a little context, but the model can miss them, especially smaller models. The render tool always stays direct, because the chat draws its page from its own call.",
+  "settings.openchamber.tools.cacheNote.direct": "Turning a tool or code mode on or off makes a running session's next turn skip the prompt cache.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Turning the render tool or code mode on or off makes a running session's next turn skip the prompt cache.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Optional absolute path to the',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode binary path',
@@ -1889,6 +1897,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'Import a full MCP server configuration from a JSON snippet',
   'settings.mcp.page.server.enable': 'Enable server',
   'settings.mcp.page.server.enableAria': 'Enable server',
+  "settings.mcp.page.server.enableCacheNote": "Code mode is off for this server, so turning it on or off makes a running session's next turn skip the prompt cache.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "With code mode on Default, OpenCode gives a server that brings its own code mode plain tools, so turning this one on or off may make a running session's next turn skip the prompt cache.",
   'settings.mcp.page.server.transportMode': 'Transport mode',
   'settings.mcp.page.connection.command': 'Command',
   'settings.mcp.page.connection.serverUrl': 'Server URL',
@@ -2577,6 +2587,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.en,
   ...extensionsSettingsI18n.en,
   ...messagingSettingsI18n.en,
+  ...modelChoicesSettingsI18n.en,
   ...settingsLayoutI18n.en,
   'settings.page.integrations.title': 'Integrations',
   'settings.page.integrations.description': 'Connect the services and subscriptions OpenChamber works with.',
@@ -2601,6 +2612,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "Default (OpenCode decides)",
   "settings.mcp.page.advanced.codemodeOption.on": "On",
   "settings.mcp.page.advanced.codemodeOption.off": "Off",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Changing code mode moves this server's tools in or out of the model's tool list, so a running session's next turn skips the prompt cache.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code mode on",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code mode off",
   'settings.mcp.page.advanced.protocol': 'Protocol',

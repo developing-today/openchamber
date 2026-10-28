@@ -3,6 +3,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -27,6 +28,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -80,6 +82,7 @@ export const dict = {
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...sessionMenuHintsI18n.tr,
+  ...sessionErrorRecoveryI18n.tr,
   ...sidebarLayoutI18n.tr,
   ...projectKnowledgeI18n.tr,
   ...linearPanelI18n.tr,
@@ -104,6 +107,7 @@ export const dict = {
   ...pluginsGridI18n.tr,
   ...integrationsCatalogI18n['tr'],
   ...sessionGoalWriterI18n['tr'],
+  ...subsessionModelsI18n['tr'],
   ...diffFindI18n['tr'],
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
@@ -2895,6 +2899,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Kimlik doğrulama gerekiyor',
   'mcpDropdown.status.needsRegistration': 'Kayıt gerekiyor: {error}',
   'mcpDropdown.empty.configureInConfig': 'MCP sunucularını Ayarlar\'dan yapılandırın.',
+  "mcpDropdown.cacheNote": "Code Mode kapalı bir sunucuyu açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
   'sessionAuth.error.rateLimitTitle': 'Çok fazla deneme',
   'sessionAuth.error.networkTitle': 'Sunucuya ulaşılamıyor',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Tekrar denemeden önce {minutes} dakika bekleyin.',

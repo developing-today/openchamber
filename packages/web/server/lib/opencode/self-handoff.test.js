@@ -89,6 +89,14 @@ describe('handoff settings', () => {
     expect(resolveHandoffTimeoutMs({ OPENCHAMBER_HANDOFF_TIMEOUT_MS: 'soon' })).toBe(30_000);
   });
 
+  it('falls back to the default for exponent, hex, signed, and decimal-point spellings', () => {
+    expect(resolveHandoffTimeoutMs({ OPENCHAMBER_HANDOFF_TIMEOUT_MS: '1e3' })).toBe(30_000);
+    expect(resolveHandoffTimeoutMs({ OPENCHAMBER_HANDOFF_TIMEOUT_MS: '0x10' })).toBe(30_000);
+    expect(resolveHandoffTimeoutMs({ OPENCHAMBER_HANDOFF_TIMEOUT_MS: '+5000' })).toBe(30_000);
+    expect(resolveHandoffTimeoutMs({ OPENCHAMBER_HANDOFF_TIMEOUT_MS: '5000.0' })).toBe(30_000);
+    expect(resolveHandoffTimeoutMs({ OPENCHAMBER_HANDOFF_TIMEOUT_MS: '5000' })).toBe(5000);
+  });
+
   it('is on unless OPENCHAMBER_SELF_HANDOFF is 0', () => {
     expect(isSelfHandoffEnabled({})).toBe(true);
     expect(isSelfHandoffEnabled({ OPENCHAMBER_SELF_HANDOFF: '1' })).toBe(true);

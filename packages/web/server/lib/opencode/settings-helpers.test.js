@@ -14,7 +14,7 @@ import { createSettingsNormalizationRuntime } from './settings-normalization-run
 const testFilePath = fileURLToPath(import.meta.url);
 const packagesWebDir = join(dirname(testFilePath), '..', '..', '..');
 
-const createTestHelpers = () => createSettingsHelpers({
+const createTestHelpers = (extra = {}) => createSettingsHelpers({
   normalizePathForPersistence: (value) => value,
   normalizeDirectoryPath: (value) => value,
   normalizeTunnelBootstrapTtlMs: (value) => value,
@@ -30,6 +30,7 @@ const createTestHelpers = () => createSettingsHelpers({
   sanitizeModelRefs: () => undefined,
   sanitizeSkillCatalogs: () => undefined,
   sanitizeProjects: () => undefined,
+  ...extra,
 });
 
 const createTestHelpersWithRealSanitizers = () => {
@@ -846,7 +847,7 @@ describe('settings registry gate', () => {
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarLayout: { sectionOrder: ['projects', 'chats'], attention: 'blocked', holdOpenSession: false, chatsGroupIndex: 2 },
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
-    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
+    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true, modelChoiceRecordingEnabled: false,
     agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentToolsCodeMode: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'],
     openInAppId: 'vscode', dictationEnabled: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en',
@@ -863,7 +864,7 @@ describe('settings registry gate', () => {
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, worktreeStartFrom: 'remote-default', worktreeStartFromOverrides: { quick: 'project-root' }, pullRequestWorktree: 'branch-off', worktreeBranchTemplate: 'dp/{name}', pullRequestBranchTemplate: '{name}-from-pr-{pr}', sessionTabsEnabled: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, persistChatDraft: true,
-    largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, agentTerminalsPlacement: 'sidebar', followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
+    largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, agentTerminalsPlacement: 'sidebar', followUpBehavior: 'steer', activeRunModelChangeBehavior: 'next-message', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', padding: 100, cornerRadius: 8,
     shortcutOverrides: { 'chat.send': 'mod+enter' },
@@ -931,6 +932,15 @@ describe('settings registry gate', () => {
       desktopHosts: [],
       notARealKey: 1,
     })).toEqual({});
+  });
+
+  // Server-owned and read-only: the Tools page gates its prompt cache note on it, and
+  // a client must never be able to write it back.
+  it('reports whether managed tool switches apply live, and never accepts it as an update', () => {
+    expect(createTestHelpers().formatSettingsResponse({}).managedToolsApplyLive).toBe(false);
+    expect(createTestHelpers({ areManagedToolsLive: () => true }).formatSettingsResponse({}).managedToolsApplyLive).toBe(true);
+    expect(createTestHelpers({ areManagedToolsLive: () => false }).formatSettingsResponse({}).managedToolsApplyLive).toBe(false);
+    expect(createTestHelpers().sanitizeSettingsUpdate({ managedToolsApplyLive: true })).toEqual({});
   });
 
   it('never returns secret keys from a formatted response', () => {

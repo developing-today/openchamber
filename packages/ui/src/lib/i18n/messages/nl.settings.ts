@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -69,6 +70,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.saved': 'Inloggegevens van {provider} opgeslagen.',
   'settings.providers.page.quotaCredentials.platformApiKey': 'Platform-API-sleutel',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Voor gebruik is een Platform-API-sleutel uit de ZenMux-console nodig. De sleutel die OpenCode voor chat gebruikt, staat daar los van en wordt hier niet gebruikt.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'Sessiecookie',
+  'settings.providers.page.quotaCredentials.workspaceId': 'Werkruimte-ID',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'Plak sessiecookie',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'Plak werkruimte-ID',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'Voor gebruik zijn de Open Design-sessiecookie uit uw browser en uw werkruimte-ID nodig. Kopieer de cookie uit de ontwikkelaarstools van uw browser; OpenChamber scant de cookieopslag van de browser nooit.',
   'settings.providers.page.quotaCredentials.accessToken': 'Toegangstoken',
   'settings.providers.page.quotaCredentials.usageToken': 'Gebruik-API-token',
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Voer deze opdracht uit in uw terminal en plak daarna het token hieronder. Het kan alleen het tegoedgebruik van LLM\'s uitlezen en verloopt na 30 dagen.',
@@ -1273,6 +1279,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Via Code Mode uitvoeren",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber-tools via Code Mode uitvoeren",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Uit: het model ziet elke tool direct. Aan: ze zitten achter één tool die een kort script uitvoert. Scheelt wat context, maar het model kan ze missen, vooral kleinere modellen. De render-tool blijft altijd direct, omdat de chat de pagina tekent vanuit zijn eigen aanroep.",
+  "settings.openchamber.tools.cacheNote.direct": "Een tool of Code Mode aan- of uitzetten zorgt dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
+  "settings.openchamber.tools.cacheNote.codeMode": "De weergavetool of Code Mode aan- of uitzetten zorgt dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Optioneel absoluut pad naar het',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'programma.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'Pad naar de OpenCode-binary',
@@ -1890,6 +1898,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'Importeer een volledige MCP-serverconfiguratie uit een JSON-fragment',
   'settings.mcp.page.server.enable': 'Server aanzetten',
   'settings.mcp.page.server.enableAria': 'Server inschakelen',
+  "settings.mcp.page.server.enableCacheNote": "Code Mode staat uit voor deze server, dus hem aan- of uitzetten zorgt dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Met Code Mode op Standaard geeft OpenCode een server met een eigen Code Mode gewone tools, dus deze aan- of uitzetten kan ervoor zorgen dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
   'settings.mcp.page.server.transportMode': 'Transportmodus',
   'settings.mcp.page.connection.command': 'Opdracht',
   'settings.mcp.page.connection.serverUrl': 'Server-URL',
@@ -2577,6 +2587,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.nl,
   ...extensionsSettingsI18n.nl,
   ...messagingSettingsI18n.nl,
+  ...modelChoicesSettingsI18n.nl,
   ...settingsLayoutI18n.nl,
   'settings.page.integrations.title': 'Integraties',
   'settings.page.integrations.description': 'Verbind GitHub en Linear zodat OpenChamber met uw issues en pull requests kan werken.',
@@ -2601,6 +2612,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "Standaard (OpenCode bepaalt het)",
   "settings.mcp.page.advanced.codemodeOption.on": "Aan",
   "settings.mcp.page.advanced.codemodeOption.off": "Uit",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Code Mode wijzigen zet de tools van deze server in of uit de toollijst van het model, dus de volgende beurt van een lopende sessie gebruikt de promptcache niet.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode aan",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode uit",
   'settings.mcp.page.advanced.protocol': 'Protocol',

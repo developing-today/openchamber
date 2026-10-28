@@ -67,10 +67,17 @@ const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
 // the 150 ms default. Only applies on directions where batching was negotiated.
-const resolveBatchWindowMs = (option) => {
+export const resolveBatchWindowMs = (option, rawEnvValue = process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS) => {
   if (Number.isFinite(option) && option >= 0) return option;
-  const envValue = Number.parseInt(process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS ?? '', 10);
-  if (Number.isFinite(envValue) && envValue >= 0) return envValue;
+  // Only a plain decimal spelling counts: a bare parseInt would silently
+  // honour '150junk' as 150, truncate '2.9' to 2, read '1e3' as a 1 ms
+  // window, and read '0x10' as 0. Same strict judgement as
+  // readRateLimitMaxAttempts in ui-auth; zero stays a valid window here.
+  const text = String(rawEnvValue ?? '').trim();
+  if (/^\d+$/.test(text)) {
+    const envValue = Number(text);
+    if (Number.isSafeInteger(envValue) && envValue >= 0) return envValue;
+  }
   return DEFAULT_BATCH_WINDOW_MS;
 };
 

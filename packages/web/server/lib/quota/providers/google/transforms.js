@@ -44,7 +44,7 @@ export const transformQuotaBucket = (bucket, sourceId) => {
   const remainingPercent = remainingFraction !== null
     ? Math.round(remainingFraction * 100)
     : null;
-  const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+  const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
   const resetAt = toTimestamp(bucket?.resetTime);
   const window = resolveGoogleWindow();
 
@@ -70,10 +70,8 @@ export const transformModelData = (modelName, modelData, sourceId) => {
   const remainingPercent = typeof remainingFraction === 'number'
     ? Math.round(remainingFraction * 100)
     : null;
-  const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-  const resetAt = modelData?.quotaInfo?.resetTime
-    ? new Date(modelData.quotaInfo.resetTime).getTime()
-    : null;
+  const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
+  const resetAt = toTimestamp(modelData?.quotaInfo?.resetTime);
   const window = resolveGoogleWindow();
 
   return {

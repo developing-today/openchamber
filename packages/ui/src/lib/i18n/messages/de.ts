@@ -3,6 +3,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -27,6 +28,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -141,6 +143,7 @@ export const dict = {
   ...linearIssuePickerI18n.de,
   ...referencePickerI18n.de,
   ...sessionMenuHintsI18n.de,
+  ...sessionErrorRecoveryI18n.de,
   ...sidebarLayoutI18n.de,
   ...projectKnowledgeI18n.de,
   ...linearPanelI18n.de,
@@ -165,6 +168,7 @@ export const dict = {
   ...pluginsGridI18n.de,
   ...integrationsCatalogI18n['de'],
   ...sessionGoalWriterI18n['de'],
+  ...subsessionModelsI18n['de'],
   ...diffFindI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
@@ -2792,6 +2796,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Authentifizierung erforderlich',
   'mcpDropdown.status.needsRegistration': 'Registrierung erforderlich: {error}',
   'mcpDropdown.empty.configureInConfig': 'Konfigurieren Sie MCP-Server in den Einstellungen.',
+  "mcpDropdown.cacheNote": "Wenn du einen Server mit ausgeschaltetem Code Mode umschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
   'sessionAuth.error.rateLimitTitle': 'Zu viele Versuche',
   'sessionAuth.error.networkTitle': 'Server nicht erreichbar',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Bitte warten Sie {minutes} Minute, bevor Sie es erneut versuchen.',

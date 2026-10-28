@@ -12,6 +12,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Icon } from '@/components/icon/Icon';
 import type { GoalSpecResult, GoalSubmitChoice, GoalWriterChoice, GoalWriterTrigger } from '@/lib/goalWriter';
 import { GoalWriterPicker } from '@/components/chat/GoalWriterPicker';
+import { useGoalWriterDefault } from '@/hooks/useGoalWriterDefault';
+import { recordGoalWriterChoice } from '@/lib/modelChoices';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore, type SessionGoalWriterSendMode } from '@/stores/useUIStore';
 
@@ -25,6 +27,8 @@ export interface GoalSpecDialogRequest {
   /** The model the message is sent with; it writes when Settings name no writer model. */
   sessionModel: { providerID: string; modelID: string } | null;
   directory: string | null;
+  /** Length of the message the goal is written from; only its size bucket is recorded. */
+  inputLength: number;
   /** `writer` is a model picked in the dialog; null keeps the default. */
   write: (signal: AbortSignal, options: { writer: GoalWriterChoice | null; ignoreLimit: boolean }) => Promise<GoalSpecResult>;
 }
@@ -88,11 +92,27 @@ function GoalSpecDialogBody({
   // another run ("Write again"), never a silent restart.
   const writeOptionsRef = React.useRef({ writer, ignoreLimit });
   writeOptionsRef.current = { writer, ignoreLimit };
+  const writerDefault = useGoalWriterDefault();
+  const writerDefaultRef = React.useRef(writerDefault);
+  writerDefaultRef.current = writerDefault;
+  // "Write again" with the same pick is one choice, recorded once.
+  const recordedWriterRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     const controller = new AbortController();
     setState({ status: 'writing' });
     const run = async () => {
+      const { writer: picked } = writeOptionsRef.current;
+      const pickedKey = picked ? `${picked.providerID}/${picked.modelID}:${picked.variant ?? ''}` : null;
+      if (picked && pickedKey !== recordedWriterRef.current) {
+        recordedWriterRef.current = pickedKey;
+        recordGoalWriterChoice({
+          writer: picked,
+          writerDefault: writerDefaultRef.current,
+          sessionModel: request.sessionModel,
+          inputLength: request.inputLength,
+        });
+      }
       let result: GoalSpecResult;
       try {
         result = await request.write(controller.signal, writeOptionsRef.current);

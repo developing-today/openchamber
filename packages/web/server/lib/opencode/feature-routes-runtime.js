@@ -46,6 +46,7 @@ import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
 import { registerDeviceSettingsRoutes } from '../device-settings/routes.js';
+import { registerModelChoiceRoutes } from '../model-choices/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
@@ -70,7 +71,7 @@ import {
   encodePluginId,
   decodePluginId,
 } from './plugins.js';
-import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, readConfigLayers, getConfigForPath, writeConfig, CONFIG_FILE } from './shared.js';
+import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, readConfigLayers, readConfigSources, getConfigForPath, writeConfig, CONFIG_FILE } from './shared.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from './skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
@@ -282,6 +283,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       openChamberSessionService,
       openChamberControlService,
       deviceSettingsStore,
+      modelChoiceService,
       waitForOpenCodeReady,
       getOpenChamberEventClients,
       writeSseEvent,
@@ -312,9 +314,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       CONFIG_FILE,
       isEnterpriseMode,
       refreshOpenCodeAfterConfigChange,
+      resolveOptionalProjectDirectory,
+      readConfigSources,
     });
-    registerModelRouteStatsRoutes(app);
-    registerMessageModelAttributionRoutes(app);
+    registerModelRouteStatsRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
+    registerMessageModelAttributionRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
     registerPlanRoutes(app);
     registerPoolPlanLinkRoutes(app, { openchamberDataDir });
     registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir, isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
@@ -379,6 +383,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService });
     if (deviceSettingsStore) registerDeviceSettingsRoutes(app, { store: deviceSettingsStore });
+    if (modelChoiceService) registerModelChoiceRoutes(app, { modelChoiceService });
 
     registerMarkdownImageGrantRoutes(app, {
       fsPromises,

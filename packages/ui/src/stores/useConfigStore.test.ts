@@ -27,6 +27,7 @@ let checkHealthImpl = async () => true;
 let probeHealthImpl: (() => Promise<'healthy' | 'unhealthy' | 'unreachable'>) | null = null;
 let probeHealthOptions: Array<{ waitMs?: number } | undefined> = [];
 let loadSettingsImpl: (() => Promise<DesktopSettings | null>) | null = null;
+let runtimeFetchImpl: ((url: string) => Promise<Response>) | null = null;
 let projectsState: {
   activeProjectId: string | null;
   projects: Array<{ id: string; path: string; label: string; defaultAgent?: string }>;
@@ -201,9 +202,12 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify({}), {
-    headers: { 'Content-Type': 'application/json' },
-  })),
+  runtimeFetch: mock(async (url: string) => {
+    if (runtimeFetchImpl) return runtimeFetchImpl(url);
+    return new Response(JSON.stringify({}), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }),
 }));
 
 mock.module('@/lib/persistence', () => ({
@@ -253,6 +257,7 @@ const {
   selectKnownCatalogModel,
   invalidateConfigAgentsLoad,
 } = await import('./useConfigStore');
+const { rememberDisabledProviders } = await import('@/lib/disabledProviders');
 const { emitSyncConfigChanged, setSyncRefs } = await import('@/sync/sync-refs');
 const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
@@ -290,6 +295,7 @@ describe('useConfigStore provider persistence', () => {
     probeHealthImpl = null;
     probeHealthOptions = [];
     loadSettingsImpl = null;
+    runtimeFetchImpl = null;
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
     useSelectionStore.setState({
       sessionModelSelections: new Map(),
@@ -347,6 +353,29 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentModelId).toBe('chosen-model');
     expect(useConfigStore.getState().currentVariant).toBe('high');
     expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
+  });
+
+  test('a provider turned off in Settings stays out of a second location whose OpenCode still lists it', async () => {
+    // The app has just reloaded: nothing has read the disabled list yet and
+    // Settings > Providers has not been opened. The second location's
+    // OpenCode has not reloaded either, so its catalog still lists groq.
+    runtimeFetchImpl = async (url) => new Response(
+      JSON.stringify(url.includes('/api/provider/disabled') ? { providers: ['groq'] } : {}),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('groq'), providerInfo('live')],
+      models: [model('groq', 'groq-model'), model('live', 'live-model')],
+      default: { providerID: 'live', id: 'live-model' },
+    });
+
+    await useConfigStore.getState().loadProviders({ directory: OTHER_DIRECTORY });
+
+    const providers = selectProvidersForDirectory(useConfigStore.getState(), OTHER_DIRECTORY);
+    expect(providers.map((entry) => entry.id)).toEqual(['live']);
+    // The snapshot is kept per runtime; clear it so later tests read their
+    // own answers.
+    rememberDisabledProviders([]);
   });
 
   test('worktree catalog uses its own directory and retains its manual model across switches', async () => {

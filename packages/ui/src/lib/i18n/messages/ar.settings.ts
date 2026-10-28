@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'الصق الرمز المميز',
   'settings.providers.page.quotaCredentials.platformApiKey': 'مفتاح API للمنصة',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'يتطلب الاستخدام مفتاح API للمنصة من وحدة تحكم ZenMux. المفتاح الذي يستخدمه OpenCode للمحادثة منفصل ولا يُستخدم هنا.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'ملف تعريف ارتباط الجلسة',
+  'settings.providers.page.quotaCredentials.workspaceId': 'معرّف مساحة العمل',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'الصق ملف تعريف ارتباط الجلسة',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'الصق معرّف مساحة العمل',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'تحتاج بيانات الاستخدام إلى ملف تعريف ارتباط جلسة Open Design من متصفحك ومعرّف مساحة العمل. انسخ ملف تعريف الارتباط من أدوات مطوّر المتصفح؛ لا يفحص OpenChamber مخزن ملفات تعريف الارتباط في المتصفح أبدًا.',
   'settings.providers.page.openCodeGo.saveFailed': 'تعذّر التحقق من بيانات اعتماد OpenCode Go.',
   'settings.providers.page.openCodeGo.valid': 'بيانات اعتماد OpenCode Go صالحة.',
   'settings.providers.page.openCodeGo.invalid': 'بيانات اعتماد OpenCode Go غير صالحة أو منتهية الصلاحية.',
@@ -1243,6 +1249,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentToolsCodeMode': 'التشغيل عبر Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeAria': 'تشغيل أدوات OpenChamber عبر Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeInfo': 'عند الإيقاف: يرى النموذج كل أداة مباشرة. عند التفعيل: توضع خلف أداة واحدة تشغّل نصًا برمجيًا قصيرًا يستدعيها. يوفر قليلًا من السياق، لكن قد يغفل النموذج عنها، خاصة النماذج الأصغر. تبقى أداة العرض مباشرة دائمًا، لأن المحادثة ترسم صفحتها من استدعائها الخاص.',
+  "settings.openchamber.tools.cacheNote.direct": "تشغيل أداة أو Code Mode أو إيقافهما يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
+  "settings.openchamber.tools.cacheNote.codeMode": "تشغيل أداة العرض أو Code Mode أو إيقافهما يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'مسار مطلق اختياري إلى',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'الملف التنفيذي.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'مسار الملف التنفيذي لـ OpenCode',
@@ -1858,6 +1866,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'استيراد إعدادات خادم MCP كاملة من مقتطف JSON',
   'settings.mcp.page.server.enable': 'تفعيل الخادم',
   'settings.mcp.page.server.enableAria': 'تفعيل الخادم',
+  "settings.mcp.page.server.enableCacheNote": "وضع الشيفرة متوقف لهذا الخادم، لذا فإن تشغيله أو إيقافه يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "عند ترك وضع الشيفرة على الافتراضي، يمنح OpenCode الخادم الذي يملك وضع شيفرة خاصًا به أدوات عادية، لذا قد يجعل تشغيل هذا الخادم أو إيقافه الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
   'settings.mcp.page.server.transportMode': 'وضع النقل',
   'settings.mcp.page.connection.command': 'الأمر',
   'settings.mcp.page.connection.serverUrl': 'عنوان URL للخادم',
@@ -2544,6 +2554,7 @@ export const settingsDict = {
   'settings.mcp.page.advanced.codemodeOption.default': 'افتراضي (يقرّر OpenCode)',
   'settings.mcp.page.advanced.codemodeOption.on': 'مفعّل',
   'settings.mcp.page.advanced.codemodeOption.off': 'معطّل',
+  "settings.mcp.page.advanced.codemodeCacheNote": "تغيير وضع الشيفرة يُدخل أدوات هذا الخادم إلى قائمة أدوات النموذج أو يُخرجها منها، لذا لا يستخدم الدور التالي في الجلسة الجارية ذاكرة التخزين المؤقت للطلبات.",
   'settings.mcp.page.advanced.summary.codemodeOn': 'وضع الشيفرة مفعّل',
   'settings.mcp.page.advanced.summary.codemodeOff': 'وضع الشيفرة معطّل',
   'settings.mcp.page.advanced.protocol': 'البروتوكول',
@@ -2586,5 +2597,6 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ar,
   ...extensionsSettingsI18n.ar,
   ...messagingSettingsI18n.ar,
+  ...modelChoicesSettingsI18n.ar,
   ...settingsLayoutI18n.ar,
 } as const;

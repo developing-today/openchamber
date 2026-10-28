@@ -1,4 +1,4 @@
-import { asNonEmptyString, isBoolean } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean, isRecord } from '../shared/guards.js';
 import express from 'express';
 import {
   createWorktree as createWorktreeDefault,
@@ -263,11 +263,20 @@ const applySessionSelection = async ({ client, sessionID, model, agent, variant 
   if (agent) await client.session.switchAgent({ sessionID, agent });
 };
 
-const createSession = async ({ client, directory, title }) => {
-  const session = await client.session.create({
+const createSession = async ({ client, directory, title, subagentPolicy }) => {
+  const createInput = {
     location: { directory },
     ...(title ? { title } : {}),
-  });
+  };
+  // Forwarded unchanged once it passes the same object check the update
+  // path applies: OpenCode owns the policy shape and its checks.
+  if (subagentPolicy !== undefined) {
+    if (!isRecord(subagentPolicy)) {
+      throw new OpenChamberControlError('subagentPolicy must be an object with models, excludedModels, or agentOverrides', 400);
+    }
+    createInput.subagentPolicy = subagentPolicy;
+  }
+  const session = await client.session.create(createInput);
   const sessionID = asNonEmptyString(session?.id);
   if (!sessionID) throw new Error('failed to create session');
   return sessionID;
@@ -1087,11 +1096,13 @@ export const createOpenChamberSessionService = (dependencies) => {
     const baseUrl = openCodeBaseUrl();
     const authHeaders = getOpenCodeAuthHeaders();
     const client = clientFor(sessionDirectory);
-    const sessionID = await createSession({
+    const createArgs = {
       client,
       directory: sessionDirectory,
       ...(title ? { title } : {}),
-    });
+    };
+    if (payload.subagentPolicy !== undefined) createArgs.subagentPolicy = payload.subagentPolicy;
+    const sessionID = await createSession(createArgs);
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
@@ -1125,6 +1136,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(goalInput.enabled ? { goalEnabled: true } : {}),
       ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
     };
+    if (payload.subagentPolicy !== undefined) result.subagentPolicy = payload.subagentPolicy;
     // Set when the project's folder could not be used and the session started at the worktree root.
     if (startDirectoryFallback) result.startDirectoryFallback = startDirectoryFallback;
 

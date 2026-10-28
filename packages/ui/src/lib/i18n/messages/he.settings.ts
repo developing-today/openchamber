@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'הדבק אסימון',
   'settings.providers.page.quotaCredentials.platformApiKey': 'מפתח API של הפלטפורמה',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'כדי להציג שימוש נדרש מפתח API של הפלטפורמה מקונסולת ZenMux. המפתח ש-OpenCode משתמש בו לצ\'אט נפרד ואינו משמש כאן.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'עוגיית מושב',
+  'settings.providers.page.quotaCredentials.workspaceId': 'מזהה סביבת העבודה',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'הדבק את עוגיית המושב',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'הדבק את מזהה סביבת העבודה',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'לנתוני השימוש דרושים עוגיית המושב של Open Design מהדפדפן ומזהה סביבת העבודה שלך. העתק את העוגייה מכלי המפתחים של הדפדפן; OpenChamber לעולם אינו סורק את אחסון העוגיות של הדפדפן.',
   'settings.providers.page.openCodeGo.saveFailed': 'לא ניתן היה לאמת את פרטי הגישה של OpenCode Go.',
   'settings.providers.page.openCodeGo.valid': 'פרטי הגישה של OpenCode Go תקינים.',
   'settings.providers.page.openCodeGo.invalid': 'פרטי הגישה של OpenCode Go לא תקינים או שתוקפם פג.',
@@ -959,7 +965,7 @@ export const settingsDict = {
   'settings.skills.catalog.shared.auth.accountHint': 'נכנס עם החשבון המחובר',
   'settings.skills.catalog.shared.auth.sshHint': 'נכנס עם מפתח ה-SSH שלה',
   'settings.skills.catalog.shared.auth.footerHint': 'אפשר להגדיר זהויות בהגדרות - זהויות Git.',
-  'settings.skills.catalog.shared.auth.footerHintArrow': 'אפשר להגדיר זהויות בהגדרות → זהויות Git.',
+  'settings.skills.catalog.shared.auth.footerHintArrow': 'אפשר להגדיר זהויות בהגדרות ← זהויות Git.',
   'settings.skills.catalog.conflicts.title': 'המיומנויות כבר קיימות',
   'settings.skills.catalog.conflicts.description': 'חלק מהמיומנויות שנבחרו כבר מותקנות בטווח הזה. יש לבחור אם לדלג עליהן או לדרוס אותן.',
   'settings.skills.catalog.conflicts.count': 'התנגשויות: {count}',
@@ -1243,6 +1249,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentToolsCodeMode': 'הרצה דרך Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeAria': 'הרץ את הכלים של OpenChamber דרך Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeInfo': 'כבוי: המודל רואה כל כלי ישירות. מופעל: הכלים נמצאים מאחורי כלי אחד שמריץ סקריפט קצר שקורא להם. חוסך מעט הקשר, אבל המודל עלול לפספס אותם, במיוחד מודלים קטנים. כלי הרינדור נשאר תמיד ישיר, כי הצ\'אט מצייר את הדף מהקריאה שלו עצמו.',
+  "settings.openchamber.tools.cacheNote.direct": "הפעלה או כיבוי של כלי או של Code Mode גורמים לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
+  "settings.openchamber.tools.cacheNote.codeMode": "הפעלה או כיבוי של כלי התצוגה או של Code Mode גורמים לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'נתיב מוחלט (רשות) לקובץ ההרצה',
   'settings.openchamber.opencodeCli.tooltipSuffix': '.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'נתיב קובץ ההרצה של OpenCode',
@@ -1858,6 +1866,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'ייבוא תצורה מלאה של שרת MCP מקטע JSON',
   'settings.mcp.page.server.enable': 'הפעל שרת',
   'settings.mcp.page.server.enableAria': 'הפעל שרת',
+  "settings.mcp.page.server.enableCacheNote": "מצב הקוד כבוי בשרת הזה, ולכן הפעלה או כיבוי שלו גורמים לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "כשמצב הקוד על ברירת מחדל, OpenCode נותן לשרת שמביא מצב קוד משלו כלים רגילים, ולכן הפעלה או כיבוי של השרת הזה עלולים לגרום לתור הבא בסשן פעיל לא להשתמש במטמון ההנחיות.",
   'settings.mcp.page.server.transportMode': 'מצב תעבורה',
   'settings.mcp.page.connection.command': 'פקודה',
   'settings.mcp.page.connection.serverUrl': 'URL של השרת',
@@ -2544,6 +2554,7 @@ export const settingsDict = {
   'settings.mcp.page.advanced.codemodeOption.default': 'ברירת מחדל (OpenCode מחליט)',
   'settings.mcp.page.advanced.codemodeOption.on': 'מופעל',
   'settings.mcp.page.advanced.codemodeOption.off': 'כבוי',
+  "settings.mcp.page.advanced.codemodeCacheNote": "שינוי מצב הקוד מכניס את הכלים של השרת הזה לרשימת הכלים של המודל או מוציא אותם ממנה, ולכן התור הבא בסשן פעיל לא משתמש במטמון ההנחיות.",
   'settings.mcp.page.advanced.summary.codemodeOn': 'מצב קוד מופעל',
   'settings.mcp.page.advanced.summary.codemodeOff': 'מצב קוד כבוי',
   'settings.mcp.page.advanced.protocol': 'פרוטוקול',
@@ -2586,5 +2597,6 @@ export const settingsDict = {
   ...guestIntegrationsI18n.he,
   ...extensionsSettingsI18n.he,
   ...messagingSettingsI18n.he,
+  ...modelChoicesSettingsI18n.he,
   ...settingsLayoutI18n.he,
 } as const;

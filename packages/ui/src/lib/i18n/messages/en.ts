@@ -2,6 +2,7 @@ import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -27,6 +28,7 @@ import { messagingI18n } from './messaging.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -140,6 +142,7 @@ export const dict = {
   ...linearIssuePickerI18n.en,
   ...referencePickerI18n.en,
   ...sessionMenuHintsI18n.en,
+  ...sessionErrorRecoveryI18n.en,
   ...sidebarLayoutI18n.en,
   ...projectKnowledgeI18n.en,
   ...linearPanelI18n.en,
@@ -165,6 +168,7 @@ export const dict = {
   ...pluginsGridI18n.en,
   ...integrationsCatalogI18n['en'],
   ...sessionGoalWriterI18n['en'],
+  ...subsessionModelsI18n['en'],
   ...diffFindI18n['en'],
   'terminalView.actions.attachSelection': 'Attach selected output',
   'terminalView.actions.copySelection': 'Copy selected output',
@@ -3077,6 +3081,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Needs authentication',
   'mcpDropdown.status.needsRegistration': 'Needs registration: {error}',
   'mcpDropdown.empty.configureInConfig': 'Configure MCP servers in Settings.',
+  "mcpDropdown.cacheNote": "Switching a server with code mode off makes a running session's next turn skip the prompt cache.",
   'sessionAuth.error.rateLimitTitle': 'Too many attempts',
   'sessionAuth.error.networkTitle': 'Unable to reach server',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Please wait {minutes} minute before trying again.',

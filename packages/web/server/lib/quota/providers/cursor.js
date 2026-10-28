@@ -6,6 +6,7 @@ import { readManagedCredential, writeManagedCredential } from '../credentials/pr
 import {
   buildResult,
   formatMoney,
+  normalizeTimestamp,
   toNumber,
   toTimestamp,
   toUsageWindow
@@ -27,7 +28,7 @@ const STATE_DB = join(homedir(), 'Library', 'Application Support', 'Cursor', 'Us
 
 export const providerId = 'cursor';
 export const providerName = 'Cursor';
-const aliases = ['cursor'];
+export const aliases = ['cursor'];
 
 const readJwtPayload = (token) => {
   try {
@@ -204,20 +205,33 @@ const centsLabel = (cents) => {
   return value === null ? null : `$${formatMoney(value / 100)}`;
 };
 
+const clampPercent = (value) => Math.min(100, Math.max(0, value));
+
 const percentFromSpend = (planUsage) => {
   const explicit = toNumber(planUsage?.totalPercentUsed);
-  if (explicit !== null) return explicit;
+  if (explicit !== null) return clampPercent(explicit);
   const limit = toNumber(planUsage?.limit);
   const remaining = toNumber(planUsage?.remaining);
   if (!limit || remaining === null) return null;
-  return Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100));
+  return clampPercent(((limit - remaining) / limit) * 100);
+};
+
+const toCycleMs = (value) => normalizeTimestamp(toNumber(value)) ?? toTimestamp(value);
+
+const cycleWindowSeconds = (startValue, endValue) => {
+  const start = toCycleMs(startValue);
+  const end = toCycleMs(endValue);
+  return start !== null && end !== null && end > start ? Math.floor((end - start) / 1000) : null;
 };
 
 const buildWindows = (usage, plan) => {
   const planUsage = usage?.planUsage ?? {};
   const spendLimitUsage = usage?.spendLimitUsage ?? {};
   const resetAt = toTimestamp(usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windowSeconds = cycleWindowSeconds(
+    usage?.billingCycleStart,
+    usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd
+  );
   const windows = {};
 
   windows.billing_cycle = toUsageWindow({
@@ -229,12 +243,12 @@ const buildWindows = (usage, plan) => {
 
   const autoPercent = toNumber(planUsage.autoPercentUsed);
   if (autoPercent !== null) {
-    windows.auto = toUsageWindow({ usedPercent: autoPercent, windowSeconds, resetAt });
+    windows.auto = toUsageWindow({ usedPercent: clampPercent(autoPercent), windowSeconds, resetAt });
   }
 
   const apiPercent = toNumber(planUsage.apiPercentUsed);
   if (apiPercent !== null) {
-    windows.api = toUsageWindow({ usedPercent: apiPercent, windowSeconds, resetAt });
+    windows.api = toUsageWindow({ usedPercent: clampPercent(apiPercent), windowSeconds, resetAt });
   }
 
   const planLimit = centsLabel(planUsage.limit);
@@ -243,22 +257,33 @@ const buildWindows = (usage, plan) => {
     const remaining = toNumber(planUsage.remaining);
     windows.plan_limit = toUsageWindow({
       usedPercent: limit && remaining !== null
-        ? Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100))
+        ? clampPercent(((limit - remaining) / limit) * 100)
         : null,
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(planUsage.remaining) ?? '$0.00'} remaining of ${planLimit}`
+      // An absent remaining is unknown, not zero: claim no remaining
+      // amount instead of inventing '$0.00 remaining'.
+      valueLabel: remaining !== null
+        ? `${centsLabel(remaining)} remaining of ${planLimit}`
+        : `${planLimit} limit`
     });
   }
 
   const onDemandLimit = toNumber(spendLimitUsage.individualLimit) ?? toNumber(spendLimitUsage.pooledLimit);
   if (onDemandLimit && onDemandLimit > 0) {
-    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining) ?? 0;
+    // An absent remaining is unknown, not zero: defaulting it to 0 would
+    // report a fully exhausted window the payload never claimed. A
+    // reported remaining of 0 still reads 100%.
+    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining);
     windows.on_demand = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, ((onDemandLimit - remaining) / onDemandLimit) * 100)),
+      usedPercent: remaining === null
+        ? null
+        : clampPercent(((onDemandLimit - remaining) / onDemandLimit) * 100),
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(remaining) ?? '$0.00'} remaining of ${centsLabel(onDemandLimit)}`
+      valueLabel: remaining === null
+        ? `${centsLabel(onDemandLimit)} limit`
+        : `${centsLabel(remaining)} remaining of ${centsLabel(onDemandLimit)}`
     });
   }
 
@@ -287,14 +312,17 @@ const pickTeamMemberSpendByUserId = (teamSpend, userId) => {
 
 const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpend) => {
   const resetAt = toTimestamp(plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windowSeconds = cycleWindowSeconds(
+    plan?.planInfo?.billingCycleStart ?? usage?.billingCycleStart,
+    plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd
+  );
   const windows = {};
   const requestUsage = pickRequestUsage(authUsage);
 
   if (requestUsage) {
     const { used, limit } = requestUsage;
     windows.billing_cycle = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, (used / limit) * 100)),
+      usedPercent: clampPercent((used / limit) * 100),
       windowSeconds,
       resetAt,
       valueLabel: `${Math.round(used)} / ${Math.round(limit)}`
@@ -306,7 +334,7 @@ const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpe
   if (onDemandLimitDollars > 0 && onDemandUsedCents !== null) {
     const onDemandLimitCents = onDemandLimitDollars * 100;
     windows.on_demand = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, (onDemandUsedCents / onDemandLimitCents) * 100)),
+      usedPercent: clampPercent((onDemandUsedCents / onDemandLimitCents) * 100),
       windowSeconds,
       resetAt,
       valueLabel: `${centsLabel(onDemandUsedCents)} / ${centsLabel(onDemandLimitCents)}`

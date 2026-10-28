@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '粘贴令牌',
   'settings.providers.page.quotaCredentials.platformApiKey': '平台 API 密钥',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': '查看用量需要 ZenMux 控制台中的平台 API 密钥。OpenCode 用于聊天的密钥是另一把，这里不会使用。',
+  'settings.providers.page.quotaCredentials.sessionCookie': '会话 Cookie',
+  'settings.providers.page.quotaCredentials.workspaceId': '工作区 ID',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': '粘贴会话 Cookie',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': '粘贴工作区 ID',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': '用量数据需要浏览器中的 Open Design 会话 Cookie 和您的工作区 ID。请从浏览器开发者工具中复制 Cookie；OpenChamber 从不扫描浏览器的 Cookie 存储。',
   'settings.providers.page.openCodeGo.saveFailed': '无法验证 OpenCode Go 凭据。',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go 凭据有效。',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go 凭据无效或已过期。',
@@ -1240,6 +1246,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "通过 Code Mode 运行",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "通过 Code Mode 运行 OpenChamber 工具",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "关闭：模型直接看到每个工具。开启：工具放在一个执行短脚本的工具后面。能省一点上下文，但模型可能漏掉它们，较小的模型尤其如此。渲染工具始终直接可见，因为聊天界面根据它自己的调用绘制页面。",
+  "settings.openchamber.tools.cacheNote.direct": "开启或关闭某个工具或 Code Mode 后，正在运行的会话下一轮不会使用提示缓存。",
+  "settings.openchamber.tools.cacheNote.codeMode": "开启或关闭展示工具或 Code Mode 后，正在运行的会话下一轮不会使用提示缓存。",
   'settings.openchamber.opencodeCli.tooltipPrefix': '可选的',
   'settings.openchamber.opencodeCli.tooltipSuffix': '二进制绝对路径。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode 可执行文件路径',
@@ -1866,6 +1874,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': '从 JSON 片段导入完整 MCP 服务器配置',
   'settings.mcp.page.server.enable': '启用服务器',
   'settings.mcp.page.server.enableAria': '启用服务器',
+  "settings.mcp.page.server.enableCacheNote": "此服务器关闭了 Code Mode，开启或关闭它后，正在运行的会话下一轮不会使用提示缓存。",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode 为默认时，OpenCode 会给自带 Code Mode 的服务器提供普通工具，因此开启或关闭此服务器后，正在运行的会话下一轮可能不会使用提示缓存。",
   'settings.mcp.page.server.transportMode': '传输模式',
   'settings.mcp.page.connection.command': '命令',
   'settings.mcp.page.connection.serverUrl': '服务器 URL',
@@ -2587,6 +2597,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n['zh-CN'],
   ...extensionsSettingsI18n['zh-CN'],
   ...messagingSettingsI18n['zh-CN'],
+  ...modelChoicesSettingsI18n['zh-CN'],
   ...settingsLayoutI18n['zh-CN'],
   'settings.page.integrations.title': '集成',
   'settings.page.integrations.description': '连接 OpenChamber 所使用的服务和订阅。',
@@ -2611,6 +2622,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "默认（由 OpenCode 决定）",
   "settings.mcp.page.advanced.codemodeOption.on": "开启",
   "settings.mcp.page.advanced.codemodeOption.off": "关闭",
+  "settings.mcp.page.advanced.codemodeCacheNote": "更改 Code Mode 会把此服务器的工具加入或移出模型的工具列表，因此正在运行的会话下一轮不会使用提示缓存。",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode 开启",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode 关闭",
   'settings.mcp.page.advanced.protocol': '协议',

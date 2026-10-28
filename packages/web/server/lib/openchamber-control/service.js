@@ -1,4 +1,4 @@
-import { asNonEmptyString, isBoolean, isPlainObject, isString } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean, isPlainObject, isRecord, isString } from '../shared/guards.js';
 import path from 'node:path';
 import { OpenCode } from '@opencode/client';
 import { OpenChamberControlError, asControlError } from './error.js';
@@ -870,6 +870,15 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
     };
+    // Forwarded unchanged on create once it passes the same object check
+    // the update path applies: OpenCode owns the policy shape and its
+    // checks. Send and fork keep the policy the session already has.
+    if (action === 'session.create' && input.subagentPolicy !== undefined) {
+      if (!isRecord(input.subagentPolicy)) {
+        throw new OpenChamberControlError('subagentPolicy must be an object with models, excludedModels, or agentOverrides', 400);
+      }
+      payload.subagentPolicy = input.subagentPolicy;
+    }
     // A pull request makes a worktree of its own, so its branch name (and a
     // start ref the session service refuses) travel without a worktree name.
     if (input.pullRequest !== undefined) {

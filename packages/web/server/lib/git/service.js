@@ -32,6 +32,12 @@ const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 // diff.srcPrefix/dstPrefix would otherwise change them, and a hunk would no
 // longer match its file. Explicit prefixes win over all of those settings.
 const DIFF_PREFIX_ARGS = ['--src-prefix=a/', '--dst-prefix=b/'];
+// Only a non-negative integer is a valid unified-context count. Anything
+// else takes the default of 3: a fractional value reaching git as -U2.9
+// (or NaN as -UNaN) is rejected with exit 129 (#578). Normalizing here, in
+// the service, mirrors the getLog maxCount guard below (#463).
+const normalizeContextLines = (contextLines) =>
+  Number.isInteger(contextLines) && contextLines >= 0 ? contextLines : 3;
 const gitIndexMutationQueues = new Map();
 const remoteProvisioningQueues = new Map();
 
@@ -1522,7 +1528,14 @@ export async function getRepositoryRemoteUrls(directory) {
     runGitCommand(directory, ['remote']),
     runGitCommand(directory, ['remote', '-v']),
   ]);
-  if (!namesResult.success) return [];
+  if (!namesResult.success) {
+    // Only a directory that is not a repository authoritatively has no
+    // remotes. Any other failure (corrupt config, unreadable .git) must
+    // surface, or callers mint an authoritative identity with remotes: []
+    // from a read that never happened.
+    if (isNotGitRepositoryError(namesResult)) return [];
+    throw new Error(namesResult.message || 'Failed to list git remotes');
+  }
   const names = String(namesResult.stdout || '').split(/\r?\n/).map((name) => name.trim()).filter(Boolean).sort();
   if (listResult.success) return parseRemoteListing(names, listResult.stdout);
   return Promise.all(names.map(async (name) => {
@@ -3324,9 +3337,7 @@ async function readStatus(normalizedDirectory, lightMode) {
 
 const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
   const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
-  if (Number.isFinite(contextLines)) {
-    args.push(`-U${Math.max(0, contextLines)}`);
-  }
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   args.push('--no-index', '--', '/dev/null', repoPath);
   const result = await runGitCommand(repoRoot, args);
   // Exit 1 means differences, even when Git also writes warnings to stderr.
@@ -3399,9 +3410,7 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
   try {
     const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
 
-    if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
-      args.push(`-U${Math.max(0, contextLines)}`);
-    }
+    args.push(`-U${normalizeContextLines(contextLines)}`);
 
     if (staged) {
       args.push('--cached');
@@ -3461,15 +3470,18 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
  * Callers that only need this list should not pay for `getStatus`, which also
  * computes ahead/behind, diff stats, and merge state — an order of magnitude
  * more work for an answer they throw away.
+ *
+ * A failed `ls-files` throws instead of returning []: the repository context
+ * above has already proven this is a repository, so a failure here is a real
+ * failure, and [] would present a tracked-only listing as complete.
  */
 export async function listUntrackedPaths(directory) {
   const { repoRoot } = await createRepositoryGitContext(directory);
-  const result = await runGitCommand(repoRoot, [
-    'ls-files',
-    '--others',
-    '--exclude-standard',
-  ]);
-  if (!result.success) return [];
+  const result = await runGitCommandOrThrow(
+    repoRoot,
+    ['ls-files', '--others', '--exclude-standard'],
+    'Failed to list untracked files'
+  );
   return String(result.stdout || '')
     .split('\n')
     .map((line) => line.trim())
@@ -3586,9 +3598,7 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
   await assertRangeRefsResolve(git, [baseRef, headRef]);
 
   const args = ['diff', '--no-color', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
-  if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
-    args.push(`-U${Math.max(0, contextLines)}`);
-  }
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   const paths = [];
   if (filePath) {
     try {
@@ -6359,7 +6369,10 @@ export async function getLog(directory, options = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
-    const maxCount = options.maxCount || 50;
+    // Only a positive integer caps the history. Anything else takes the
+    // default: a negative reaching git as --max-count=-5 means unlimited,
+    // so an invalid value must never pass through (#463).
+    const maxCount = Number.isInteger(options.maxCount) && options.maxCount > 0 ? options.maxCount : 50;
 
     if (options.all) {
       const logArgs = [
@@ -6707,7 +6720,7 @@ export async function getCommitDiff(directory, { hash, path: filePath, previousP
   const commit = await resolveCommitHash(git, hash);
   const paths = [filePath, previousPath].filter(Boolean).map((value) => `:(literal)${value}`);
   return git.raw([
-    ...commitShowArgs(commit), '--no-color', '--no-ext-diff', `-U${Math.max(0, contextLines)}`,
+    ...commitShowArgs(commit), '--no-color', '--no-ext-diff', `-U${normalizeContextLines(contextLines)}`,
     '--', ...paths,
   ]);
 }

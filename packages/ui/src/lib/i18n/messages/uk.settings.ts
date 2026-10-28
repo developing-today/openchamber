@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Вставте токен',
   'settings.providers.page.quotaCredentials.platformApiKey': 'Ключ Platform API',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Для обліку використання потрібен ключ Platform API з консолі ZenMux. Ключ, який OpenCode використовує для чату, окремий і тут не застосовується.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'Файл cookie сесії',
+  'settings.providers.page.quotaCredentials.workspaceId': 'Ідентифікатор робочого простору',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'Вставте файл cookie сесії',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'Вставте ідентифікатор робочого простору',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'Для даних про використання потрібні файл cookie сесії Open Design з вашого браузера та ідентифікатор робочого простору. Скопіюйте файл cookie з інструментів розробника браузера; OpenChamber ніколи не сканує сховище файлів cookie браузера.',
   'settings.providers.page.openCodeGo.saveFailed': 'Не вдалося перевірити дані OpenCode Go.',
   'settings.providers.page.openCodeGo.valid': 'Дані OpenCode Go дійсні.',
   'settings.providers.page.openCodeGo.invalid': 'Дані OpenCode Go недійсні або протерміновані.',
@@ -1240,6 +1246,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Запускати через Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Запускати інструменти OpenChamber через Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Вимкнено: модель бачить кожен інструмент напряму. Увімкнено: вони ховаються за одним інструментом, що запускає короткий скрипт. Трохи економить контекст, але модель може їх пропустити, особливо слабша. Інструмент рендеру завжди лишається прямим, бо чат малює сторінку з його власного виклику.",
+  "settings.openchamber.tools.cacheNote.direct": "Якщо увімкнути чи вимкнути інструмент або Code Mode, наступний хід активної сесії не використає кеш промпту.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Якщо увімкнути чи вимкнути інструмент показу або Code Mode, наступний хід активної сесії не використає кеш промпту.",
   "settings.openchamber.opencodeCli.tooltipPrefix": "Додатковий абсолютний шлях до",
   "settings.openchamber.opencodeCli.tooltipSuffix": "бінарного файлу.",
   "settings.openchamber.opencodeCli.field.binaryPath": "Шлях до бінарного файлу OpenCode",
@@ -1866,6 +1874,8 @@ export const settingsDict = {
   "settings.mcp.page.server.importJsonTitle": "Імпортувати повну конфігурацію MCP сервера з фрагмента JSON",
   "settings.mcp.page.server.enable": "Увімкнути сервер",
   "settings.mcp.page.server.enableAria": "Увімкнути сервер",
+  "settings.mcp.page.server.enableCacheNote": "Для цього сервера Code Mode вимкнено, тож якщо його увімкнути чи вимкнути, наступний хід активної сесії не використає кеш промпту.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Коли Code Mode стоїть на «За замовчуванням», OpenCode дає серверу з власним Code Mode звичайні інструменти, тож якщо увімкнути чи вимкнути цей сервер, наступний хід активної сесії може не використати кеш промпту.",
   "settings.mcp.page.server.transportMode": "Транспортний режим",
   "settings.mcp.page.connection.command": "Команда",
   "settings.mcp.page.connection.serverUrl": "URL сервера",
@@ -2587,6 +2597,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.uk,
   ...extensionsSettingsI18n.uk,
   ...messagingSettingsI18n.uk,
+  ...modelChoicesSettingsI18n.uk,
   ...settingsLayoutI18n.uk,
   'settings.page.integrations.title': 'Інтеграції',
   'settings.page.integrations.description': 'Підключіть сервіси та підписки, з якими працює OpenChamber.',
@@ -2611,6 +2622,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "За замовчуванням (вирішує OpenCode)",
   "settings.mcp.page.advanced.codemodeOption.on": "Увімкнено",
   "settings.mcp.page.advanced.codemodeOption.off": "Вимкнено",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Зміна Code Mode додає інструменти цього сервера до списку інструментів моделі або прибирає їх звідти, тож наступний хід активної сесії не використає кеш промпту.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode увімкнено",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode вимкнено",
   'settings.mcp.page.advanced.protocol': 'Протокол',

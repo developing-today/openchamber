@@ -27,6 +27,35 @@ import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/li
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 
+// Session-activity v1 envelope (design #612, #621): the shape the web
+// server's GET /api/session-activity returns and the extension host's
+// snapshot now serves. The host tracks a session's phase and when it last
+// changed; status, model and toolInFlight have no host source and arrive
+// as explicit nulls.
+type SessionActivityV1Entry = {
+  type: 'idle' | 'busy' | 'cooldown';
+  lastActivityAt: number;
+  status: string | null;
+  model: { modelID: string | null; providerID: string | null } | null;
+  toolInFlight: null;
+};
+
+type SessionActivityV1Snapshot = {
+  version: 1;
+  serverTime: number;
+  watcherReady: boolean;
+  sessions: Record<string, SessionActivityV1Entry>;
+};
+
+// A failed bridge read answers with the contract's not-started shape, so
+// the UI reads it as a watcher that has not started yet.
+const emptySessionActivityV1Snapshot = (): SessionActivityV1Snapshot => ({
+  version: 1,
+  serverTime: Date.now(),
+  watcherReady: false,
+  sessions: {},
+});
+
 declare const __OPENCHAMBER_WEBVIEW_BUILD_TIME__: string;
 
 declare global {
@@ -483,13 +512,13 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (normalizedPathname === '/api/sessions/snapshot' && method === 'GET') {
-    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
-      .catch(() => ({}));
+    const activity = await sendBridgeMessage<SessionActivityV1Snapshot>('api:session-activity:get')
+      .catch(emptySessionActivityV1Snapshot);
     return new Response(
       JSON.stringify({
         statusSessions: {},
         attentionSessions: {},
-        activitySessions: activity || {},
+        activitySessions: activity.sessions,
         serverTime: Date.now(),
       }),
       {
@@ -544,9 +573,9 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (normalizedPathname === '/api/session-activity' && method === 'GET') {
-    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
-      .catch(() => ({}));
-    return new Response(JSON.stringify(activity || {}), {
+    const activity = await sendBridgeMessage<SessionActivityV1Snapshot>('api:session-activity:get')
+      .catch(emptySessionActivityV1Snapshot);
+    return new Response(JSON.stringify(activity), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -557,12 +586,11 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     // extension host's activity watcher. Its phases collapse busy and retry
     // into `busy` and it settles sessions itself through `cooldown`, so every
     // busy entry is current as of now.
-    type ActivitySnapshot = Record<string, { type: 'idle' | 'busy' | 'cooldown' }>;
-    const activity = await sendBridgeMessage<ActivitySnapshot>('api:session-activity:get')
-      .catch((): ActivitySnapshot => ({}));
+    const activity = await sendBridgeMessage<SessionActivityV1Snapshot>('api:session-activity:get')
+      .catch(emptySessionActivityV1Snapshot);
     const now = Date.now();
     const sessions: Record<string, { status: 'busy'; lastUpdateAt: number }> = {};
-    for (const [sessionId, entry] of Object.entries(activity || {})) {
+    for (const [sessionId, entry] of Object.entries(activity.sessions)) {
       if (entry?.type === 'busy') sessions[sessionId] = { status: 'busy', lastUpdateAt: now };
     }
     // The extension host keeps no pending-request map; directory stores and

@@ -4,6 +4,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -28,6 +29,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -152,6 +154,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.es,
   ...referencePickerI18n.es,
   ...sessionMenuHintsI18n.es,
+  ...sessionErrorRecoveryI18n.es,
   ...sidebarLayoutI18n.es,
   ...projectKnowledgeI18n.es,
   ...linearPanelI18n.es,
@@ -176,6 +179,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.es,
   ...integrationsCatalogI18n['es'],
   ...sessionGoalWriterI18n['es'],
+  ...subsessionModelsI18n['es'],
   ...diffFindI18n['es'],
   'terminalView.actions.attachSelection': 'Adjuntar salida seleccionada',
   'terminalView.actions.copySelection': 'Copiar salida seleccionada',
@@ -3031,6 +3035,7 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.status.needsAuth": "Necesita autenticación",
   "mcpDropdown.status.needsRegistration": "Necesita registro: {error}",
   "mcpDropdown.empty.configureInConfig": "Configura los servidores MCP en Ajustes.",
+  "mcpDropdown.cacheNote": "Activar o desactivar un servidor con Code Mode apagado hace que el siguiente turno de una sesión en curso no use la caché del prompt.",
   "sessionAuth.error.rateLimitTitle": "Demasiados intentos",
   "sessionAuth.error.networkTitle": "No se puede alcanzar el servidor",
   "sessionAuth.error.rateLimitDescriptionSingle": "Por favor, espera {minutes} minuto antes de intentarlo de nuevo.",

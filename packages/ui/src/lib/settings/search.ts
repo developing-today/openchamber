@@ -568,6 +568,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['history limit', 'prompt recall', 'remember prompts', 'composer history', 'submitted prompts', 'trim history'],
   },
   {
+    id: 'chat.model-choices',
+    page: 'chat',
+    titleKey: 'settings.openchamber.modelChoices.title',
+    keywords: ['model', 'effort', 'choices', 'history', 'learn', 'suggestions', 'privacy'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.model-choice-recording',
+    page: 'chat',
+    titleKey: 'settings.openchamber.modelChoices.field.enabled',
+    descriptionKey: 'settings.openchamber.modelChoices.field.enabledInfo',
+    keywords: ['model', 'effort', 'record', 'history', 'learn', 'notes', 'privacy'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.message-search',
     page: 'chat',
     titleKey: 'settings.openchamber.messageSearch.title',
@@ -613,6 +628,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.largeTextPaste',
     descriptionKey: 'settings.openchamber.visual.field.largeTextPasteHint',
     keywords: ['paste', 'clipboard', 'attachment', 'large', 'text', 'file', 'double paste', 'ctrl v', 'cmd v'],
+  },
+  {
+    id: 'chat.active-run-model-change',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.activeRunModelChange',
+    descriptionKey: 'settings.openchamber.visual.field.activeRunModelChangeInfo',
+    keywords: ['model', 'switch', 'running', 'run', 'stop', 'restart', 'next message'],
   },
   {
     id: 'chat.enter-to-send',
@@ -1082,6 +1104,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.pools.tuning.enabled',
     descriptionKey: 'settings.pools.tuning.info',
     keywords: ['automatic review', 'tuning', 'review', 'history', 'schedule', 'routing'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
+  },
+  {
+    id: 'routing.pools-schedules',
+    page: 'routing',
+    titleKey: 'settings.pools.schedules.globalTitle',
+    descriptionKey: 'settings.pools.schedules.globalInfo',
+    keywords: ['schedule', 'schedules', 'peak hours', 'weekdays', 'weekends', 'timezone', 'weight', 'pool', 'routing'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {

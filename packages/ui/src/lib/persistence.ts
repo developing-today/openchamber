@@ -498,6 +498,10 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _settingsCache = null;
     _settingsInflight = null;
     _serverKnownSettings = {};
+    // Server-owned and per instance: a server from before this flag omits it, and an
+    // omitted key leaves the store alone, so the previous instance's `true` would
+    // otherwise keep the Tools page's cache note on. The next settings read sets it.
+    useUIStore.getState().setManagedToolsApplyLive(false);
     dispatchSettingsSaveState('saved');
   });
 

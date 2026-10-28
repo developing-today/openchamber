@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '토큰 붙여넣기',
   'settings.providers.page.quotaCredentials.platformApiKey': '플랫폼 API 키',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': '사용량을 보려면 ZenMux 콘솔의 플랫폼 API 키가 필요합니다. OpenCode가 채팅에 쓰는 키는 별도이며 여기서는 사용하지 않습니다.',
+  'settings.providers.page.quotaCredentials.sessionCookie': '세션 쿠키',
+  'settings.providers.page.quotaCredentials.workspaceId': '워크스페이스 ID',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': '세션 쿠키 붙여넣기',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': '워크스페이스 ID 붙여넣기',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': '사용량을 보려면 브라우저의 Open Design 세션 쿠키와 워크스페이스 ID가 필요합니다. 쿠키는 브라우저 개발자 도구에서 복사하세요. OpenChamber는 브라우저 쿠키 저장소를 절대 스캔하지 않습니다.',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go 인증 정보를 검증할 수 없습니다.',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go 인증 정보가 유효합니다.',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go 인증 정보가 유효하지 않거나 만료되었습니다.',
@@ -1240,6 +1246,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Code Mode로 실행",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber 도구를 Code Mode로 실행",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "끔: 모델이 각 도구를 직접 봅니다. 켬: 짧은 스크립트를 실행하는 도구 하나 뒤에 놓입니다. 컨텍스트를 조금 아끼지만, 특히 작은 모델은 도구를 놓칠 수 있습니다. 렌더 도구는 항상 직접 노출됩니다. 채팅이 그 도구 자체의 호출에서 페이지를 그리기 때문입니다.",
+  "settings.openchamber.tools.cacheNote.direct": "도구나 Code Mode를 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
+  "settings.openchamber.tools.cacheNote.codeMode": "표시 도구나 Code Mode를 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
   'settings.openchamber.opencodeCli.tooltipPrefix': '선택적 절대 경로:',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode binary 경로',
@@ -1866,6 +1874,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'JSON snippet에서 전체 MCP 서버 설정을 가져옵니다',
   'settings.mcp.page.server.enable': '서버 활성화',
   'settings.mcp.page.server.enableAria': '서버 활성화',
+  "settings.mcp.page.server.enableCacheNote": "이 서버는 Code Mode가 꺼져 있어, 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode가 기본값이면 OpenCode는 자체 Code Mode가 있는 서버에 일반 도구를 줍니다. 그래서 이 서버를 켜거나 끄면 실행 중인 세션의 다음 턴이 프롬프트 캐시를 사용하지 않을 수 있습니다.",
   'settings.mcp.page.server.transportMode': 'Transport 모드',
   'settings.mcp.page.connection.command': '명령어',
   'settings.mcp.page.connection.serverUrl': '서버 URL',
@@ -2587,6 +2597,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,
   ...messagingSettingsI18n.ko,
+  ...modelChoicesSettingsI18n.ko,
   ...settingsLayoutI18n.ko,
   'settings.page.integrations.title': '통합',
   'settings.page.integrations.description': 'OpenChamber와 함께 쓰는 서비스와 구독을 연결합니다.',
@@ -2611,6 +2622,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "기본값(OpenCode가 결정)",
   "settings.mcp.page.advanced.codemodeOption.on": "켜기",
   "settings.mcp.page.advanced.codemodeOption.off": "끄기",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Code Mode를 바꾸면 이 서버의 도구가 모델의 도구 목록에 들어가거나 빠지므로, 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode 켜짐",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode 꺼짐",
   'settings.mcp.page.advanced.protocol': '프로토콜',

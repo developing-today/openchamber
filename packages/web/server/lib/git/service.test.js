@@ -65,6 +65,7 @@ import {
   getPathDiffs,
   revertFile,
   getUntrackedDiffs,
+  listUntrackedPaths,
   getFileDiff,
   hasLocalIdentity,
   validateWorktreeCreate,
@@ -228,6 +229,97 @@ describe('getLog with a base', () => {
     // A checkout behind the base adds nothing.
     const behind = await getLog(tmpDir, { from: 'feature', to: 'main~1', maxCount: 25 });
     expect(behind.all).toEqual([]);
+  });
+});
+
+describe('getLog maxCount guard (#463)', () => {
+  it('caps invalid maxCount values at the default instead of passing them to git', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    for (let i = 0; i < 55; i += 1) {
+      await git.commit(`commit ${i}`, { '--allow-empty': null });
+    }
+
+    // --max-count=-5 would return all 55 commits; the guard applies the
+    // default of 50 instead. Zero and fractional values take the default too.
+    expect((await getLog(tmpDir, { maxCount: -5 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: 0 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: 2.5 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, {})).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: 7 })).all).toHaveLength(7);
+  });
+});
+
+describe('diff contextLines guard (#578)', () => {
+  it('normalizes fractional, negative, and NaN contextLines to the default of 3 in every diff function', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    const original = Array.from({ length: 20 }, (_, index) => `line${index}`);
+    await writeFile(tmpDir, 'file.txt', original.join('\n') + '\n');
+    await git.add('file.txt');
+    await git.commit('Initial');
+    await git.raw(['branch', 'base-branch']);
+    const changed = [...original];
+    changed[9] = 'CHANGED';
+    await writeFile(tmpDir, 'file.txt', changed.join('\n') + '\n');
+
+    // Working-tree diff (readDiff): a fractional value used to reach git
+    // verbatim as -U2.9, which git rejects with exit 129.
+    const workingDefault = await getDiff(tmpDir, { path: 'file.txt' });
+    expect(workingDefault).toContain('@@ -7,7 +7,7 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect(await getDiff(tmpDir, { path: 'file.txt', contextLines: bad })).toBe(workingDefault);
+    }
+    expect(await getDiff(tmpDir, { path: 'file.txt', contextLines: 0 })).toContain('@@ -10 +10 @@');
+    expect(await getDiff(tmpDir, { path: 'file.txt', contextLines: 1 })).toContain('@@ -9,3 +9,3 @@');
+
+    // Commit diff (getCommitDiff): NaN used to reach git as -UNaN — this
+    // function had no guard at all.
+    await git.add('file.txt');
+    await git.commit('Change');
+    const hash = (await git.revparse(['HEAD'])).trim();
+    const commitDefault = await getCommitDiff(tmpDir, { hash, path: 'file.txt' });
+    expect(commitDefault).toContain('@@ -7,7 +7,7 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect(await getCommitDiff(tmpDir, { hash, path: 'file.txt', contextLines: bad })).toBe(commitDefault);
+    }
+    expect(await getCommitDiff(tmpDir, { hash, path: 'file.txt', contextLines: 0 })).toContain('@@ -10 +10 @@');
+
+    // Range diff (getRangeDiff): same fractional/negative normalization.
+    const rangeDefault = await getRangeDiff(tmpDir, { base: 'base-branch', head: 'main', path: 'file.txt' });
+    expect(rangeDefault).toContain('@@ -7,7 +7,7 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect(await getRangeDiff(tmpDir, { base: 'base-branch', head: 'main', path: 'file.txt', contextLines: bad })).toBe(rangeDefault);
+    }
+
+    // Untracked diff (getNoIndexDiff): a fractional value used to make git
+    // fail the whole call instead of returning the new file's diff.
+    await writeFile(tmpDir, 'new.txt', Array.from({ length: 20 }, (_, index) => `new${index}`).join('\n') + '\n');
+    const [untrackedDefault] = await getUntrackedDiffs(tmpDir, ['new.txt']);
+    expect(untrackedDefault).toContain('@@ -0,0 +1,20 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect((await getUntrackedDiffs(tmpDir, ['new.txt'], { contextLines: bad }))[0]).toBe(untrackedDefault);
+    }
+  });
+});
+
+describe('listUntrackedPaths (#665)', () => {
+  it('lists untracked files, returns [] when there are none, and throws when ls-files fails', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'tracked.txt'), 'tracked\n');
+    await git.add('tracked.txt');
+    await git.commit('Initial');
+
+    expect(await listUntrackedPaths(tmpDir)).toEqual([]);
+
+    fs.writeFileSync(path.join(tmpDir, 'new.txt'), 'new\n');
+    fs.writeFileSync(path.join(tmpDir, 'another.txt'), 'another\n');
+    expect(await listUntrackedPaths(tmpDir)).toEqual(['another.txt', 'new.txt']);
+
+    // A corrupt index leaves rev-parse (repository context) working while
+    // ls-files fails: that failure must surface, not read as "no untracked".
+    fs.writeFileSync(path.join(tmpDir, '.git', 'index'), 'garbage-not-an-index');
+    await expect(listUntrackedPaths(tmpDir)).rejects.toThrow(/index file smaller than expected/);
   });
 });
 
@@ -5410,6 +5502,31 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
       fetchUrl: 'git@github.com:owner/repo.git',
       pushUrl: 'git@github.com:owner/repo.git',
     });
+  });
+
+  it('returns [] for a repository with no remotes', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+
+    await expect(getRepositoryRemoteUrls(repository)).resolves.toEqual([]);
+  });
+
+  it('returns [] for a directory that is not a repository', async () => {
+    const directory = createTempDir();
+
+    await expect(getRepositoryRemoteUrls(directory)).resolves.toEqual([]);
+  });
+
+  it('rejects when the remote names read fails for a reason other than not-a-repository', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+    // A corrupt config makes `git remote` fail with a bad-config error, not
+    // a not-a-repository error: the failure must surface with git's error
+    // instead of reading as a repository with no remotes.
+    fs.writeFileSync(path.join(repository, '.git', 'config'), 'garbage [[[\n');
+
+    await expect(getRepositoryRemoteUrls(repository)).rejects.toThrow(/bad config/i);
   });
 });
 

@@ -1,9 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { POOL_DESCRIPTION_MAX_LENGTH, POOL_DETAILS_MAX_LENGTH } from '@/lib/routing/modelRoutesApi';
 import {
   AUTONOMY_LEVELS,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_DETAILS_LENGTH,
   readModelRoutes,
   registerModelRouteRoutes,
   validateModelRoute,
+  validateModelRouteSchedules,
   validateModelRouteTuning,
   validateModelRoutes,
 } from './model-routes.js';
@@ -384,6 +388,38 @@ describe('validateModelRoute target options and display name', () => {
     ).toBeNull();
   });
 
+  it('refuses a pattern target fully shadowed by an earlier pattern target', () => {
+    const future = Date.now() + 3600000;
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-*'] }),
+    ).toMatch(/target "openai\/gpt-\*" is already covered by the earlier pattern target "openai\/\*"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*#high', { model: 'openai/gpt-*#high', defaultVariant: 'low' }] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/\*#high"/);
+    expect(
+      validateModelRoute('r1', { targets: ['openai/gpt-*', 'openai/gpt-5*'] }),
+    ).toMatch(/already covered by the earlier pattern target "openai\/gpt-\*"/);
+    // The judgement is about the model sets, not the spellings: a pattern
+    // that only adds fixed text inside the earlier pattern is covered too.
+    expect(
+      validateModelRoute('r1', { targets: ['openai/*-luna', 'openai/gpt-*-luna'] }),
+    ).toMatch(/already covered by the earlier pattern target/);
+    // A partly overlapping pattern still attaches the models the earlier
+    // pattern does not cover, in either order.
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-*', 'openai/*'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/*-luna', 'openai/*-sol'] })).toBeNull();
+    // The #variant is part of the attach key, so a different variant is a distinct leaf.
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'openai/gpt-*#high'] })).toBeNull();
+    // Disjoint providers, and a pattern listed after a concrete target, still attach.
+    expect(validateModelRoute('r1', { targets: ['openai/*', 'anthropic/*'] })).toBeNull();
+    expect(validateModelRoute('r1', { targets: ['openai/gpt-5', 'openai/gpt-*'] })).toBeNull();
+    // An earlier pattern with a future until shadows only until it expires;
+    // the later pattern applies after that, so the pair stays accepted.
+    expect(
+      validateModelRoute('r1', { targets: [{ model: 'openai/*', until: future }, 'openai/gpt-*'] }),
+    ).toBeNull();
+  });
+
   it('refuses a target until that is already past, which OpenCode drops on save', () => {
     const past = Date.now() - 1000;
     expect(validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', until: past }] })).toMatch(
@@ -466,6 +502,62 @@ describe('validateModelRoute target options and display name', () => {
       validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { '': 'high' } }] }),
     ).toMatch(/must not use an empty route variant as a key/);
   });
+
+  it('rejects padded and empty-segment target references, which can never match a model', () => {
+    for (const padded of [' openai/gpt-6-luna', 'openai/gpt-6-luna ', 'openai/gpt-6-luna# high']) {
+      expect(validateModelRoute('luna', { targets: [padded] })).toMatch(/padded/);
+      expect(validateModelRoute('luna', { targets: [{ model: padded }] })).toMatch(/padded/);
+    }
+    expect(validateModelRoute('luna', { targets: ['openai/ gpt-6-luna'] })).toMatch(/padded model segment/);
+    expect(validateModelRoute('luna', { targets: ['openai//gpt-6-luna'] })).toMatch(/empty model segment/);
+    expect(validateModelRoute('luna', { targets: [{ model: 'openai//gpt-6-luna' }] })).toMatch(/empty model segment/);
+    // Model IDs containing `/` still validate, in both target forms.
+    expect(validateModelRoute('luna', { targets: ['openrouter/anthropic/claude-sonnet-4'] })).toBeNull();
+    expect(validateModelRoute('luna', { targets: [{ model: 'openrouter/anthropic/claude-sonnet-4' }] })).toBeNull();
+  });
+
+  it('rejects target references with whitespace inside a segment or variant, which can never match a model', () => {
+    for (const spaced of ['open ai/gpt-6-luna', 'openai/gpt 6-luna', 'openai/gpt-6-luna#hi there', 'openai/gpt\t6-luna']) {
+      expect(validateModelRoute('luna', { targets: [spaced] })).toMatch(/containing whitespace/);
+      expect(validateModelRoute('luna', { targets: [{ model: spaced }] })).toMatch(/containing whitespace/);
+    }
+    expect(validateModelRoute('luna', { targets: ['open ai/gpt-6-luna'] })).toMatch(/provider segment containing whitespace/);
+    expect(validateModelRoute('luna', { targets: ['openai/gpt 6-luna'] })).toMatch(/model segment containing whitespace/);
+    expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna#hi there'] })).toMatch(/variant containing whitespace/);
+    // Whitespace-free references still validate, including `/`-containing model IDs and variants.
+    expect(validateModelRoute('luna', { targets: ['openrouter/anthropic/claude-sonnet-4'] })).toBeNull();
+    expect(validateModelRoute('luna', { targets: ['openai/gpt-6-luna#high'] })).toBeNull();
+  });
+
+  it('rejects padded variant settings, which OpenCode never trims or applies', () => {
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: ' high' }] }),
+    ).toMatch(/defaultVariant is padded/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { ' high': 'low' } }] }),
+    ).toMatch(/must not use a padded route variant as a key/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { high: ' low' } }] }),
+    ).toMatch(/remap "high" is padded/);
+    // Unpadded variant settings still validate, including on pattern targets.
+    expect(
+      validateModelRoute('luna', {
+        targets: [{ model: 'openai/*', defaultVariant: 'high', variants: { low: 'high' } }],
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects variant settings containing whitespace, which no variant name ever has', () => {
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', defaultVariant: 'hi there' }] }),
+    ).toMatch(/defaultVariant contains whitespace/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { 'hi there': 'low' } }] }),
+    ).toMatch(/must not use a route variant containing whitespace as a key/);
+    expect(
+      validateModelRoute('luna', { targets: [{ model: 'openai/gpt-6-luna', variants: { high: 'lo w' } }] }),
+    ).toMatch(/remap "high" contains whitespace/);
+  });
 });
 
 describe('validateModelRoute schedules', () => {
@@ -545,6 +637,22 @@ describe('validateModelRoute schedules', () => {
     expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2 }] })).toBeNull();
   });
 
+  it('judges a padded schedule target by its trimmed spelling, the way OpenCode trims before matching', () => {
+    // A padded entry that names a route target applies in OpenCode, plain or pattern.
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' deepseek/v4 '] }] })).toBeNull();
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: ['\tdeepseek/* '] }] })).toBeNull();
+    // Padded entries get the same specific verdicts as their unpadded spellings.
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' deepseek/v4#high '] }] })).toMatch(
+      /schedule 1 target "deepseek\/v4#high" carries a "#variant" suffix/,
+    );
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' opencode-route/b '] }] })).toMatch(
+      /schedule 1 target "opencode-route\/b" is a route reference/,
+    );
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 2, targets: [' anthropic/claude-sonnet-4-6 '] }] })).toMatch(
+      /schedule 1 target "anthropic\/claude-sonnet-4-6" matches no target in the route/,
+    );
+  });
+
   it('accepts a schedule target pattern that partly overlaps a route target pattern, and refuses disjoint patterns', () => {
     const withTargets = (targets, entry) =>
       validateModelRoute('x', { targets, schedules: [{ when: {}, factor: 2, targets: [entry] }] });
@@ -606,6 +714,9 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '9am' })).toMatch(/window\.start must be a local time/);
     expect(withWindow({ start: '24:00' })).toMatch(/window\.start/);
     expect(withWindow({ end: '17:60' })).toMatch(/window\.end/);
+    // Seconds past 59 are out of range and OpenCode refuses the whole schedule.
+    expect(withWindow({ start: '09:30:60' })).toMatch(/window\.start must be a local time/);
+    expect(withWindow({ end: '09:30:99' })).toMatch(/window\.end must be a local time/);
     expect(withWindow({ timezone: 'Nowhere/Special' })).toMatch(/window\.timezone/);
     expect(withWindow({ from: 0 })).toMatch(/window\.from must be a positive/);
     expect(withWindow({ from: 2000, until: 1000 })).toMatch(/from must be before window\.until/);
@@ -618,6 +729,8 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '00:00', end: '00:00' })).toMatch(/empty window that can never apply/);
     expect(withWindow({ start: '9:00', end: '09:00' })).toMatch(/must not be the same time/);
     expect(withWindow({ start: '09:00:15', end: '09:00:45' })).toMatch(/must not be the same time/);
+    // Seconds round down, so these are one minute to OpenCode.
+    expect(withWindow({ start: '09:30:5', end: '09:30' })).toMatch(/must not be the same time/);
   });
 
   it('accepts day numbers, single-digit times and a start past its end, which OpenCode runs past midnight', () => {
@@ -627,6 +740,9 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ start: '09:00' })).toBeNull();
     expect(withWindow({ end: '17:00' })).toBeNull();
     expect(withWindow({ start: '09:00', end: '09:01' })).toBeNull();
+    // Seconds are read the way OpenCode reads them: one or two digits, to 59.
+    expect(withWindow({ start: '09:30:5', end: '09:31' })).toBeNull();
+    expect(withWindow({ start: '9:30', end: '9:31' })).toBeNull();
     expect(withWindow({ timezone: 'UTC', from: 1000, until: 4102444800000 })).toBeNull();
   });
 
@@ -636,6 +752,35 @@ describe('validateModelRoute schedules', () => {
     expect(withWindow({ from: 1000, until: 2000 })).toMatch(/window\.until is in the past/);
     expect(withWindow({ until: Date.now() + 60000 })).toBeNull();
     expect(withWindow({ from: 1000 })).toBeNull();
+  });
+});
+
+describe('validateModelRoute description and details', () => {
+  const base = { targets: ['openai/gpt-6-luna'] };
+
+  it('accepts a one-line description and a paragraph of details', () => {
+    expect(
+      validateModelRoute('strong', {
+        ...base,
+        description: 'Long refactors across many files; slow; costs the most.',
+        details: 'Use for work that spans packages.\nAvoid for one-line fixes.',
+      }),
+    ).toBeNull();
+  });
+
+  // The UI reads a value over its own copy of these limits as absent, so a
+  // drift would either drop text the server accepts or let through text it refuses.
+  it('uses the same limits as the UI', () => {
+    expect(MAX_DESCRIPTION_LENGTH).toBe(POOL_DESCRIPTION_MAX_LENGTH);
+    expect(MAX_DETAILS_LENGTH).toBe(POOL_DETAILS_MAX_LENGTH);
+  });
+
+  it('rejects a multi-line or non-string description, non-string details and text over the caps', () => {
+    expect(validateModelRoute('x', { ...base, description: 'one\ntwo' })).toMatch(/description must be one line/);
+    expect(validateModelRoute('x', { ...base, description: 4 })).toMatch(/description must be one line/);
+    expect(validateModelRoute('x', { ...base, description: 'a'.repeat(201) })).toMatch(/at most 200/);
+    expect(validateModelRoute('x', { ...base, details: ['a'] })).toMatch(/details must be text/);
+    expect(validateModelRoute('x', { ...base, details: 'a'.repeat(2001) })).toMatch(/at most 2000/);
   });
 });
 
@@ -700,12 +845,253 @@ describe('registerModelRouteRoutes', () => {
     };
   });
 
-  it('GET returns the merged routes and path', async () => {
+  it('GET returns the user file\'s routes and path', async () => {
     const { app, routes } = makeApp();
     registerModelRouteRoutes(app, deps);
     const response = res();
     await routes.get[0][1]({}, response);
-    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, path: '/u/opencode.json' });
+    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, schedules: null, otherRoutes: [], otherSchedules: [], path: '/u/opencode.json' });
+  });
+
+  it('GET returns the cross-pool schedules', async () => {
+    const schedules = [{ providers: ['deepseek'], when: { start: '09:00', end: '17:00' }, factor: 0.5 }];
+    targetConfig.experimental.model_route_schedules = schedules;
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const response = res();
+    await routes.get[0][1]({}, response);
+    expect(response.out.body.schedules).toEqual(schedules);
+  });
+
+  // #298: `schedules` was not a known route key, so a single pool with a
+  // schedule made every save of the whole map fail with a 400.
+  it('PUT saves a map in which a pool has schedules', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const pools = {
+      peak: {
+        targets: ['deepseek/v4', 'openai/gpt-6-luna'],
+        schedules: [{ id: 'peak', targets: ['deepseek/*'], when: { daysOfWeek: ['mon', 'fri'], start: '09:00', end: '17:00', timezone: 'America/Chicago' }, factor: 0.5 }],
+      },
+      other: { targets: ['a/b'] },
+    };
+    const response = res();
+    await handler({ body: { routes: pools } }, response);
+    expect(response.out.status).toBeUndefined();
+    expect(targetConfig.experimental.model_routes).toEqual(pools);
+    expect(deps.writeConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('PUT writes cross-pool schedules alone and removes them when null', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const [, , , handler] = routes.put[0];
+    const schedules = [{ routes: ['old'], models: ['*flash*'], when: { daysOfMonth: [1, -1] }, weight: 3, note: 'month ends' }];
+    const saved = res();
+    await handler({ body: { schedules } }, saved);
+    expect(targetConfig.experimental.model_routes).toEqual({ old: { targets: ['a/b'] } });
+    expect(targetConfig.experimental.model_route_schedules).toEqual(schedules);
+    expect(saved.out.body.schedules).toEqual(schedules);
+    const removed = res();
+    await handler({ body: { schedules: null } }, removed);
+    expect(targetConfig.experimental.model_route_schedules).toBeUndefined();
+    expect(removed.out.body.schedules).toBeNull();
+  });
+
+  // OpenCode adds up model_route_schedules from every config file, while the
+  // merged config keeps only the last file's list. Editing the merged list and
+  // writing it to the user file made schedules apply twice.
+  describe('with schedules in two config files', () => {
+    const userSchedules = [{ providers: ['deepseek'], when: {}, factor: 0.5 }];
+    const projectSchedules = [{ models: ['*flash*'], when: { daysOfWeek: ['sat'] }, weight: 2 }];
+    let userConfig;
+    let projectConfig;
+    let layered;
+
+    beforeEach(() => {
+      userConfig = { experimental: { model_routes: { old: { targets: ['a/b'] } }, model_route_schedules: userSchedules } };
+      projectConfig = { experimental: { model_route_schedules: projectSchedules } };
+      const withProject = {
+        userConfig,
+        userOverrideConfig: {},
+        customConfig: {},
+        projectConfig,
+        // What shared.js mergeConfigs produces: the later file's list replaces the earlier one.
+        mergedConfig: { experimental: { ...userConfig.experimental, model_route_schedules: projectSchedules } },
+        paths: { userPath: '/u/opencode.json', userOverridePath: null, customPath: null, projectPath: '/p/opencode.json' },
+      };
+      // Like shared.js readConfigLayers: without a working directory there is no project layer.
+      const withoutProject = {
+        ...withProject,
+        projectConfig: {},
+        mergedConfig: { experimental: { ...userConfig.experimental } },
+        paths: { ...withProject.paths, projectPath: null },
+      };
+      layered = {
+        ...deps,
+        readConfigLayers: vi.fn((directory) => (directory === '/p' ? withProject : withoutProject)),
+        getConfigForPath: vi.fn((given, path) => (path === '/p/opencode.json' ? given.projectConfig : given.userConfig)),
+        resolveOptionalProjectDirectory: vi.fn(async (req) => ({ directory: req.query?.directory ?? null })),
+      };
+    });
+
+    it('GET returns the user file\'s list to edit and the other file\'s list apart', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({ query: { directory: '/p' } }, response);
+      expect(response.out.body.schedules).toEqual(userSchedules);
+      expect(response.out.body.otherSchedules).toEqual([{ path: '/p/opencode.json', schedules: projectSchedules }]);
+    });
+
+    it('GET without a project directory lists no project schedules', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({ query: {} }, response);
+      expect(response.out.body.schedules).toEqual(userSchedules);
+      expect(response.out.body.otherSchedules).toEqual([]);
+    });
+
+    it('GET lists every folder file OpenCode reads, in its order, and never the user file', async () => {
+      const ancestorSchedules = [{ providers: ['groq'], when: {}, factor: 0.8 }];
+      const dotSchedules = [{ targets: ['openai/*'], when: {}, weight: 3 }];
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, {
+        ...layered,
+        readConfigSources: vi.fn((directory) => (directory === '/p'
+          ? [
+              { path: '/u/opencode.json', config: userConfig },
+              { path: '/opencode.json', config: { experimental: { model_route_schedules: ancestorSchedules } } },
+              { path: '/p/opencode.json', config: projectConfig },
+              { path: '/p/.opencode/opencode.json', config: { experimental: { model_route_schedules: dotSchedules } } },
+            ]
+          : [{ path: '/u/opencode.json', config: userConfig }])),
+      });
+      const response = res();
+      await routes.get[0][1]({ query: { directory: '/p' } }, response);
+      expect(response.out.body.otherSchedules).toEqual([
+        { path: '/opencode.json', schedules: ancestorSchedules },
+        { path: '/p/opencode.json', schedules: projectSchedules },
+        { path: '/p/.opencode/opencode.json', schedules: dotSchedules },
+      ]);
+    });
+
+    it('PUT writes only the user file\'s list, and a save of routes alone leaves it as it was', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const [, , , handler] = routes.put[0];
+      const edited = [{ ...userSchedules[0], factor: 0.25 }];
+      const saved = res();
+      await handler({ body: { schedules: edited }, query: { directory: '/p' } }, saved);
+      expect(userConfig.experimental.model_route_schedules).toEqual(edited);
+      expect(projectConfig.experimental.model_route_schedules).toEqual(projectSchedules);
+      expect(saved.out.body.schedules).toEqual(edited);
+      expect(saved.out.body.otherSchedules).toEqual([{ path: '/p/opencode.json', schedules: projectSchedules }]);
+
+      const routesOnly = res();
+      await handler({ body: { routes: { old: { targets: ['a/c'] } } }, query: { directory: '/p' } }, routesOnly);
+      expect(userConfig.experimental.model_route_schedules).toEqual(edited);
+      expect(routesOnly.out.body.schedules).toEqual(edited);
+    });
+  });
+
+  // #324: GET returned the merged pool map and every save wrote the whole map
+  // to the user file, so a pool defined only in a project file was copied
+  // into the user file and kept applying to every project.
+  describe('with pools in two config files', () => {
+    const userRoutes = { own: { targets: ['a/b'] } };
+    const projectRoutes = { projectonly: { targets: ['p/m'] } };
+    let userConfig;
+    let projectConfig;
+    let layered;
+
+    beforeEach(() => {
+      userConfig = { experimental: { model_routes: userRoutes } };
+      projectConfig = { experimental: { model_routes: projectRoutes } };
+      const withProject = {
+        userConfig,
+        userOverrideConfig: {},
+        customConfig: {},
+        projectConfig,
+        mergedConfig: { experimental: { model_routes: { ...userRoutes, ...projectRoutes } } },
+        paths: { userPath: '/u/opencode.json', userOverridePath: null, customPath: null, projectPath: '/p/opencode.json' },
+      };
+      const withoutProject = {
+        ...withProject,
+        projectConfig: {},
+        mergedConfig: { experimental: { model_routes: userRoutes } },
+        paths: { ...withProject.paths, projectPath: null },
+      };
+      layered = {
+        ...deps,
+        readConfigLayers: vi.fn((directory) => (directory === '/p' ? withProject : withoutProject)),
+        getConfigForPath: vi.fn((given, path) => (path === '/p/opencode.json' ? given.projectConfig : given.userConfig)),
+        resolveOptionalProjectDirectory: vi.fn(async (req) => ({ directory: req.query?.directory ?? null })),
+      };
+    });
+
+    it('GET returns the user file\'s pools to edit and the other file\'s pools apart', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({ query: { directory: '/p' } }, response);
+      expect(response.out.body.routes).toEqual(userRoutes);
+      expect(response.out.body.otherRoutes).toEqual([{ path: '/p/opencode.json', routes: projectRoutes }]);
+    });
+
+    it('GET without a project directory lists no project pools', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const response = res();
+      await routes.get[0][1]({ query: {} }, response);
+      expect(response.out.body.routes).toEqual(userRoutes);
+      expect(response.out.body.otherRoutes).toEqual([]);
+    });
+
+    it('a save performed while a project-defined pool is present does not copy it into the user file', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const [, , , handler] = routes.put[0];
+      // The client edits only the user file's pools, as GET now returns them.
+      const edited = { own: { targets: ['a/c'] } };
+      const saved = res();
+      await handler({ body: { routes: edited }, query: { directory: '/p' } }, saved);
+      expect(userConfig.experimental.model_routes).toEqual(edited);
+      expect(projectConfig.experimental.model_routes).toEqual(projectRoutes);
+      expect(saved.out.body.routes).toEqual(edited);
+      expect(saved.out.body.otherRoutes).toEqual([{ path: '/p/opencode.json', routes: projectRoutes }]);
+    });
+
+    it('a tuning save alone returns the user file\'s pools, not the merged map', async () => {
+      const { app, routes } = makeApp();
+      registerModelRouteRoutes(app, layered);
+      const [, , , handler] = routes.put[0];
+      const saved = res();
+      await handler({ body: { tuning: { enabled: true } }, query: { directory: '/p' } }, saved);
+      expect(saved.out.body.routes).toEqual(userRoutes);
+      expect(userConfig.experimental.model_routes).toEqual(userRoutes);
+    });
+  });
+
+  it('GET returns a stored list it cannot read as stored, so the editor can show it', async () => {
+    targetConfig.experimental.model_route_schedules = { start: 900 };
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const response = res();
+    await routes.get[0][1]({}, response);
+    expect(response.out.body.schedules).toEqual({ start: 900 });
+  });
+
+  it('PUT rejects a bad cross-pool schedule and writes nothing', async () => {
+    const { app, routes } = makeApp();
+    registerModelRouteRoutes(app, deps);
+    const response = res();
+    await routes.put[0][3]({ body: { schedules: [{ when: { start: '25:00' }, factor: 2 }] } }, response);
+    expect(response.out.status).toBe(400);
+    expect(response.out.body.error).toMatch(/schedule 1 window\.start/);
+    expect(deps.writeConfig).not.toHaveBeenCalled();
   });
 
   it('PUT writes tuning alone and removes it when null', async () => {
@@ -929,5 +1315,41 @@ describe('validateModelRouteTuning strictness', () => {
     expect(validateModelRouteTuning({ notes: ['openai:   '] })).toMatch(/line 1 must read/);
     expect(validateModelRouteTuning({ notes: ['openai: back\nin 3 hours'] })).toMatch(/line 1 must read "match: text" on one line/);
     expect(validateModelRouteTuning({ notes: [{ match: 'openai', text: 'back' }] })).toMatch(/notes must be a list of strings/);
+  });
+});
+
+describe('validateModelRouteSchedules', () => {
+  it('accepts every field the OpenCode GlobalSchedule schema defines', () => {
+    expect(
+      validateModelRouteSchedules([
+        { id: 'g', providers: ['deepseek'], models: ['*flash*'], targets: ['openai/gpt-6-*'], routes: ['cheap'], when: { daysOfWeek: ['sat', 'sun'] }, weight: 0.5, note: 'weekends' },
+      ]),
+    ).toBeNull();
+    expect(validateModelRouteSchedules([])).toBeNull();
+  });
+
+  it('refuses a non-list, an unknown key and a bad window', () => {
+    expect(validateModelRouteSchedules({})).toMatch(/schedules must be a list/);
+    expect(validateModelRouteSchedules([{ provider: ['x'], when: {}, factor: 2 }])).toMatch(/schedule 1 has unknown key "provider"/);
+    expect(validateModelRouteSchedules([{ when: {}, factor: 2 }, { routes: 'cheap', when: {}, factor: 2 }])).toMatch(/schedule 2 routes must be a list/);
+    expect(validateModelRouteSchedules([{ when: { start: '24:00' }, factor: 2 }])).toMatch(/^schedule 1 window\.start must be a local time/);
+    // The same seconds handling on the cross-pool surface: out of range is
+    // refused, one digit is accepted, as OpenCode's `minutesOf` reads them.
+    expect(validateModelRouteSchedules([{ when: { start: '09:30:60' }, factor: 2 }])).toMatch(/^schedule 1 window\.start must be a local time/);
+    expect(validateModelRouteSchedules([{ when: { end: '09:30:99' }, factor: 2 }])).toMatch(/^schedule 1 window\.end must be a local time/);
+    expect(validateModelRouteSchedules([{ when: { start: '09:30:5', end: '09:31:59' }, factor: 2 }])).toBeNull();
+  });
+
+  // The same list rules a route's own schedules follow: OpenCode reads an empty
+  // matcher as "everything", so a blank entry or an empty list is refused.
+  it('refuses a blank entry and an empty matcher list', () => {
+    expect(validateModelRouteSchedules([{ providers: ['deepseek', ''], when: {}, factor: 2 }])).toMatch(/providers must be a list of non-blank strings/);
+    expect(validateModelRouteSchedules([{ models: [], when: {}, factor: 2 }])).toMatch(/models must not be empty/);
+  });
+
+  it('refuses a schedule with no change or with both changes', () => {
+    expect(validateModelRouteSchedules([{ when: {} }])).toMatch(/needs a factor or a weight/);
+    expect(validateModelRouteSchedules([{ when: {}, factor: 2, weight: 3 }])).toMatch(/both factor and weight/);
+    expect(validateModelRouteSchedules([{ when: {}, weight: -1 }])).toMatch(/weight must be a positive number/);
   });
 });

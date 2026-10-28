@@ -3,6 +3,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -26,6 +27,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict = {
@@ -2979,6 +2981,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'يتطلب المصادقة',
   'mcpDropdown.status.needsRegistration': 'يتطلب التسجيل: {error}',
   'mcpDropdown.empty.configureInConfig': 'اضبط خوادم MCP في الإعدادات.',
+  "mcpDropdown.cacheNote": "تشغيل خادم أُوقف فيه وضع الشيفرة أو إيقافه يجعل الدور التالي في الجلسة الجارية لا يستخدم ذاكرة التخزين المؤقت للطلبات.",
   'sessionAuth.error.rateLimitTitle': 'محاولات كثيرة جدًا',
   'sessionAuth.error.networkTitle': 'تعذّر الوصول إلى الخادم',
   'sessionAuth.error.rateLimitDescriptionSingle': 'يُرجى الانتظار {minutes} دقيقة قبل المحاولة مجددًا.',
@@ -3815,6 +3818,7 @@ export const dict = {
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...sessionMenuHintsI18n.ar,
+  ...sessionErrorRecoveryI18n.ar,
   ...sidebarLayoutI18n.ar,
   ...projectKnowledgeI18n.ar,
   ...linearPanelI18n.ar,
@@ -3838,6 +3842,7 @@ export const dict = {
   ...pluginsGridI18n.ar,
   ...integrationsCatalogI18n['ar'],
   ...sessionGoalWriterI18n['ar'],
+  ...subsessionModelsI18n['ar'],
   ...diffFindI18n['ar'],
   'settings.usage.page.state.claudeSignedOutTitle': 'لم يتم تسجيل الدخول إلى Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'شغّل هذا الأمر في الطرفية:',
@@ -3936,34 +3941,34 @@ export const dict = {
   "mcpx.secrets.decline": "Decline",
   "mcpx.secrets.error.save": "Could not save {name}. The fields are cleared, so enter the values again.",
   "mcpx.secrets.error.decline": "Could not decline the request. Try again.",
-  "chat.persistentTerminals.aria": "Terminals",
-  "chat.persistentTerminals.count": "Terminals: {count}",
-  "chat.persistentTerminals.running": "running",
-  "chat.persistentTerminals.exited": "exited",
-  "chat.persistentTerminals.show": "Show",
-  "chat.persistentTerminals.hide": "Hide",
-  "chat.persistentTerminals.noOutput": "No output yet",
-  "chat.persistentTerminals.stop": "Stop",
-  "chat.persistentTerminals.stopAria": "Stop {command}",
-  "chat.persistentTerminals.stopFailed": "Could not stop the terminal",
-  "chat.persistentTerminals.inputAria": "Send input to {command}",
-  "chat.persistentTerminals.inputPlaceholder": "Type input for this terminal",
-  "chat.persistentTerminals.send": "Send",
-  "chat.persistentTerminals.inputFailed": "Could not reach the terminal",
-  "chat.persistentTerminals.rename": "Rename",
-  "chat.persistentTerminals.renameAria": "Rename {command}",
-  "chat.persistentTerminals.renamePlaceholder": "Name for {command}",
-  "chat.persistentTerminals.origin": "From {title}",
-  "chat.persistentTerminals.originSubagent": "From subagent {title}",
-  "chat.commandAutocomplete.command.routeDescription": "Change model routing in plain words, e.g. /route avoid Anthropic for an hour.",
-  "chat.chatInput.toast.routeUsage": "Type what to change after /route, for example: /route avoid OpenAI for an hour",
-  "chat.chatInput.toast.routeApplied": "Routing updated: {summary}",
-  "chat.chatInput.toast.routeNeedsChoice": "That needs a choice. Open Settings → Routing to pick one.",
-  "chat.chatInput.toast.routeUnknown": "Couldn't tell what to change: {reason}",
-  "chat.chatInput.toast.routeFailed": "Couldn't update routing",
-  "chat.chatInput.autoWorktree.label": "Auto-create worktree",
-  "chat.chatInput.autoWorktree.tooltip": "Your first prompt starts the session in a new worktree. Without a name, the selected model names it from the prompt; a name starting with / is an exact folder path.",
-  "chat.chatInput.autoWorktree.namePlaceholder": "Name or /path (optional)",
+  "chat.persistentTerminals.aria": "الطرفيات",
+  "chat.persistentTerminals.count": "الطرفيات: {count}",
+  "chat.persistentTerminals.running": "قيد التشغيل",
+  "chat.persistentTerminals.exited": "انتهت",
+  "chat.persistentTerminals.show": "إظهار",
+  "chat.persistentTerminals.hide": "إخفاء",
+  "chat.persistentTerminals.noOutput": "لا مخرجات بعد",
+  "chat.persistentTerminals.stop": "إيقاف",
+  "chat.persistentTerminals.stopAria": "إيقاف {command}",
+  "chat.persistentTerminals.stopFailed": "تعذّر إيقاف الطرفية",
+  "chat.persistentTerminals.inputAria": "إرسال إدخال إلى {command}",
+  "chat.persistentTerminals.inputPlaceholder": "اكتب إدخالًا لهذه الطرفية",
+  "chat.persistentTerminals.send": "إرسال",
+  "chat.persistentTerminals.inputFailed": "تعذّر الوصول إلى الطرفية",
+  "chat.persistentTerminals.rename": "إعادة تسمية",
+  "chat.persistentTerminals.renameAria": "إعادة تسمية {command}",
+  "chat.persistentTerminals.renamePlaceholder": "اسم لـ {command}",
+  "chat.persistentTerminals.origin": "من {title}",
+  "chat.persistentTerminals.originSubagent": "من الوكيل الفرعي {title}",
+  "chat.commandAutocomplete.command.routeDescription": "غيّر توجيه النماذج بكلمات بسيطة، مثل: /route تجنّب Anthropic لمدة ساعة.",
+  "chat.chatInput.toast.routeUsage": "اكتب ما تريد تغييره بعد /route، مثال: /route تجنّب OpenAI لمدة ساعة",
+  "chat.chatInput.toast.routeApplied": "تم تحديث التوجيه: {summary}",
+  "chat.chatInput.toast.routeNeedsChoice": "هذا يحتاج إلى اختيار. افتح الإعدادات ← التوجيه لاختيار واحد.",
+  "chat.chatInput.toast.routeUnknown": "تعذّر فهم ما يجب تغييره: {reason}",
+  "chat.chatInput.toast.routeFailed": "تعذّر تحديث التوجيه",
+  "chat.chatInput.autoWorktree.label": "إنشاء شجرة عمل تلقائيًا",
+  "chat.chatInput.autoWorktree.tooltip": "يبدأ طلبك الأول الجلسة في شجرة عمل جديدة. من دون اسم، يسمّيها النموذج المحدد انطلاقًا من الطلب؛ الاسم الذي يبدأ بـ / هو مسار مجلد دقيق.",
+  "chat.chatInput.autoWorktree.namePlaceholder": "الاسم أو /مسار (اختياري)",
   "chat.chatInput.autoWorktree.source.title": "نقطة بدء شجرة العمل",
   "chat.chatInput.autoWorktree.source.trigger": "من {source}",
   "chat.chatInput.autoWorktree.source.default": "الافتراضي",

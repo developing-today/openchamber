@@ -6,9 +6,10 @@ import express from 'express';
  *
  * OpenChamber owns the Jev category decision (which kind of task this is);
  * OpenCode owns provider failover inside the chosen pool. This module is the
- * bridge: it reads the merged OpenCode config and writes route definitions to
- * the user's global `opencode.json(c)`, the same file the providers surface
- * writes to. Writes are refused in enterprise mode, where the administrator
+ * bridge: it reads the user's global `opencode.json(c)` for editing, shows
+ * the pools in the other config files read-only, and writes route definitions
+ * back to the user file, the same file the providers surface writes to.
+ * Writes are refused in enterprise mode, where the administrator
  * controls the OpenCode config.
  */
 
@@ -25,13 +26,22 @@ const MAX_COUNT = 50;
 
 // The keys each object may carry, as OpenCode's schema defines them. OpenCode
 // reads only these, so any other key would be saved and silently ignored.
-const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules"];
+// `description` and `details` are the exception: OpenChamber owns them and
+// gives them to Jev (`jev.js`). OpenCode decodes its config with
+// `onExcessProperty: "ignore"` (core config.ts, config/normalize.ts), so it
+// loads a route that carries them and drops the two keys.
+const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules", "description", "details"];
+// The UI reads a value over these as absent (`modelRoutesApi.ts`), so the two
+// must match; `model-routes.test.js` checks that.
+export const MAX_DESCRIPTION_LENGTH = 200;
+export const MAX_DETAILS_LENGTH = 2000;
 const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
 const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
 const SCHEDULE_KEYS = ["id", "targets", "when", "factor", "weight", "note"];
 const WINDOW_KEYS = ["daysOfWeek", "daysOfMonth", "start", "end", "timezone", "from", "until"];
+const GLOBAL_SCHEDULE_KEYS = ["id", "providers", "models", "targets", "routes", "when", "factor", "weight", "note"];
 // The weekday spellings OpenCode's schema accepts, beside a whole number from 0 (Sunday) to 6.
 const DAY_OF_WEEK_NAMES = [
   "sun", "sunday", "mon", "monday", "tue", "tuesday", "tues", "wed", "wednesday",
@@ -56,10 +66,64 @@ export const readModelRoutes = (config) => {
   return isRecord(routes) ? routes : {};
 };
 
+/**
+ * The pools OpenCode builds from every config file it reads (`sources` from
+ * `readConfigSources`, lowest priority first). A later file's pool replaces an
+ * earlier one of the same id whole, as OpenCode's model-routes config plugin
+ * does (`routes.set(id, route)`), so a pool's description comes from the same
+ * file as its targets. A file that failed to parse reads as empty and adds nothing.
+ */
+export const readLayeredModelRoutes = (sources) => {
+  const routes = {};
+  for (const source of sources) Object.assign(routes, readModelRoutes(source.config));
+  return routes;
+};
+
 const readModelRouteTuning = (config) => {
   const tuning = config?.experimental?.model_route_tuning;
   return isRecord(tuning) ? tuning : null;
 };
+
+/** `experimental.model_route_schedules` as one config file stores it, or null. */
+const readModelRouteSchedules = (config) => config?.experimental?.model_route_schedules ?? null;
+
+/**
+ * Cross-pool schedules from the config files other than `targetPath`, with
+ * the file each came from, in OpenCode's reading order. OpenCode applies every
+ * file's list (it flattens them), so Settings shows these read-only and writes
+ * only the user file's. `sources` is `readConfigSources(directory)`: the
+ * global files, `OPENCODE_CONFIG`, and every folder file from the outermost
+ * ancestor down to the project, json and jsonc and `.opencode`.
+ */
+const readOtherModelRouteSchedules = (sources, targetPath) =>
+  sources.flatMap(({ path, config }) => {
+    if (!path || path === targetPath) return [];
+    const schedules = config?.experimental?.model_route_schedules;
+    return Array.isArray(schedules) && schedules.length > 0 ? [{ path, schedules }] : [];
+  });
+
+/**
+ * The pools in the config files other than `targetPath`, with the file each
+ * came from, in OpenCode's reading order. OpenCode builds its pools from
+ * every file it reads, so Settings shows these read-only and writes only the
+ * user file's pools. Each file's map is shown as stored: a later file's pool
+ * replaces an earlier one of the same id in OpenCode's view, and the file
+ * that holds a pool is where that pool is edited.
+ */
+const readOtherModelRoutes = (sources, targetPath) =>
+  sources.flatMap(({ path, config }) => {
+    if (!path || path === targetPath) return [];
+    const routes = readModelRoutes(config);
+    return Object.keys(routes).length > 0 ? [{ path, routes }] : [];
+  });
+
+/** The layers' files as a source list, for callers that have no readConfigSources. */
+const sourcesFromLayers = (layers) => [
+  [layers.paths.userPath, layers.userConfig],
+  [layers.paths.userOverridePath, layers.userOverrideConfig],
+  [layers.paths.customPath, layers.customConfig],
+  [layers.paths.projectPath, layers.projectConfig],
+].map(([path, config]) => ({ path, config }));
 
 const HEALTH_LIMITS = {
   firstTokenTimeoutMs: MAX_MS,
@@ -128,14 +192,19 @@ const isString = (value) => String(value) === value;
 const isPositiveNumber = (value) => Number.isFinite(value) && value > 0;
 
 // A window time as OpenCode's schedule parser reads it (`minutesOf` in
-// model-route-schedule.ts): "9:30", "09:30" or "9:30:15", hours to 23, minutes to 59.
-// The parser compares minutes since midnight and rounds seconds down, so two
-// spellings of one minute are the same time to it.
+// model-route-schedule.ts): "9:30", "09:30", "9:30:15" or "9:30:5", hours to
+// 23, minutes to 59, seconds to 59. The parser compares minutes since
+// midnight and rounds seconds down, so two spellings of one minute are the
+// same time to it.
 const windowTimeMinutes = (value) => {
   if (!isString(value)) return undefined;
-  const match = /^(\d{1,2}):(\d{1,2})(?::\d{2})?$/.exec(value.trim());
-  if (match === null || Number(match[1]) > 23 || Number(match[2]) > 59) return undefined;
-  return Number(match[1]) * 60 + Number(match[2]);
+  const match = /^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/.exec(value.trim());
+  if (match === null) return undefined;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = match[3] === undefined ? 0 : Number(match[3]);
+  if (hours > 23 || minutes > 59 || seconds > 59) return undefined;
+  return hours * 60 + minutes;
 };
 
 const isWindowTime = (value) => windowTimeMinutes(value) !== undefined;
@@ -152,47 +221,47 @@ const isKnownTimezone = (value) => {
 
 /** A schedule's `when` window, judged the way OpenCode judges it: its schema first, then the
  * schedule parser, which drops a window it cannot read and takes the whole schedule with it. */
-const validateScheduleWindow = (id, label, window) => {
+const validateScheduleWindow = (subject, window) => {
   const unknown = unknownKeysProblem(window, WINDOW_KEYS);
-  if (unknown) return `route "${id}" ${label} window has ${unknown}`;
+  if (unknown) return `${subject} window has ${unknown}`;
   if (window.daysOfWeek !== undefined) {
     if (!Array.isArray(window.daysOfWeek))
-      return `route "${id}" ${label} window.daysOfWeek must be a list of weekday names or whole numbers from 0 to 6`;
+      return `${subject} window.daysOfWeek must be a list of weekday names or whole numbers from 0 to 6`;
     if (window.daysOfWeek.length === 0)
-      return `route "${id}" ${label} window.daysOfWeek must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
+      return `${subject} window.daysOfWeek must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
     for (const day of window.daysOfWeek)
       if (!DAY_OF_WEEK_NAMES.includes(day) && !isWhole(day, 0, 6))
-        return `route "${id}" ${label} window.daysOfWeek entry "${String(day)}" is not a weekday name or a whole number from 0 to 6`;
+        return `${subject} window.daysOfWeek entry "${String(day)}" is not a weekday name or a whole number from 0 to 6`;
   }
   if (window.daysOfMonth !== undefined) {
     if (!Array.isArray(window.daysOfMonth))
-      return `route "${id}" ${label} window.daysOfMonth must be a list of whole numbers from 1 to 31, or -1 for the last day`;
+      return `${subject} window.daysOfMonth must be a list of whole numbers from 1 to 31, or -1 for the last day`;
     if (window.daysOfMonth.length === 0)
-      return `route "${id}" ${label} window.daysOfMonth must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
+      return `${subject} window.daysOfMonth must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
     for (const day of window.daysOfMonth)
       if (day !== -1 && !isWhole(day, 1, 31))
-        return `route "${id}" ${label} window.daysOfMonth entry "${String(day)}" is not a whole number from 1 to 31 or -1`;
+        return `${subject} window.daysOfMonth entry "${String(day)}" is not a whole number from 1 to 31 or -1`;
   }
   for (const key of ["start", "end"])
     if (window[key] !== undefined && !isWindowTime(window[key]))
-      return `route "${id}" ${label} window.${key} must be a local time like "09:00"`;
+      return `${subject} window.${key} must be a local time like "09:00"`;
   if (
     window.start !== undefined &&
     window.end !== undefined &&
     windowTimeMinutes(window.start) === windowTimeMinutes(window.end)
   )
-    return `route "${id}" ${label} window.start and window.end must not be the same time: OpenCode treats an equal start and end as an empty window that can never apply`;
+    return `${subject} window.start and window.end must not be the same time: OpenCode treats an equal start and end as an empty window that can never apply`;
   if (window.timezone !== undefined && !isKnownTimezone(window.timezone))
-    return `route "${id}" ${label} window.timezone must be an IANA timezone name OpenCode can resolve`;
+    return `${subject} window.timezone must be an IANA timezone name OpenCode can resolve`;
   for (const key of ["from", "until"])
     if (window[key] !== undefined && !isWhole(window[key], 1, Number.MAX_SAFE_INTEGER))
-      return `route "${id}" ${label} window.${key} must be a positive epoch-millisecond time`;
+      return `${subject} window.${key} must be a positive epoch-millisecond time`;
   if (window.from !== undefined && window.until !== undefined && window.from >= window.until)
-    return `route "${id}" ${label} window.from must be before window.until: OpenCode drops a window that can never apply`;
+    return `${subject} window.from must be before window.until: OpenCode drops a window that can never apply`;
   // A window that has already ended can never apply again: OpenCode's
   // active() check is `now >= window.until` from the moment it passes.
   if (window.until !== undefined && window.until <= Date.now())
-    return `route "${id}" ${label} window.until is in the past: the window has already ended, so the schedule can never apply`;
+    return `${subject} window.until is in the past: the window has already ended, so the schedule can never apply`;
   return null;
 };
 
@@ -205,6 +274,67 @@ const validateScheduleWindow = (id, label, window) => {
  * no characters, which moves past it, or takes the character the other
  * pattern fixes next, which moves that pattern on.
  */
+/**
+ * Whether every model reference the later pattern matches is also matched
+ * by the earlier pattern. Providers must be equal, because `keyNamesTarget`
+ * reads the provider literally. The model parts are `*` globs, and a glob
+ * inclusion check runs over position sets: a pair of position sets is a
+ * counterexample when the later pattern can end there and the earlier one
+ * cannot. The alphabet is the literal characters either pattern names plus
+ * one other character, because a glob transition only ever asks whether a
+ * character equals one of those literals or is taken by a `*`.
+ */
+const patternCoversPattern = (earlier, later) => {
+  const [earlierProvider, ...earlierParts] = earlier.split("/");
+  const [laterProvider, ...laterParts] = later.split("/");
+  if (earlierProvider !== laterProvider) return false;
+  const earlierModel = earlierParts.join("/");
+  const laterModel = laterParts.join("/");
+  const literals = new Set([...earlierModel, ...laterModel].filter((character) => character !== "*"));
+  let other = "\u0001";
+  while (literals.has(other)) other = String.fromCodePoint(other.codePointAt(0) + 1);
+  const alphabet = [...literals, other];
+  const closure = (pattern, positions) => {
+    const closed = new Set(positions);
+    const stack = [...positions];
+    while (stack.length > 0) {
+      const position = stack.pop();
+      if (pattern[position] === "*" && !closed.has(position + 1)) {
+        closed.add(position + 1);
+        stack.push(position + 1);
+      }
+    }
+    return closed;
+  };
+  const step = (pattern, positions, character) => {
+    const next = new Set();
+    for (const position of positions) {
+      if (pattern[position] === "*") next.add(position);
+      else if (pattern[position] === character) next.add(position + 1);
+    }
+    return closure(pattern, next);
+  };
+  const keyOf = (earlierPositions, laterPositions) =>
+    `${[...earlierPositions].sort((a, b) => a - b).join(",")}|${[...laterPositions].sort((a, b) => a - b).join(",")}`;
+  const start = [closure(earlierModel, new Set([0])), closure(laterModel, new Set([0]))];
+  const seen = new Set([keyOf(start[0], start[1])]);
+  const stack = [start];
+  while (stack.length > 0) {
+    const [earlierPositions, laterPositions] = stack.pop();
+    if (laterPositions.has(laterModel.length) && !earlierPositions.has(earlierModel.length)) return false;
+    for (const character of alphabet) {
+      const nextEarlier = step(earlierModel, earlierPositions, character);
+      const nextLater = step(laterModel, laterPositions, character);
+      if (nextLater.size === 0) continue;
+      const key = keyOf(nextEarlier, nextLater);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      stack.push([nextEarlier, nextLater]);
+    }
+  }
+  return true;
+};
+
 const patternsOverlap = (first, second) => {
   const seen = new Set();
   const stack = [[0, 0]];
@@ -242,7 +372,12 @@ const validateSchedules = (id, schedules, targets) => {
         return `route "${id}" ${label} targets must be a list of non-empty target references`;
       if (schedule.targets.length === 0)
         return `route "${id}" ${label} targets must not be empty: OpenCode applies a schedule with an empty targets list to every target in the route, so leave the key out for every target`;
-      for (const entry of schedule.targets) {
+      for (const rawEntry of schedule.targets) {
+        // OpenCode trims each schedule entry before matching it, so the
+        // entry is judged by its trimmed spelling: padding alone neither
+        // refuses an entry OpenCode would apply nor changes which of the
+        // specific verdicts below an entry gets.
+        const entry = rawEntry.trim();
         // OpenCode matches a schedule entry against a `provider/model`
         // reference, which carries no variant, so an entry spelled with the
         // `#variant` suffix targets use everywhere else can never match.
@@ -270,7 +405,7 @@ const validateSchedules = (id, schedules, targets) => {
       }
     }
     if (!isRecord(schedule.when)) return `route "${id}" ${label} needs a when window object`;
-    const windowProblem = validateScheduleWindow(id, label, schedule.when);
+    const windowProblem = validateScheduleWindow(`route "${id}" ${label}`, schedule.when);
     if (windowProblem) return windowProblem;
     if (schedule.factor !== undefined && schedule.weight !== undefined)
       return `route "${id}" ${label} gives both factor and weight: OpenCode uses the weight and ignores the factor, so give one of them`;
@@ -284,14 +419,52 @@ const validateSchedules = (id, schedules, targets) => {
   return null;
 };
 
+/**
+ * The spelling problem in a target reference that already matches
+ * TARGET_PATTERN, or null. Provider, model and variant names contain no
+ * whitespace and no empty `/`-joined segments, and OpenCode does not trim target
+ * references (trimming is specific to schedule entries), so a padded,
+ * whitespace-containing or empty-segment reference attaches under a key no
+ * real model ever has.
+ * Model IDs may contain `/` (`openrouter/anthropic/claude-sonnet-4`); every
+ * segment still has to be non-empty, unpadded and free of whitespace.
+ */
+const targetReferenceSpellingProblem = (reference) => {
+  const hashIndex = reference.indexOf("#");
+  const modelPart = hashIndex < 0 ? reference : reference.slice(0, hashIndex);
+  const segments = modelPart.split("/");
+  for (const [index, segment] of segments.entries()) {
+    const name = index === 0 ? "provider" : "model";
+    if (segment === "")
+      return `target "${reference}" has an empty ${name} segment: OpenCode keys a target by its provider/model spelling, so a reference with an empty segment would never match a model`;
+    if (segment !== segment.trim())
+      return `target "${reference}" has a padded ${name} segment: OpenCode does not trim target references, so the padded spelling would never match a model`;
+    if (/\s/.test(segment))
+      return `target "${reference}" has a ${name} segment containing whitespace: ${name} names contain no whitespace, so the spelling would never match a model`;
+  }
+  if (hashIndex >= 0) {
+    const variant = reference.slice(hashIndex + 1);
+    if (variant !== variant.trim())
+      return `target "${reference}" has a padded variant: OpenCode does not trim target references, so the padded spelling would never match a model`;
+    if (/\s/.test(variant))
+      return `target "${reference}" has a variant containing whitespace: variant names contain no whitespace, so the spelling would never match a model`;
+  }
+  return null;
+};
+
 /** A single target: a `provider/model` string or `{ model, ... }` with variant overrides. */
 const validateTarget = (target) => {
-  if (typeof target === "string") return TARGET_PATTERN.test(target) ? null : "must look like provider/model";
+  if (typeof target === "string") {
+    if (!TARGET_PATTERN.test(target)) return "must look like provider/model";
+    return targetReferenceSpellingProblem(target);
+  }
   if (!isRecord(target)) return "must be a provider/model string or an object with a model field";
   const unknown = unknownKeysProblem(target, TARGET_KEYS);
   if (unknown) return unknown;
   if (typeof target.model !== "string" || !TARGET_PATTERN.test(target.model))
     return "its model must look like provider/model";
+  const spellingProblem = targetReferenceSpellingProblem(target.model);
+  if (spellingProblem) return spellingProblem;
   if (target.until !== undefined && !(Number.isInteger(target.until) && target.until > 0))
     return "its until must be a positive epoch-millisecond time";
   if (target.until !== undefined && routeReferenceOf(target.model) !== null)
@@ -304,11 +477,19 @@ const validateTarget = (target) => {
     return "its variants are on a route reference: OpenCode expands the referenced route from its own targets and never reads variants on a reference, so the variant remaps would never apply";
   if (target.defaultVariant !== undefined && (typeof target.defaultVariant !== "string" || target.defaultVariant === ""))
     return "its defaultVariant must be a string and not empty: OpenCode drops an empty default variant, so the target would run at its own default";
+  if (target.defaultVariant !== undefined && target.defaultVariant !== target.defaultVariant.trim())
+    return "its defaultVariant is padded with whitespace: OpenCode does not trim variant names, so the padded default variant would never apply";
+  if (target.defaultVariant !== undefined && /\s/.test(target.defaultVariant))
+    return "its defaultVariant contains whitespace: variant names contain no whitespace, so the default variant would never apply";
   if (target.variants !== undefined) {
     if (!isRecord(target.variants)) return "its variants must map route variants to target variants";
     for (const [from, to] of Object.entries(target.variants)) {
       if (from === "") return "its variants must not use an empty route variant as a key: no selected variant is ever empty, so the remap would never apply";
+      if (from !== from.trim()) return "its variants must not use a padded route variant as a key: OpenCode does not trim variant names, so the remap would never apply";
+      if (/\s/.test(from)) return "its variants must not use a route variant containing whitespace as a key: variant names contain no whitespace, so the remap would never apply";
       if (typeof to !== "string" || to === "") return `its variant remap "${from}" must be a string and not empty`;
+      if (to !== to.trim()) return `its variant remap "${from}" is padded with whitespace: OpenCode does not trim variant names, so the remap would never apply`;
+      if (/\s/.test(to)) return `its variant remap "${from}" contains whitespace: variant names contain no whitespace, so the remap would never apply`;
     }
   }
   return null;
@@ -380,6 +561,18 @@ export const validateModelRoute = (id, route, expandedTargets) => {
   const unknown = unknownKeysProblem(route, ROUTE_KEYS);
   if (unknown) return `route "${id}" has ${unknown}`;
   if (route.name !== undefined && typeof route.name !== "string") return `route "${id}" name must be a string`;
+  // Only a string is equal to its own String(), so these are plain value checks.
+  if (route.description !== undefined) {
+    if (String(route.description) !== route.description || /[\r\n]/.test(route.description))
+      return `route "${id}" description must be one line of text`;
+    if (route.description.length > MAX_DESCRIPTION_LENGTH)
+      return `route "${id}" description must be at most ${MAX_DESCRIPTION_LENGTH} characters`;
+  }
+  if (route.details !== undefined) {
+    if (String(route.details) !== route.details) return `route "${id}" details must be text`;
+    if (route.details.length > MAX_DETAILS_LENGTH)
+      return `route "${id}" details must be at most ${MAX_DETAILS_LENGTH} characters`;
+  }
   if (!Array.isArray(route.targets) || route.targets.length === 0)
     return `route "${id}" needs at least one target`;
   const seenTargets = new Set();
@@ -395,21 +588,27 @@ export const validateModelRoute = (id, route, expandedTargets) => {
       return `route "${id}" lists target "${key}" twice: OpenCode attaches each target once and silently drops the later entry, including its variant settings`;
     seenTargets.add(key);
     // A pattern target attaches every model it covers under its own
-    // settings, so a later concrete target it covers (with the same
+    // settings, so a later target it fully covers (with the same
     // #variant, which is part of the attach key) never attaches at all.
+    // The later target can be concrete, judged with keyNamesTarget, or a
+    // pattern whose whole model set the earlier pattern covers, judged
+    // with patternCoversPattern. A partly overlapping pattern stays live.
     // An earlier pattern with an until is carved out: it shadows only
-    // until it expires, and the concrete target applies after that, so
+    // until it expires, and the later target applies after that, so
     // the pair is a staging shape rather than a dead entry. Any until
     // still present here is in the future — a past one is refused above.
     const reference = referenceOf(key);
-    if (!reference.includes("*") && routeReferenceOf(reference) === null) {
+    if (routeReferenceOf(reference) === null) {
       const variant = key.split("#")[1] ?? "";
       for (const earlier of earlierTargets) {
         if (earlier.until !== undefined) continue;
         const earlierReference = referenceOf(earlier.key);
         if (!earlierReference.includes("*") || routeReferenceOf(earlierReference) !== null) continue;
         if ((earlier.key.split("#")[1] ?? "") !== variant) continue;
-        if (keyNamesTarget(reference, earlierReference))
+        const covered = reference.includes("*")
+          ? patternCoversPattern(earlierReference, reference)
+          : keyNamesTarget(reference, earlierReference);
+        if (covered)
           return `route "${id}" target "${key}" is already covered by the earlier pattern target "${earlier.key}": OpenCode attaches each model once, so this entry and its variant settings would never apply`;
       }
     }
@@ -528,6 +727,43 @@ export const validateModelRoutes = (routes) => {
   return null;
 };
 
+/**
+ * `experimental.model_route_schedules`: weight changes across routes, as
+ * OpenCode's GlobalSchedule schema defines them. The window, the factor or
+ * weight, and the list rules are the ones a route's own schedules follow: a
+ * blank entry or an empty list is refused, because OpenCode reads an empty
+ * matcher as "everything".
+ */
+export const validateModelRouteSchedules = (schedules) => {
+  if (!Array.isArray(schedules)) return "schedules must be a list of schedule objects";
+  for (const [index, schedule] of schedules.entries()) {
+    const label = `schedule ${index + 1}`;
+    if (!isRecord(schedule)) return `${label} must be an object`;
+    const unknown = unknownKeysProblem(schedule, GLOBAL_SCHEDULE_KEYS);
+    if (unknown) return `${label} has ${unknown}`;
+    for (const key of ["id", "note"])
+      if (schedule[key] !== undefined && !isString(schedule[key])) return `${label} ${key} must be a string`;
+    for (const key of ["providers", "models", "targets", "routes"]) {
+      const list = schedule[key];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || list.some((entry) => !isString(entry) || entry.trim() === ""))
+        return `${label} ${key} must be a list of non-blank strings`;
+      if (list.length === 0)
+        return `${label} ${key} must not be empty: OpenCode reads an empty list as every ${key.slice(0, -1)}, so leave the key out instead`;
+    }
+    if (!isRecord(schedule.when)) return `${label} needs a when window object`;
+    const windowProblem = validateScheduleWindow(label, schedule.when);
+    if (windowProblem) return windowProblem;
+    if (schedule.factor !== undefined && schedule.weight !== undefined)
+      return `${label} sets both factor and weight: OpenCode applies the weight and ignores the factor, so keep one`;
+    if (schedule.factor === undefined && schedule.weight === undefined)
+      return `${label} needs a factor or a weight: OpenCode drops a schedule with neither`;
+    if (schedule.factor !== undefined && !isPositiveNumber(schedule.factor)) return `${label} factor must be a positive number`;
+    if (schedule.weight !== undefined && !isPositiveNumber(schedule.weight)) return `${label} weight must be a positive number`;
+  }
+  return null;
+};
+
 // The shape OpenCode's schema accepts for one note (`NOTE_LINE`, packages/schema/src/config/model-routes.ts):
 // one line of `match: text`, with a non-space character before its first colon (never a colon) and after it.
 const NOTE_LINE = /^[^:\r\n]*[^\s:][^:\r\n]*:[^\r\n]*\S[^\r\n]*$/;
@@ -559,7 +795,21 @@ export const registerModelRouteRoutes = (app, dependencies) => {
     CONFIG_FILE,
     isEnterpriseMode,
     refreshOpenCodeAfterConfigChange,
+    resolveOptionalProjectDirectory = async () => ({ directory: null }),
+    readConfigSources = (directory) => sourcesFromLayers(readConfigLayers(directory)),
   } = dependencies;
+
+  // Only the read-only lists of other files' pools and schedules look at the
+  // project: OpenCode applies every folder file's pools and schedules too, so
+  // Settings shows them. Tuning keeps reading and writing as before.
+  const otherFilesFor = async (req, targetPath) => {
+    const { directory } = await resolveOptionalProjectDirectory(req);
+    const sources = readConfigSources(directory ?? null);
+    return {
+      otherRoutes: readOtherModelRoutes(sources, targetPath),
+      otherSchedules: readOtherModelRouteSchedules(sources, targetPath),
+    };
+  };
 
   const refuseInEnterpriseMode = (_req, res, next) =>
     isEnterpriseMode()
@@ -569,10 +819,18 @@ export const registerModelRouteRoutes = (app, dependencies) => {
   app.get("/api/model-routes", async (req, res) => {
     try {
       const layers = readConfigLayers(null);
+      const targetPath = layers.paths.userPath ?? CONFIG_FILE;
+      const targetConfig = getConfigForPath(layers, targetPath);
       res.json({
-        routes: readModelRoutes(layers.mergedConfig),
+        // The user file's own pools, which are the ones Settings edits; the
+        // merged view would copy other files' pools into it on save.
+        routes: readModelRoutes(targetConfig),
         tuning: readModelRouteTuning(layers.mergedConfig),
-        path: layers.paths.userPath ?? CONFIG_FILE,
+        // The user file's own list, which is the one Settings edits; the
+        // merged view would copy other files' entries into it on save.
+        schedules: readModelRouteSchedules(targetConfig),
+        ...(await otherFilesFor(req, targetPath)),
+        path: targetPath,
       });
     } catch (error) {
       res.status(500).json({ error: error?.message ?? "Failed to read model pools" });
@@ -581,15 +839,19 @@ export const registerModelRouteRoutes = (app, dependencies) => {
 
   app.put("/api/model-routes", express.json({ limit: "256kb" }), refuseInEnterpriseMode, async (req, res) => {
     try {
-      const { routes, tuning } = req.body ?? {};
-      if (routes === undefined && tuning === undefined)
-        return res.status(400).json({ error: "Send routes, tuning, or both" });
+      const { routes, tuning, schedules } = req.body ?? {};
+      if (routes === undefined && tuning === undefined && schedules === undefined)
+        return res.status(400).json({ error: "Send routes, tuning, schedules, or any of them together" });
       if (routes !== undefined) {
         const problem = validateModelRoutes(routes);
         if (problem) return res.status(400).json({ error: problem });
       }
       if (tuning !== undefined && tuning !== null) {
         const problem = validateModelRouteTuning(tuning);
+        if (problem) return res.status(400).json({ error: problem });
+      }
+      if (schedules !== undefined && schedules !== null) {
+        const problem = validateModelRouteSchedules(schedules);
         if (problem) return res.status(400).json({ error: problem });
       }
       const layers = readConfigLayers(null);
@@ -599,6 +861,8 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       if (routes !== undefined) targetConfig.experimental.model_routes = routes;
       if (tuning === null) delete targetConfig.experimental.model_route_tuning;
       else if (tuning !== undefined) targetConfig.experimental.model_route_tuning = tuning;
+      if (schedules === null) delete targetConfig.experimental.model_route_schedules;
+      else if (schedules !== undefined) targetConfig.experimental.model_route_schedules = schedules;
       writeConfig(targetConfig, targetPath);
       if (refreshOpenCodeAfterConfigChange) {
         try {
@@ -608,8 +872,10 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         }
       }
       res.json({
-        routes: routes ?? readModelRoutes(layers.mergedConfig),
+        routes: routes ?? readModelRoutes(targetConfig),
         tuning: tuning === undefined ? readModelRouteTuning(layers.mergedConfig) : tuning,
+        schedules: readModelRouteSchedules(targetConfig),
+        ...(await otherFilesFor(req, targetPath)),
         path: targetPath,
       });
     } catch (error) {

@@ -8,7 +8,9 @@
 /** @public */
 export {
   listConfiguredQuotaProviders,
+  listQuotaProviderCatalogue,
   fetchQuotaForProvider,
+  fetchQuotaForProviderInstances,
   fetchClaudeQuota,
   fetchOpenaiQuota,
   fetchGoogleQuota,

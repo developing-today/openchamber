@@ -15,6 +15,7 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
 - `packages/web/server/lib/opencode/v1-migration-topup.js`: re-arms OpenCode's own V1 -> V2 session import for V1 sessions changed by 1.x after the last completed import; runs only before a managed spawn. See "v1-migration-topup.js" below.
 - `packages/web/server/lib/opencode/managed-opencode-state.js`: state file, launch fingerprint, adopt-or-replace decision, and log-file cursor helpers for the managed OpenCode process (see "Managed OpenCode across OpenChamber restarts" below).
+- `packages/web/server/lib/opencode/managed-servers.js`: the `GET /api/managed-servers` read for external tooling (design #612 phase 2, #525). It builds the versioned response from the managed-process registry and draining records through the validated readers in `lifecycle.js`, completes the hosting instance's own entry from lifecycle state (directory, version last reported in the health payload, ready/starting/draining status, live session count from the session runtime), and leaves every field it cannot verify null with status `unknown` for other instances' servers. Entries whose pid is gone leave the list. The projection is an explicit allowlist of seven keys per server; the managed password, agent-tool token, launch fingerprint, args, binary, and owner pid in the source records never reach the response, and a test pins the key set.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring). It records each lifecycle transition (launch, ready, exit, restart, health failure and recovery, external connect) as a fixed action in the process-local diagnostic journal (`../diagnostics/server-journal.js`), which the diagnostic timeline exports; the journal never holds stderr, paths or error text. After readiness it warms the last-used directory only (first entry of the `getWarmupDirectories` dep, best-effort) because OpenCode initializes each directory lazily on first request and that cost would otherwise be paid by the user's first interactive session open. It warms no other projects: on OpenCode 2 the first directory-scoped read boots that location's whole MCP fleet. The warmed directory is also `getDefaultOpenCodeDirectory()`, the scope for server-side reads that have no directory of their own (integrations in `auth.js`, the small model's model and provider lists, the agent check after a restart): v2 answers a location read without one for its own working directory, the user's home for a managed OpenCode, and would start an MCP fleet there. While no warmed directory is usable (no project open), the getter answers the `noProjectDirectory` dep instead, the managed chats root, which the UI also works in then. Once the UI saves the directory it moved to (`lastDirectory`, reported by the settings runtime's `onLastDirectoryChanged`), `noteCurrentDirectory` makes that directory the default: the UI runs it anyway, and the one used last at startup may be a chat the user left, whose location the UI stops; a read there, such as the quota's integration list every 3 minutes, started it again. The getter revalidates that directory on every read: once it is no longer a readable directory (deleted, moved, replaced by a file, or stripped of read/execute permission) it is never sent, and the lifecycle advances to another directory the warm pass validated or re-reads `getWarmupDirectories` (coalesced, with a short cooldown) so a currently-valid `lastDirectory` replaces the stale one. A stale cached path would otherwise make every directory-scoped read answer `500 FileSystem.realPath ... ENOENT` — the failure that took the quota credential read down with it.
 - The managed OpenCode's environment also carries the user's variables from Settings and from `opencode service set env` (`getUserEnvironment`, see `../environment`), over the inherited environment and under everything OpenChamber sets for OpenCode itself; enterprise mode passes none. `getManagedOpenCodeProcessEnv()` therefore includes them, so a provider key given this way is visible to the credential reader like any other variable OpenCode reports.
 - `packages/web/server/lib/opencode/provider-env-aliases.js`: mirrors known provider credential env aliases into the managed OpenCode process environment (for example `GEMINI_API_KEY` → `GOOGLE_GENERATIVE_AI_API_KEY`) so OpenCode connection detection and the upstream AI SDK agree on the same key names. Canonical implementation shared by web lifecycle and the VS Code managed spawn path (`packages/vscode/src/provider-env-aliases.ts` re-exports this module).
@@ -144,6 +145,7 @@ exists in OpenCode's store.
 
 - `configureOpenCodeCredentials(source | null)`: wires the reader to a `{ list }` credential source; reads throw until it is wired.
 - `openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders, getLaunchEnvironment? })`: the running OpenCode as that source, URL and headers read per call; `getLaunchEnvironment` returns the managed launch environment or null.
+- `openCodeLocalCredentialSource({ env?, dbPath? })`: OpenCode's credential store read straight from its database file (`OPENCODE_DB`, else `opencode.db` under the XDG data directory), in the same row shape and order the server lists — selection sorts each integration's chosen row last and that row is marked active. Read-only, no launch environment. It exists for readers on the same machine when no server is listening (the quota CLI's fallback); the server and VS Code keep the running OpenCode as their only source.
 - `readOpenCodeCredentials()`: each integration's active credential, keyed by
   integration id (the provider id for providers), in the legacy `auth.json`
   entry shape (`{ type: 'api', key }` /
@@ -233,8 +235,9 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally instead of being re-serialized whole, so comments, formatting, and line endings outside the changed values survive; changed arrays are replaced whole, comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite (never an invalid file).
 - `getJsonEntrySource(layers, sectionKind, entryName)`: Resolves which config layer provides an entry. `sectionKind` is `agents`, `commands`, `providers`, or `mcp`, and both the v2 and the v1 spelling are searched (v2 wins). The result carries `sectionKey` (the spelling that actually held the entry) and `legacy`, so a writer can rewrite the same file in v2 shape. A failed custom or user layer throws `INVALID_JSONC` instead of treating that file as empty. A failed project layer is skipped so a valid user/custom entry can still be found.
 - `getJsonWriteTarget(layers, preferredScope)`: Determines write target for config updates. Throws `INVALID_JSONC` when the chosen target file is the unparseable layer.
-- `getFolderConfigPaths(workingDirectory)`: Every `opencode.json(c)` and `.opencode/opencode.json(c)` OpenCode 2 finds walking up from the project folder to the filesystem root, lowest priority first in OpenCode's order (`core/src/config/discovery.ts`): plain files outermost folder first, `.jsonc` after `.json`, then the `.opencode/` files the same way. Global config files are left out. Only MCP reads use it so far; agents, commands and providers still read the single project file.
-- `getProjectConfigCandidates(workingDirectory)`, `getLayerError(layers, filePath)`: The project folder's own config files, and the parse error `readConfigLayers` recorded for one file.
+- `getFolderConfigPaths(workingDirectory)`: Every `opencode.json(c)` and `.opencode/opencode.json(c)` OpenCode 2 finds walking up from the project folder to the filesystem root, lowest priority first in OpenCode's order (`core/src/config/discovery.ts`): plain files outermost folder first, `.jsonc` after `.json`, then the `.opencode/` files the same way. Global config files are left out. Internal to `shared.js`; callers use `readConfigSources`.
+- `readConfigSources(workingDirectory)`: Every config file OpenCode 2 reads with its parsed content, lowest priority first: the global files, `OPENCODE_CONFIG`, then the `getFolderConfigPaths` files. Each entry is `{ path, config, error, required }`; `required` marks the global and `OPENCODE_CONFIG` files, and a broken file reads as `{}` with its `error`. Used by MCP reads and by the model pool text Jev reads (`../routing/model-routes.js` `readLayeredModelRoutes`); agents, commands and providers still read the single project file.
+- `getProjectConfigCandidates(workingDirectory)`: The project folder's own config files. `getLayerError(layers, filePath)`, internal to `shared.js`, finds the parse error `readConfigLayers` recorded for one file.
 - `getAncestors(startDir, stopDir)`, `findWorktreeRoot(startDir)`: Git worktree helpers.
 - `isPromptFileReference(value)`, `resolvePromptFilePath(reference)`, `writePromptFile(filePath, content)`: Prompt file reference handling.
 - `walkSkillMdFiles(rootDir)`: Async. Recursively finds all SKILL.md files at any depth, following links and skipping a link back to its own ancestor. Sibling directories are read in parallel, at most 8 file-system calls at once, and the result keeps depth-first readdir order: discovery lets a later file win a duplicate name, so the order is part of the contract.
@@ -335,6 +338,71 @@ Installer output is discarded, not forwarded to clients or logs.
   - `dispose()`
 
 The runtime maintains active-session count incrementally from idempotent activity phase transitions. Upstream stall-timeout and lifecycle health checks read it in O(1); the hourly cleanup removes activity phases older than 24 hours without broadcasting synthetic state transitions. Snapshot generation remains reserved for the session-activity API.
+
+### Why the session-activity snapshot is a versioned envelope and not the bare phase map
+
+`getSessionActivitySnapshot()` returns the external observability contract v1 (design #612, phase 1 - #524): `{ version: 1, serverTime, watcherReady, sessions }`, where each session entry keeps the frozen `{ type }` phase and adds `lastActivityAt` (the phase map's recorded `updatedAt`), `status` (session-state map), `model` (the observed `{ modelID, providerID }` pair remembered by the notifications runtime from the session's latest assistant message, or null), and `toolInFlight` (null while no in-process source tracks it). Unknowns are explicit nulls, never fabricated values, and `watcherReady` stays false until the watcher stream delivers its first payload in the process, so an empty read is distinguishable from a watcher that has not started. The bare `{ [sessionId]: { type } }` map was rejected for the envelope because external consumers cannot version, timestamp, or readiness-mark a bare map without colliding with session IDs.
+
+## External observability contract v1 (design #612)
+
+Two read-only endpoints expose this OpenChamber instance's state to external consumers — the babysitter poller is the first, and any paired client can build on the same shapes. Both responses are versioned envelopes built from explicit allowlist projections, and a conformance fixture (`observability-contract.test.js`, beside the server tests in this directory) pins the shapes described here: it runs the same builders the routes serve and asserts the key sets, the empty-but-ready state, secret-field absence, an identity-unverified recorded pid never being listed, and a stopped server leaving the registry read. A paired client running against a live server applies the same assertions to the HTTP JSON.
+
+### The five contract rules
+
+1. **Additive-only, versioned.** Every response carries a top-level `version` (currently `1`) and `serverTime`. A future breaking change ships as a new version; within v1, fields are only added, never renamed or removed, and consumers must ignore keys they do not know.
+2. **Explicit unknowns.** A value the server cannot verify is `null`, never a fabricated default — no invented `0`, empty string, or guessed status stands in for an unknown. Consumers must treat `null` as "unknown", not as "none".
+3. **Empty is not unknown.** An empty collection with its readiness marker set is a real answer ("nothing to report"); a not-ready read says so instead of looking empty. The markers are `watcherReady` for session activity and `status: "unknown"` per registry entry (below).
+4. **Allowlist projection, no auth material.** Responses are built by projecting source records onto a fixed key set, never by serializing the records. The managed state file and registry entries hold a managed password, an agent-tool token, a launch fingerprint, launch args, a binary path, and an owner pid; none of those keys — nor any password/token/secret/fingerprint/credential-shaped key — ever appears in either response, at any nesting depth.
+5. **Authoritative sources only.** Every field comes from the record that owns it: session phases and their timestamps from the watcher-fed activity map, session status from the session-state map, the model pair from the notifications runtime's observation of the session's latest assistant message, registry facts from the managed-process registry, and the hosting instance's own entry from lifecycle state. Nothing is inferred from the process table or from another field.
+
+### `GET /api/session-activity`
+
+The envelope:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `version` | number | Contract version, always `1`. |
+| `serverTime` | number | The server's clock when the snapshot was built, epoch milliseconds. |
+| `watcherReady` | boolean | `false` until the OpenCode watcher stream delivers its first payload in this process. An empty `sessions` map with `watcherReady: false` means "the watcher has not started", not "no sessions exist"; with `watcherReady: true` it means no session has reported activity. |
+| `sessions` | object | Map of session ID to activity entry (below). Entries are pruned after 24 hours without a phase change. |
+
+Each entry in `sessions` has exactly these five keys:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `type` | string | The session's current activity phase (for example `busy` or `idle`), frozen from the phase-1 contract. |
+| `lastActivityAt` | number | When the phase last changed, epoch milliseconds. |
+| `status` | string \| null | The session-state map's status for this session, or `null` when no state has been recorded for it. |
+| `model` | object \| null | The **observed** model pair `{ modelID, providerID }` (each a string or `null` when unreported) from the session's latest assistant message — observed, not the configured model — or `null` when no assistant message has been observed for the session. There is no separate `provider` key. |
+| `toolInFlight` | null | Pinned `null` in v1 today: no in-process source tracks a per-session in-flight tool, and rule 2 forbids fabricating one. The key exists so a future source can fill it without a version break. |
+
+This read is a pollable snapshot, not a stream guarantee: phases are the latest recorded state at `serverTime`, and a phase that starts and ends between two polls may never appear.
+
+### `GET /api/managed-servers`
+
+The envelope is `{ version: 1, serverTime, servers }`, with the same `version` and `serverTime` (epoch milliseconds) meanings as above. `servers` is an array sorted by `pid` ascending. Each entry has exactly these seven keys:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `pid` | number | The recorded pid of a managed OpenCode server. |
+| `port` | number \| null | The port the server was recorded on, or `null` when no valid port was recorded. |
+| `directory` | string \| null | The hosting instance's validated default directory. Only the hosting instance's own entry carries it; other instances' entries are `null`. |
+| `version` | string \| null | That server's reported OpenCode version (from its health payload), or `null` when unverifiable. This is **not** the contract version: the envelope's top-level `version` is the contract's, this per-entry `version` is the server's. |
+| `status` | string | `ready` (the hosting instance's own server, healthy), `starting` (its own server, not yet ready), `draining` (a replaced server still finishing its sessions), or `unknown` (another instance's server: listed because its identity verified, but its details are not visible to this instance). |
+| `startedAt` | string \| null | When the server started (ISO 8601, from its registry record), or `null` when unrecorded. |
+| `sessionCount` | number \| null | Live session count for the hosting instance's own server, or `null` for other instances' servers (and for an own server that has not reported one). |
+
+Discovery comes from the managed-process registry alone; no process table is scanned for servers nobody recorded. The hosting instance completes its own entry from lifecycle state (directory, version, readiness, session count). Every other instance's entry reports only registry facts — `pid`, `port`, `startedAt` — with the remaining fields `null` under `status: "unknown"`.
+
+Liveness as landed: a recorded entry appears only while two checks pass for its recorded pid at read time — a signal-0 probe (`process.kill(pid, 0)`, with `EPERM` counting as alive) succeeds, and the pid's identity is verified: the live command at that pid must be an `opencode serve` for the recorded port, the same identity check the orphan reaper uses, wired into this read by lifecycle (#638). Signal-0 alone proves only that *some* process lives at the recorded pid, and the OS can recycle a dead server's pid onto an unrelated process, so where identity cannot be verified — including a platform with no command read — a recorded entry is not listed at all. A stopped server is therefore absent from the very next poll rather than lingering as a zombie, and so is a live but unrelated process that inherited its pid. The hosting instance's own entry is the one exemption: it comes from live lifecycle state for a process this instance is running, not from a record, so it does not go through the recorded-pid check.
+
+### Building a poller from this contract
+
+- Poll both endpoints, require `version: 1`, and key timing decisions on `serverTime`, not the local clock.
+- Treat `watcherReady: false` as "activity unknown yet" and keep polling; treat an empty `sessions` map with `watcherReady: true` as "no active sessions".
+- A managed server disappearing between polls means it stopped, its pid died, or the pid's identity could no longer be verified as the recorded server (for example, the pid was recycled onto another process). A server sitting at `status: "unknown"` is another instance's identity-verified server whose details this instance cannot see — it is not evidence the server is down.
+- Read every `null` as "unknown" per rule 2; in particular a `null` entry `version` or `sessionCount` is not a zero value.
+
 
 ## Public exports (lifecycle.js)
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) is fired after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), then calls `interruptBusySessionsAfterRestart()` and broadcasts one `opencode-restart-interrupted` UI notification when interrupted turns exist (#2943).
@@ -1128,6 +1196,11 @@ under a running child.
   OpenChamber does not take it over. It merges its plugin directories into
   `OPENCODE_CONFIG_CONTENT` instead, and those installs keep the old behavior —
   a managed-tool toggle needs an OpenCode restart to take effect.
+- `appliesLive()` is true when OpenChamber launched the running OpenCode
+  (`isManagedOpenCode`: not external, not skip-start) and owns the config file.
+  `formatSettingsResponse` reports it as the computed, read-only
+  `managedToolsApplyLive`, so the Tools settings page shows its prompt cache
+  note only when a switch reaches the running process. No process or CLI call.
 
 The embedded server controller exposes `getManagedOpenCodePreflight()` for
 desktop bootstrap. It shares the lifecycle's current CLI validation promise,

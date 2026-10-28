@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '貼上權杖',
   'settings.providers.page.quotaCredentials.platformApiKey': '平台 API 金鑰',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': '查看用量需要 ZenMux 主控台中的平台 API 金鑰。OpenCode 用於聊天的金鑰是另一把，這裡不會使用。',
+  'settings.providers.page.quotaCredentials.sessionCookie': '工作階段 Cookie',
+  'settings.providers.page.quotaCredentials.workspaceId': '工作區 ID',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': '貼上工作階段 Cookie',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': '貼上工作區 ID',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': '用量資料需要瀏覽器中的 Open Design 工作階段 Cookie 和您的工作區 ID。請從瀏覽器開發者工具複製 Cookie；OpenChamber 從不掃描瀏覽器的 Cookie 儲存空間。',
   'settings.providers.page.openCodeGo.saveFailed': '無法驗證 OpenCode Go 憑證。',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go 憑證有效。',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go 憑證無效或已過期。',
@@ -1198,6 +1204,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "透過 Code Mode 執行",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "透過 Code Mode 執行 OpenChamber 工具",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "關閉：模型直接看到每個工具。開啟：工具放在一個執行短腳本的工具後面。能省一點上下文，但模型可能漏掉它們，較小的模型尤其如此。渲染工具始終直接可見，因為聊天介面根據它自己的呼叫繪製頁面。",
+  "settings.openchamber.tools.cacheNote.direct": "開啟或關閉某個工具或 Code Mode 後，執行中的工作階段下一輪不會使用提示快取。",
+  "settings.openchamber.tools.cacheNote.codeMode": "開啟或關閉展示工具或 Code Mode 後，執行中的工作階段下一輪不會使用提示快取。",
   'settings.openchamber.opencodeCli.tooltipPrefix': '可選的',
   'settings.openchamber.opencodeCli.tooltipSuffix': '二進位檔絕對路徑。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode 可執行檔路徑',
@@ -1754,6 +1762,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': '從 JSON 片段匯入完整 MCP 伺服器設定',
   'settings.mcp.page.server.enable': '啟用伺服器',
   'settings.mcp.page.server.enableAria': '啟用伺服器',
+  "settings.mcp.page.server.enableCacheNote": "此伺服器關閉了 Code Mode，開啟或關閉它後，執行中的工作階段下一輪不會使用提示快取。",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode 為預設時，OpenCode 會給自帶 Code Mode 的伺服器提供一般工具，因此開啟或關閉此伺服器後，執行中的工作階段下一輪可能不會使用提示快取。",
   'settings.mcp.page.server.transportMode': '傳輸模式',
   'settings.mcp.page.connection.command': '命令',
   'settings.mcp.page.connection.serverUrl': '伺服器 URL',
@@ -2587,6 +2597,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n['zh-TW'],
   ...extensionsSettingsI18n['zh-TW'],
   ...messagingSettingsI18n['zh-TW'],
+  ...modelChoicesSettingsI18n['zh-TW'],
   ...settingsLayoutI18n['zh-TW'],
   'settings.page.integrations.title': '整合',
   'settings.page.integrations.description': '連接 OpenChamber 所使用的服務和訂閱。',
@@ -2611,6 +2622,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "預設（由 OpenCode 決定）",
   "settings.mcp.page.advanced.codemodeOption.on": "開啟",
   "settings.mcp.page.advanced.codemodeOption.off": "關閉",
+  "settings.mcp.page.advanced.codemodeCacheNote": "變更 Code Mode 會把此伺服器的工具加入或移出模型的工具清單，因此執行中的工作階段下一輪不會使用提示快取。",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode 開啟",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode 關閉",
   'settings.mcp.page.advanced.protocol': '通訊協定',

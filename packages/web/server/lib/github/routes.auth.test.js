@@ -381,6 +381,24 @@ describe('GitHub account routes', () => {
     expect(fetch.mock.calls.at(-1)[1].headers.authorization).toBe('token bound-token');
   });
 
+  it('defaults malformed issue and pull list pages to page 1', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
+    const fetch = vi.fn(async () => Response.json([]));
+    vi.stubGlobal('fetch', fetch);
+    const app = makeApp({
+      resolveGitHubRepoFromDirectory: vi.fn(async () => ({ repo: { owner: 'team', repo: 'project' } })),
+      resolveRepoNetwork: vi.fn(async () => null),
+    });
+    const query = boundQuery(account.accountId, { page: '2.9' });
+
+    await request(app).get('/api/source-control/github/issues/list').query(query).expect(200);
+    await request(app).get('/api/source-control/github/pulls/list').query(query).expect(200);
+
+    const listRequests = fetch.mock.calls.map(([url]) => new URL(url));
+    expect(listRequests).toHaveLength(2);
+    expect(listRequests.map((url) => url.searchParams.get('page'))).toEqual(['1', '1']);
+  });
+
   it('retires legacy pull lists before account and repository resolution', async () => {
     await auth.setGitHubAuth({ accessToken: 'active-token', user: { id: 8, login: 'active' } });
     const fetch = vi.fn(async () => Response.json([]));
@@ -505,6 +523,20 @@ describe('GitHub account routes', () => {
 
     expect(pullReads).toHaveLength(2);
     expect(resolveGitHubRepoFromDirectory).toHaveBeenCalledWith(directory, 'upstream');
+  });
+
+  it.each(['10junk', '2.9', '1e3'])('rejects malformed canonical pull context number %s', async (number) => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const resolveGitHubRepoFromDirectory = vi.fn(async () => ({ repo: { owner: 'team', repo: 'project' } }));
+
+    await request(makeApp({ resolveGitHubRepoFromDirectory }))
+      .get('/api/source-control/github/pulls/context')
+      .query(boundQuery(account.accountId, { number })).expect(400);
+
+    expect(resolveGitHubRepoFromDirectory).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('does not fabricate empty CI from malformed canonical check payloads', async () => {

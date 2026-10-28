@@ -11,7 +11,7 @@ import { asNonEmptyString, asObject, buildResult, formatMoney, getAuthEntry, nor
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
-const aliases = ['ollama-cloud', 'ollamacloud'];
+export const aliases = ['ollama-cloud', 'ollamacloud'];
 
 const BALANCE_URL = 'https://ollama.com/api/balance';
 const ME_URL = 'https://ollama.com/api/me';

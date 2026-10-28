@@ -123,9 +123,22 @@ export const mintOutsideFileGrant = async (targetPath, {
   };
 };
 
-const createCommandTimeoutMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw > 0) return raw;
+// A whole number from the environment, else null. Only a plain decimal
+// spelling counts: a bare Number(...) would silently honour '' and ' ' as 0,
+// '1e3' as 1000, '0x10' as 16, and '5.9' as a fractional value. Same strict
+// judgement as readRateLimitMaxAttempts in ui-auth.
+const parsePlainDecimalInt = (raw) => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
+export const createCommandTimeoutMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
+  if (raw !== null && raw > 0) return raw;
   return 5 * 60 * 1000;
 };
 
@@ -133,15 +146,15 @@ const createCommandTimeoutMs = () => {
 // directory is effectively static while the app runs, so a short TTL safely
 // absorbs the burst of identical lookups a fresh client (e.g. right after a
 // page reload) fires for every project. Set to 0 to disable caching.
-const createGitReadCacheTtlMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
+export const createGitReadCacheTtlMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
+  if (raw !== null && raw >= 0) return raw;
   return 30 * 1000;
 };
 
-const createUploadMaxBytes = () => {
-  const raw = Number(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
-  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+export const createUploadMaxBytes = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
+  if (raw !== null && raw > 0) return raw;
   return 100 * 1024 * 1024;
 };
 
@@ -1033,9 +1046,10 @@ export const registerFsRoutes = (app, dependencies) => {
     if (!query.trim() || query.length > CONTENT_SEARCH_MAX_QUERY_LENGTH) {
       return res.status(400).json({ error: 'A search query is required' });
     }
-    const requestedLimit = isString(req.query.limit) ? Number.parseInt(String(req.query.limit), 10) : Number.NaN;
-    const limit = Number.isInteger(requestedLimit)
-      ? Math.min(Math.max(1, requestedLimit), CONTENT_SEARCH_MAX_LIMIT)
+    const requestedLimitText = isString(req.query.limit) ? String(req.query.limit) : '';
+    const requestedLimit = /^[1-9]\d*$/.test(requestedLimitText) ? Number(requestedLimitText) : null;
+    const limit = Number.isSafeInteger(requestedLimit)
+      ? Math.min(requestedLimit, CONTENT_SEARCH_MAX_LIMIT)
       : CONTENT_SEARCH_DEFAULT_LIMIT;
     const project = await resolveProjectDirectory(req);
     if (!project.directory) {

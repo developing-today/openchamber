@@ -4,6 +4,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -28,6 +29,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -142,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ko,
   ...referencePickerI18n.ko,
   ...sessionMenuHintsI18n.ko,
+  ...sessionErrorRecoveryI18n.ko,
   ...sidebarLayoutI18n.ko,
   ...projectKnowledgeI18n.ko,
   ...linearPanelI18n.ko,
@@ -166,6 +169,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
   ...sessionGoalWriterI18n['ko'],
+  ...subsessionModelsI18n['ko'],
   ...diffFindI18n['ko'],
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
@@ -3077,6 +3081,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '인증 필요',
   'mcpDropdown.status.needsRegistration': '등록 필요: {error}',
   'mcpDropdown.empty.configureInConfig': '설정에서 MCP 서버를 구성하세요.',
+  "mcpDropdown.cacheNote": "Code Mode가 꺼진 서버를 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
   'sessionAuth.error.rateLimitTitle': '시도가 너무 많습니다',
   'sessionAuth.error.networkTitle': '서버에 연결할 수 없습니다',
   'sessionAuth.error.rateLimitDescriptionSingle': '{minutes}분 후 다시 시도하세요.',

@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Wklej token',
   'settings.providers.page.quotaCredentials.platformApiKey': 'Klucz API platformy',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Użycie wymaga klucza API platformy z konsoli ZenMux. Klucz, którego OpenCode używa do czatu, jest osobny i nie jest tutaj używany.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'Plik cookie sesji',
+  'settings.providers.page.quotaCredentials.workspaceId': 'Identyfikator obszaru roboczego',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'Wklej plik cookie sesji',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'Wklej identyfikator obszaru roboczego',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'Dane użycia wymagają pliku cookie sesji Open Design z przeglądarki oraz identyfikatora obszaru roboczego. Skopiuj plik cookie z narzędzi deweloperskich przeglądarki; OpenChamber nigdy nie skanuje magazynu plików cookie przeglądarki.',
   'settings.providers.page.openCodeGo.saveFailed': 'Nie udało się sprawdzić danych OpenCode Go.',
   'settings.providers.page.openCodeGo.valid': 'Dane OpenCode Go są prawidłowe.',
   'settings.providers.page.openCodeGo.invalid': 'Dane OpenCode Go są nieprawidłowe lub wygasły.',
@@ -520,6 +526,8 @@ export const settingsDict = {
   'settings.mcp.page.importDialog.title': 'Importuj fragment JSON',
   'settings.mcp.page.server.enable': 'Włącz serwer',
   'settings.mcp.page.server.enableAria': 'Włącz serwer',
+  "settings.mcp.page.server.enableCacheNote": "Code Mode jest wyłączony dla tego serwera, więc jego włączenie lub wyłączenie sprawia, że następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Gdy Code Mode jest ustawiony na Domyślnie, OpenCode daje serwerowi z własnym Code Mode zwykłe narzędzia, więc włączenie lub wyłączenie tego serwera może sprawić, że następna tura trwającej sesji nie skorzysta z pamięci podręcznej promptu.",
   'settings.mcp.page.server.importJson': 'Importuj z fragmentu JSON',
   'settings.mcp.page.server.importJsonTitle': 'Importuj pełną konfigurację serwera MCP z fragmentu JSON',
   'settings.mcp.page.server.name': 'Nazwa serwera',
@@ -995,6 +1003,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Uruchamiaj przez Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Uruchamiaj narzędzia OpenChamber przez Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Wyłączone: model widzi każde narzędzie bezpośrednio. Włączone: trafiają za jedno narzędzie uruchamiające krótki skrypt. Oszczędza trochę kontekstu, ale model może je przeoczyć, zwłaszcza mniejszy. Narzędzie renderowania zawsze zostaje bezpośrednie, bo czat rysuje stronę z jego własnego wywołania.",
+  "settings.openchamber.tools.cacheNote.direct": "Włączenie lub wyłączenie narzędzia albo Code Mode sprawia, że następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Włączenie lub wyłączenie narzędzia wyświetlania albo Code Mode sprawia, że następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Opcjonalna ścieżka absolutna do',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'pliku binarnego.',
   'settings.openchamber.passkeys.actions.add': 'Dodaj klucz dostępu (passkey)',
@@ -2580,6 +2590,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.pl,
   ...extensionsSettingsI18n.pl,
   ...messagingSettingsI18n.pl,
+  ...modelChoicesSettingsI18n.pl,
   ...settingsLayoutI18n.pl,
   'settings.page.integrations.title': 'Integracje',
   'settings.page.integrations.description': 'Połącz usługi i subskrypcje, z którymi pracuje OpenChamber.',
@@ -2612,6 +2623,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "Domyślnie (decyduje OpenCode)",
   "settings.mcp.page.advanced.codemodeOption.on": "Włączony",
   "settings.mcp.page.advanced.codemodeOption.off": "Wyłączony",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Zmiana Code Mode dodaje narzędzia tego serwera do listy narzędzi modelu albo je z niej usuwa, więc następna tura trwającej sesji nie korzysta z pamięci podręcznej promptu.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode włączony",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode wyłączony",
   'settings.mcp.page.advanced.protocol': 'Protokół',

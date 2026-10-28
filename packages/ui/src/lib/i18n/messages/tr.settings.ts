@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -52,6 +53,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Token\'ı yapıştır',
   'settings.providers.page.quotaCredentials.platformApiKey': 'Platform API anahtarı',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Kullanım için ZenMux konsolundan bir Platform API anahtarı gerekir. OpenCode’un sohbet için kullandığı anahtar ayrıdır ve burada kullanılmaz.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'Oturum çerezi',
+  'settings.providers.page.quotaCredentials.workspaceId': 'Çalışma alanı kimliği',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'Oturum çerezini yapıştırın',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'Çalışma alanı kimliğini yapıştırın',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'Kullanım için tarayıcınızdaki Open Design oturum çerezi ve çalışma alanı kimliğiniz gerekir. Çerezi tarayıcınızın geliştirici araçlarından kopyalayın; OpenChamber tarayıcı çerez deposunu asla taramaz.',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go kimlik bilgileri doğrulanamadı.',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go kimlik bilgileri geçerli.',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go kimlik bilgileri geçersiz veya süresi dolmuş.',
@@ -1248,6 +1254,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Code Mode üzerinden çalıştır",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber araçlarını Code Mode üzerinden çalıştır",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Kapalı: model her aracı doğrudan görür. Açık: araçlar kısa bir betik çalıştıran tek bir aracın arkasına geçer. Biraz bağlam kazandırır ama model, özellikle küçük modeller, araçları gözden kaçırabilir. Render aracı her zaman doğrudan kalır, çünkü sohbet sayfayı onun kendi çağrısından çizer.",
+  "settings.openchamber.tools.cacheNote.direct": "Bir aracı veya Code Mode'u açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Görüntüleme aracını veya Code Mode'u açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'İsteğe bağlı mutlak dosya yolu: ',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary dosyası.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode Binary Yolu',
@@ -1787,6 +1795,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'Tam bir MCP sunucu yapılandırmasını JSON parçasından içe aktar',
   'settings.mcp.page.server.enable': 'Sunucuyu Etkinleştir',
   'settings.mcp.page.server.enableAria': 'Sunucuyu etkinleştir',
+  "settings.mcp.page.server.enableCacheNote": "Bu sunucuda Code Mode kapalı; sunucuyu açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode Varsayılan'dayken OpenCode, kendi Code Mode'u olan bir sunucuya normal araçlar verir; bu yüzden bu sunucuyu açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açabilir.",
   'settings.mcp.page.server.transportMode': 'Aktarım Modu',
   'settings.mcp.page.connection.command': 'Komut',
   'settings.mcp.page.connection.serverUrl': 'Sunucu URL\'si',
@@ -2598,6 +2608,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "Varsayılan (OpenCode karar verir)",
   "settings.mcp.page.advanced.codemodeOption.on": "Açık",
   "settings.mcp.page.advanced.codemodeOption.off": "Kapalı",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Code Mode'u değiştirmek bu sunucunun araçlarını modelin araç listesine ekler ya da listeden çıkarır; bu yüzden çalışan bir oturumun sonraki turu prompt önbelleğini kullanmaz.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode açık",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode kapalı",
   'settings.mcp.page.advanced.protocol': 'Protokol',
@@ -2613,6 +2624,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.tr,
   ...extensionsSettingsI18n.tr,
   ...messagingSettingsI18n.tr,
+  ...modelChoicesSettingsI18n.tr,
   ...settingsLayoutI18n.tr,
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Kod fusion talimatları',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Sistem başlık çubuğunu kullan',

@@ -150,6 +150,14 @@
         "mobile"
       ]
     },
+    "modelChoiceRecordingEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },
@@ -191,6 +199,10 @@
       "computed": true
     },
     "routingFeatureAvailable": {
+      "scope": "instance",
+      "computed": true
+    },
+    "managedToolsApplyLive": {
       "scope": "instance",
       "computed": true
     },
@@ -643,6 +655,9 @@
         "desktop",
         "mobile"
       ]
+    },
+    "activeRunModelChangeBehavior": {
+      "scope": "profile"
     },
     "sessionGoalEnabled": {
       "scope": "profile"

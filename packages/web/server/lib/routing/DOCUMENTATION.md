@@ -35,7 +35,9 @@ Auto. There is no env gate — the feature shipped dark behind
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
 - `jev.js` — request builders, answer parsing, and the HTTP call with a
-  timeout to the endpoint `classifierEndpoint` chose.
+  timeout to the endpoint `classifierEndpoint` chose. A category whose model is
+  a pool (`opencode-route/<id>`) gets that pool's `description` and `details`
+  appended to its criteria string (see "Pool descriptions" below).
 - `history.js` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
@@ -251,6 +253,83 @@ the source and manages the TypeSafe key and, through `CustomEndpointFields.tsx`,
 the custom endpoint; `JevAccessNote` links there from the
 features that need Jev.
 
+## Model pool config
+
+`model-routes.js` — `GET`/`PUT /api/model-routes`: OpenCode's
+`experimental.model_routes` (the pools), `model_route_tuning` (automatic
+review) and `model_route_schedules` (weight changes across pools), written to
+the user's global `opencode.json(c)` and refused in enterprise mode. A `PUT`
+carries any of `routes`, `tuning` and `schedules`; `null` removes `tuning` or
+`schedules`. Every key is checked against OpenCode's schema
+(`packages/schema/src/config/model-routes.ts`) before anything is written, and
+one bad pool refuses the whole map. A schedule is also refused where OpenCode
+would quietly drop it (`packages/core/src/model-route-schedule.ts`,
+`routeWeightRules` in `packages/core/src/config/plugin/model-routes.ts`): an
+empty day list, an unreadable time or timezone, or neither `factor` nor
+`weight`. Two cases OpenCode keeps are refused too, because they do not do what
+they say: a start equal to its end (the rule stays and is never active) and
+both `factor` and `weight` (the weight applies and the factor is ignored).
+A cross-pool schedule's `providers`, `models`, `targets` and `routes` follow
+the same list rules as a route schedule's `targets`: a blank entry or an empty
+list is refused, because OpenCode reads an empty matcher as "everything".
+
+OpenCode adds up `model_route_schedules` from every config file, while
+`mergeConfigs` keeps only the last file's list, and it builds its pools from
+every file's `model_routes`, a later file's pool replacing an earlier one of
+the same id. So `schedules` and `routes` in a response are the user file's
+own, as stored, and the only ones a `PUT` writes; `otherSchedules` lists the
+non-empty lists in the other files (`{ path, schedules }`) and `otherRoutes`
+the non-empty pool maps (`{ path, routes }`), which Settings shows read-only,
+in OpenCode's reading order from `readConfigSources`
+(`../opencode/shared.js`): the global files, `OPENCODE_CONFIG`, then every
+`opencode.json(c)` and `.opencode/opencode.json(c)` from the outermost
+ancestor folder down to the project. The folder files are included only when
+the request names the Settings project (`?directory=` or the
+`x-opencode-directory` header). Tuning reads and writes the same with or
+without it. Settings sends schedule saves one at a time and keeps only the
+newest edit's answer.
+
+## Pool descriptions
+
+`model-routes.js` reads and writes OpenCode's `experimental.model_routes` in the
+user's `opencode.json(c)`. Besides OpenCode's own route keys it accepts two that
+OpenChamber owns: `description` (one line, at most 200 characters) and
+`details` (at most 2000). The Routing page reads a value the save would
+refuse as absent (`modelRoutesApi.ts`, same limits, checked equal by
+`model-routes.test.js`), because every save sends the whole map and one bad
+hand-edited value would otherwise block saving any pool. OpenCode decodes its config with
+`onExcessProperty: "ignore"` (core `config.ts`, `config/normalize.ts`), so a
+route carrying them loads and the two keys are dropped. OpenCode's published
+JSON schema sets `additionalProperties: false` on a route, so an editor that
+validates the file may flag them. Both were checked against OpenCode on
+2026-10-22.
+
+Because OpenCode's own config read drops the keys, the routing runtime reads
+the pools from the config files (`readModelPools`, wired in `index.js` to
+`readLayeredModelRoutes(readConfigSources(directory))`), not from OpenCode's
+config API. `readConfigSources` (`../opencode/shared.js`, shared with Settings ›
+MCP) lists the files OpenCode reads, lowest priority first: the global
+`opencode.json` and `opencode.jsonc`, `OPENCODE_CONFIG`, then every
+`opencode.json(c)` from the outermost ancestor folder down to the project, then
+every `.opencode/opencode.json(c)` in the same order. A later file's pool
+replaces an earlier one whole, as OpenCode's model-routes config plugin does,
+so a description never outlives the pool definition it came with. Not covered:
+the system config folder, macOS managed preferences, `.well-known` remote
+config and `OPENCODE_CONFIG_CONTENT`; a pool defined only there reaches Jev
+without its text. In a routed
+send, each enabled category whose own model is a pool gets
+`\n\nRuns on the model pool "<id>": <description>\n<details>` appended to its
+description; a category without a model of its own, or on a pool with neither
+key, keeps its description alone. Each value is held to the save's rules
+(`MAX_DESCRIPTION_LENGTH`, `MAX_DETAILS_LENGTH`, no line break in the
+description), and a hand-edited value that breaks them is left out. Criteria
+stay one string per category. A config that cannot be read means no pool text,
+and routing goes on.
+
+The text goes to the same classification provider as the rest of the routing
+request, so enterprise mode already covers it. The OpenCode `plan_info` pool
+`purpose` is a separate record in OpenCode's plan store and is not read here.
+
 ## Model pool telemetry
 
 Separate from Jev/Auto above: read-only views over OpenCode's own
@@ -258,6 +337,9 @@ Separate from Jev/Auto above: read-only views over OpenCode's own
 `model-routes.js`'s concern), not OpenChamber's classifier. Both report
 `{ available: false, reason }` instead of an empty result when the database,
 its routing tables, or a usable `node:sqlite`/`bun:sqlite` driver are absent.
+When OpenCode's base URL is not a loopback address, both routes read no local
+file and answer `{ available: false, reason: "remote-opencode" }`, the same
+check pool health applies.
 
 - `model-route-stats.js` — `GET /api/model-routes/stats`: aggregate counts,
   latencies, grouped errors and hedge win rates per target over a trailing
@@ -285,7 +367,9 @@ makes that visible so the user can spread them.
   against OpenCode's `Config.ModelRoute` schema, `schedules` included: a
   schedule carries an optional `id`, `targets` patterns and `note`, a required
   `when` window (weekday names or 0 to 6, days of month or -1, `start`/`end`
-  local times, `timezone`, `from`/`until`), and one of `factor` or `weight`.
+  local times read as OpenCode's `minutesOf` reads them: one or two digit
+  hours, minutes and optional seconds, all in range, seconds rounded down,
+  `timezone`, `from`/`until`), and one of `factor` or `weight`.
   Values OpenCode would drop or silently ignore are refused with the reason:
   a window its parser cannot read, an empty day list, a window whose start
   and end are the same time (OpenCode treats that as an empty window that
@@ -294,12 +378,25 @@ makes that visible so the user can spread them.
   be finite and which would save as `null`), a target listed twice in one
   route (OpenCode attaches each target once, keyed by its full model
   reference, and silently drops the later entry, including its variant
-  settings), a concrete target fully covered by an earlier pattern
+  settings), a target reference with a padded provider, model or
+  `#variant` segment, a segment or variant containing whitespace, an
+  empty `/`-joined segment, or a padded or whitespace-containing
+  `defaultVariant`/`variants` setting (OpenCode does not trim target
+  references or variant names — trimming is specific to schedule
+  entries — so the padded, whitespace-containing or empty spelling
+  would never match a model;
+  model IDs containing `/` stay accepted while every segment is
+  non-empty, unpadded and free of whitespace), a concrete target fully covered by an earlier pattern
   target in the same route with the same `#variant` (the pattern
   attaches that model under its own settings, so the later entry and
   its variant settings would never apply; an earlier pattern carrying
   an `until` is left alone, because it shadows only until it expires
-  and the concrete target applies after that), a target whose `until` is already past (OpenCode drops a
+  and the concrete target applies after that), a pattern target whose
+  whole model set an earlier pattern target in the same route with the
+  same `#variant` covers (every model the later pattern would attach is
+  already attached by the earlier one, so the later entry would never
+  apply; a partly overlapping pattern stays accepted, and the same
+  `until` carve-out applies), a target whose `until` is already past (OpenCode drops a
   target whose `until` has passed, so the target would leave the route as
   soon as the config is saved), an `until` on a route-reference target
   (OpenCode includes the referenced route unconditionally and never reads
@@ -319,7 +416,10 @@ makes that visible so the user can spread them.
   pattern shares no model with any target the route expands to (two
   patterns count as sharing when one model matches both, even if each
   covers models the other does not; entries are judged in lower case,
-  the way OpenCode's case-insensitive schedule matcher reads them; the
+  the way OpenCode's case-insensitive schedule matcher reads them, and
+  trimmed before every check, the way OpenCode trims them before
+  matching, so padding alone neither refuses an entry that would apply
+  nor changes which verdict it gets; the
   set-level check judges entries against the concrete models the route
   reaches through its route references, because OpenCode inherits a
   route's schedule rules into nested groups and matches them against
@@ -349,8 +449,8 @@ makes that visible so the user can spread them.
   a route whose targets only chase references in a
   cycle that reaches no concrete model target (OpenCode drops both
   silently, and the second would expand to no models). Cross-pool schedules
-  (`experimental.model_route_schedules`) are not OpenChamber's to save yet;
-  #297 covers their editor.
+  (`experimental.model_route_schedules`) go through `validateModelRouteSchedules`,
+  which reuses the route schedule window checks; see "Model pool config".
 - `pool-plan-links.js` keeps `pool-plan-links.json` in the OpenChamber data
   directory: a map from a target reference (`provider/model`, or a `*`
   pattern) to a plan id from the plan store. Two targets linked to one plan
@@ -373,9 +473,14 @@ makes that visible so the user can spread them.
   model its pattern matches, each session once. `requests` and `messages`
   windows count attempts; `tokens` windows count input, output and reasoning
   tokens, as OpenCode's `model-usage.ts` meters plans. `usd`, `percent` and
-  `other` windows get no projection. The projection is an estimate from
-  recent traffic and cannot see usage outside OpenCode; a window of zero or
-  negative hours gets none. A weighted or round-robin pool (OpenCode's
+  `other` windows get no projection. Every projection carries
+  `source: 'traffic-estimate'` (a provider reading, if one ever arrives
+  through an existing in-repo source, would carry `'provider-reading'`), and
+  the plan also lists each unprojectable window in `unprojectedQuotas` with
+  its reason (`needs-pricing`, `needs-provider-meter`, `unsupported-unit`),
+  which the panel renders instead of silence. The projection is an estimate
+  from recent traffic and cannot see usage outside OpenCode; a window of zero
+  or negative hours gets none. A weighted or round-robin pool (OpenCode's
   round-robin is smooth weighted round robin, so both draw by weight) with a
   target at 70 percent or more gets a `lower-weight` suggestion while the
   target's weight is above 0.1, which the panel turns into a button that
@@ -400,12 +505,14 @@ makes that visible so the user can spread them.
 
 ## Tests
 
-`store.test.js` (defaults, deviation round-trip, the cache setting's default,
+`model-routes.test.js` (route validation, pool description and details limits,
+the routes), `model-pools-folder-config.test.js` (which files the pool text
+comes from and which one wins), `store.test.js` (defaults, deviation round-trip, the cache setting's default,
 deleted built-ins, malformed
 file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
 excerpts, decisions, cache holds and the warm window, endpoints, custom URL normalization and setter,
 classifier fallback, rewrite and fallback
-paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
+paths, pool descriptions in the criteria, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send
 ahead of a stand-in proxy, the routes). The queue and auto-accept tests cover
 their hooks.

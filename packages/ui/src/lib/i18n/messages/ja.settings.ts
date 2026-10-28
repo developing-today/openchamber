@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -72,6 +73,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'トークンを貼り付け',
   'settings.providers.page.quotaCredentials.platformApiKey': 'プラットフォーム API キー',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': '使用量には ZenMux コンソールのプラットフォーム API キーが必要です。OpenCode がチャットに使うキーは別物で、ここでは使いません。',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'セッション Cookie',
+  'settings.providers.page.quotaCredentials.workspaceId': 'ワークスペース ID',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'セッション Cookie を貼り付け',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'ワークスペース ID を貼り付け',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': '使用状況の取得には、ブラウザの Open Design セッション Cookie とワークスペース ID が必要です。Cookie はブラウザの開発者ツールからコピーしてください。OpenChamber がブラウザの Cookie ストレージをスキャンすることはありません。',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go の認証情報を検証できませんでした。',
   'settings.providers.page.openCodeGo.valid': 'OpenCode Go の認証情報は有効です。',
   'settings.providers.page.openCodeGo.invalid': 'OpenCode Go の認証情報が無効または期限切れです。',
@@ -1273,6 +1279,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Code Mode で実行",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber のツールを Code Mode で実行",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "オフ: モデルは各ツールを直接見ます。オン: 短いスクリプトを実行する 1 つのツールの背後に置かれます。コンテキストを少し節約できますが、特に小さいモデルはツールを見落とすことがあります。 レンダーツールは常に直接のままです。チャットはそのツール自身の呼び出しからページを描くためです。",
+  "settings.openchamber.tools.cacheNote.direct": "ツールや Code Mode をオン・オフすると、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
+  "settings.openchamber.tools.cacheNote.codeMode": "表示ツールや Code Mode をオン・オフすると、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
   'settings.openchamber.opencodeCli.tooltipPrefix': '以下への絶対パス（任意）:',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'バイナリ。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode バイナリパス',
@@ -1899,6 +1907,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'JSON Snippet から MCP サーバー設定全体をインポート',
   'settings.mcp.page.server.enable': 'サーバーを有効化',
   'settings.mcp.page.server.enableAria': 'サーバーを有効化',
+  "settings.mcp.page.server.enableCacheNote": "このサーバーは Code Mode がオフのため、オン・オフすると実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Code Mode が既定のとき、OpenCode は独自の Code Mode を持つサーバーに通常のツールを渡します。そのため、このサーバーをオン・オフすると、実行中のセッションの次のターンがプロンプトキャッシュを使わない場合があります。",
   'settings.mcp.page.server.transportMode': 'トランスポートモード',
   'settings.mcp.page.connection.command': 'コマンド',
   'settings.mcp.page.connection.serverUrl': 'サーバー URL',
@@ -2587,6 +2597,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ja,
   ...extensionsSettingsI18n.ja,
   ...messagingSettingsI18n.ja,
+  ...modelChoicesSettingsI18n.ja,
   ...settingsLayoutI18n.ja,
   'settings.page.integrations.title': '連携',
   'settings.page.integrations.description': 'OpenChamber と連携するサービスやサブスクリプションを接続します。',
@@ -2611,6 +2622,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "既定（OpenCode が判断）",
   "settings.mcp.page.advanced.codemodeOption.on": "オン",
   "settings.mcp.page.advanced.codemodeOption.off": "オフ",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Code Mode を変えると、このサーバーのツールがモデルのツール一覧に入ったり外れたりするため、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode オン",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode オフ",
   'settings.mcp.page.advanced.protocol': 'プロトコル',

@@ -40,7 +40,7 @@ const extractSessionStatusUpdate = (payload) => {
 
 const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
-export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
+export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent, getSessionModelProvider }) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
@@ -55,6 +55,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // leave when the call stops waiting (`trackWaitingPage`).
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
+  // False until the watcher stream delivers its first payload in this
+  // process; part of the session-activity v1 contract (design #612) so an
+  // empty read is distinguishable from a watcher that has not started.
+  let watcherReady = false;
 
   const getOrCreatePendingRequests = (sessionId) => {
     let entry = pendingRequestsBySession.get(sessionId);
@@ -153,11 +157,20 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     return state;
   };
 
-  const setSessionActivityPhase = (sessionId, phase) => {
+  const setSessionActivityPhase = (sessionId, phase, spaceId = undefined) => {
     if (!sessionId || typeof sessionId !== 'string') return false;
 
     const current = sessionActivityPhases.get(sessionId);
-    if (current?.phase === phase) return false;
+    // A caller that knows the session's space (the SSE payload path) passes
+    // it explicitly, including null for a host session; internal callers
+    // that do not pass it must not erase a tag an earlier payload set.
+    const nextSpaceId = spaceId === undefined ? (current?.spaceId ?? null) : spaceId;
+    if (current?.phase === phase) {
+      if (current && current.spaceId !== nextSpaceId) {
+        sessionActivityPhases.set(sessionId, { ...current, spaceId: nextSpaceId });
+      }
+      return false;
+    }
     if (phase === 'cooldown' && current?.phase !== 'busy') {
       return false;
     }
@@ -173,7 +186,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     if (wasActive !== isActive) {
       activeSessionCount = Math.max(0, activeSessionCount + (isActive ? 1 : -1));
     }
-    sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now() });
+    sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now(), spaceId: nextSpaceId });
 
     if (phase === 'cooldown') {
       const timer = setTimeout(() => {
@@ -363,15 +376,45 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     };
   };
 
+  // External observability contract v1 (design #612, phase 1 - #524): the
+  // per-session { type } phase is frozen; every other field is additive and
+  // an unknown is an explicit null, never a fabricated value. toolInFlight
+  // has no in-process per-session source today, so it ships null.
   const getSessionActivitySnapshot = () => {
-    const result = {};
+    const sessions = {};
     for (const [sessionId, data] of sessionActivityPhases) {
-      result[sessionId] = { type: data.phase };
+      const modelProvider = getSessionModelProvider ? getSessionModelProvider(sessionId) : null;
+      sessions[sessionId] = {
+        type: data.phase,
+        lastActivityAt: data.updatedAt,
+        status: sessionStates.get(sessionId)?.status ?? null,
+        model: modelProvider
+          ? { modelID: modelProvider.modelID ?? null, providerID: modelProvider.providerID ?? null }
+          : null,
+        toolInFlight: null,
+      };
     }
-    return result;
+    return {
+      version: 1,
+      serverTime: Date.now(),
+      watcherReady,
+      sessions,
+    };
   };
 
   const getActiveSessionCount = () => activeSessionCount;
+
+  // Host-only counterpart for the managed-servers read: busy sessions that
+  // belong to an isolated space run on the same OpenCode process but are not
+  // sessions of the host server itself. Derived from the phase records so
+  // cooldown, cleanup, and reset paths cannot drift from the tags.
+  const getActiveHostSessionCount = () => {
+    let count = 0;
+    for (const data of sessionActivityPhases.values()) {
+      if (data.phase === 'busy' && !data.spaceId) count += 1;
+    }
+    return count;
+  };
 
   const resetAllSessionActivityToIdle = () => {
     for (const timer of sessionActivityCooldowns.values()) {
@@ -380,8 +423,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     sessionActivityCooldowns.clear();
     activeSessionCount = 0;
     const now = Date.now();
-    for (const [sessionId] of sessionActivityPhases) {
-      sessionActivityPhases.set(sessionId, { phase: 'idle', updatedAt: now });
+    for (const [sessionId, data] of sessionActivityPhases) {
+      sessionActivityPhases.set(sessionId, { phase: 'idle', updatedAt: now, spaceId: data.spaceId ?? null });
     }
   };
 
@@ -446,15 +489,17 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
-  const processOpenCodeSsePayload = (payload) => {
+  const processOpenCodeSsePayload = (payload, { spaceId = null } = {}) => {
+    watcherReady = true;
     processBlockingRequestPayload(payload);
     const update = extractSessionStatusUpdate(payload);
     if (!update) return;
 
+    const activitySpaceId = spaceId || null;
     if (update.type === 'busy' || update.type === 'retry') {
-      setSessionActivityPhase(update.sessionId, 'busy');
+      setSessionActivityPhase(update.sessionId, 'busy', activitySpaceId);
     } else if (update.type === 'idle') {
-      setSessionActivityPhase(update.sessionId, 'cooldown');
+      setSessionActivityPhase(update.sessionId, 'cooldown', activitySpaceId);
     }
 
     updateSessionState(update.sessionId, update.type, update.eventId || `sse-${Date.now()}`, {
@@ -475,12 +520,14 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     sessionAttentionStates.clear();
     pendingRequestsBySession.clear();
     activeSessionCount = 0;
+    watcherReady = false;
   };
 
   return {
     processOpenCodeSsePayload,
     getSessionActivitySnapshot,
     getActiveSessionCount,
+    getActiveHostSessionCount,
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
     trackWaitingPage,

@@ -33,7 +33,7 @@ import {
 
 export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
-const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
+export const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
 
 // Mirrors the Z.ai credit label (same monitor API family): `usage` is the
 // total, `currentValue` the consumed amount.
@@ -49,17 +49,23 @@ const formatCreditValueLabel = (limit) => {
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
 
+// The monitor API can report percentages outside [0, 100]; clamp at the
+// read site. Non-finite or non-number input stays null. (No clamp inside
+// toUsageWindow: wafer's overage branch deliberately exceeds 100.)
+const clampUsedPercent = (value) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+
 // `percentage` is the used percent; when the API omits it, derive it from
 // currentValue/usage (observed percentages are integers).
 const resolveUsedPercent = (limit) => {
   const percentage = toNumber(limit?.percentage);
   if (percentage !== null) {
-    return percentage;
+    return clampUsedPercent(percentage);
   }
   const used = toNumber(limit?.currentValue);
   const total = toNumber(limit?.usage);
   if (used === null || total === null || total <= 0) return null;
-  return Math.round((used / total) * 100);
+  return clampUsedPercent(Math.round((used / total) * 100));
 };
 
 /** A business failure reported inside an HTTP 200 body; shared with the z.ai provider (same monitor API). */
@@ -171,7 +177,7 @@ export const fetchQuota = async () => {
       // TIME_LIMIT unit=5 means 1 month (30 days)
       const monthSeconds = 30 * 24 * 60 * 60;
       const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
-      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? mcpToolsTimeLimit.percentage : null;
+      const usedPercent = clampUsedPercent(mcpToolsTimeLimit?.percentage);
 
       windows['MCP Tools'] = toUsageWindow({
         usedPercent,

@@ -304,6 +304,14 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('messageSearchReasoningEnabled', (v) => useUIStore.getState().setMessageSearchReasoningEnabled(v)),
   }),
+  // The server records manual model choices only while this is on (absent
+  // reads as on); VS Code has no OpenChamber server to keep them.
+  modelChoiceRecordingEnabled: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('modelChoiceRecordingEnabled', (v) => useUIStore.getState().setModelChoiceRecordingEnabled(v)),
+  }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentScheduleToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentScheduleToolEnabled', (v) => useUIStore.getState().setAgentScheduleToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
@@ -340,6 +348,13 @@ export const SETTINGS_REGISTRY = {
     computed: true,
     parse: parseBoolean,
     ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
+  }),
+  // Server-owned: whether the Tools page switches reach the running OpenCode live.
+  managedToolsApplyLive: field({
+    scope: 'instance',
+    computed: true,
+    parse: parseBoolean,
+    ui: uiStore('managedToolsApplyLive', (v) => useUIStore.getState().setManagedToolsApplyLive(v), { autoSave: false }),
   }),
   openCodeUpdateToastDismissedVersion: field({ scope: 'instance', parse: parseTrimmedStringUpTo(128) }),
   autoDeleteEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('autoDeleteEnabled', (v) => useUIStore.getState().setAutoDeleteEnabled(v)) }),
@@ -565,6 +580,11 @@ export const SETTINGS_REGISTRY = {
   sessionSuggestionEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionSuggestionEnabled', (v) => useUIStore.getState().setSessionSuggestionEnabled(v)) }),
   sessionWorkEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionWorkEnabled', (v) => useUIStore.getState().setSessionWorkEnabled(v)) }),
   sessionReviewOfferEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('sessionReviewOfferEnabled', (v) => useUIStore.getState().setSessionReviewOfferEnabled(v)) }),
+  activeRunModelChangeBehavior: field({
+    scope: 'profile',
+    parse: parseOneOf(['next-message', 'restart'] as const),
+    ui: uiStore('activeRunModelChangeBehavior', (v) => useUIStore.getState().setActiveRunModelChangeBehavior(v)),
+  }),
   sessionGoalEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalEnabled', (v) => useUIStore.getState().setSessionGoalEnabled(v)) }),
   // Who checks goal progress. The goal loop runs on the OpenChamber server,
   // which VS Code does not have.

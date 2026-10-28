@@ -4,6 +4,7 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
@@ -28,6 +29,7 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -142,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ja,
   ...referencePickerI18n.ja,
   ...sessionMenuHintsI18n.ja,
+  ...sessionErrorRecoveryI18n.ja,
   ...sidebarLayoutI18n.ja,
   ...projectKnowledgeI18n.ja,
   ...linearPanelI18n.ja,
@@ -166,6 +169,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ja,
   ...integrationsCatalogI18n['ja'],
   ...sessionGoalWriterI18n['ja'],
+  ...subsessionModelsI18n['ja'],
   ...diffFindI18n['ja'],
   'terminalView.actions.attachSelection': '選択した出力を添付',
   'terminalView.actions.copySelection': '選択した出力をコピー',
@@ -3076,6 +3080,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '認証が必要です',
   'mcpDropdown.status.needsRegistration': '登録が必要: {error}',
   'mcpDropdown.empty.configureInConfig': '設定でMCPサーバーを構成してください。',
+  "mcpDropdown.cacheNote": "Code Mode がオフのサーバーを切り替えると、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
   'sessionAuth.error.rateLimitTitle': '試行回数が多すぎます',
   'sessionAuth.error.networkTitle': 'サーバーに到達できません',
   'sessionAuth.error.rateLimitDescriptionSingle': '再試行まで{minutes}分お待ちください。',

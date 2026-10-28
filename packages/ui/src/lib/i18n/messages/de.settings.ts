@@ -1,6 +1,7 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { messagingSettingsI18n } from './messaging.settings.i18n';
+import { modelChoicesSettingsI18n } from './model-choices.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
@@ -1214,6 +1215,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentToolsCodeMode": "Über Code Mode ausführen",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber-Werkzeuge über Code Mode ausführen",
   "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Aus: Das Modell sieht jedes Werkzeug direkt. An: Sie liegen hinter einem Werkzeug, das ein kurzes Skript ausführt. Spart etwas Kontext, aber das Modell kann sie übersehen, besonders kleinere Modelle. Das Render-Werkzeug bleibt immer direkt, weil der Chat die Seite aus seinem eigenen Aufruf zeichnet.",
+  "settings.openchamber.tools.cacheNote.direct": "Wenn du ein Tool oder Code Mode ein- oder ausschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
+  "settings.openchamber.tools.cacheNote.codeMode": "Wenn du das Darstellungstool oder Code Mode ein- oder ausschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Optionaler absoluter Pfad zur',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'Binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode Binary-Pfad',
@@ -1831,6 +1834,8 @@ export const settingsDict = {
   'settings.mcp.page.server.importJsonTitle': 'Eine vollständige MCP-Server-Konfiguration aus einem JSON-Snippet importieren',
   'settings.mcp.page.server.enable': 'Server aktivieren',
   'settings.mcp.page.server.enableAria': 'Server aktivieren',
+  "settings.mcp.page.server.enableCacheNote": "Code Mode ist für diesen Server aus. Wenn du ihn ein- oder ausschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
+  "settings.mcp.page.server.enableCacheNoteDefault": "Steht Code Mode auf Standard, gibt OpenCode einem Server mit eigenem Code Mode normale Tools. Diesen Server ein- oder auszuschalten kann daher dazu führen, dass der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht nutzt.",
   'settings.mcp.page.server.transportMode': 'Transportmodus',
   'settings.mcp.page.connection.command': 'Befehl',
   'settings.mcp.page.connection.serverUrl': 'Server-URL',
@@ -2448,6 +2453,11 @@ export const settingsDict = {
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Token einfügen',
   'settings.providers.page.quotaCredentials.platformApiKey': 'Plattform-API-Schlüssel',
   'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Für die Nutzung brauchen Sie einen Plattform-API-Schlüssel aus der ZenMux-Konsole. Der Schlüssel, den OpenCode für den Chat verwendet, ist ein anderer und wird hier nicht benutzt.',
+  'settings.providers.page.quotaCredentials.sessionCookie': 'Sitzungs-Cookie',
+  'settings.providers.page.quotaCredentials.workspaceId': 'Workspace-ID',
+  'settings.providers.page.quotaCredentials.cookiePlaceholder': 'Sitzungs-Cookie einfügen',
+  'settings.providers.page.quotaCredentials.workspaceIdPlaceholder': 'Workspace-ID einfügen',
+  'settings.providers.page.quotaCredentials.opendesignInstructions': 'Für die Nutzung brauchen Sie das Open Design-Sitzungs-Cookie aus Ihrem Browser und Ihre Workspace-ID. Kopieren Sie das Cookie aus den Entwicklertools Ihres Browsers; OpenChamber durchsucht den Cookie-Speicher des Browsers nie.',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'Arbeitsbereich',
   'settings.view.nav.group.opencode': 'OpenCode',
@@ -2578,6 +2588,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,
   ...messagingSettingsI18n.de,
+  ...modelChoicesSettingsI18n.de,
   ...settingsLayoutI18n.de,
   'settings.page.integrations.title': 'Integrationen',
   'settings.page.integrations.description': 'Verbinde die Dienste und Abonnements, mit denen OpenChamber arbeitet.',
@@ -2602,6 +2613,7 @@ export const settingsDict = {
   "settings.mcp.page.advanced.codemodeOption.default": "Standard (OpenCode entscheidet)",
   "settings.mcp.page.advanced.codemodeOption.on": "An",
   "settings.mcp.page.advanced.codemodeOption.off": "Aus",
+  "settings.mcp.page.advanced.codemodeCacheNote": "Code Mode zu ändern nimmt die Tools dieses Servers in die Tool-Liste des Modells auf oder daraus heraus, daher nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
   "settings.mcp.page.advanced.summary.codemodeOn": "Code Mode an",
   "settings.mcp.page.advanced.summary.codemodeOff": "Code Mode aus",
   'settings.mcp.page.advanced.protocol': 'Protokoll',

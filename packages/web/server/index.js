@@ -110,6 +110,7 @@ import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
+import { readLayeredModelRoutes } from './lib/routing/model-routes.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
@@ -141,7 +142,7 @@ import { createVaultResolver } from './lib/environment/vault.js';
 import { configureGitHubVaultReader } from './lib/github/auth.js';
 import { configureGitLabVaultReader } from './lib/gitlab/auth-storage.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
-import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
+import { OPENCODE_CONFIG_DIR, readConfigSources } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -173,6 +174,9 @@ import { createIntegrationActions } from './lib/openchamber-control/integration-
 import { createIntegrationServiceActions } from './lib/openchamber-control/integration-service-actions.js';
 import { createEnvironmentActions } from './lib/openchamber-control/environment-actions.js';
 import { createProjectSetupActions } from './lib/openchamber-control/project-setup-actions.js';
+import { createModelChoiceActions } from './lib/openchamber-control/model-choice-actions.js';
+import { createModelChoiceStore } from './lib/model-choices/store.js';
+import { createModelChoiceService } from './lib/model-choices/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -425,6 +429,8 @@ const settingsHelpers = createSettingsHelpers({
   sanitizeModelRefs,
   sanitizeSkillCatalogs,
   sanitizeProjects,
+  // Called per settings response; the runtime is created at startup, so false until then.
+  areManagedToolsLive: () => managedConfigRuntime?.appliesLive() === true,
 });
 
 const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
@@ -628,10 +634,16 @@ const updateSessionMetadataWith = async (sessionID, decide, { directory = '' } =
   return result;
 };
 
+// The notifications runtime is created after the session runtime, so the
+// session-activity snapshot reads its remembered model/provider through
+// this ref, filled in once the notifications runtime exists.
+const sessionModelProviderRef = { current: null };
+
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
+  getSessionModelProvider: (sessionId) => sessionModelProviderRef.current?.(sessionId) ?? null,
 });
 
 const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
@@ -977,6 +989,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
+sessionModelProviderRef.current = notificationTriggerRuntime.getRememberedSessionModelProvider;
 const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
@@ -1123,6 +1136,7 @@ const routingRuntime = createRoutingRuntime({
   getOpenCodeAuthHeaders,
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   isSessionWarm: (sessionId, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionId, cacheLifetimeMs),
+  readModelPools: (directory) => readLayeredModelRoutes(readConfigSources(directory || null)),
 });
 
 // "In work": Jev opens a session when real work starts in it and hints when a
@@ -1217,7 +1231,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   onPayload: (payload, { spaceId }) => {
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
-    sessionRuntime.processOpenCodeSsePayload(payload);
+    sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
   },
 });
 
@@ -1425,6 +1439,12 @@ const clientPairingRuntime = createClientPairingRuntime({
 });
 // What each open window reports of its device-only settings (lib/device-settings).
 const deviceSettingsStore = createDeviceSettingsStore();
+// Manual model and effort choices and the notes built from them (lib/model-choices).
+const modelChoiceService = createModelChoiceService({
+  store: createModelChoiceStore({ dataDir: OPENCHAMBER_DATA_DIR }),
+  readSettings: () => readSettingsFromDiskMigrated(),
+  persistSettings: (changes) => persistSettings(changes),
+});
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
 });
@@ -1538,6 +1558,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  getActiveHostSessionCount: () => sessionRuntime.getActiveHostSessionCount(),
   listBusySessionIds: () => Object.entries(sessionRuntime.getSessionStateSnapshot())
     .filter(([, sessionState]) => sessionState?.status === 'busy' || sessionState?.status === 'retry')
     .map(([sessionId]) => sessionId),
@@ -1983,6 +2004,7 @@ const openChamberControlService = createOpenChamberControlService({
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
     createEnvironmentActions({ store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects }),
     createProjectSetupActions({ readProjectSetup: projectConfigRuntime.readProjectSetup, listProjects: listConfiguredProjects }),
+    createModelChoiceActions({ modelChoiceService }),
   ],
 });
 
@@ -2126,6 +2148,7 @@ async function main(options = {}) {
     agentToolRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
     isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
+    isManagedOpenCode: () => !ENV_SKIP_OPENCODE_START && !isExternalOpenCode,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 
@@ -2509,6 +2532,7 @@ async function main(options = {}) {
     writeSseEvent,
     pluginNotificationEmitter,
     sessionRuntime,
+    getManagedServersSnapshot: () => openCodeLifecycleRuntime.getManagedServersSnapshot(),
     setPushInitialized,
     fs,
     os,
@@ -2717,6 +2741,7 @@ async function main(options = {}) {
     openChamberSessionService,
     openChamberControlService,
     deviceSettingsStore,
+    modelChoiceService,
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,

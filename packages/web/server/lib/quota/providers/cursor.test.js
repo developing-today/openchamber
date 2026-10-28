@@ -42,6 +42,79 @@ afterEach(() => {
 });
 
 describe('Cursor quota', () => {
+  it('does not fabricate on-demand exhaustion when spendLimitUsage omits the remaining amount', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 },
+        spendLimitUsage: { individualLimit: 2000 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.on_demand.usedPercent).toBeNull();
+    expect(result.usage.windows.on_demand.valueLabel).toBe('$20.00 limit');
+  });
+
+  it.each([
+    [1500, 25, '$15.00 remaining of $20.00'],
+    [0, 100, '$0.00 remaining of $20.00']
+  ])('reports on-demand remaining %s as %s%% used', async (individualRemaining, expectedUsedPercent, expectedLabel) => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 },
+        spendLimitUsage: { individualLimit: 2000, individualRemaining }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.on_demand.usedPercent).toBe(expectedUsedPercent);
+    expect(result.usage.windows.on_demand.valueLabel).toBe(expectedLabel);
+  });
+
+  it('makes no remaining claim for plan_limit when the payload omits the remaining amount', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300, limit: 2000 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.plan_limit.usedPercent).toBeNull();
+    expect(result.usage.windows.plan_limit.valueLabel).toBe('$20.00 limit');
+  });
+
+  it('reports plan_limit from a reported remaining amount', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300, limit: 2000, remaining: 500 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.plan_limit.usedPercent).toBe(75);
+    expect(result.usage.windows.plan_limit.valueLabel).toBe('$5.00 remaining of $20.00');
+  });
+
   it('keeps the planUsage path for Pro accounts', async () => {
     mockResponses({
       GetCurrentPeriodUsage: ok({ enabled: true, planUsage: { totalPercentUsed: 42, totalSpend: 2300 } }),
@@ -57,6 +130,137 @@ describe('Cursor quota', () => {
     expect(result.usage.windows.billing_cycle.valueLabel).toBe('$23.00');
   });
 
+  it.each([
+    [150, 100],
+    [-20, 0],
+    [200, 100],
+    [42, 42]
+  ])('clamps billing_cycle totalPercentUsed %s to %s', async (totalPercentUsed, expectedUsedPercent) => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({ enabled: true, planUsage: { totalPercentUsed, totalSpend: 2300 } }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.usedPercent).toBe(expectedUsedPercent);
+  });
+
+  it.each([
+    [150, 100],
+    [-20, 0],
+    [200, 100],
+    [42, 42]
+  ])('clamps autoPercentUsed %s to %s', async (autoPercentUsed, expectedUsedPercent) => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, autoPercentUsed, apiPercentUsed: 10, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.auto.usedPercent).toBe(expectedUsedPercent);
+    expect(result.usage.windows.auto.remainingPercent).toBe(100 - expectedUsedPercent);
+  });
+
+  it.each([
+    [150, 100],
+    [-20, 0],
+    [200, 100],
+    [42, 42]
+  ])('clamps apiPercentUsed %s to %s', async (apiPercentUsed, expectedUsedPercent) => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, autoPercentUsed: 10, apiPercentUsed, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.api.usedPercent).toBe(expectedUsedPercent);
+    expect(result.usage.windows.api.remainingPercent).toBe(100 - expectedUsedPercent);
+  });
+
+  it('omits the auto and api windows when their percentages are missing', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({ enabled: true, planUsage: { totalPercentUsed: 42, totalSpend: 2300 } }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.usedPercent).toBe(42);
+    expect(result.usage.windows.auto).toBeUndefined();
+    expect(result.usage.windows.api).toBeUndefined();
+  });
+
+  it('reports windowSeconds as the billing-cycle duration, not time until reset', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        billingCycleStart: '1700000000000',
+        billingCycleEnd: '1702592000000',
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBe(2592000);
+  });
+
+  it('reports windowSeconds as null when the billing-cycle start is missing', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        billingCycleEnd: 1702592000000,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
+    expect(result.usage.windows.billing_cycle.resetAt).toBe(1702592000000);
+  });
+
+  it('reports windowSeconds as null when the billing-cycle start is not before the end', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        billingCycleStart: 1702592000000,
+        billingCycleEnd: 1702592000000,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
+  });
+
   it('falls back to auth/usage and team-scoped GetHardLimit for enterprise accounts', async () => {
     const fetchMock = mockResponses(enterpriseRoutes);
 
@@ -69,6 +273,52 @@ describe('Cursor quota', () => {
     expect(result.usage.windows.on_demand).toBeUndefined();
     const hardLimitCall = fetchMock.mock.calls.find(([url]) => String(url).includes('GetHardLimit'));
     expect(JSON.parse(hardLimitCall[1].body)).toEqual({ teamId: '424242' });
+  });
+
+  it('reports enterprise windowSeconds as the billing-cycle duration', async () => {
+    mockResponses(enterpriseRoutes);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBe(288471);
+  });
+
+  it('reports enterprise windowSeconds when billingCycleStart is only in planInfo', async () => {
+    mockResponses({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: ok({ billingCycleEnd: '1787932328088', displayThreshold: 100 }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Enterprise', price: 'Custom', billingCycleStart: '1787932328088', billingCycleEnd: '1788220800000' } })
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBe(288471);
+  });
+
+  it('reports enterprise windowSeconds as null when the billing-cycle start is missing', async () => {
+    mockResponses({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: ok({ billingCycleEnd: '1787932328088', displayThreshold: 100 })
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
+  });
+
+  it('reports enterprise windowSeconds as null when the billing-cycle start is not before the end', async () => {
+    mockResponses({
+      ...enterpriseRoutes,
+      GetCurrentPeriodUsage: ok({ billingCycleStart: '1788220800000', billingCycleEnd: '1787932328088', displayThreshold: 100 })
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.windowSeconds).toBeNull();
   });
 
   it('picks the largest request bucket and skips metadata', async () => {

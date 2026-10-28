@@ -10,21 +10,26 @@ import { injectedEnvKeys } from '../injected-env.js';
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
+// The managed-servers read verifies recorded pids through an async `ps`
+// read (execFile in lifecycle.js). Tests steer it by setting
+// `recordedProcessCommand`; the callback shape matches the real execFile,
+// so lifecycle's async wrapper resolves with this stdout.
+let recordedProcessCommand = '';
+const execFileMock = vi.fn((file, args, options, callback) => callback(null, recordedProcessCommand, ''));
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
   spawnSync: spawnSyncMock,
   // `managed-process-registry.js` (imported transitively via lifecycle.js)
   // calls `promisify(execFile)` at module load, so the mock must expose a
-  // function here. Lifecycle tests don't exercise the reaper path, so a plain
-  // stub is enough; the registry's best-effort writes are no-ops on errors.
-  execFile: vi.fn(),
+  // function here.
+  execFile: execFileMock,
 }));
 vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createOpenCodeLifecycleRuntime, parsePositiveInt } = await import('./lifecycle.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
@@ -38,6 +43,7 @@ afterEach(async () => {
   activeLogPath = null;
   await Promise.all(tempDataDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
   spawnSyncMock.mockReset();
+  recordedProcessCommand = '';
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
@@ -190,6 +196,95 @@ describe('OpenCode lifecycle', () => {
       // Credential reads take variable keys from the environment the current process got.
       expect(runtime.getManagedOpenCodeProcessEnv()).toBe(spawnMock.mock.calls[1][2].env);
       expect(runtime.getManagedOpenCodeProcessEnv()).toMatchObject({ SHELL_ONLY: 'yes' });
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
+  it('does not pair a replacement process with its predecessor version in the managed-servers read', async () => {
+    const pids = [process.pid, process.ppid];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      child.pid = pids.shift() ?? child.pid;
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.19' }),
+    }));
+    const runtime = createRuntime();
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+    try {
+      await runtime.triggerHealthCheck();
+      const before = await runtime.getManagedServersSnapshot();
+      expect(before.servers.find((server) => server.pid === process.pid)?.version).toBe('2.0.19');
+
+      await runtime.restartOpenCode();
+
+      const after = await runtime.getManagedServersSnapshot();
+      const replacement = after.servers.find((server) => server.pid === process.ppid);
+      expect(replacement?.status).toBe('ready');
+      expect(replacement?.version).toBeNull();
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
+  it('verifies recorded-pid identity in the managed-servers read (#638)', async () => {
+    const entry = { pid: process.pid, port: 5001, binary: '/bin/opencode', startedAt: '2026-10-28T00:30:00.000Z' };
+    const runtime = createRuntime({ readRegistryEntries: async () => [entry] });
+    try {
+      // Recycled pid: the live process at the recorded pid is unrelated.
+      recordedProcessCommand = 'sleep 30\n';
+      const recycled = await runtime.getManagedServersSnapshot();
+      expect(recycled.servers.map((server) => server.pid)).toEqual([]);
+
+      // Genuine recorded server: command still identifies it, port included.
+      recordedProcessCommand = '/bin/opencode serve --hostname 127.0.0.1 --port 5001\n';
+      const genuine = await runtime.getManagedServersSnapshot();
+      expect(genuine.servers).toEqual([
+        { pid: process.pid, port: 5001, directory: null, version: null, status: 'unknown', startedAt: '2026-10-28T00:30:00.000Z', sessionCount: null },
+      ]);
+
+      // A different OpenCode server whose port merely contains the recorded
+      // port as a substring (50010 vs 5001) is not the recorded server.
+      recordedProcessCommand = '/bin/opencode serve --hostname 127.0.0.1 --port 50010\n';
+      const wrongPort = await runtime.getManagedServersSnapshot();
+      expect(wrongPort.servers).toEqual([]);
+
+      // Identity cannot be verified: no command read -> not listed.
+      recordedProcessCommand = '';
+      const unverifiable = await runtime.getManagedServersSnapshot();
+      expect(unverifiable.servers).toEqual([]);
+    } finally {
+      recordedProcessCommand = '';
+    }
+  });
+
+  it('reports the host-only session count for its own server in the managed-servers read', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      child.pid = process.pid;
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.19' }),
+    }));
+    const runtime = createRuntime({
+      getActiveSessionCount: () => 5,
+      getActiveHostSessionCount: () => 2,
+    });
+    const server = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = server;
+    try {
+      await runtime.triggerHealthCheck();
+      const snapshot = await runtime.getManagedServersSnapshot();
+      const own = snapshot.servers.find((entry) => entry.pid === process.pid);
+      expect(own?.sessionCount).toBe(2);
     } finally {
       await runtime.testState.openCodeProcess.close();
     }
@@ -1689,3 +1784,18 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
   });
 });
 
+
+describe('parsePositiveInt health env parsing (#689)', () => {
+  it('honours plain decimal spellings', () => {
+    expect(parsePositiveInt('5000', 5000)).toBe(5000);
+    expect(parsePositiveInt('250', 5000)).toBe(250);
+    expect(parsePositiveInt(' 12 ', 5000)).toBe(12);
+  });
+
+  it('falls back for non-plain-decimal spellings instead of truncating them', () => {
+    for (const invalid of [undefined, '', 'abc', '5000junk', '5000ms', '5.9', '1e3', '0x10', '-5', '0']) {
+      expect(parsePositiveInt(invalid, 5000)).toBe(5000);
+      expect(parsePositiveInt(invalid, 20)).toBe(20);
+    }
+  });
+});

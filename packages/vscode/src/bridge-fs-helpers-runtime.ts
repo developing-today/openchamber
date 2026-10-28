@@ -6,9 +6,22 @@ import { execGit } from './bridge-git-process-runtime';
 
 const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
-const createGitCheckIgnoreTimeoutMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
+// An env value is judged by its whole text, not by what `Number(...)` can
+// reinterpret: '' or ' ' must not read as 0, and '1e3', '0x10' or '5.9' must
+// not become a number the user never wrote. The web copies of these readers
+// judge the same variables this way (`packages/web/server/lib/fs/routes.js`).
+const parsePlainDecimalInt = (raw: string | undefined): number | null => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
+export const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (raw !== null && raw >= 0) return raw;
   return 2500;
 };
 

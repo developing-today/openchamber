@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
-import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -69,6 +73,22 @@ describe('projectCredentialEntries', () => {
   });
 });
 
+describe('projectCredentialRows', () => {
+  it('keeps every row with its id, label and active flag in the legacy entry shape', () => {
+    const rows = projectCredentialRows([
+      entry('openai', false, { type: 'oauth', methodID: 'chatgpt-browser', access: 'legacy', refresh: 'rt', expires: 42, metadata: { accountID: 'acc_1' } }),
+      entry('openai', true, { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'sharing', refresh: 'rt2', expires: 43, metadata: {} }),
+      { id: 'cred_x', integrationID: 'deepseek', label: '', active: true, value: { type: 'key', key: 'ds' } },
+    ]);
+
+    expect(rows).toEqual([
+      { id: 'cred_openai_false', integrationID: 'openai', label: 'default', active: false, value: { type: 'oauth', access: 'legacy', refresh: 'rt', expires: 42, accountId: 'acc_1' } },
+      { id: 'cred_openai_true', integrationID: 'openai', label: 'default', active: true, value: { type: 'oauth', access: 'sharing', refresh: 'rt2', expires: 43 } },
+      { id: 'cred_x', integrationID: 'deepseek', label: null, active: true, value: { type: 'api', key: 'ds' } },
+    ]);
+  });
+});
+
 describe('projectEnvironmentKeys', () => {
   it('takes each variable OpenCode reports from the launch environment', () => {
     const integrations = [
@@ -128,6 +148,28 @@ describe('readOpenCodeCredentials', () => {
     await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
     await expect(getProviderAuth('openai')).resolves.toBeNull();
     expect(requests[0]).toEqual({ url: '/api/credential', authorization: 'Basic test' });
+  });
+
+  it('lists every stored credential row, not only the active one', async () => {
+    respond = (res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        data: [
+          entry('openai', false, { type: 'oauth', methodID: 'chatgpt-browser', access: 'legacy', refresh: 'rt-legacy', expires: 42, metadata: { accountID: 'acc_1' } }),
+          entry('openai', true, { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'sharing', refresh: 'rt-sharing', expires: 43, metadata: {} }),
+          entry('deepseek', true, { type: 'key', key: 'ds' }),
+        ],
+      }));
+    };
+
+    const openaiRows = await listStoredCredentials('openai');
+    expect(openaiRows.map((row) => [row.label, row.active, row.value.access])).toEqual([
+      ['default', false, 'legacy'],
+      ['default', true, 'sharing'],
+    ]);
+    expect(openaiRows[0].value.accountId).toBe('acc_1');
+    await expect(listStoredCredentials()).resolves.toHaveLength(3);
+    await expect(listStoredCredentials('anthropic')).resolves.toEqual([]);
   });
 
   it('reads the selected browser login of an integration with its method and metadata, and without the refresh token', async () => {
@@ -284,5 +326,93 @@ describe('renewStoredLogin', () => {
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('not connected');
     configureOpenCodeCredentials({ list: async () => rows });
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('cannot write');
+  });
+});
+
+describe('openCodeLocalCredentialSource', () => {
+  let dir;
+  let dbPath;
+
+  const createStore = (rows) => {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`create table credential (
+      id text primary key,
+      integration_id text,
+      label text not null,
+      value text not null,
+      connector_id text,
+      method_id text,
+      active integer,
+      time_created integer not null,
+      time_updated integer not null
+    )`);
+    const insert = db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)');
+    for (const row of rows) {
+      insert.run(row.id, row.integration, row.label ?? 'default', row.value, row.active ?? null, row.created, row.created);
+    }
+    db.close();
+  };
+
+  const keyRow = (id, integration, key, extra = {}) => ({
+    id,
+    integration,
+    value: JSON.stringify({ type: 'key', key }),
+    created: 100,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-auth-test-'));
+    dbPath = path.join(dir, 'opencode.db');
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('marks the newest legacy row active when no row carries the flag', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'old-key', { created: 100 }),
+      keyRow('cred_b', 'deepseek', 'new-key', { created: 200 }),
+    ]);
+    const entries = await openCodeLocalCredentialSource({ dbPath }).list();
+    expect(entries).toEqual([
+      { id: 'cred_a', integrationID: 'deepseek', label: 'default', active: false, value: { type: 'key', key: 'old-key' } },
+      { id: 'cred_b', integrationID: 'deepseek', label: 'default', active: true, value: { type: 'key', key: 'new-key' } },
+    ]);
+  });
+
+  it('honors an explicit active flag over creation order', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'pinned-key', { created: 100, active: 1 }),
+      keyRow('cred_b', 'deepseek', 'newer-key', { created: 200, active: 0 }),
+    ]);
+    const entries = await openCodeLocalCredentialSource({ dbPath }).list();
+    expect(entries.find((entry) => entry.id === 'cred_a')?.active).toBe(true);
+    expect(entries.find((entry) => entry.id === 'cred_b')?.active).toBe(false);
+  });
+
+  it('projects through the shared readers, skipping unreadable rows', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'live-key', { created: 100 }),
+      { id: 'cred_broken', integration: 'wafer', value: 'not json', created: 100 },
+      { id: 'cred_orphan', integration: null, value: JSON.stringify({ type: 'key', key: 'x' }), created: 100 },
+    ]);
+    configureOpenCodeCredentials(openCodeLocalCredentialSource({ dbPath }));
+    await expect(readOpenCodeCredentials()).resolves.toEqual({
+      deepseek: { type: 'api', key: 'live-key' },
+    });
+    const rows = await listStoredCredentials();
+    expect(rows.map((row) => row.id)).toEqual(['cred_a']);
+  });
+
+  it('fails clearly when the store file is missing', async () => {
+    await expect(openCodeLocalCredentialSource({ dbPath }).list()).rejects.toThrow('not found');
+  });
+
+  it('fails rather than answering empty when every stored row is unreadable', async () => {
+    createStore([{ id: 'cred_broken', integration: 'wafer', value: 'not json', created: 100 }]);
+    await expect(openCodeLocalCredentialSource({ dbPath }).list()).rejects.toThrow('none could be read');
   });
 });
