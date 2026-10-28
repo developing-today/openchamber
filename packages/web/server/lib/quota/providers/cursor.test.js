@@ -152,6 +152,95 @@ describe('Cursor quota', () => {
     expect(result.usage.windows.billing_cycle.windowSeconds).toBe(2592000);
   });
 
+  it('does not fabricate on-demand exhaustion when spendLimitUsage omits the remaining amount', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 },
+        spendLimitUsage: { individualLimit: 2000 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.on_demand.usedPercent).toBeNull();
+    expect(result.usage.windows.on_demand.remainingPercent).toBeNull();
+    expect(result.usage.windows.on_demand.valueLabel).toBeUndefined();
+  });
+
+  it('reports on-demand usage from a reported individual remaining', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 },
+        spendLimitUsage: { individualLimit: 2000, individualRemaining: 1500 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.on_demand.usedPercent).toBe(25);
+    expect(result.usage.windows.on_demand.valueLabel).toBe('$15.00 remaining of $20.00');
+  });
+
+  it('reports a reported on-demand remaining of zero as real exhaustion', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300 },
+        spendLimitUsage: { individualLimit: 2000, individualRemaining: 0 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.on_demand.usedPercent).toBe(100);
+    expect(result.usage.windows.on_demand.valueLabel).toBe('$0.00 remaining of $20.00');
+  });
+
+  it('makes no plan-limit remaining claim when planUsage omits the remaining amount', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300, limit: 2000 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.plan_limit.usedPercent).toBeNull();
+    expect(result.usage.windows.plan_limit.valueLabel).toBeUndefined();
+  });
+
+  it('reports a reported plan-limit remaining of zero as $0.00 remaining', async () => {
+    mockResponses({
+      GetCurrentPeriodUsage: ok({
+        enabled: true,
+        planUsage: { totalPercentUsed: 42, totalSpend: 2300, limit: 2000, remaining: 0 }
+      }),
+      GetPlanInfo: ok({ planInfo: { planName: 'Pro' } }),
+      GetCreditGrantsBalance: ok({})
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.plan_limit.usedPercent).toBe(100);
+    expect(result.usage.windows.plan_limit.valueLabel).toBe('$0.00 remaining of $20.00');
+  });
+
   it('reports windowSeconds as null when the billing-cycle start is missing', async () => {
     mockResponses({
       GetCurrentPeriodUsage: ok({

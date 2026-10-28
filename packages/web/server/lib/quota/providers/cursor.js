@@ -255,24 +255,30 @@ const buildWindows = (usage, plan) => {
   if (planLimit) {
     const limit = toNumber(planUsage.limit);
     const remaining = toNumber(planUsage.remaining);
+    const remainingLabel = centsLabel(planUsage.remaining);
     windows.plan_limit = toUsageWindow({
       usedPercent: limit && remaining !== null
         ? clampPercent(((limit - remaining) / limit) * 100)
         : null,
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(planUsage.remaining) ?? '$0.00'} remaining of ${planLimit}`
+      // An absent remaining is unknown, not zero: make no remaining claim.
+      valueLabel: remainingLabel ? `${remainingLabel} remaining of ${planLimit}` : undefined
     });
   }
 
   const onDemandLimit = toNumber(spendLimitUsage.individualLimit) ?? toNumber(spendLimitUsage.pooledLimit);
   if (onDemandLimit && onDemandLimit > 0) {
-    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining) ?? 0;
+    // An absent remaining is unknown, not zero: defaulting it to 0 would
+    // report a fabricated 100% used / $0.00 remaining (exhaustion).
+    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining);
     windows.on_demand = toUsageWindow({
-      usedPercent: clampPercent(((onDemandLimit - remaining) / onDemandLimit) * 100),
+      usedPercent: remaining === null
+        ? null
+        : clampPercent(((onDemandLimit - remaining) / onDemandLimit) * 100),
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(remaining) ?? '$0.00'} remaining of ${centsLabel(onDemandLimit)}`
+      valueLabel: remaining === null ? undefined : `${centsLabel(remaining)} remaining of ${centsLabel(onDemandLimit)}`
     });
   }
 
