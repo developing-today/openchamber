@@ -29,7 +29,7 @@ vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createOpenCodeLifecycleRuntime, parsePositiveInt } = await import('./lifecycle.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
@@ -167,6 +167,33 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
   runtime.testState = state;
   return runtime;
 };
+
+// All four OPENCHAMBER_OPENCODE_HEALTH_* variables (timeout, consecutive
+// failures, interval, cache) pass through this reader, so its grammar is their
+// grammar: a plain decimal integer is honoured unchanged, and every other
+// spelling falls back instead of being truncated or reinterpreted.
+describe('health-check env values', () => {
+  it.each([
+    ['5000', 5000],
+    [' 5000 ', 5000],
+    ['01', 1],
+    ['1', 1],
+  ])('honours the plain decimal value %j', (raw, expected) => {
+    expect(parsePositiveInt(raw, 750)).toBe(expected);
+  });
+
+  it.each(['5000junk', '5.9', '1e3', '0x10', '2.50', 'abc', '', '0', '-5', '+5'])(
+    'falls back for the non-plain spelling %j',
+    (raw) => {
+      expect(parsePositiveInt(raw, 750)).toBe(750);
+    },
+  );
+
+  it('falls back when the value is absent, including the zero fallback that disables the interval override', () => {
+    expect(parsePositiveInt(undefined, 5000)).toBe(5000);
+    expect(parsePositiveInt(null, 0)).toBe(0);
+  });
+});
 
 describe('OpenCode lifecycle', () => {
   it('uses the resolved binary directly on startup and managed restart without an env override', async () => {

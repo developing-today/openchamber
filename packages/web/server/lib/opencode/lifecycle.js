@@ -45,9 +45,14 @@ const execFileAsync = (file, args, options) =>
     execFile(file, args, options, (error, stdout, stderr) => (error ? reject(error) : resolve({ stdout, stderr })));
   });
 
-const parsePositiveInt = (value, fallback) => {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+// A positive whole number from the environment, else the fallback. Only a plain
+// decimal spelling counts: bare parseInt honours '5000junk' as 5000, truncates
+// '5.9' to 5, and reads '1e3' as a 1 ms health-check timeout.
+export const parsePositiveInt = (value, fallback) => {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return fallback;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
 const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000);

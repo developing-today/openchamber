@@ -67,11 +67,15 @@ const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
 // the 150 ms default. Only applies on directions where batching was negotiated.
-const resolveBatchWindowMs = (option) => {
+// Only a plain decimal spelling counts: bare parseInt honours '150junk' as 150,
+// truncates '2.9' to 2, and reads '1e3' as a 1 ms window. Zero stays valid: it
+// turns batching into an immediate flush.
+export const resolveBatchWindowMs = (option) => {
   if (Number.isFinite(option) && option >= 0) return option;
-  const envValue = Number.parseInt(process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS ?? '', 10);
-  if (Number.isFinite(envValue) && envValue >= 0) return envValue;
-  return DEFAULT_BATCH_WINDOW_MS;
+  const text = String(process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS ?? '').trim();
+  if (!/^\d+$/.test(text)) return DEFAULT_BATCH_WINDOW_MS;
+  const envValue = Number(text);
+  return Number.isSafeInteger(envValue) ? envValue : DEFAULT_BATCH_WINDOW_MS;
 };
 
 // Bun's WebSocket puts the full dial URL into its error messages, and that URL

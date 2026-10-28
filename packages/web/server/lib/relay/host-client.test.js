@@ -2,13 +2,13 @@
 // client using the JS e2ee initiator. Verifies the full handshake and a tunneled
 // HTTP GET /health, and asserts only binary frames cross the relay post-handshake.
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'bun:test';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { startRelayHost } from './host-client.js';
+import { resolveBatchWindowMs, startRelayHost } from './host-client.js';
 import {
   bytesToBase64Url,
   createFrameDecryptor,
@@ -594,5 +594,46 @@ describe('relay host-client error redaction', () => {
     } finally {
       host.stop();
     }
+  });
+});
+
+// The env value is read through a plain-decimal grammar: bare parseInt would
+// honour '250junk' as 250, truncate '2.9' to 2, and read '1e3' as a 1 ms
+// window. Zero stays valid because it flushes batches immediately.
+describe('relay host-client batch window env value', () => {
+  const ENV = 'OPENCHAMBER_RELAY_BATCH_WINDOW_MS';
+  const DEFAULT_BATCH_WINDOW_MS = 150;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('prefers an explicit option over the environment', () => {
+    vi.stubEnv(ENV, '250');
+    expect(resolveBatchWindowMs(0)).toBe(0);
+    expect(resolveBatchWindowMs(400)).toBe(400);
+  });
+
+  it.each([
+    ['150', 150],
+    [' 250 ', 250],
+    ['0', 0],
+    ['0150', 150],
+  ])('honours the plain decimal value %j', (raw, expected) => {
+    vi.stubEnv(ENV, raw);
+    expect(resolveBatchWindowMs(undefined)).toBe(expected);
+  });
+
+  it.each(['150junk', '250junk', '2.9', '1e3', '0x10', '2.0', 'abc', '', '-5', '+150'])(
+    'falls back to the 150 ms default for the non-plain spelling %j',
+    (raw) => {
+      vi.stubEnv(ENV, raw);
+      expect(resolveBatchWindowMs(undefined)).toBe(DEFAULT_BATCH_WINDOW_MS);
+    },
+  );
+
+  it('uses the default when the variable is unset', () => {
+    vi.stubEnv(ENV, undefined);
+    expect(resolveBatchWindowMs(undefined)).toBe(DEFAULT_BATCH_WINDOW_MS);
   });
 });
