@@ -10,15 +10,20 @@ import { injectedEnvKeys } from '../injected-env.js';
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
+// The managed-servers read verifies recorded pids through an async `ps`
+// read (execFile in lifecycle.js). Tests steer it by setting
+// `recordedProcessCommand`; the callback shape matches the real execFile,
+// so lifecycle's async wrapper resolves with this stdout.
+let recordedProcessCommand = '';
+const execFileMock = vi.fn((file, args, options, callback) => callback(null, recordedProcessCommand, ''));
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
   spawnSync: spawnSyncMock,
   // `managed-process-registry.js` (imported transitively via lifecycle.js)
   // calls `promisify(execFile)` at module load, so the mock must expose a
-  // function here. Lifecycle tests don't exercise the reaper path, so a plain
-  // stub is enough; the registry's best-effort writes are no-ops on errors.
-  execFile: vi.fn(),
+  // function here.
+  execFile: execFileMock,
 }));
 vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
@@ -38,6 +43,7 @@ afterEach(async () => {
   activeLogPath = null;
   await Promise.all(tempDataDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
   spawnSyncMock.mockReset();
+  recordedProcessCommand = '';
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
@@ -231,23 +237,29 @@ describe('OpenCode lifecycle', () => {
     const runtime = createRuntime({ readRegistryEntries: async () => [entry] });
     try {
       // Recycled pid: the live process at the recorded pid is unrelated.
-      spawnSyncMock.mockReturnValue({ stdout: 'sleep 30\n' });
+      recordedProcessCommand = 'sleep 30\n';
       const recycled = await runtime.getManagedServersSnapshot();
       expect(recycled.servers.map((server) => server.pid)).toEqual([]);
 
       // Genuine recorded server: command still identifies it, port included.
-      spawnSyncMock.mockReturnValue({ stdout: '/bin/opencode serve --hostname 127.0.0.1 --port 5001\n' });
+      recordedProcessCommand = '/bin/opencode serve --hostname 127.0.0.1 --port 5001\n';
       const genuine = await runtime.getManagedServersSnapshot();
       expect(genuine.servers).toEqual([
         { pid: process.pid, port: 5001, directory: null, version: null, status: 'unknown', startedAt: '2026-10-28T00:30:00.000Z', sessionCount: null },
       ]);
 
+      // A different OpenCode server whose port merely contains the recorded
+      // port as a substring (50010 vs 5001) is not the recorded server.
+      recordedProcessCommand = '/bin/opencode serve --hostname 127.0.0.1 --port 50010\n';
+      const wrongPort = await runtime.getManagedServersSnapshot();
+      expect(wrongPort.servers).toEqual([]);
+
       // Identity cannot be verified: no command read -> not listed.
-      spawnSyncMock.mockReturnValue({ stdout: '' });
+      recordedProcessCommand = '';
       const unverifiable = await runtime.getManagedServersSnapshot();
       expect(unverifiable.servers).toEqual([]);
     } finally {
-      spawnSyncMock.mockReset();
+      recordedProcessCommand = '';
     }
   });
 

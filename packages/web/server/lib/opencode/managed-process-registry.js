@@ -125,7 +125,12 @@ export const commandIdentifiesOurServer = (command, entry) => {
   if (!lower.includes('opencode') || !lower.includes('serve')) return false;
   // Tie to the exact server we registered when we know its port, so a recycled
   // pid running a *different* opencode server is never mistaken for ours.
-  if (Number.isInteger(entry.port) && !command.includes(String(entry.port))) return false;
+  // The port is parsed from the `--port` argument, never substring-matched:
+  // a command serving port 50010 must not satisfy a record for port 5001.
+  if (Number.isInteger(entry.port)) {
+    const portMatch = command.match(/--port(?:=|\s+)(\d+)/);
+    if (!portMatch || Number.parseInt(portMatch[1], 10) !== entry.port) return false;
+  }
   return true;
 };
 
