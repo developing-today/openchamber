@@ -188,6 +188,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // The same variables with vault references read; only the launch sees them.
     resolveUserEnvironment = async () => getUserEnvironment(),
     getActiveSessionCount = () => 0,
+    // Defaults to the global count for runtimes that do not split out
+    // space sessions; index.js wires the session runtime's host-only
+    // count so the managed-servers read can use it.
+    getActiveHostSessionCount = getActiveSessionCount,
     listBusySessionIds = () => [],
     spawnProcess = spawn,
     spawnSyncProcess = spawnSync,
@@ -1922,7 +1926,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             version: lastKnownOpenCodeVersion,
             ready: true,
             startedAt: ownRecord?.pid === readyOwn.pid ? (ownRecord?.startedAt ?? null) : null,
-            sessionCount: getActiveSessionCount(),
+            sessionCount: getActiveHostSessionCount(),
           }
         : Number.isInteger(startingPid)
           ? {
