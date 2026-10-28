@@ -5503,6 +5503,31 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
       pushUrl: 'git@github.com:owner/repo.git',
     });
   });
+
+  it('returns [] for a repository with no remotes', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+
+    await expect(getRepositoryRemoteUrls(repository)).resolves.toEqual([]);
+  });
+
+  it('returns [] for a directory that is not a repository', async () => {
+    const directory = createTempDir();
+
+    await expect(getRepositoryRemoteUrls(directory)).resolves.toEqual([]);
+  });
+
+  it('rejects when the remote names read fails for a reason other than not-a-repository', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+    // A corrupt config makes `git remote` fail with a bad-config error, not
+    // a not-a-repository error: the failure must surface with git's error
+    // instead of reading as a repository with no remotes.
+    fs.writeFileSync(path.join(repository, '.git', 'config'), 'garbage [[[\n');
+
+    await expect(getRepositoryRemoteUrls(repository)).rejects.toThrow(/bad config/i);
+  });
 });
 
 describe.runIf(canRunGit())('getUnpushedBranchCounts', () => {

@@ -1528,7 +1528,14 @@ export async function getRepositoryRemoteUrls(directory) {
     runGitCommand(directory, ['remote']),
     runGitCommand(directory, ['remote', '-v']),
   ]);
-  if (!namesResult.success) return [];
+  if (!namesResult.success) {
+    // Only a directory that is not a repository authoritatively has no
+    // remotes. Any other failure (corrupt config, unreadable .git) must
+    // surface, or callers mint an authoritative identity with remotes: []
+    // from a read that never happened.
+    if (isNotGitRepositoryError(namesResult)) return [];
+    throw new Error(namesResult.message || 'Failed to list git remotes');
+  }
   const names = String(namesResult.stdout || '').split(/\r?\n/).map((name) => name.trim()).filter(Boolean).sort();
   if (listResult.success) return parseRemoteListing(names, listResult.stdout);
   return Promise.all(names.map(async (name) => {
