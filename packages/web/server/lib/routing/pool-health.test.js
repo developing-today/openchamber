@@ -4,7 +4,10 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 
-import { computePoolHealth, isLocalOpenCode } from './pool-health.js';
+import express from 'express';
+import request from 'supertest';
+
+import { computePoolHealth, isLocalOpenCode, registerPoolHealthRoutes } from './pool-health.js';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pool-health-'));
 
@@ -377,5 +380,71 @@ describe('computePoolHealth', () => {
     expect(health.statsAvailable).toBe(false);
     expect(health.statsReason).toBe('no-database');
     expect(health.pools.pool1.targets[0]).toMatchObject({ activeSessions: null, plan: null, blastRadius: false });
+  });
+});
+
+describe('registerPoolHealthRoutes query parsing', () => {
+  const routeApp = () => {
+    const root = tempDir();
+    const xdg = path.join(root, 'xdg');
+    const opencodeDir = path.join(xdg, 'opencode');
+    fs.mkdirSync(opencodeDir, { recursive: true });
+    const now = Date.now();
+    // s1 is inside every window; s2 is inside 30 minutes but outside the
+    // 15-minute default; the old attempt is inside a reinterpreted 1e3-hour
+    // (clamped 336h) window but outside the 24-hour default.
+    seedDb(opencodeDir, [
+      { time: now - 10 * 60_000, session: 's1', provider: 'openai', model: 'a' },
+      { time: now - 20 * 60_000, session: 's2', provider: 'openai', model: 'a' },
+      { time: now - 100 * 3_600_000, session: 's-old', provider: 'openai', model: 'a' },
+    ]);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 100, windowHours: 24 }])];
+    fs.writeFileSync(path.join(opencodeDir, 'plans.json'), JSON.stringify({ version: 1, plans, models: {}, pools: {} }));
+    const openchamberDataDir = path.join(root, 'openchamber');
+    fs.mkdirSync(openchamberDataDir, { recursive: true });
+    fs.writeFileSync(path.join(openchamberDataDir, 'pool-plan-links.json'), JSON.stringify({ version: 1, links: { 'openai/a': 'openai-plus' } }));
+    process.env.XDG_DATA_HOME = xdg;
+    delete process.env.OPENCODE_DB;
+    const app = express();
+    registerPoolHealthRoutes(app, {
+      readConfigLayers: () => ({ mergedConfig: { experimental: { model_routes: { pool1: { targets: ['openai/a'] } } } } }),
+      openchamberDataDir,
+      isOpenCodeLocal: () => true,
+    });
+    return app;
+  };
+
+  const targetFor = async (app, query) => {
+    const response = await request(app).get(`/api/model-routes/health${query}`);
+    expect(response.status).toBe(200);
+    return response.body.pools.pool1.targets[0];
+  };
+
+  it('falls back to the defaults for reinterpreted spellings of both parameters', async () => {
+    const app = routeApp();
+    // 1e3 reinterpreted would be a 336h usage window (3 attempts, projected
+    // 0.2) and a 1000-minute active window (2 sessions).
+    const target = await targetFor(app, '?hours=1e3&activeMinutes=1e3');
+    expect(target.activeSessions).toBe(1);
+    expect(target.plan.projection.projected).toBe(2);
+  });
+
+  it('falls back to the defaults for radix-prefixed spellings', async () => {
+    const app = routeApp();
+    // 0x10 reinterpreted as 16h would project (2/16)*24 = 3.
+    const byHours = await targetFor(app, '?hours=0x10');
+    expect(byHours.plan.projection.projected).toBe(2);
+    // 0b101 reinterpreted as 5 minutes would count no active session.
+    const byActive = await targetFor(app, '?activeMinutes=0b101');
+    expect(byActive.activeSessions).toBe(1);
+  });
+
+  it('honours canonical spellings, including a fractional window', async () => {
+    const app = routeApp();
+    const target = await targetFor(app, '?hours=2&activeMinutes=30');
+    expect(target.activeSessions).toBe(2);
+    expect(target.plan.projection.projected).toBe(24);
+    const fractional = await targetFor(app, '?hours=1.5');
+    expect(fractional.plan.projection.projected).toBe(32);
   });
 });
