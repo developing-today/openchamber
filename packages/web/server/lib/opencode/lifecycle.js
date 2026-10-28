@@ -5,7 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
-import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess } from './managed-process-registry.js';
+import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries } from './managed-process-registry.js';
 import {
   clearManagedOpenCodeState,
   createLaunchFingerprint,
@@ -21,6 +21,7 @@ import {
   writeManagedOpenCodeState,
 } from './managed-opencode-state.js';
 import { createDrainingOpenCodeRegistry, resolveOpenCodeDrainGraceMs } from './draining-opencode.js';
+import { buildManagedServersResponse } from './managed-servers.js';
 import { countUpstreamRequests } from './upstream-requests.js';
 import { hasChildProcessExited, stopOpenCodeByClosingStdin, waitForChildProcessClose } from './managed-process-stop.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
@@ -191,6 +192,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     spawnProcess = spawn,
     spawnSyncProcess = spawnSync,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
+    readRegistryEntries = readManagedProcessEntries,
     getWarmupDirectories = async () => [],
     // Scopes server-side reads while no project directory is usable (the
     // managed chats root). Without it they name no directory, and OpenCode
@@ -206,6 +208,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   } = deps;
 
   let managedPreflight = null;
+  // The version the managed OpenCode last reported in its health payload,
+  // kept for the managed-servers read; null until a probe has seen one.
+  let lastKnownOpenCodeVersion = null;
   // The environment the managed OpenCode was launched with. Keys OpenCode
   // takes from environment variables are never stored in it, so this is the
   // only place their values can be read back (see auth.js).
@@ -845,6 +850,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           failure: { class: 'invalid_response', detail: version.detail },
         };
       }
+      if (body?.version) lastKnownOpenCodeVersion = body.version;
       return { healthy: true, failure: null };
     } catch (error) {
       return {
@@ -1356,6 +1362,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         const info = await readOpenCodeInfo(response);
         if (!info) throw new Error('The server did not identify itself as OpenCode 2.x. OpenChamber requires OpenCode 2.x; if the server runs an older OpenCode, upgrade it.');
         if (!isSupportedOpenCodeVersion(info.version)) throw new UnsupportedOpenCodeVersionError(info.version);
+        lastKnownOpenCodeVersion = info.version;
         state.isOpenCodeReady = true;
         state.lastOpenCodeError = null;
         return;
@@ -1865,6 +1872,39 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }, effectiveIntervalMs);
   };
 
+
+  // The managed-servers read (design #612 phase 2, #525): registry entries
+  // from the validated readers, this instance's own server completed from
+  // lifecycle state, and the session runtime's live count. The projection
+  // in managed-servers.js is the allowlist; state.json fields beyond the
+  // own pid/port/startedAt never leave this runtime.
+  const getManagedServersSnapshot = async () => {
+    const registryEntries = await readRegistryEntries().catch(() => []);
+    const drainingRecords = [
+      ...readDrainingOpenCodeRecords(managedPaths.drainingPath),
+      ...drainingOpenCode.snapshot(),
+    ];
+    const ownPid = state.openCodeProcess?.pid ?? ownRecord?.pid ?? null;
+    const own = !state.isExternalOpenCode && Number.isInteger(ownPid)
+      ? {
+          pid: ownPid,
+          port: state.openCodePort ?? ownRecord?.port ?? null,
+          directory: getValidatedDefaultDirectory(),
+          version: lastKnownOpenCodeVersion,
+          ready: state.isOpenCodeReady === true,
+          startedAt: ownRecord?.startedAt ?? null,
+          sessionCount: getActiveSessionCount(),
+        }
+      : null;
+    return buildManagedServersResponse({
+      registryEntries,
+      drainingRecords,
+      own,
+      isPidAlive,
+      now: now(),
+    });
+  };
+
   return {
     /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
@@ -1881,6 +1921,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       defaultOpenCodeDirectory = directory;
       warmedOpenCodeDirectories = [directory, ...warmedOpenCodeDirectories.filter((entry) => entry !== directory)];
     },
+    getManagedServersSnapshot,
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

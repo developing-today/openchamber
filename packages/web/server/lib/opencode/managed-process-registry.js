@@ -334,7 +334,14 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     return { inspected: records.length, reaped };
   };
 
-  return { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses };
+  return {
+    registerManagedProcess,
+    unregisterManagedProcess,
+    reapOrphanedProcesses,
+    // The validated reader the reaper uses, exposed for read-only consumers
+    // (the managed-servers read): entries only, never the file paths.
+    readAllEntries: async () => (await readAllEntries()).map(({ entry }) => entry),
+  };
 };
 
 const defaultRegistry = createManagedProcessRegistry();
@@ -342,3 +349,4 @@ const defaultRegistry = createManagedProcessRegistry();
 export const registerManagedProcess = defaultRegistry.registerManagedProcess;
 export const unregisterManagedProcess = defaultRegistry.unregisterManagedProcess;
 export const reapOrphanedProcesses = defaultRegistry.reapOrphanedProcesses;
+export const readManagedProcessEntries = defaultRegistry.readAllEntries;
