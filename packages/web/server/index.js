@@ -634,10 +634,16 @@ const updateSessionMetadataWith = async (sessionID, decide, { directory = '' } =
   return result;
 };
 
+// The notifications runtime is created after the session runtime, so the
+// session-activity snapshot reads its remembered model/provider through
+// this ref, filled in once the notifications runtime exists.
+const sessionModelProviderRef = { current: null };
+
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
+  getSessionModelProvider: (sessionId) => sessionModelProviderRef.current?.(sessionId) ?? null,
 });
 
 const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
@@ -983,6 +989,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
+sessionModelProviderRef.current = notificationTriggerRuntime.getRememberedSessionModelProvider;
 const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 

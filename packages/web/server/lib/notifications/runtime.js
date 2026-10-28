@@ -264,9 +264,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     const id = String(info.id ?? '');
     const agent = String(info.agent ?? info.mode ?? '');
     const modelID = String(info.modelID ?? '');
-    if (!id || (!agent && !modelID)) return;
+    const providerID = String(info.providerID ?? '');
+    if (!id || (!agent && !modelID && !providerID)) return;
     assistantStepMeta.delete(id);
-    assistantStepMeta.set(id, { agent, modelID });
+    assistantStepMeta.set(id, { agent, modelID, providerID });
     const sessionId = String(info.sessionID ?? '');
     if (sessionId) {
       lastAssistantStepBySession.delete(sessionId);
@@ -288,7 +289,20 @@ export const createNotificationTriggerRuntime = (deps) => {
       merged.mode = remembered.agent;
     }
     if (!merged.modelID) merged.modelID = remembered.modelID;
+    if (!merged.providerID && remembered.providerID) merged.providerID = remembered.providerID;
     return merged;
+  };
+
+  // The session's observed model/provider pair ({ modelID, providerID })
+  // from its latest assistant message info, or null when none was observed.
+  // Consumed by the session-activity v1 snapshot (design #612, #524); the
+  // values are observed from step events, not the configured model.
+  const getRememberedSessionModelProvider = (sessionId) => {
+    const messageId = lastAssistantStepBySession.get(String(sessionId ?? ''));
+    if (!messageId) return null;
+    const remembered = assistantStepMeta.get(messageId);
+    if (!remembered || (!remembered.modelID && !remembered.providerID)) return null;
+    return { modelID: remembered.modelID || null, providerID: remembered.providerID || null };
   };
 
   const maybeCacheSessionParentFromPayload = (payload, spaceId) => {
@@ -981,6 +995,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   };
 
   return {
+    getRememberedSessionModelProvider,
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,

@@ -293,12 +293,16 @@ describe('session runtime', () => {
     });
 
     expect(runtime.getActiveSessionCount()).toBe(0);
-    expect(runtime.getSessionActivitySnapshot()).toEqual({
-      'session-busy-1': { type: 'idle' },
-      'session-busy-2': { type: 'idle' },
-      'session-busy-3': { type: 'idle' },
-      'session-idle': { type: 'idle' },
-    });
+    expect(runtime.getSessionActivitySnapshot()).toEqual(expect.objectContaining({
+      version: 1,
+      watcherReady: true,
+      sessions: {
+        'session-busy-1': expect.objectContaining({ type: 'idle' }),
+        'session-busy-2': expect.objectContaining({ type: 'idle' }),
+        'session-busy-3': expect.objectContaining({ type: 'idle' }),
+        'session-idle': expect.objectContaining({ type: 'idle' }),
+      },
+    }));
     expect(runtime.getSessionStateSnapshot()).toEqual({
       'session-busy-1': expect.objectContaining({
         status: 'idle',
@@ -364,7 +368,7 @@ describe('session runtime', () => {
       vi.advanceTimersByTime(2000);
 
       expect(runtime.getActiveSessionCount()).toBe(1);
-      expect(runtime.getSessionActivitySnapshot()['session-1']).toEqual({ type: 'busy' });
+      expect(runtime.getSessionActivitySnapshot().sessions['session-1']).toEqual(expect.objectContaining({ type: 'busy' }));
     } finally {
       runtime.dispose();
       vi.useRealTimers();
@@ -387,8 +391,47 @@ describe('session runtime', () => {
     runtime.dispose();
 
     expect(runtime.getActiveSessionCount()).toBe(0);
-    expect(runtime.getSessionActivitySnapshot()).toEqual({});
+    expect(runtime.getSessionActivitySnapshot()).toEqual(expect.objectContaining({ version: 1, watcherReady: false, sessions: {} }));
     expect(runtime.getSessionStateSnapshot()).toEqual({});
     expect(runtime.getSessionAttentionSnapshot()).toEqual({});
+  });
+
+  it('exposes the session-activity v1 contract fields (design #612, #524)', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+      getSessionModelProvider: (sessionId) => (sessionId === 'session-1' ? { modelID: 'model-1', providerID: 'provider-1' } : null),
+    });
+    runtimes.push(runtime);
+
+    const empty = runtime.getSessionActivitySnapshot();
+    expect(Object.keys(empty).sort()).toEqual(['serverTime', 'sessions', 'version', 'watcherReady']);
+    expect(empty.version).toBe(1);
+    expect(empty.watcherReady).toBe(false);
+    expect(empty.sessions).toEqual({});
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    const snapshot = runtime.getSessionActivitySnapshot();
+    expect(snapshot.watcherReady).toBe(true);
+    expect(snapshot.serverTime).toEqual(expect.any(Number));
+    expect(Object.keys(snapshot.sessions['session-1']).sort()).toEqual(['lastActivityAt', 'model', 'status', 'toolInFlight', 'type']);
+    expect(snapshot.sessions['session-1']).toEqual({
+      type: 'busy',
+      lastActivityAt: expect.any(Number),
+      status: 'busy',
+      model: { modelID: 'model-1', providerID: 'provider-1' },
+      toolInFlight: null,
+    });
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-2', status: { type: 'idle' } },
+    });
+    expect(runtime.getSessionActivitySnapshot().sessions['session-2'].model).toBeNull();
   });
 });

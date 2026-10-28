@@ -339,6 +339,10 @@ Installer output is discarded, not forwarded to clients or logs.
 
 The runtime maintains active-session count incrementally from idempotent activity phase transitions. Upstream stall-timeout and lifecycle health checks read it in O(1); the hourly cleanup removes activity phases older than 24 hours without broadcasting synthetic state transitions. Snapshot generation remains reserved for the session-activity API.
 
+### Why the session-activity snapshot is a versioned envelope and not the bare phase map
+
+`getSessionActivitySnapshot()` returns the external observability contract v1 (design #612, phase 1 - #524): `{ version: 1, serverTime, watcherReady, sessions }`, where each session entry keeps the frozen `{ type }` phase and adds `lastActivityAt` (the phase map's recorded `updatedAt`), `status` (session-state map), `model` (the observed `{ modelID, providerID }` pair remembered by the notifications runtime from the session's latest assistant message, or null), and `toolInFlight` (null while no in-process source tracks it). Unknowns are explicit nulls, never fabricated values, and `watcherReady` stays false until the watcher stream delivers its first payload in the process, so an empty read is distinguishable from a watcher that has not started. The bare `{ [sessionId]: { type } }` map was rejected for the envelope because external consumers cannot version, timestamp, or readiness-mark a bare map without colliding with session IDs.
+
 ## Public exports (lifecycle.js)
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) is fired after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), then calls `interruptBusySessionsAfterRestart()` and broadcasts one `opencode-restart-interrupted` UI notification when interrupted turns exist (#2943).
 - Returned API:

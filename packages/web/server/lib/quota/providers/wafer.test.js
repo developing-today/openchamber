@@ -72,6 +72,35 @@ describe('Wafer quota provider', () => {
     expect(withoutOverage.usage.windows['5h'].usedPercent).toBe(0);
   });
 
+  it('derives usedPercent from remaining/limit when the percent is absent', async () => {
+    stubPayload({
+      remaining_included_requests: 40,
+      included_request_limit: 100,
+    });
+    const result = await fetchQuota();
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(60);
+    expect(result.usage.windows['5h'].remainingPercent).toBe(40);
+    expect(result.usage.windows['5h'].valueLabel).toBe('40 / 100 left');
+  });
+
+  it('clamps the derived usedPercent when remaining exceeds the limit', async () => {
+    stubPayload({
+      remaining_included_requests: 120,
+      included_request_limit: 100,
+    });
+    const result = await fetchQuota();
+    expect(result.usage.windows['5h'].usedPercent).toBe(0);
+  });
+
+  it('reports a null usedPercent when the percent is absent and no counts can derive it', async () => {
+    stubPayload({ overage_request_count: 5 });
+    const result = await fetchQuota();
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBeNull();
+    expect(result.usage.windows['5h'].remainingPercent).toBeNull();
+  });
+
   it('builds the value label from remaining and limit without tier or overage', async () => {
     stubPayload({
       remaining_included_requests: 40,

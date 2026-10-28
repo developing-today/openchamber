@@ -30,11 +30,24 @@ const TRUSTED_DEVICE_SESSION_TTL_MS = readSessionTtlMs(
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
 const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
 
+// A positive whole number of attempts from the environment, else the default.
+// Only a plain decimal spelling counts: a bare Number(...) would silently
+// honour '-5' (lockout after one failure), '2.9', and '1e3' (a 1000-attempt
+// budget) for the login brute-force limit.
+export const readRateLimitMaxAttempts = (raw, fallback) => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return fallback;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+};
+
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
-const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS) || 10;
+const RATE_LIMIT_MAX_ATTEMPTS = readRateLimitMaxAttempts(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS, 10);
 const RATE_LIMIT_LOCKOUT_MS = 15 * 60 * 1000;
 const RATE_LIMIT_CLEANUP_MS = 60 * 60 * 1000;
-const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
+const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = readRateLimitMaxAttempts(process.env.OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS, 3);
 
 const loginRateLimiter = new Map();
 let rateLimitCleanupTimer = null;
