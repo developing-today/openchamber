@@ -224,32 +224,53 @@ describe('gatekeeper program', () => {
     request.end();
   });
 
+  // The child takes its listener ports as arguments, so the ports have to be chosen before
+  // it starts. A probed port is released before the child binds it, and another process can
+  // take it in between: that race failed this whole file in CI with a listener EADDRINUSE
+  // (#666). The start below retries with fresh ports when the child dies on EADDRINUSE, and
+  // only on that. Any other start failure, and a fifth collision in a row, fails the suite
+  // with the child's own output, the way a single attempt did before.
+  const startGatekeeper = async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      ports = { corridor: await freePort(), window: await freePort(), control: await freePort() };
+      childOutput = '';
+      // The last argument is the window's deadline: 1.5 seconds here so a test can watch it
+      // pass, 300000 in the container command, which the hardening test asserts.
+      child = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), '1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)], { stdio: ['ignore', 'pipe', 'pipe'] });
+      // Both pipes are read, always. A full stderr pipe blocks the child, and the program writes
+      // there whenever it keeps running after an error, which the flood tests provoke.
+      const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
+      child.stdout.on('data', keep);
+      child.stderr.on('data', keep);
+      try {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`the gatekeeper did not start: ${childOutput}`)), 10_000);
+          const ready = (chunk) => { if (String(chunk).includes('gatekeeper:')) { clearTimeout(timer); resolve(); } };
+          child.stdout.on('data', ready);
+          child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`the gatekeeper ended with ${code}: ${childOutput}`)); });
+        });
+        return;
+      } catch (error) {
+        if (child.exitCode === null) child.kill('SIGKILL');
+        if (!childOutput.includes('EADDRINUSE') || attempt >= 5) throw error;
+      }
+    }
+  };
+
   beforeAll(async () => {
-    ports = { corridor: await freePort(), window: await freePort(), control: await freePort() };
     // The upstream of a grant. It answers with what it received, minus the secret itself.
+    // It stays in this process, so it binds port 0 and reads back the port the kernel gave
+    // it: no other process can take that port first, and no probe is needed.
     upstream = http.createServer((request, response) => {
       seen.push({ url: request.url, headers: request.headers });
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ upstreamSaw: request.url }));
     });
-    upstreamPort = await freePort();
-    await new Promise((resolve) => { upstream.listen(upstreamPort, '127.0.0.1', resolve); });
+    await new Promise((resolve) => { upstream.listen(0, '127.0.0.1', resolve); });
+    upstreamPort = upstream.address().port;
 
-    // The last argument is the window's deadline: 1.5 seconds here so a test can watch it
-    // pass, 300000 in the container command, which the hardening test asserts.
-    child = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), '1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)], { stdio: ['ignore', 'pipe', 'pipe'] });
-    // Both pipes are read, always. A full stderr pipe blocks the child, and the program writes
-    // there whenever it keeps running after an error, which the flood tests provoke.
-    const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
-    child.stdout.on('data', keep);
-    child.stderr.on('data', keep);
-    await new Promise((resolve, reject) => {
-      const ready = (chunk) => { if (String(chunk).includes('gatekeeper:')) resolve(); };
-      child.stdout.on('data', ready);
-      child.once('exit', (code) => reject(new Error(`the gatekeeper ended with ${code}: ${childOutput}`)));
-      setTimeout(() => reject(new Error(`the gatekeeper did not start: ${childOutput}`)), 10_000);
-    });
-  }, 20_000);
+    await startGatekeeper();
+  }, 60_000);
 
   afterAll(async () => {
     closeEverything();
