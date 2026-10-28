@@ -6,6 +6,7 @@ import { registerNotificationRoutes } from '../notifications/routes.js';
 const SERVER_KEYS = ['pid', 'port', 'directory', 'version', 'status', 'startedAt', 'sessionCount'];
 
 const aliveExcept = (deadPids) => (pid) => !deadPids.includes(pid);
+const verified = () => true;
 
 describe('buildManagedServersResponse', () => {
   it('returns the own server as the complete entry', () => {
@@ -15,6 +16,7 @@ describe('buildManagedServersResponse', () => {
       ],
       own: { pid: 4242, port: 4096, directory: '/projects/alpha', version: '2.0.19', ready: true, startedAt: '2026-10-28T01:00:00.000Z', sessionCount: 3 },
       isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: verified,
       now: 1_700_000_000_000,
     });
 
@@ -38,6 +40,7 @@ describe('buildManagedServersResponse', () => {
     const response = buildManagedServersResponse({
       own: { pid: 4242, port: 4096, directory: null, version: null, ready: false, startedAt: null, sessionCount: 0 },
       isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: verified,
       now: 5,
     });
 
@@ -52,6 +55,7 @@ describe('buildManagedServersResponse', () => {
         { pid: 777, ownerPid: 555, port: 5001, binary: '/bin/opencode', runtime: 'desktop', startedAt: '2026-10-28T00:30:00.000Z' },
       ],
       isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: verified,
       now: 5,
     });
 
@@ -79,6 +83,7 @@ describe('buildManagedServersResponse', () => {
       ],
       own: { pid: 888, port: 5002, directory: '/projects/beta', version: '2.0.19', ready: true, startedAt: null, sessionCount: 1 },
       isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: verified,
       now: 5,
     });
 
@@ -98,6 +103,7 @@ describe('buildManagedServersResponse', () => {
         { pid: 222, port: 5002, startedAt: '2026-10-28T00:31:00.000Z' },
       ],
       isPidAlive: aliveExcept([111]),
+      isRecordedPidVerified: verified,
       now: 5,
     });
 
@@ -112,6 +118,7 @@ describe('buildManagedServersResponse', () => {
         { pid: 333, port: 5003, binary: '/bin/opencode', drainStartedAt: 1_700_000_000_000 },
       ],
       isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: verified,
       now: 5,
     });
 
@@ -126,6 +133,7 @@ describe('buildManagedServersResponse', () => {
       registryEntries: [],
       own: { pid: 4242, port: 4096, directory: '/projects/alpha', version: null, ready: true, startedAt: null, sessionCount: 2 },
       isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: verified,
       now: 5,
     });
 
@@ -142,6 +150,7 @@ describe('buildManagedServersResponse', () => {
       ],
       own: { pid: 999, port: null, directory: '/projects/alpha', version: null, ready: false, startedAt: null, sessionCount: null },
       isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: verified,
       now: 5,
     });
 
@@ -149,6 +158,57 @@ describe('buildManagedServersResponse', () => {
       { pid: 111, port: 4001, directory: null, version: null, status: 'unknown', startedAt: '2026-10-28T00:30:00.000Z', sessionCount: null },
       { pid: 999, port: 4002, directory: '/projects/alpha', version: null, status: 'starting', startedAt: '2026-10-28T00:35:00.000Z', sessionCount: null },
     ]);
+  });
+
+  it('excludes a recorded pid whose identity no longer matches (recycled pid)', () => {
+    // The recorded pid is alive (signal-0 passes) but the live process is
+    // an unrelated `sleep`, so the verifier rejects it — exactly the
+    // phantom-server case from #638.
+    const response = buildManagedServersResponse({
+      registryEntries: [
+        { pid: 777, port: 5001, startedAt: '2026-10-28T00:30:00.000Z' },
+        { pid: 888, port: 5002, startedAt: '2026-10-28T00:31:00.000Z' },
+      ],
+      isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: (server) => server.pid === 888,
+      now: 5,
+    });
+
+    expect(response.servers.map((server) => server.pid)).toEqual([888]);
+  });
+
+  it('excludes a draining record whose pid was recycled', () => {
+    const response = buildManagedServersResponse({
+      drainingRecords: [{ pid: 333, port: 5003, binary: '/bin/opencode' }],
+      isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: () => false,
+      now: 5,
+    });
+
+    expect(response.servers).toEqual([]);
+  });
+
+  it('excludes recorded entries when no verifier is supplied (identity cannot be verified)', () => {
+    const response = buildManagedServersResponse({
+      registryEntries: [{ pid: 777, port: 5001, startedAt: '2026-10-28T00:30:00.000Z' }],
+      isPidAlive: aliveExcept([]),
+      now: 5,
+    });
+
+    expect(response.servers).toEqual([]);
+  });
+
+  it('still lists the own server without a recorded-pid verification', () => {
+    const response = buildManagedServersResponse({
+      registryEntries: [{ pid: 4242, port: 4096, startedAt: '2026-10-28T01:00:00.000Z' }],
+      own: { pid: 4242, port: 4096, directory: '/projects/alpha', version: '2.0.19', ready: true, startedAt: '2026-10-28T01:00:00.000Z', sessionCount: 3 },
+      isPidAlive: aliveExcept([]),
+      isRecordedPidVerified: () => false,
+      now: 5,
+    });
+
+    expect(response.servers.map((server) => server.pid)).toEqual([4242]);
+    expect(response.servers[0].status).toBe('ready');
   });
 
   it('answers an empty list when nothing is recorded', () => {

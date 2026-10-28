@@ -226,6 +226,31 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('verifies recorded-pid identity in the managed-servers read (#638)', async () => {
+    const entry = { pid: process.pid, port: 5001, binary: '/bin/opencode', startedAt: '2026-10-28T00:30:00.000Z' };
+    const runtime = createRuntime({ readRegistryEntries: async () => [entry] });
+    try {
+      // Recycled pid: the live process at the recorded pid is unrelated.
+      spawnSyncMock.mockReturnValue({ stdout: 'sleep 30\n' });
+      const recycled = await runtime.getManagedServersSnapshot();
+      expect(recycled.servers.map((server) => server.pid)).toEqual([]);
+
+      // Genuine recorded server: command still identifies it, port included.
+      spawnSyncMock.mockReturnValue({ stdout: '/bin/opencode serve --hostname 127.0.0.1 --port 5001\n' });
+      const genuine = await runtime.getManagedServersSnapshot();
+      expect(genuine.servers).toEqual([
+        { pid: process.pid, port: 5001, directory: null, version: null, status: 'unknown', startedAt: '2026-10-28T00:30:00.000Z', sessionCount: null },
+      ]);
+
+      // Identity cannot be verified: no command read -> not listed.
+      spawnSyncMock.mockReturnValue({ stdout: '' });
+      const unverifiable = await runtime.getManagedServersSnapshot();
+      expect(unverifiable.servers).toEqual([]);
+    } finally {
+      spawnSyncMock.mockReset();
+    }
+  });
+
   it('journals managed launch, readiness, exit and restart as fixed actions only', async () => {
     const journal = createServerDiagnosticJournal();
     spawnMock.mockImplementation(() => {

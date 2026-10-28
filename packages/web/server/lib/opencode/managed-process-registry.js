@@ -116,7 +116,10 @@ const isPidAlive = (pid) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const commandIdentifiesOurServer = (command, entry) => {
+// Exported for the managed-servers read (managed-servers.js via
+// lifecycle.js), which must make the same identity judgement as the
+// reaper before it presents a recorded pid as a live server.
+export const commandIdentifiesOurServer = (command, entry) => {
   if (typeof command !== 'string') return false;
   const lower = command.toLowerCase();
   if (!lower.includes('opencode') || !lower.includes('serve')) return false;

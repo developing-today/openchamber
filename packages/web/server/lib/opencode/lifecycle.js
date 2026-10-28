@@ -5,7 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
-import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries } from './managed-process-registry.js';
+import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries, commandIdentifiesOurServer } from './managed-process-registry.js';
 import {
   clearManagedOpenCodeState,
   createLaunchFingerprint,
@@ -407,6 +407,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const result = spawnSyncProcess('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, windowsHide: true });
     const command = String(result?.stdout ?? '').trim();
     return command.includes(path.basename(binary)) && /\bserve\b/.test(command);
+  };
+
+  // Identity check for the managed-servers read: a recorded pid can be
+  // recycled onto an unrelated process, so signal-0 liveness is not
+  // enough to list it. Read the live command and apply the orphan
+  // reaper's identity check (opencode + serve + the recorded port).
+  // Where the command cannot be read (win32, a failed ps, empty output)
+  // identity is unverified and the entry is not listed.
+  const isRecordedPidVerified = ({ pid, port }) => {
+    if (process.platform === 'win32' || !Number.isInteger(pid) || pid <= 0) return false;
+    const result = spawnSyncProcess('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, windowsHide: true });
+    const command = String(result?.stdout ?? '').trim();
+    return commandIdentifiesOurServer(command, { port });
   };
 
   const terminateRecordedOpenCodeProcess = async (pid) => {
@@ -1945,6 +1958,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       drainingRecords,
       own,
       isPidAlive,
+      isRecordedPidVerified,
       now: now(),
     });
   };
