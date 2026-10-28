@@ -4134,6 +4134,13 @@ export async function resetToCommit(
   }
   if (mode === 'hard' && !force) {
     const statusResult = await execGit(['status', '--porcelain'], directory);
+    if (statusResult.exitCode !== 0) {
+      // Fail closed: a failed status read is not a clean tree. Surfacing
+      // git's error keeps the hard reset from discarding uncommitted work
+      // the guard could not see - the web resetToCommit fails closed the
+      // same way, because its status read rejects on failure.
+      throw new Error(statusResult.stderr.trim() || statusResult.stdout.trim() || `git status failed with exit code ${statusResult.exitCode}`);
+    }
     const isDirty = statusResult.stdout.trim().length > 0;
     if (isDirty) {
       throw new Error('Cannot hard reset: uncommitted changes in working tree. Stash or commit first, or use force.');
