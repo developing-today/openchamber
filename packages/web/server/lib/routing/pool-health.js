@@ -44,6 +44,12 @@ const MIN_WEIGHT = 0.1;
 // or the provider's own meter, so they get no projection.
 const USAGE_BY_UNIT = { requests: 'attempts', messages: 'attempts', tokens: 'tokens' };
 
+// Why a quota window gets no projection, by unit: the panel renders this
+// reason instead of leaving the window unexplained. There is no pricing or
+// provider-meter source in this codebase today, so no window resolves to a
+// projection through these units; inventing one is a separate feature.
+const NO_PROJECTION_REASON_BY_UNIT = { usd: 'needs-pricing', percent: 'needs-provider-meter', other: 'unsupported-unit' };
+
 const projectionFor = (quota, usage, hours) => {
   const measure = USAGE_BY_UNIT[quota?.unit];
   if (!measure || !(quota.limit > 0) || !(quota.windowHours > 0)) return null;
@@ -55,10 +61,16 @@ const projectionFor = (quota, usage, hours) => {
     limit: quota.limit,
     windowHours: quota.windowHours,
     projected: Math.round(projected * 10) / 10,
+    source: 'traffic-estimate',
     ratio,
     status: ratio >= 1 ? 'over' : ratio >= WARN_RATIO ? 'warn' : 'ok',
   };
 };
+
+/** The plan's quota windows that traffic cannot project, each with the reason the panel shows. */
+const unprojectedQuotas = (quotas) => quotas
+  .filter((quota) => NO_PROJECTION_REASON_BY_UNIT[quota?.unit] && quota.limit > 0 && quota.windowHours > 0)
+  .map((quota) => ({ quotaName: quota.name, unit: quota.unit, reason: NO_PROJECTION_REASON_BY_UNIT[quota.unit] }));
 
 /** The plan's tightest window: the projection closest to (or furthest past) its limit. */
 const tightestProjection = (quotas, usage, hours) =>
@@ -166,6 +178,7 @@ export const computePoolHealth = async ({
             providerID: plan.providerID,
             siblingRefs: Object.entries(links).filter(([, id]) => id === planID).map(([key]) => key).filter((key) => key !== ref),
             projection,
+            unprojectedQuotas: unprojectedQuotas(plan.quotas),
           }
         : null;
       // A link to a plan that is gone (or unreadable) is reported so it can be cleared.
