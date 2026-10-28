@@ -1920,9 +1920,15 @@ export async function continueIntegrate(stateInput = {}) {
   return { kind: 'success', moved: state.remainingCommits.length };
 }
 
-const ensureOpenCodeProjectId = async (primaryWorktree) => {
-  const gitDir = path.join(primaryWorktree, '.git');
-  const idFile = path.join(gitDir, 'opencode');
+export const ensureOpenCodeProjectId = async (primaryWorktree, commonDir) => {
+  // The ID file lives in the repository's real git common dir, which the
+  // caller has already resolved with git rev-parse --git-common-dir: for
+  // a plain checkout that is the .git directory under the root, for a bare
+  // repository it is the bare directory itself, and for a separate-git-dir
+  // layout it is that directory. Assuming the worktree's .git entry
+  // instead would create a stray .git inside a bare repository and never
+  // cache through a .git pointer file in the other layouts.
+  const idFile = path.join(commonDir, 'opencode');
   const existing = await fsp.readFile(idFile, 'utf8').then((value) => value.trim()).catch(() => '');
   if (existing) {
     return existing;
@@ -1945,8 +1951,14 @@ const ensureOpenCodeProjectId = async (primaryWorktree) => {
     throw new Error('Failed to derive OpenCode project ID');
   }
 
-  await fsp.mkdir(gitDir, { recursive: true }).catch(() => undefined);
-  await fsp.writeFile(idFile, projectId, 'utf8').catch(() => undefined);
+  try {
+    await fsp.writeFile(idFile, projectId, 'utf8');
+  } catch (error) {
+    // Caching the ID is an optimisation, so a failed write must not fail
+    // the call — but it must not be silent either: until a write lands,
+    // the ID is re-derived on every call.
+    console.warn(`Failed to persist OpenCode project ID to ${idFile}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   return projectId;
 };
@@ -1976,7 +1988,7 @@ const resolveWorktreeProjectContext = async (directory, options = {}) => {
   // repository, a separate git dir) has no primary worktree, and the sandbox
   // directory is the closest thing to one.
   const primaryWorktree = derivePrimaryWorktreeRootFromGitDir(commonDir) || sandbox;
-  const projectID = await ensureOpenCodeProjectId(primaryWorktree);
+  const projectID = await ensureOpenCodeProjectId(primaryWorktree, commonDir);
   // OpenCode's `worktree.directory` is read from the canonical checkout so a
   // linked worktree still sees the project's saved configuration. When unset,
   // worktrees keep landing in the data-dir folder keyed by project ID.
