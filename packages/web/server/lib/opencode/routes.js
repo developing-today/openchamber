@@ -24,6 +24,17 @@ import { discoverProviderModels } from './model-discovery.js';
 import { readDisabledProviders, setProviderDisabled } from './providers.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
+// The local /api/info probes share one named 3s deadline: a stalled
+// OpenCode must settle the version, upgrade-status and health answers with
+// their existing error shapes instead of hanging them forever.
+const OPENCODE_INFO_DEADLINE_MS = 3_000;
+let openCodeInfoDeadlineMs = OPENCODE_INFO_DEADLINE_MS;
+
+/** Test hook: replace the /api/info probe deadline; no argument restores the default. */
+export const setOpenCodeInfoDeadlineForTest = (ms = OPENCODE_INFO_DEADLINE_MS) => {
+  openCodeInfoDeadlineMs = ms;
+};
+
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
@@ -176,14 +187,22 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       // are two answers: the UI announces the version either way and offers
       // the Update action only when `upgrade.supported` is true.
       const capability = getOpenCodeUpgradeCapability();
-      const [healthResponse, latestVersion] = await Promise.all([
-        fetch(buildOpenCodeUrl('/api/info', ''), {
+      // The info body is read inside its own task, not after Promise.all:
+      // the probe deadline keeps running while the registry fetch is in
+      // flight, and reading the body only afterwards can hit the abort and
+      // discard an answer that arrived promptly (Codex finding, PR #799).
+      const readInfo = async () => {
+        const response = await fetch(buildOpenCodeUrl('/api/info', ''), {
           method: 'GET',
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        }),
+          signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
+        });
+        return { response, info: await response.json().catch(() => null) };
+      };
+      const [{ response: healthResponse, info }, latestVersion] = await Promise.all([
+        readInfo(),
         fetchLatestOpenCodeVersion(),
       ]);
-      const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
         return res.status(healthResponse.status).json({
           available: null,
@@ -222,7 +241,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        signal: AbortSignal.timeout(3_000),
+        signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
@@ -268,6 +287,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
