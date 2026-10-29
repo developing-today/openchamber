@@ -10,6 +10,14 @@ import {
   SAFETY_KINDS,
 } from './defaults.js';
 import { MAX_DESCRIPTION_LENGTH, MAX_DETAILS_LENGTH } from './model-routes.js';
+import { readBoundedResponseText } from '../guests/response-body.js';
+
+// A Jev answer is a small { answers } object, so 1 MiB is ample. The endpoint
+// can be one the user picked in Settings or an admin pinned, so its body is
+// untrusted input: ask() reads it through the bounded reader instead of
+// buffering it whole, the same contract as the guests and model-discovery
+// reads.
+export const JEV_MAX_RESPONSE_BYTES = 1024 * 1024;
 
 // A category whose model is a pool (`opencode-route/<id>`) runs on whatever
 // that pool picks; the pool's own description says what it is for.
@@ -123,7 +131,8 @@ const responseSchema = z.union([directAnswersSchema, wrappedAnswersSchema]);
 export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS } = {}) => ({
   /**
    * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
-   * throws with `status` on an HTTP error and `code: 'timeout'` on abort.
+   * throws with `status` on an HTTP error, `code: 'timeout'` on abort, and
+   * `code: 'response_too_large'` when the body crosses JEV_MAX_RESPONSE_BYTES.
    */
   ask: async (request, endpoint) => {
     const abort = new AbortController();
@@ -136,10 +145,17 @@ export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS 
         body: JSON.stringify({ ...request, model: endpoint.model }),
         signal: abort.signal,
       });
-      const text = await response.text();
+      const bounded = await readBoundedResponseText(response, JEV_MAX_RESPONSE_BYTES);
       if (!response.ok) {
         throw Object.assign(new Error(`Jev responded ${response.status}`), { status: response.status });
       }
+      if (bounded.tooLarge) {
+        throw Object.assign(new Error(`Jev response exceeded ${JEV_MAX_RESPONSE_BYTES} bytes`), { code: 'response_too_large' });
+      }
+      // Response.text() (the previous read) strips a leading UTF-8 BOM; the bounded
+      // reader's utf8 decode preserves it and JSON.parse rejects it, so strip it here
+      // to keep BOM-prefixed endpoint answers working.
+      const text = bounded.text.replace(/^\uFEFF/, '');
       const body = responseSchema.safeParse(JSON.parse(text));
       if (!body.success) throw new Error('Jev response has no answers');
       return { answers: body.data.answers, ms: Date.now() - started };

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { attachmentHint, createRoutingRuntime, readOpenCodeKeys, requestTextOf, routingRequestTextOf } from './runtime.js';
 import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
-import { buildRoutingRequest, createJevClient, decidePermission, decideRouting } from './jev.js';
+import { buildRoutingRequest, createJevClient, decidePermission, decideRouting, JEV_MAX_RESPONSE_BYTES } from './jev.js';
 import { classifierEndpoint, parseCustomEndpointUrl, resolveClassifier } from './classifier.js';
 
 const AUTO = { providerID: 'openchamber', id: 'auto' };
@@ -424,7 +424,7 @@ describe('jev endpoint', () => {
     let call = null;
     const fetchImpl = async (url, init) => {
       call = { url, init };
-      return { ok: true, status: 200, text: async () => JSON.stringify({ answers: {} }) };
+      return new Response(JSON.stringify({ answers: {} }), { status: 200 });
     };
     await createJevClient({ fetchImpl }).ask({ state: 'x', questions: {} }, classifierEndpoint(source, keys));
     return { url: call.url, headers: call.init.headers, body: JSON.parse(call.init.body) };
@@ -484,16 +484,62 @@ describe('jev endpoint', () => {
       },
       success: true,
     };
-    const fetchImpl = async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(cfPayload),
-    });
+    const fetchImpl = async () => new Response(JSON.stringify(cfPayload), { status: 200 });
     const result = await createJevClient({ fetchImpl }).ask(
       { state: 'x', questions: {} },
       { url: 'https://example.com/v1/systemone', model: 'clef-flash' },
     );
     expect(result.answers).toEqual({ category: { choice: 'implement', confidence: 0.95 } });
+  });
+
+  it('refuses a response whose declared length crosses the size cap, without reading the body', async () => {
+    const cancel = vi.fn(async () => {});
+    const fetchImpl = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-length': String(JEV_MAX_RESPONSE_BYTES + 1) }),
+      body: { cancel },
+    });
+    await expect(createJevClient({ fetchImpl }).ask(
+      { state: 'x', questions: {} },
+      { url: 'https://example.com/v1/systemone', model: 'jev-latest' },
+    )).rejects.toMatchObject({ code: 'response_too_large' });
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('stops pulling a streamed response shortly past the size cap', async () => {
+    const chunk = new Uint8Array(64 * 1024).fill(97);
+    let pulled = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (pulled >= 64) {
+          controller.close();
+          return;
+        }
+        pulled += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchImpl = async () => new Response(stream, { status: 200 });
+    await expect(createJevClient({ fetchImpl }).ask(
+      { state: 'x', questions: {} },
+      { url: 'https://example.com/v1/systemone', model: 'jev-latest' },
+    )).rejects.toMatchObject({ code: 'response_too_large' });
+    // The full stream is 4 MiB; the client must stop near the 1 MiB cap.
+    expect(pulled * chunk.byteLength).toBeLessThan(2 * JEV_MAX_RESPONSE_BYTES);
+  });
+
+  it('accepts a small answer prefixed with a UTF-8 BOM', async () => {
+    const json = new TextEncoder().encode(JSON.stringify({ answers: {} }));
+    const body = new Uint8Array(3 + json.byteLength);
+    body.set([0xef, 0xbb, 0xbf]);
+    body.set(json, 3);
+    const fetchImpl = async () => new Response(body, { status: 200 });
+    const result = await createJevClient({ fetchImpl }).ask(
+      { state: 'x', questions: {} },
+      { url: 'https://example.com/v1/systemone', model: 'jev-latest' },
+    );
+    expect(result.answers).toEqual({});
   });
 });
 

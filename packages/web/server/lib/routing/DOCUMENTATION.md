@@ -35,7 +35,9 @@ Auto. There is no env gate — the feature shipped dark behind
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
 - `jev.js` — request builders, answer parsing, and the HTTP call with a
-  timeout to the endpoint `classifierEndpoint` chose. A category whose model is
+  timeout and a 1 MiB response cap (`JEV_MAX_RESPONSE_BYTES`: the endpoint
+  can be user- or admin-chosen, so its body is untrusted input) to the
+  endpoint `classifierEndpoint` chose. A category whose model is
   a pool (`opencode-route/<id>`) gets that pool's `description` and `details`
   appended to its criteria string (see "Pool descriptions" below).
 - `history.js` — the last three settled turns through session assist's
