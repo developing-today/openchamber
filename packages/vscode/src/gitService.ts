@@ -2773,15 +2773,34 @@ export async function revertGitFile(
   options: { scope?: 'all' | 'working' } = {},
 ): Promise<void> {
   const scope = options.scope === 'working' ? 'working' : 'all';
+  // Validate the repository and the target before anything can delete.
+  // Without this, an `ls-files` failure for a directory that is not a
+  // repository at all fell through to the recursive `fs.rm` fallback
+  // below and deleted ordinary files - or the whole directory for `.`.
+  const repoRootResult = await execGit(['rev-parse', '--show-toplevel'], directory);
+  if (repoRootResult.exitCode !== 0) {
+    throw new Error(repoRootResult.stderr.trim() || `Not a git repository: ${directory}`);
+  }
+  const repoRoot = await canonicalizePath(repoRootResult.stdout.trim());
+  const directoryRoot = await canonicalizePath(directory);
+  const target = await canonicalizePath(path.resolve(directory, filePath));
+  if (target === repoRoot || target === directoryRoot) {
+    throw new Error(`Cannot revert the repository root: ${filePath}`);
+  }
+  if (!target.startsWith(repoRoot + path.sep)) {
+    throw new Error(`Path is outside repository: ${filePath}`);
+  }
   const tracked = await execGit(['ls-files', '--error-unmatch', '--', filePath], directory);
   if (tracked.exitCode !== 0) {
+    // Only a path git affirmatively lists as untracked may be removed.
+    // Any other answer here (the path does not exist, git could not
+    // tell) is ambiguous, and an ambiguous answer deletes nothing.
+    const untracked = await execGit(['ls-files', '--others', '--error-unmatch', '--', filePath], directory);
+    if (untracked.exitCode !== 0) {
+      throw new Error(tracked.stderr.trim() || `Cannot confirm untracked status for: ${filePath}`);
+    }
     const clean = await execGit(['clean', '-f', '-d', '--', filePath], directory);
     if (clean.exitCode !== 0) {
-      const root = path.resolve(directory);
-      const target = path.resolve(directory, filePath);
-      if (target !== root && !target.startsWith(root + path.sep)) {
-        throw new Error(`Path is outside repository: ${filePath}`);
-      }
       await fs.promises.rm(target, { recursive: true, force: true });
     }
     return;
