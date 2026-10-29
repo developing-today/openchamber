@@ -131,6 +131,20 @@ const errorMessage = (body) => asNonEmptyString(asObject(body?.error)?.message)
  */
 const requestPlanUsage = async (bearer, fetchImpl) => {
   const timeoutSignal = AbortSignal.timeout(15_000);
+  const failureFromError = (error) => {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    return {
+      kind: 'error',
+      failureClass: error instanceof SyntaxError ? 'malformed' : 'transport',
+      message: isTimeout
+        ? 'Request timed out'
+        : error instanceof SyntaxError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed')
+    };
+  };
   let response;
   try {
     response = await fetchImpl(META_KEY_URL, {
@@ -145,25 +159,19 @@ const requestPlanUsage = async (bearer, fetchImpl) => {
       signal: timeoutSignal
     });
   } catch (error) {
-    const isTimeout = error instanceof DOMException && (
-      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
-    );
-    return {
-      kind: 'error',
-      failureClass: error instanceof SyntaxError ? 'malformed' : 'transport',
-      message: isTimeout
-        ? 'Request timed out'
-        : error instanceof SyntaxError
-          ? 'Invalid response from provider'
-          : (error instanceof Error ? error.message : 'Request failed')
-    };
+    return failureFromError(error);
   }
 
+  // The body read can fail two ways: invalid JSON (a SyntaxError — the
+  // response really is malformed) or a transport failure (the connection
+  // dropped, or the deadline above fired mid-body). Keep the error from
+  // readBody so the caller classifies the two differently instead of
+  // reporting both as malformed.
   const readBody = async () => {
     try {
-      return asObject(await response.json());
-    } catch {
-      return null;
+      return { body: asObject(await response.json()), error: null };
+    } catch (error) {
+      return { body: null, error };
     }
   };
 
@@ -172,7 +180,7 @@ const requestPlanUsage = async (bearer, fetchImpl) => {
   }
 
   if (response.status === 402 || response.status === 429) {
-    const body = await readBody();
+    const { body } = await readBody();
     return { kind: 'exhausted', ...readQuotaErrorDetail(body), message: errorMessage(body) };
   }
 
@@ -180,9 +188,11 @@ const requestPlanUsage = async (bearer, fetchImpl) => {
     return { kind: 'error', failureClass: 'http-error', message: `API error: ${response.status}` };
   }
 
-  const body = await readBody();
+  const { body, error: bodyError } = await readBody();
   if (!body) {
-    return { kind: 'error', failureClass: 'malformed', message: 'Invalid response from provider' };
+    return bodyError
+      ? failureFromError(bodyError)
+      : { kind: 'error', failureClass: 'malformed', message: 'Invalid response from provider' };
   }
 
   if (body.is_subs_active === false) {

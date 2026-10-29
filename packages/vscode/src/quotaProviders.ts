@@ -3962,20 +3962,25 @@ const requestMetaPlanUsage = async (
     };
   }
 
-  const readBody = async (): Promise<MetaKeyResponse | null> => {
+  // The body read can fail two ways: invalid JSON (a SyntaxError — the
+  // response really is malformed) or a transport failure (the connection
+  // dropped, or the deadline above fired mid-body). Keep the error from
+  // readBody so the caller classifies the two differently instead of
+  // reporting both as malformed.
+  const readBody = async (): Promise<{ body: MetaKeyResponse | null; error: unknown }> => {
     try {
       // SAFETY: this is the Meta key endpoint's own response body; `MetaKeyResponse`
       // describes the fields the parser reads, each of which is checked before use.
-      return (await response.json()) as MetaKeyResponse;
-    } catch {
-      return null;
+      return { body: (await response.json()) as MetaKeyResponse, error: null };
+    } catch (error) {
+      return { body: null, error };
     }
   };
 
   if (response.status === 401 || response.status === 403) return { kind: 'unauthorized' };
 
   if (response.status === 402 || response.status === 429) {
-    const body = await readBody();
+    const { body } = await readBody();
     return {
       kind: 'exhausted',
       ...metaQuotaErrorDetail(body),
@@ -3985,8 +3990,22 @@ const requestMetaPlanUsage = async (
 
   if (!response.ok) return { kind: 'error', failureClass: 'http-error', message: `API error: ${response.status}` };
 
-  const body = await readBody();
-  if (!body) return { kind: 'error', failureClass: 'malformed', message: 'Invalid response from provider' };
+  const { body, error: bodyError } = await readBody();
+  if (!body) {
+    if (!bodyError) return { kind: 'error', failureClass: 'malformed', message: 'Invalid response from provider' };
+    const isTimeout = bodyError instanceof DOMException && (
+      bodyError.name === 'TimeoutError' || (bodyError.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    return {
+      kind: 'error',
+      failureClass: bodyError instanceof SyntaxError ? 'malformed' : 'transport',
+      message: isTimeout
+        ? 'Request timed out'
+        : bodyError instanceof SyntaxError
+          ? 'Invalid response from provider'
+          : (bodyError instanceof Error ? bodyError.message : 'Request failed'),
+    };
+  }
   if (body.is_subs_active === false) return { kind: 'inactive' };
   if (body.require_payment === true) {
     return { kind: 'exhausted', ...metaQuotaErrorDetail(body), message: metaErrorMessage(body) };

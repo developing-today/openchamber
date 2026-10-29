@@ -3279,6 +3279,27 @@ describe('Meta quota provider', () => {
     resetMetaQuotaCache();
   });
 
+  test('classifies a body-read transport failure as transport, not malformed', async () => {
+    resetMetaQuotaCache();
+    const result = await fetchMetaQuota({
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+      fetchImpl: async () => new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError('terminated'));
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.failureClass, 'transport');
+    assert.equal(result.error, 'terminated');
+    resetMetaQuotaCache();
+  });
+
   test('reports not configured without a meta credential', async () => {
     let requests = 0;
     const result = await fetchMetaQuota({

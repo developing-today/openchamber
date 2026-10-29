@@ -318,6 +318,34 @@ describe('Meta failure classes', () => {
     expect(result.error).toBe('Invalid response from provider');
   });
 
+  it('reports a body-read transport failure as transport, not malformed', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new TypeError('terminated'); },
+    });
+
+    const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+    expect(result.ok).toBe(false);
+    expect(result.failureClass).toBe('transport');
+    expect(result.error).toBe('terminated');
+  });
+
+  it('reports a body-read timeout as a timeout, not malformed', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new DOMException('The operation timed out.', 'TimeoutError'); },
+    });
+
+    const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+    expect(result.ok).toBe(false);
+    expect(result.failureClass).toBe('transport');
+    expect(result.error).toBe('Request timed out');
+  });
+
   it('reports a normalized timeout', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
 
