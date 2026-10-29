@@ -90,6 +90,27 @@ describe('downloadModel', () => {
     expect(fs.existsSync(`${file}.part`)).toBe(false);
   });
 
+  it('cancels the response body when it refuses an oversized download', async () => {
+    const file = tempFile();
+    let cancelled = false;
+    const body = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(Buffer.from('y'.repeat(CONTENT.length)));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchImpl = vi.fn(async () => new Response(body, { status: 200 }));
+    await expect(downloadModel({ file, model: modelFor(), fetchImpl })).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringMatching(/larger than the expected/),
+    });
+    expect(cancelled).toBe(true);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(`${file}.part`)).toBe(false);
+  });
+
   it('times out a download whose response never arrives and leaves nothing behind', async () => {
     const file = tempFile();
     const fetchImpl = vi.fn(() => new Promise(() => {}));

@@ -82,25 +82,34 @@ export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, f
     new Error(`The model download timed out after ${Math.round(stallTimeoutMs / 1000)} seconds without receiving data, so it was discarded; try again`),
     { status: 502 },
   );
+  // Each operation races its OWN stall promise, created per call and
+  // dropped when that call settles: racing every chunk against one
+  // long-lived promise pins each settled race (and the chunk it carried)
+  // in that promise's handler list for the whole transfer, so a healthy
+  // download would retain the entire model in memory.
   let stallTimer = null;
-  let rejectStalled = () => {};
-  const stalled = new Promise((_, reject) => { rejectStalled = reject; });
-  // The race observes this promise; this catch only keeps a firing that
-  // lands after the download already settled from going unhandled.
-  stalled.catch(() => {});
+  let rejectStalled = null;
   const armStallTimer = () => {
     if (stallTimer) clearTimeout(stallTimer);
     stallTimer = setTimeout(() => {
       const error = timeoutError();
-      rejectStalled(error);
+      rejectStalled?.(error);
       controller.abort(error);
     }, stallTimeoutMs);
     stallTimer.unref?.();
   };
+  const raceStall = (operation) => new Promise((resolve, reject) => {
+    rejectStalled = reject;
+    // Handlers stay attached after this race settles, so a late rejection
+    // of the operation (the abort landing after a stall, say) is handled
+    // rather than unhandled; the caller drops the settled race, so
+    // nothing accumulates across chunks.
+    operation.then(resolve, reject);
+  });
 
   try {
     armStallTimer();
-    const response = await Promise.race([fetchImpl(model.url, { signal: controller.signal }), stalled]);
+    const response = await raceStall(fetchImpl(model.url, { signal: controller.signal }));
     if (!response.ok || !response.body) {
       throw Object.assign(new Error(`Model download failed (${response.status})`), { status: 502 });
     }
@@ -112,7 +121,7 @@ export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, f
     const reader = response.body.getReader();
     try {
       while (true) {
-        const { done, value: chunk } = await Promise.race([reader.read(), stalled]);
+        const { done, value: chunk } = await raceStall(reader.read());
         if (done) break;
         armStallTimer();
         received += chunk.length;
@@ -132,6 +141,13 @@ export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, f
       }
       await new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve())));
     } catch (error) {
+      // Leave nothing running behind the failure: abort the fetch and
+      // cancel the body reader, or an abandoned transfer keeps consuming
+      // the connection after an early refusal (the oversize throw above
+      // is the common case). The manual reader replaced a for-await loop,
+      // which cancelled the stream implicitly on throw.
+      controller.abort(error);
+      try { await reader.cancel(); } catch { /* the body is already closed */ }
       out.destroy();
       fs.rmSync(partial, { force: true });
       throw error;
