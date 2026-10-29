@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cloneGitRepository, isGitAuthFailure, runGitNetwork } from './clone.js';
+import { MAX_CAPTURED_STDOUT_BYTES, cloneGitRepository, isGitAuthFailure, runGit, runGitNetwork } from './clone.js';
 
 const dirs = [];
 afterEach(() => {
@@ -48,6 +48,32 @@ exit 128`);
     expect(result.ok).toBe(false);
     expect(fs.readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
     expect(String(warn.mock.calls[0]?.[1])).toContain('repository not found');
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('runGit captured stdout cap', () => {
+  it('returns captured stdout under the cap whole', async () => {
+    const { gitBinary } = fakeGit(`printf 'hello'`);
+    const result = await runGit(['show', 'FETCH_HEAD:package.json'], { gitBinary, capture: true, maxCapturedStdoutBytes: 1024 });
+    expect(result).toEqual({ ok: true, stdout: 'hello' });
+  });
+
+  it('resolves output-too-large over the cap with no stdout', async () => {
+    const { gitBinary } = fakeGit(`head -c 10000 /dev/zero | tr '\\0' 'x'`);
+    const result = await runGit(['show', 'FETCH_HEAD:package.json'], { gitBinary, capture: true, maxCapturedStdoutBytes: 1024 });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('output-too-large');
+    expect(result.stdout).toBeUndefined();
+  });
+
+  it('does not buffer stdout when capture is off, however large', async () => {
+    const { gitBinary } = fakeGit(`head -c 10000 /dev/zero | tr '\\0' 'x'`);
+    const result = await runGit(['clone', 'src', 'dest'], { gitBinary, maxCapturedStdoutBytes: 1024 });
+    expect(result).toEqual({ ok: true, stdout: '' });
+  });
+
+  it('documents a default cap in the skills-catalog size class', () => {
+    expect(MAX_CAPTURED_STDOUT_BYTES).toBe(4 * 1024 * 1024);
   });
 });
 
