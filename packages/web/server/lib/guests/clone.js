@@ -177,13 +177,23 @@ export const parseGitInstallUrl = (value) => {
 const STDERR_TAIL_BYTES = 4096;
 
 /**
+ * Captured stdout is bounded. The only capture caller reads a guest repo's
+ * package.json, a file the guest's remote controls, so an oversized file
+ * must not load into server memory whole. 4 MiB matches the skills-catalog
+ * git runner's buffer.
+ */
+export const MAX_CAPTURED_STDOUT_BYTES = 4 * 1024 * 1024;
+
+/**
  * Run one git command without a terminal. Resolves `{ ok: true, stdout }` on
  * exit 0 and `{ ok: false, stderr }` on a non-zero exit, a spawn error, or the
  * timeout (the child is killed). Never rejects. `stdout` is captured only
- * when `capture` is set so a clone's progress is not buffered; `stderr` keeps
+ * when `capture` is set so a clone's progress is not buffered; captured
+ * stdout over `MAX_CAPTURED_STDOUT_BYTES` kills the child and resolves
+ * `{ ok: false, error: 'output-too-large' }` with no stdout. `stderr` keeps
  * only its tail, for diagnosis.
  */
-export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} } = {}) => (
+export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, maxCapturedStdoutBytes = MAX_CAPTURED_STDOUT_BYTES, env = {} } = {}) => (
   new Promise((resolve) => {
     let child;
     try {
@@ -208,8 +218,24 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
     }
     /** @type {Buffer[]} */
     const chunks = [];
+    let capturedBytes = 0;
+    let overflow = false;
     if (capture && child.stdout) {
-      child.stdout.on('data', (chunk) => chunks.push(chunk));
+      child.stdout.on('data', (chunk) => {
+        if (overflow) {
+          return;
+        }
+        capturedBytes += chunk.length;
+        if (capturedBytes > maxCapturedStdoutBytes) {
+          overflow = true;
+          chunks.length = 0;
+          child.kill('SIGKILL');
+          clearTimeout(timer);
+          finish({ ok: false, error: 'output-too-large', stderr: stderrTail.toString('utf8') });
+          return;
+        }
+        chunks.push(chunk);
+      });
     }
     let stderrTail = Buffer.alloc(0);
     child.stderr?.on('data', (chunk) => {
