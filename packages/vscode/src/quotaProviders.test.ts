@@ -55,7 +55,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchMetaQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchMetaQuota, fetchOllamaCloudQuota, resetMetaQuotaCache, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -3248,6 +3248,7 @@ describe('Meta quota provider', () => {
   });
 
   test('reports no quota data when the payload carries no usage windows and no active flag', async () => {
+    resetMetaQuotaCache();
     const result = await fetchMetaQuota({
       readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
       readAccountToken: () => 'dca:test-account-token',
@@ -3256,7 +3257,26 @@ describe('Meta quota provider', () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.configured, true);
-    assert.equal(result.error, 'No quota data in response');
+    assert.equal(result.error, 'Usage unknown — Meta plan-usage read returned no quota data');
+    assert.equal(result.failureClass, 'no-data');
+    assert.equal(result.lastSuccessAt, null);
+  });
+
+  test('carries the last success timestamp on a later failure, and the failure class', async () => {
+    resetMetaQuotaCache();
+    const deps = {
+      readAuth: () => ({ meta: { type: 'key', key: 'LLM|test-minted-key' } }),
+      readAccountToken: () => 'dca:test-account-token',
+    };
+    const okResult = await fetchMetaQuota({ ...deps, fetchImpl: async () => mockResponse(usagePayload) });
+    assert.equal(okResult.ok, true);
+    assert.equal(okResult.lastSuccessAt, okResult.fetchedAt);
+
+    const failResult = await fetchMetaQuota({ ...deps, fetchImpl: async () => mockResponse({}, { ok: false, status: 500 }) });
+    assert.equal(failResult.ok, false);
+    assert.equal(failResult.failureClass, 'http-error');
+    assert.equal(failResult.lastSuccessAt, okResult.fetchedAt);
+    resetMetaQuotaCache();
   });
 
   test('reports not configured without a meta credential', async () => {

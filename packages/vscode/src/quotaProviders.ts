@@ -265,6 +265,10 @@ type ProviderResult = {
   quotaExhausted?: boolean;
   /** When the walled window resets, epoch milliseconds, when the provider says. */
   quotaResetAt?: number | null;
+  /** Why a read failed, in the provider's own classes (meta: unauthorized/inactive/exhausted/transport/malformed/http-error/no-data). */
+  failureClass?: string;
+  /** Epoch ms of the provider's last successful read in this process, or null when none has succeeded yet. */
+  lastSuccessAt?: number | null;
 };
 
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
@@ -3843,6 +3847,14 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
 // from the Muse CLI's own login store (`~/.config/muse/auth.json`). A 402-class
 // wall is `ok: false, quotaExhausted: true`, distinct from a read failure.
 const META_KEY_URL = 'https://api.meta.ai/muse-code/key';
+
+/** Epoch ms of the last successful (ok: true) Meta usage read in this process, or null. */
+let metaLastSuccessAt: number | null = null;
+
+/** Test seam: clears the in-process Meta last-success state between cases. */
+export const resetMetaQuotaCache = (): void => {
+  metaLastSuccessAt = null;
+};
 const META_WEEKLY_SECONDS = 7 * 24 * 60 * 60;
 const MUSE_AUTH_PATH = path.join(os.homedir(), '.config', 'muse', 'auth.json');
 
@@ -3902,7 +3914,7 @@ type MetaPlanOutcome =
   | { kind: 'exhausted'; resetAt: number | null; limitKind: string | null; tier: string | null; message: string | null }
   | { kind: 'unauthorized' }
   | { kind: 'inactive' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; failureClass: 'transport' | 'malformed' | 'http-error' };
 
 const metaQuotaErrorDetail = (body: MetaKeyResponse | null) => {
   const quota = body?.quota;
@@ -3941,6 +3953,7 @@ const requestMetaPlanUsage = async (
     );
     return {
       kind: 'error',
+      failureClass: error instanceof SyntaxError ? 'malformed' : 'transport',
       message: isTimeout
         ? 'Request timed out'
         : error instanceof SyntaxError
@@ -3970,10 +3983,10 @@ const requestMetaPlanUsage = async (
     };
   }
 
-  if (!response.ok) return { kind: 'error', message: `API error: ${response.status}` };
+  if (!response.ok) return { kind: 'error', failureClass: 'http-error', message: `API error: ${response.status}` };
 
   const body = await readBody();
-  if (!body) return { kind: 'error', message: 'Invalid response from provider' };
+  if (!body) return { kind: 'error', failureClass: 'malformed', message: 'Invalid response from provider' };
   if (body.is_subs_active === false) return { kind: 'inactive' };
   if (body.require_payment === true) {
     return { kind: 'exhausted', ...metaQuotaErrorDetail(body), message: metaErrorMessage(body) };
@@ -4026,22 +4039,26 @@ const metaOutcomeToResult = (outcome: MetaPlanOutcome): ProviderResult => {
       }),
       quotaExhausted: true,
       quotaResetAt: outcome.resetAt,
+      failureClass: 'exhausted',
     };
   }
   if (outcome.kind === 'inactive') {
-    return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'Meta subscription is inactive' });
+    return { ...buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'Meta subscription is inactive' }), failureClass: 'inactive' };
   }
   if (outcome.kind === 'error') {
-    return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: outcome.message });
+    return { ...buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: outcome.message }), failureClass: outcome.failureClass };
   }
   if (outcome.kind === 'unauthorized') {
-    return buildResult({
-      providerId: 'meta',
-      providerName: 'Meta Model API',
-      ok: false,
-      configured: true,
-      error: 'Meta plan usage needs the account login — sign in with the Muse Code CLI or store its account token',
-    });
+    return {
+      ...buildResult({
+        providerId: 'meta',
+        providerName: 'Meta Model API',
+        ok: false,
+        configured: true,
+        error: 'Meta plan usage needs the account login — sign in with the Muse Code CLI or store its account token',
+      }),
+      failureClass: 'unauthorized',
+    };
   }
 
   const body = outcome.body;
@@ -4055,7 +4072,7 @@ const metaOutcomeToResult = (outcome: MetaPlanOutcome): ProviderResult => {
     // body that does not say the subscription is active carries no such
     // signal and stays a failure.
     if (body.is_subs_active !== true) {
-      return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'No quota data in response' });
+      return { ...buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: true, error: 'Usage unknown — Meta plan-usage read returned no quota data' }), failureClass: 'no-data' };
     }
     windows = metaWindowsFrom({ window: {}, weekly: {} });
   }
@@ -4087,13 +4104,23 @@ export const fetchMetaQuota = async ({
     return buildResult({ providerId: 'meta', providerName: 'Meta Model API', ok: false, configured: false, error: 'Not configured' });
   }
 
+  // Every configured result carries the last-success timestamp, mirroring
+  // the web provider: a success moves it to this read's time, a failure
+  // leaves it where the last success put it (null when none has succeeded).
+  const finishRead = (result: ProviderResult): ProviderResult => {
+    if (result.ok) {
+      metaLastSuccessAt = result.fetchedAt;
+    }
+    return { ...result, lastSuccessAt: metaLastSuccessAt };
+  };
+
   const first = await requestMetaPlanUsage(primary, fetchImpl);
-  if (first.kind !== 'unauthorized') return metaOutcomeToResult(first);
+  if (first.kind !== 'unauthorized') return finishRead(metaOutcomeToResult(first));
 
   const fallback = readAccountToken();
-  if (!fallback || fallback === primary) return metaOutcomeToResult(first);
+  if (!fallback || fallback === primary) return finishRead(metaOutcomeToResult(first));
 
-  return metaOutcomeToResult(await requestMetaPlanUsage(fallback, fetchImpl));
+  return finishRead(metaOutcomeToResult(await requestMetaPlanUsage(fallback, fetchImpl)));
 };
 
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
