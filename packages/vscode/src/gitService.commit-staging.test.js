@@ -166,6 +166,22 @@ describe('VS Code git service createGitCommit selective staging (#669)', () => {
     expect(stagedPaths(dir)).toEqual(['b.txt']);
   });
 
+  it('fallback (no VS Code repository) stages a dash-named selected file as a path, not an option (#786)', async () => {
+    if (!canRunGit()) return;
+
+    const { dir } = makeRepo();
+    fs.writeFileSync(path.join(dir, '-A'), 'dash selected\n');
+    fs.writeFileSync(path.join(dir, 'other.txt'), 'unselected sibling\n');
+
+    const result = await createGitCommit(dir, 'dash fallback', { files: ['-A'] });
+
+    expect(result.success).toBe(true);
+    expect(result.commit).toBe(headHash(dir));
+    expect(headSubject(dir)).toBe('dash fallback');
+    expect(commitPaths(dir)).toEqual(['-A']);
+    expect(stagedPaths(dir)).toEqual([]);
+  });
+
   it('logs a failure to restore temporarily unstaged files after a successful commit', async () => {
     if (!canRunGit()) return;
 
