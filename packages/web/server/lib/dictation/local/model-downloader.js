@@ -14,6 +14,11 @@ import { spawn } from 'child_process';
 
 import { getLocalSttModelSpec } from './model-catalog.js';
 
+// A download that delivers no bytes for this long is stalled, not slow:
+// model archives are large, so the bound is on silence, not on total time —
+// a slow connection that keeps delivering bytes is never cut off.
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
+
 async function hasRequiredFiles(modelDir, requiredFiles) {
   const results = await Promise.all(
     requiredFiles.map(async (rel) => {
@@ -43,25 +48,30 @@ async function hasRequiredFiles(modelDir, requiredFiles) {
  * @param {string} url
  * @param {string} outputPath
  * @param {((downloadedBytes: number, totalBytes: number | null) => void) | undefined} onProgress
- * @param {{ bytes?: number, sha256?: string, fetchImpl?: typeof fetch }} [expected]
+ * @param {{ bytes?: number, sha256?: string, fetchImpl?: typeof fetch, stallTimeoutMs?: number }} [expected]
  */
 export async function downloadToFile(url, outputPath, onProgress, expected = {}) {
-  const { bytes, sha256, fetchImpl = fetch } = expected;
+  const { bytes, sha256, fetchImpl = fetch, stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS } = expected;
   if (!Number.isInteger(bytes) || bytes <= 0 || !/^[0-9a-f]{64}$/.test(sha256 ?? '')) {
     throw new Error(`No pinned size and checksum for ${url}, so it cannot be downloaded safely`);
-  }
-  const res = await fetchImpl(url);
-  if (!res.ok) {
-    throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
-  }
-  if (!res.body) {
-    throw new Error(`Failed to download ${url}: missing response body`);
   }
 
   let downloadedBytes = 0;
   const digest = createHash('sha256');
+
+  // Stall bound for the whole transfer: the timer is armed before the
+  // fetch (so a response that never arrives counts) and re-armed on every
+  // chunk. Firing aborts the fetch through its signal and destroys the
+  // verify stream, so the pipeline rejects even when a body ignores its
+  // signal. A local timer is used instead of a fixed overall deadline
+  // because these archives are large: total time is legitimately
+  // unbounded, silence is not.
+  const controller = new AbortController();
+  let stallTimer = null;
+  let streaming = false;
   const verify = new Transform({
     transform(chunk, _encoding, callback) {
+      armStallTimer();
       downloadedBytes += chunk.length;
       if (downloadedBytes > bytes) {
         callback(new Error(`The download from ${url} was larger than the expected ${bytes} bytes, so it was discarded; try again`));
@@ -74,25 +84,53 @@ export async function downloadToFile(url, outputPath, onProgress, expected = {})
       callback(null, chunk);
     },
   });
-
-  const tmpPath = `${outputPath}.tmp-${Date.now()}`;
-  await mkdir(path.dirname(outputPath), { recursive: true });
+  const armStallTimer = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      const error = new Error(
+        `The download from ${url} timed out after ${Math.round(stallTimeoutMs / 1000)} seconds without receiving data, so it was discarded; try again`,
+      );
+      controller.abort(error);
+      // Destroying a stream nothing is consuming yet would surface as an
+      // unhandled 'error' event; before the pipeline starts, the abort
+      // alone ends the fetch.
+      if (streaming) verify.destroy(error);
+    }, stallTimeoutMs);
+    stallTimer.unref?.();
+  };
 
   try {
-    await pipeline(Readable.fromWeb(res.body), verify, createWriteStream(tmpPath));
-  } catch (error) {
-    await rm(tmpPath, { force: true }).catch(() => undefined);
-    throw error;
+    armStallTimer();
+    const res = await fetchImpl(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
+    }
+    if (!res.body) {
+      throw new Error(`Failed to download ${url}: missing response body`);
+    }
+
+    const tmpPath = `${outputPath}.tmp-${Date.now()}`;
+    await mkdir(path.dirname(outputPath), { recursive: true });
+
+    try {
+      streaming = true;
+      await pipeline(Readable.fromWeb(res.body), verify, createWriteStream(tmpPath));
+    } catch (error) {
+      await rm(tmpPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    if (downloadedBytes !== bytes) {
+      await rm(tmpPath, { force: true }).catch(() => undefined);
+      throw new Error(`The download from ${url} was incomplete (${downloadedBytes} of ${bytes} bytes), so it was discarded; try again`);
+    }
+    if (digest.digest('hex') !== sha256) {
+      await rm(tmpPath, { force: true }).catch(() => undefined);
+      throw new Error(`The download from ${url} did not match its pinned checksum, so it was discarded; try again`);
+    }
+    await rename(tmpPath, outputPath);
+  } finally {
+    if (stallTimer) clearTimeout(stallTimer);
   }
-  if (downloadedBytes !== bytes) {
-    await rm(tmpPath, { force: true }).catch(() => undefined);
-    throw new Error(`The download from ${url} was incomplete (${downloadedBytes} of ${bytes} bytes), so it was discarded; try again`);
-  }
-  if (digest.digest('hex') !== sha256) {
-    await rm(tmpPath, { force: true }).catch(() => undefined);
-    throw new Error(`The download from ${url} did not match its pinned checksum, so it was discarded; try again`);
-  }
-  await rename(tmpPath, outputPath);
 }
 
 /**
