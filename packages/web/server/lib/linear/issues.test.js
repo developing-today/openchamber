@@ -55,6 +55,7 @@ describe('Linear issue list/get', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     clearLinearAuth();
     if (previousDataDir === undefined) {
       delete process.env.OPENCHAMBER_DATA_DIR;
@@ -124,6 +125,44 @@ describe('Linear issue list/get', () => {
     vi.stubGlobal('fetch', graphql);
     await expect(listLinearIssues()).resolves.toEqual({ connected: false });
     expect(graphql).not.toHaveBeenCalled();
+  });
+
+  it('abandons a GraphQL request that never answers at the deadline', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) => realTimeout(Math.min(ms, 10)));
+    const stalled = vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    }));
+    vi.stubGlobal('fetch', stalled);
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL request timed out',
+      status: 504,
+      userError: false,
+    });
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    expect(stalled).toHaveBeenCalledTimes(1);
+    expect(stalled.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('abandons a GraphQL body read that never finishes at the deadline', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => realTimeout(Math.min(ms, 10)));
+    vi.stubGlobal('fetch', vi.fn((_url, options) => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      }),
+    })));
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL request timed out',
+      status: 504,
+    });
   });
 
   it('lists incomplete issues and never returns the token', async () => {
