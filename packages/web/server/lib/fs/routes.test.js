@@ -2849,4 +2849,10 @@ describe('fs env readers (#696)', () => {
     expect(readWith('OPENCHAMBER_FS_UPLOAD_MAX_BYTES', '0', createUploadMaxBytes)).toBe(100 * 1024 * 1024);
     expect(readWith('OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES', '0', createExecOutputMaxBytes)).toBe(4 * 1024 * 1024);
   });
+
+  it('falls back to the default for an exec timeout above the timer maximum', () => {
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '2147483647', createCommandTimeoutMs)).toBe(2_147_483_647);
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '3000000000', createCommandTimeoutMs)).toBe(5 * 60 * 1000);
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '9007199254740993', createCommandTimeoutMs)).toBe(5 * 60 * 1000);
+  });
 });

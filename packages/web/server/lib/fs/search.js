@@ -104,7 +104,10 @@ export const createGitCheckIgnoreTimeoutMs = () => {
   // as 0 (disarming the check-ignore kill timeout), '1e3' as 1000, '0x10' as
   // 16, and '5.9' as a fractional timeout. An explicit '0' still disables
   // the timeout.
-  return parseBoundedIntWithDefault(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS, 2500, 0, Number.MAX_SAFE_INTEGER);
+  // The upper bound is Node's timer maximum (2^31 - 1 ms): a larger delay
+  // fires after ~1 ms instead, which would kill every check-ignore child
+  // immediately rather than giving it the configured time.
+  return parseBoundedIntWithDefault(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS, 2500, 0, 2_147_483_647);
 };
 
 export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {

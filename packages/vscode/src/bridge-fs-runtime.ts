@@ -66,7 +66,10 @@ export const createGitReadCacheTtlMs = () => {
 
 export const createGitCheckIgnoreTimeoutMs = () => {
   const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
-  if (raw !== null && raw >= 0) return raw;
+  // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
+  // instead, so a larger configured timeout falls back to the default
+  // rather than killing every check-ignore child immediately.
+  if (raw !== null && raw >= 0 && raw <= 2_147_483_647) return raw;
   return 2500;
 };
 
