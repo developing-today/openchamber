@@ -55,6 +55,24 @@ const fakeFetch = async (url, init = {}) => {
     }
     return { ok: false, status: 401, json: async () => ({ error: { type: 'rejected_by_access_enforcement' } }) };
   }
+  if (String(url).includes('opencode.ai/console/api/billing/status')) {
+    return { ok: true, status: 200, json: async () => ({}) };
+  }
+  if (String(url).includes('opencode.ai/console/api/go/status')) {
+    const orgID = init.headers?.['x-org-id'] ?? '';
+    if (orgID === 'org_BROKEN12') {
+      return { ok: true, status: 200, json: async () => ({ product: 'free', access: { meters: {} } }) };
+    }
+    const usedMicroCents = orgID === 'org_SECOND123' ? '900' : '250';
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        product: 'go',
+        access: { meters: { fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '1000', usedMicroCents } } },
+      }),
+    };
+  }
   return { ok: true, status: 200, json: async () => ({ data: {} }) };
 };
 
@@ -199,6 +217,77 @@ describe('per-credential quota', () => {
     expect(results).toHaveLength(1);
     expect(results[0].ok).toBe(true);
     expect(results[0].credentialId).toBeUndefined();
+  });
+});
+
+describe('per-credential quota — OpenCode Go workspaces', () => {
+  const consoleRow = (id, label, active, orgID) => ({
+    id,
+    integrationID: 'opencode',
+    label,
+    active,
+    value: {
+      type: 'oauth',
+      access: `token-${orgID}`,
+      refresh: 'rt',
+      expires: Date.now() + 3_600_000,
+      server: 'https://opencode.ai/console',
+      orgID,
+    },
+  });
+
+  // The gate from #768: two stored Console rows with distinct orgIDs
+  // must enumerate as two distinct usable per-workspace rows.
+  it('returns one labeled row per stored Console workspace and skips unusable rows', async () => {
+    authState.rows = [
+      consoleRow('cred_ws1', 'Workspace One', true, 'org_FIRST123'),
+      consoleRow('cred_ws2', undefined, false, 'org_SECOND123'),
+      // Not a Console sign-in (another server): unusable for Go, skipped.
+      { id: 'cred_other', integrationID: 'opencode', label: 'Other', active: false, value: { type: 'oauth', access: 'x', refresh: 'rt', expires: 1, server: 'https://example.com/console', orgID: 'org_OTHER123' } },
+    ];
+    const results = await fetchQuotaForProviderInstances('opencode-go');
+    expect(results).toHaveLength(2);
+
+    const [first, second] = results;
+    expect(first.credentialId).toBe('cred_ws1');
+    expect(first.credentialLabel).toBe('Workspace One');
+    expect(first.credentialActive).toBe(true);
+    expect(first.accountLabel).toBe('org_FIRST123');
+    expect(first.planLabel).toBe('go');
+    expect(first.usage.windows['5h'].usedPercent).toBe(25);
+
+    expect(second.credentialId).toBe('cred_ws2');
+    expect(second.credentialLabel).toBeUndefined();
+    expect(second.accountLabel).toBe('org_SECOND123');
+    expect(second.usage.windows['5h'].usedPercent).toBe(90);
+  });
+
+  it('isolates a failing workspace row from the healthy ones', async () => {
+    authState.rows = [
+      consoleRow('cred_ok', 'OK', true, 'org_FIRST123'),
+      consoleRow('cred_broken', 'Broken', false, 'org_BROKEN12'),
+    ];
+    const results = await fetchQuotaForProviderInstances('opencode-go');
+    expect(results).toHaveLength(2);
+    expect(results[0].ok).toBe(true);
+    expect(results[1].ok).toBe(false);
+    expect(results[1].credentialId).toBe('cred_broken');
+    expect(results[1].error).toMatch(/subscription/i);
+  });
+
+  it('falls back to the single combined row when the store holds no usable rows', async () => {
+    authState.rows = [];
+    authState.projected = { opencode: consoleRow('cred_active', 'Active', true, 'org_FIRST123').value };
+    const results = await fetchQuotaForProviderInstances('opencode-go');
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(true);
+    expect(results[0].credentialId).toBeUndefined();
+    expect(results[0].usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('catalogues opencode-go with the shared opencode credential alias', () => {
+    const entry = listQuotaProviderCatalogue().find((candidate) => candidate.id === 'opencode-go');
+    expect(entry?.aliases).toEqual(expect.arrayContaining(['opencode-go', 'opencode']));
   });
 });
 

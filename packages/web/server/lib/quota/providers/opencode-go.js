@@ -280,3 +280,35 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }
 };
+
+/**
+ * Quota for one stored credential row, fetched with that row's own
+ * credential alone. OpenCode's store holds one Console sign-in per
+ * workspace, so each usable row answers its own per-workspace result
+ * instead of the single combined (active-credential) row.
+ *
+ * The row re-enters the single fetch with a credential read limited to
+ * that row, which preserves the within-row order the combined fetch
+ * uses: a Console sign-in serves Go, an API key is the fallback, and a
+ * 403 for a key stored on the shared `opencode` integration still
+ * means an absent subscription. A provider-instance row lives under
+ * its instance id; its value is a base `opencode` credential, so it is
+ * read under that id. The dispatcher adds credentialId/label/active;
+ * a Console row also carries its organization id as `accountLabel`, so
+ * an unlabeled workspace row is still attributable to its workspace.
+ * A failing row returns its own error result (fetchQuota never
+ * throws), so one workspace cannot take down the others.
+ */
+export const fetchQuotaForCredential = async (credential, { fetchImpl = fetch } = {}) => {
+  const integrationID = asNonEmptyString(credential?.integrationID);
+  if (!integrationID || !credential?.value) {
+    return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
+  }
+  const authKey = integrationID === providerId || integrationID === CONSOLE_INTEGRATION_ID
+    ? integrationID
+    : CONSOLE_INTEGRATION_ID;
+  const auth = { [authKey]: credential.value };
+  const result = await fetchQuota({ readAuth: async () => auth, fetchImpl });
+  const consoleCredential = getConsoleCredential(auth);
+  return consoleCredential ? { ...result, accountLabel: consoleCredential.orgID } : result;
+};
