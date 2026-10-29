@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 
@@ -35,6 +36,8 @@ const SETTLE_RECHECKS = 3;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
+// Error answers are only shown as a 200-char excerpt; cap the body read to match.
+const ERROR_DETAIL_MAX_BYTES = 1_024;
 const MESSAGE_PAGE_LIMIT = 50;
 // The answer travels into the parent's context; a session that wrote a book
 // is cut, and the agent can read the rest with session.messages.
@@ -295,7 +298,9 @@ export function createDispatchResultsRuntime({
     }
     const response = await fetchImpl(search ? `${base}?${search}` : base, init);
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
+      const detailRead = await readBoundedResponseText(response, ERROR_DETAIL_MAX_BYTES)
+        .catch(() => ({ tooLarge: true }));
+      const detail = detailRead.tooLarge ? '' : detailRead.text;
       throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
     }
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
