@@ -11,6 +11,17 @@ on:
       - nix/**
   workflow_dispatch:
 
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779;
+# Phase 1 code#1780, Phase 2 code#1781, Phase 3 code#1782).
+# Concurrency (design sec.4): PR/branch runs are ref-keyed and cancel on
+# supersede; a push-to-main run (none today -- kept for shape parity) would
+# be keyed by run_id so it is never cancelled. Triggers are pull_request /
+# workflow_dispatch only: no issues/pull_request_target event and no
+# queue: max, so the #84 validation trap cannot occur here.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

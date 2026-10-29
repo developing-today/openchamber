@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { execFileSync } from 'node:child_process';
 
-import { ElectronSshManager } from './ssh-manager.mjs';
+import { DEFAULT_SSH_OUTPUT_TIMEOUT_MS, ElectronSshManager, MAX_SSH_OUTPUT_BYTES } from './ssh-manager.mjs';
 
 // The remote probes call coreutils, which some hosts (NixOS) keep outside /usr/bin and /bin.
 const coreutilsDir = (home) => {
@@ -159,6 +159,61 @@ printf '4321\\n'`);
     expect(calls[0].args).toContain('ControlPath=none');
     expect(calls[0].args).toContain('StrictHostKeyChecking=accept-new');
     expect(calls[0].args).not.toContain('ControlPath=C:\\Temp\\unused.sock');
+  });
+
+  test('caps runRemoteCommand stdout and kills the child over the cap', async () => {
+    const calls = [];
+    let killed = false;
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: (command, args) => {
+        calls.push({ command, args });
+        const child = createChild();
+        child.kill = () => {
+          killed = true;
+          return true;
+        };
+        queueMicrotask(() => {
+          child.stdout.end('x'.repeat(5000));
+        });
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'uname -s', 60, { maxStdoutBytes: 1024 }))
+      .rejects.toThrow('output-too-large');
+    expect(killed).toBe(true);
+    expect(calls[0].args).toContain('ConnectTimeout=60');
+  });
+
+  test('rejects a silent runRemoteCommand child at the execution deadline', async () => {
+    let killed = false;
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: () => {
+        const child = createChild();
+        child.kill = () => {
+          killed = true;
+          return true;
+        };
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'uname -s', 60, { executionTimeoutMs: 50 }))
+      .rejects.toThrow('timed out after 50ms');
+    expect(killed).toBe(true);
+  });
+
+  test('documents the ssh output defaults', () => {
+    expect(MAX_SSH_OUTPUT_BYTES).toBe(4 * 1024 * 1024);
+    expect(DEFAULT_SSH_OUTPUT_TIMEOUT_MS).toBe(120 * 1000);
   });
 
   test('creates a PowerShell-backed askpass helper on Windows', async () => {

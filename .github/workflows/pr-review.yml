@@ -9,22 +9,25 @@ on:
     types: [created]
 
 concurrency:
-  # PR conversation comments arrive as `issue_comment` events, so their PR number
-  # is exposed as `github.event.issue.number`. Keep comment-triggered runs in a
-  # separate group so skipped non-command comments do not cancel active reviews.
-  # queue: max combined with cancel-in-progress: true is a workflow
-  # validation error, and an expression that evaluates to true for
-  # pull_request_target failed every such run at startup (#84). So no
-  # event cancels: a pull_request_target run gets its own group (the
-  # run_id segment), starts at once, and can neither cancel nor be
-  # cancelled — a rapid synchronize can therefore leave two reviews
-  # running side by side where the stale one used to be cancelled.
-  # Comment runs share one group per PR and queue: max keeps every
-  # review command — with the default single queue a third command on
-  # the same PR silently replaces the pending second one (#77).
-  group: pr-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name == 'pull_request_target' && github.run_id || 'shared' }}
-  cancel-in-progress: false
-  queue: max
+  # CI policy: .github/ci-policy.md (fleet design developing-today/code#1779
+  # sec.4; Phase 1, developing-today/code#1780).
+  # PR paths cancel on supersede (Phase 1): pull_request_target runs share
+  # one group per PR and cancel-in-progress evaluates true only for that
+  # event, so a rapid synchronize cancels the stale review instead of
+  # leaving two reviews running side by side.
+  # The #84 trap is avoided by construction: queue: max is GONE. Pairing
+  # queue: max with a cancel expression that evaluates true for
+  # issues/pull_request_target events is the GitHub validation error that
+  # killed this workflow before; with the default queue behaviour a true
+  # cancel expression on pull_request_target is valid.
+  # The #77 trap is avoided by the group, not the queue: comment-triggered
+  # runs (issue_comment / pull_request_review_comment) are keyed by the
+  # individual comment id, so every review command gets its own group,
+  # never queues behind (or silently replaces) another command, and --
+  # with cancel evaluating false for comment events -- never cancels an
+  # active review.
+  group: pr-review-${{ github.event_name }}-${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || github.event.comment.id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
   # Every PR event gets a review. A comment command starts the agent on the

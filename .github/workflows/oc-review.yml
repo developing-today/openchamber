@@ -1,5 +1,12 @@
 name: pr checks
 
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779
+# sec.3.3/sec.3.4; Phase 2, developing-today/code#1781). This workflow is
+# openchamber's designated main-gate for the Phase 3 remediation chain.
+# PR tier = lint + type-check only (sub-minute execution). The full suite
+# (tests + build) runs on push to main and on the nightly backstop below.
+# Dedup: push is restricted to branches: [main], so a PR branch push fires
+# pull_request only -- a commit never runs the same suite twice.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -7,6 +14,12 @@ on:
   # merge that breaks main is only discovered by the next PR's run.
   push:
     branches: [main]
+  schedule:
+    # Nightly backstop for the main tier: the full suite (including the
+    # tests and build jobs that no longer run on PRs) re-runs even on
+    # days with no merge, so nothing removed from PRs can vanish.
+    - cron: '37 5 * * *'
+  workflow_dispatch:
 
 # A new push to the same PR makes the older run pointless. Push runs have
 # no pull_request payload, so they fall back to the unique run_id (the
@@ -56,7 +69,10 @@ jobs:
       - name: Changelog outputs match their sources
         run: bun run changelog:check
 
+  # Main tier only (Phase 2): skipped on pull_request events; runs on
+  # push to main, on the nightly schedule, and on manual dispatch.
   tests:
+    if: github.event_name != 'pull_request'
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
@@ -76,10 +92,13 @@ jobs:
           bun run test:updater
           bun run test:linux-desktop
 
+  # Main tier only (Phase 2): skipped on pull_request events; runs on
+  # push to main, on the nightly schedule, and on manual dispatch.
   # Catches what type-check cannot: bundling, Vite-only syntax, the web
   # build's memory ceiling. The packages whose `build` is only a type-check (`tsc -b`)
   # (ui) or a no-op (electron) are covered by the type-check job.
   build:
+    if: github.event_name != 'pull_request'
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:

@@ -43,7 +43,9 @@ mock.module('vscode', () => ({
 }));
 
 const {
+  FS_EXEC_OUTPUT_MAX_BYTES,
   clearGitReadCacheForTests,
+  createFsExecOutputMaxBytes,
   createGitCheckIgnoreTimeoutMs,
   createGitReadCacheTtlMs,
   handleFsBridgeMessage,
@@ -154,6 +156,32 @@ describe('bridge fs exec spawn launch', () => {
       stdout: 'partial out',
       stderr: 'boom',
     });
+  });
+});
+
+describe('bridge fs exec output cap env reader', () => {
+  const name = 'OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES';
+  let saved;
+  beforeEach(() => {
+    saved = process.env[name];
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[name];
+    else process.env[name] = saved;
+  });
+
+  it('falls back to 4 MiB when unset, not a plain decimal, or 0', () => {
+    delete process.env[name];
+    expect(createFsExecOutputMaxBytes()).toBe(FS_EXEC_OUTPUT_MAX_BYTES);
+    for (const value of ['', ' ', '1e3', '0x10', '5.9', '-5', '0']) {
+      process.env[name] = value;
+      expect(createFsExecOutputMaxBytes()).toBe(FS_EXEC_OUTPUT_MAX_BYTES);
+    }
+  });
+
+  it('honours a positive plain decimal value', () => {
+    process.env[name] = '2048';
+    expect(createFsExecOutputMaxBytes()).toBe(2048);
   });
 });
 

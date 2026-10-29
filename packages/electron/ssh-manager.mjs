@@ -47,6 +47,16 @@ const MONITOR_STABILIZE_TICKS = 5;
 const SSH_STATUS_EVENT = 'openchamber:ssh-instance-status';
 const MAX_PROCESS_ERROR_CHARS = 2000;
 const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
+// Captured stdout from an SSH command is bounded and timed. The remote host
+// controls both how much a command prints and whether it exits, so an
+// unbounded, timeless read lets a verbose or wedged remote grow or hang the
+// desktop app. The 4 MiB cap matches the web run-command cap; stderr in
+// this file was already tail-capped.
+export const MAX_SSH_OUTPUT_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_SSH_OUTPUT_TIMEOUT_MS = 120 * 1000;
+// A remote install (bun add / npm install -g) legitimately runs for
+// minutes, so its call site passes this generous deadline explicitly.
+const REMOTE_INSTALL_TIMEOUT_MS = 600 * 1000;
 const childProcessDiagnostics = new WeakMap();
 
 const nowMillis = () => Date.now();
@@ -550,7 +560,7 @@ export class ElectronSshManager {
     return this.trackSshProcess(child, parsed);
   }
 
-  async runSshOutput(parsed, preDestinationArgs, remoteCommand = null) {
+  async runSshOutput(parsed, preDestinationArgs, remoteCommand = null, { timeoutMs = DEFAULT_SSH_OUTPUT_TIMEOUT_MS, maxStdoutBytes = MAX_SSH_OUTPUT_BYTES } = {}) {
     return await new Promise((resolve, reject) => {
       const child = this.trackSshProcess(this.spawnProcess('ssh', buildSshArgs(parsed, preDestinationArgs, remoteCommand), {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -560,18 +570,47 @@ export class ElectronSshManager {
 
       let stdout = '';
       let stderr = '';
+      let stdoutBytes = 0;
+      let settled = false;
+      const settle = (action, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        action(value);
+      };
+      const killChild = () => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // The process already exited.
+        }
+      };
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+          killChild();
+          settle(reject, new Error(`SSH command timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+        : null;
       child.stdout?.on('data', (chunk) => {
-        stdout += chunk.toString();
+        if (settled) return;
+        const text = chunk.toString();
+        stdoutBytes += Buffer.byteLength(text);
+        if (stdoutBytes > maxStdoutBytes) {
+          killChild();
+          settle(reject, new Error(`SSH command output exceeded the ${maxStdoutBytes} byte limit (output-too-large)`));
+          return;
+        }
+        stdout += text;
       });
       child.stderr?.on('data', (chunk) => {
         stderr = `${stderr}${chunk.toString()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
       });
       child.on('error', () => {
-        reject(new Error(this.processErrorDetail(child, 'Failed to start SSH process')));
+        settle(reject, new Error(this.processErrorDetail(child, 'Failed to start SSH process')));
       });
       child.on('close', (code) => {
         const auth = this.sshAuth.get(parsed);
-        resolve({
+        settle(resolve, {
           code: typeof code === 'number' ? code : -1,
           stdout,
           stderr: sanitizeProcessDiagnostic(stderr, auth?.sshPassword),
@@ -580,15 +619,18 @@ export class ElectronSshManager {
     });
   }
 
-  async runRemoteCommand(parsed, controlPath, script, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC) {
+  async runRemoteCommand(parsed, controlPath, script, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC, { executionTimeoutMs = DEFAULT_SSH_OUTPUT_TIMEOUT_MS, maxStdoutBytes = MAX_SSH_OUTPUT_BYTES } = {}) {
     const connectionArgs = this.usesControlMaster()
       ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`]
       : this.independentConnectionArgs();
+    // ConnectTimeout bounds connection establishment only. The execution
+    // deadline bounds the remote command itself and is enforced locally by
+    // runSshOutput, which kills the ssh child when it passes.
     const { code, stdout, stderr } = await this.runSshOutput(parsed, [
       ...connectionArgs,
       '-o', `ConnectTimeout=${timeoutSec}`,
       '-T',
-    ], `sh -lc ${shellQuote(script)}`);
+    ], `sh -lc ${shellQuote(script)}`, { timeoutMs: executionTimeoutMs, maxStdoutBytes });
     if (code !== 0) {
       const auth = this.sshAuth.get(parsed);
       throw new Error(sanitizeProcessDiagnostic(stderr || stdout, auth?.sshPassword) || 'Remote command failed');
@@ -1206,7 +1248,7 @@ export class ElectronSshManager {
     let lastError = null;
     for (const command of commands) {
       try {
-        await this.runRemoteCommand(parsed, controlPath, command);
+        await this.runRemoteCommand(parsed, controlPath, command, DEFAULT_CONNECTION_TIMEOUT_SEC, { executionTimeoutMs: REMOTE_INSTALL_TIMEOUT_MS });
         return;
       } catch (error) {
         lastError = error;

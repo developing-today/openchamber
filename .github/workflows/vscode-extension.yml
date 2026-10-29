@@ -6,6 +6,17 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779;
+# Phase 1 code#1780, Phase 2 code#1781, Phase 3 code#1782).
+# Concurrency (design sec.4): releases are never cancelled. Tag pushes and
+# manual dispatches each get a per-run group (run_id); any other ref-keyed
+# run cancels on supersede. Triggers are push/workflow_dispatch only: no
+# issues/pull_request_target event and no queue: max, so the #84
+# validation trap cannot occur here.
+concurrency:
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))) && github.run_id || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
