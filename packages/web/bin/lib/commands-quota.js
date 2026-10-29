@@ -4,6 +4,19 @@ import { asNonEmptyString } from '../../server/lib/shared/guards.js';
 
 const DEFAULT_OPENCODE_PORT = 4096;
 
+// A whole number from the environment, else null. Only a plain decimal
+// spelling counts: a bare parseInt would read '1e3' as 1, '4096junk' as
+// 4096, and '10.9' as 10. Same strict judgement as parsePlainDecimalInt in
+// server/lib/fs/routes.js and the whole-text checks in cli-args.js.
+const parsePlainDecimalInt = (raw) => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
 const QUOTA_HELP = `OpenChamber Quota Commands
 
 USAGE:
@@ -52,8 +65,8 @@ ENVIRONMENT:
 const resolveOpenCodeBaseUrl = (env) => {
   const host = asNonEmptyString(env.OPENCODE_HOST);
   if (host) return host.replace(/\/+$/, '');
-  const port = Number.parseInt(env.OPENCODE_PORT ?? '', 10);
-  return `http://127.0.0.1:${Number.isInteger(port) && port > 0 ? port : DEFAULT_OPENCODE_PORT}`;
+  const port = parsePlainDecimalInt(env.OPENCODE_PORT);
+  return `http://127.0.0.1:${port !== null && port >= 1 && port <= 65535 ? port : DEFAULT_OPENCODE_PORT}`;
 };
 
 const buildOpenCodeAuthHeaders = (env) => {
@@ -224,8 +237,8 @@ const QUOTA_FETCH_CONCURRENCY = 6;
 const DEFAULT_QUOTA_TIMEOUT_MS = 10_000;
 
 const resolveQuotaTimeoutMs = (env) => {
-  const parsed = Number.parseInt(env.OPENCHAMBER_QUOTA_TIMEOUT_MS ?? '', 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_QUOTA_TIMEOUT_MS;
+  const parsed = parsePlainDecimalInt(env.OPENCHAMBER_QUOTA_TIMEOUT_MS);
+  return parsed !== null && parsed > 0 ? parsed : DEFAULT_QUOTA_TIMEOUT_MS;
 };
 
 /** Runs `worker` over `items` with at most `limit` in flight; results keep input order. */
