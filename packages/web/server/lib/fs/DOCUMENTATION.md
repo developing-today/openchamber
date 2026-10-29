@@ -50,6 +50,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
       symlinked directories are followed, each real directory walked once,
       and repositories are reported under the link path)
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
+  - Exec command output is capped per stream at `OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES` (default 4 MiB, `createExecOutputMaxBytes`). A command that exceeds the cap is killed and its result resolves with `success: false` and an `output-too-large` error, with each stream truncated to the cap. Results under the cap keep the usual shape.
   - Exec commands run with the terminal's PATH plus the user's and the project's environment variables for their directory (`environmentRuntime`, see `../environment`).
   - Enforces workspace boundary checks with active project + worktree fallback support.
   - The active project directory is validated with `fs.realpath`, so when the project root is itself a symlink the workspace base no longer matches the paths the client sends. Workspace resolution therefore retries against the raw directory the client requested (`requestedDirectory` from `resolveProjectDirectory`) before falling back to worktree roots. Symlinks are still resolved afterwards, and write/exec routes keep their canonical containment check against the resolved base.

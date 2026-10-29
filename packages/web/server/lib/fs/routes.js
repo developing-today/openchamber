@@ -158,6 +158,16 @@ export const createUploadMaxBytes = () => {
   return 100 * 1024 * 1024;
 };
 
+// Per-stream byte cap for /api/fs/exec command output. A verbose command
+// otherwise grows server memory for the full command timeout. The default
+// matches the environment command runner (MAX_COMMAND_OUTPUT_BYTES in
+// ../environment/runtime.js).
+export const createExecOutputMaxBytes = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES);
+  if (raw !== null && raw > 0) return raw;
+  return 4 * 1024 * 1024;
+};
+
 const FILE_MIME_MAP = Object.freeze({
   '.html': 'text/html',
   '.htm': 'text/html',
@@ -548,11 +558,37 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs }) => {
+const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs, execOutputMaxBytes = 4 * 1024 * 1024 }) => {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let timedOut = false;
+    let outputTooLarge = false;
+
+    const killForOutputLimit = () => {
+      if (outputTooLarge) return;
+      outputTooLarge = true;
+      try {
+        child.kill('SIGKILL');
+      } catch {
+      }
+    };
+
+    // Append at most the bytes left under the cap and report overflow, so a
+    // capped stream is truncated to the cap and never grows past it.
+    const appendCapped = (current, currentBytes, chunk) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      if (currentBytes >= execOutputMaxBytes) {
+        return { value: current, bytes: currentBytes, exceeded: true };
+      }
+      const remaining = execOutputMaxBytes - currentBytes;
+      if (buffer.length <= remaining) {
+        return { value: current + buffer.toString(), bytes: currentBytes + buffer.length, exceeded: false };
+      }
+      return { value: current + buffer.subarray(0, remaining).toString(), bytes: execOutputMaxBytes, exceeded: true };
+    };
 
     const child = spawn(shell, [shellFlag, command], {
       cwd: resolvedCwd,
@@ -570,11 +606,19 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
     }, commandTimeoutMs);
 
     child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
+      if (outputTooLarge) return;
+      const appended = appendCapped(stdout, stdoutBytes, chunk);
+      stdout = appended.value;
+      stdoutBytes = appended.bytes;
+      if (appended.exceeded) killForOutputLimit();
     });
 
     child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
+      if (outputTooLarge) return;
+      const appended = appendCapped(stderr, stderrBytes, chunk);
+      stderr = appended.value;
+      stderrBytes = appended.bytes;
+      if (appended.exceeded) killForOutputLimit();
     });
 
     child.on('error', (error) => {
@@ -599,6 +643,15 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
         stdout: stdout.trim(),
         stderr: stderr.trim(),
       };
+
+      if (outputTooLarge) {
+        resolve({
+          ...base,
+          success: false,
+          error: `Command output exceeded the ${execOutputMaxBytes} byte limit (output-too-large)`,
+        });
+        return;
+      }
 
       if (timedOut) {
         resolve({
@@ -669,6 +722,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
+  const execOutputMaxBytes = createExecOutputMaxBytes();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
   const gitReadCache = new Map();
@@ -762,6 +816,7 @@ export const registerFsRoutes = (app, dependencies) => {
         ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !isCacheableGitReadCommand(command) })
         : { ...process.env, PATH: buildAugmentedPath() },
       commandTimeoutMs,
+      execOutputMaxBytes,
     }))().then((result) => {
       // Only cache successful results — failures may be transient.
       if (cacheKey && result && result.success) {
