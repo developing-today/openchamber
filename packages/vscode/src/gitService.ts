@@ -1819,8 +1819,15 @@ export async function listGitWorktrees(directory: string): Promise<GitWorktreeIn
         path: entry.worktree,
       }));
   } catch (error) {
-    console.warn('[GitService] Failed to list worktrees, returning empty list:', error instanceof Error ? error.message : String(error));
-    return [];
+    // Only a directory that is not a repository authoritatively has no
+    // worktrees - the same distinction the web getWorktrees and this
+    // module's getRemotes make. Any other failure (corrupt config,
+    // dubious ownership) must surface with git's stderr instead of
+    // reading as a repository with no worktrees.
+    if (/not a git repository/i.test(error instanceof Error ? error.message : String(error))) {
+      return [];
+    }
+    throw error;
   }
 }
 
