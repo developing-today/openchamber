@@ -9,6 +9,9 @@ import { refreshAccessToken } from './oauth.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
 
 const LINEAR_GRAPHQL_URL = 'https://api.linear.app/graphql';
+// GraphQL calls run inside request handlers and background tracked-item
+// refreshes. Without a deadline a stalled connection holds those open forever.
+const LINEAR_GRAPHQL_TIMEOUT_MS = 10_000;
 const VIEWER_QUERY = '{ viewer { id name displayName email avatarUrl } organization { id name urlKey } }';
 // Linear file URLs in GraphQL need this header or the browser cannot load
 // uploads.linear.app images (comment screenshots, description images).
@@ -21,6 +24,16 @@ export class LinearApiError extends Error {
     this.status = status;
     this.userError = options.userError === true;
   }
+}
+
+// AbortSignal.timeout aborts with a TimeoutError DOMException; a body read cut
+// off by the same deadline may surface as an AbortError instead.
+function isTimeoutAbort(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError';
+}
+
+function graphqlTimeoutError() {
+  return new LinearApiError('Linear GraphQL request timed out', 504);
 }
 
 function readGraphqlError(payload) {
@@ -98,17 +111,31 @@ export async function fetchLinearGraphql(accessToken, query, variables) {
     body.variables = variables;
   }
 
-  const response = await fetch(LINEAR_GRAPHQL_URL, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'public-file-urls-expire-in': LINEAR_PUBLIC_FILE_URL_TTL_SECONDS,
-    },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => null);
+  const signal = AbortSignal.timeout(LINEAR_GRAPHQL_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(LINEAR_GRAPHQL_URL, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'public-file-urls-expire-in': LINEAR_PUBLIC_FILE_URL_TTL_SECONDS,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (isTimeoutAbort(error)) throw graphqlTimeoutError();
+    throw error;
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    if (isTimeoutAbort(error) || signal.aborted) throw graphqlTimeoutError();
+    payload = null;
+  }
   if (response.status === 401) {
     throw new LinearApiError('Linear token expired or revoked', 401);
   }
