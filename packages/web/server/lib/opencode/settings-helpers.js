@@ -72,6 +72,11 @@ export const createSettingsHelpers = (dependencies) => {
     normalizeDirectoryPath,
     normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
+    normalizeScheduledTasksMaxRunDurationMs = (value) => (
+      Number.isFinite(value) && value > 0
+        ? Math.min(Math.max(Math.round(value), 1_000), 2_147_483_647)
+        : undefined
+    ),
     normalizeTunnelProvider,
     normalizeTunnelMode,
     normalizeOptionalPath,
@@ -699,6 +704,12 @@ export const createSettingsHelpers = (dependencies) => {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
       result.tunnelBootstrapTtlMs = normalizeTunnelBootstrapTtlMs(candidate.tunnelBootstrapTtlMs);
+    }
+    if (Number.isFinite(candidate.scheduledTasksMaxRunDurationMs)) {
+      const normalizedMaxRunMs = normalizeScheduledTasksMaxRunDurationMs(candidate.scheduledTasksMaxRunDurationMs);
+      if (normalizedMaxRunMs !== undefined) {
+        result.scheduledTasksMaxRunDurationMs = normalizedMaxRunMs;
+      }
     }
     if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
       result.tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(candidate.tunnelSessionTtlMs);

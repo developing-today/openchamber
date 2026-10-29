@@ -508,6 +508,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '已傳送',
   'sessions.scheduledTasks.dialog.status.skipped': '已略過',
   'sessions.scheduledTasks.dialog.status.cancelled': '已取消',
+  'sessions.scheduledTasks.dialog.status.timeout': '逾時',
   'sessions.scheduledTasks.dialog.nextRun.label': '下次',
   'sessions.scheduledTasks.dialog.lastRun.label': '上次執行',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '正在執行',

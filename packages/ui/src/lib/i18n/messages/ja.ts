@@ -480,6 +480,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '送信済み',
   'sessions.scheduledTasks.dialog.status.skipped': 'スキップ',
   'sessions.scheduledTasks.dialog.status.cancelled': 'キャンセル',
+  'sessions.scheduledTasks.dialog.status.timeout': 'タイムアウト',
   'sessions.scheduledTasks.dialog.nextRun.label': '次回',
   'sessions.scheduledTasks.dialog.lastRun.label': '最終実行',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '実行中',

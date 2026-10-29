@@ -319,6 +319,7 @@ const normalizePathForPersistence = (...args) => settingsNormalizationRuntime.no
 const normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
 const normalizeTunnelBootstrapTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs(...args);
 const normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
+const normalizeScheduledTasksMaxRunDurationMs = (...args) => settingsNormalizationRuntime.normalizeScheduledTasksMaxRunDurationMs(...args);
 const normalizeManagedRemoteTunnelHostname = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
 const normalizeManagedRemoteTunnelPresets = (...args) =>
@@ -419,6 +420,7 @@ const settingsHelpers = createSettingsHelpers({
   normalizeDirectoryPath,
   normalizeTunnelBootstrapTtlMs,
   normalizeTunnelSessionTtlMs,
+  normalizeScheduledTasksMaxRunDurationMs,
   normalizeTunnelProvider,
   normalizeTunnelMode,
   normalizeOptionalPath,
@@ -1689,6 +1691,11 @@ const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
+  resolveServerMaxRunDurationMs: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    const value = settings?.scheduledTasksMaxRunDurationMs;
+    return Number.isFinite(value) && value > 0 ? value : null;
+  },
   chatsScope: scheduledChatsScope,
   messageQueueRuntime,
   resolvePrimaryWorktreeRoot,

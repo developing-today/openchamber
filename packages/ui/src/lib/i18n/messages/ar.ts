@@ -442,6 +442,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'أُرسلت',
   'sessions.scheduledTasks.dialog.status.skipped': 'تم التخطي',
   'sessions.scheduledTasks.dialog.status.cancelled': 'أُلغيت',
+  'sessions.scheduledTasks.dialog.status.timeout': 'انتهت المهلة',
   'sessions.scheduledTasks.dialog.nextRun.label': 'التالي',
   'sessions.scheduledTasks.dialog.lastRun.label': 'آخر تشغيل',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'قيد التشغيل الآن',
