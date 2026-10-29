@@ -3119,7 +3119,7 @@ export async function createGitCommit(
   } else if (options?.files?.length) {
     const filesToStage = options.stageFiles ?? options.files;
     if (filesToStage.length > 0) {
-      assertGitCommandSucceeded(await execGit(['add', ...filesToStage], directory), 'Failed to stage selected files');
+      assertGitCommandSucceeded(await execGit(['add', '--', ...filesToStage], directory), 'Failed to stage selected files');
     }
   }
 
