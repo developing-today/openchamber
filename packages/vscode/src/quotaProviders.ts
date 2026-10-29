@@ -1027,6 +1027,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
   try {
     const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -1735,6 +1736,7 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   try {
     const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'anthropic-beta': 'oauth-2025-04-20',
@@ -1911,6 +1913,7 @@ const fetchCopilotQuota = async (): Promise<ProviderResult> => {
   try {
     const response = await fetch(copilotUserUrl(enterpriseUrl), {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `token ${accessToken}`,
         Accept: 'application/json',
@@ -1970,6 +1973,7 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   try {
     const response = await fetch(copilotUserUrl(enterpriseUrl), {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `token ${accessToken}`,
         Accept: 'application/json',
@@ -2151,6 +2155,7 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
   try {
     const response = await fetchImpl('https://api.kimi.com/coding/v1/usages', {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -2227,6 +2232,7 @@ const fetchMiniMaxQuota = async (data: {
   try {
     const response = await fetch(data.endpoint, {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -2837,6 +2843,7 @@ const attachZaiGiftResets = async (windows: Record<string, UsageWindow>, apiKey:
   try {
     const response = await fetch(ZAI_GIFT_RESET_URL, {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -2882,6 +2889,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
   try {
     const response = await fetch('https://api.z.ai/api/monitor/usage/quota/limit', {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -2975,6 +2983,7 @@ const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaG
 
   const response = await fetch(ZAI_GIFT_RESET_USE_URL, {
     method: 'POST',
+    signal: AbortSignal.timeout(15_000),
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
@@ -3023,6 +3032,7 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
   try {
     const response = await fetch('https://open.bigmodel.cn/api/monitor/usage/quota/limit', {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -3151,6 +3161,7 @@ const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
   try {
     const response = await fetch('https://nano-gpt.com/api/subscription/v1/usage', {
       method: 'GET',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
