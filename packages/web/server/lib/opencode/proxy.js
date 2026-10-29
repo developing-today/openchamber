@@ -16,6 +16,7 @@ import { beginUpstreamRequest } from './upstream-requests.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
+import { readBoundedResponseText } from '../guests/response-body.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 // How long a browser's SSE stream waits, with no block forwarded, for OpenCode to take it back.
@@ -34,6 +35,14 @@ const OPENCODE_AGENT_MAX_FREE_SOCKETS = 256;
 // Setting this higher than upstream causes stale socket reuse where the
 // client writes into a dead socket and gets 'socket hang up' (ECONNRESET).
 const OPENCODE_AGENT_IDLE_TIMEOUT_MS = 4_000;
+
+// The session list/detail/message routes read the whole upstream body and
+// parse it (the overlay and the message shelling need the parsed body), so the
+// read is capped while it streams in: 16 MiB matches the event-stream
+// protocol's in-memory bound for the same session/message data
+// (MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES), and UI pages stay far below it
+// (message pages ask for 10-50 messages, session lists for <=200 records).
+export const SESSION_LIST_PAYLOAD_MAX_BYTES = 16 * 1024 * 1024;
 
 const OPENCODE_AGENT_OPTIONS = {
   keepAlive: true,
@@ -466,6 +475,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   app.set('opencodeProxyConfigured', true);
 
   const isAbortError = (error) => error?.name === 'AbortError';
+  const isResponseTooLargeError = (error) => error?.code === 'response_too_large';
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
     realpath: fs?.promises?.realpath?.bind(fs.promises),
@@ -960,14 +970,25 @@ export const registerOpenCodeProxy = (app, deps) => {
       method: 'GET',
       headers,
       // The whole body is read and parsed below, so this fetch cannot
-      // stream the way the event route's non-SSE branch does (#759). It
-      // stays bounded in time instead: a caller with no tighter budget
-      // gets the proxy's long-request deadline, the same one the response
-      // deadline middleware applies to the route.
+      // stream the way the event route's non-SSE branch does (#759). It is
+      // bounded in time — a caller with no tighter budget gets the proxy's
+      // long-request deadline, the same one the response deadline
+      // middleware applies to the route — and in size, by the bounded read
+      // below (#776).
       signal: AbortSignal.timeout(typeof timeoutMs === 'number' ? timeoutMs : PROXY_REQUEST_TIMEOUT_MS),
     });
     const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
-    const bodyText = await upstream.text();
+    const bounded = await readBoundedResponseText(upstream, SESSION_LIST_PAYLOAD_MAX_BYTES);
+    if (bounded.tooLarge) {
+      throw Object.assign(
+        new Error(`OpenCode session payload exceeded ${SESSION_LIST_PAYLOAD_MAX_BYTES} bytes`),
+        { code: 'response_too_large' },
+      );
+    }
+    // Response.text() (the previous read) strips a leading UTF-8 BOM; the
+    // bounded reader does not, so strip it here to keep the bytes the
+    // callers see unchanged.
+    const bodyText = bounded.text.replace(/^\uFEFF/, '');
     const isJson = contentType.toLowerCase().includes('application/json');
 
     if (!isJson) {
@@ -1021,6 +1042,14 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.json(wantsSpaces ? await mergeSpaceSessionList(hostList) : hostList);
     } catch (error) {
       if (isAbortError(error)) {
+        return;
+      }
+      if (isResponseTooLargeError(error)) {
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'OpenCode response too large' });
+          return;
+        }
+        next(error);
         return;
       }
       console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSanitizedSessionListRequest', error)}`);
@@ -1205,6 +1234,14 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.json(record.data && typeof record.data === 'object' ? { ...record, data: overlaid } : overlaid);
     } catch (error) {
       if (isAbortError(error)) return;
+      if (isResponseTooLargeError(error)) {
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'OpenCode response too large' });
+          return;
+        }
+        next(error);
+        return;
+      }
       console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSessionGetRequest', error)}`);
       if (!res.headersSent) {
         res.status(503).json({ error: 'OpenCode service unavailable' });
@@ -1232,6 +1269,14 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.json(shellMessagePage(result.payload, keepWhole));
     } catch (error) {
       if (isAbortError(error)) return;
+      if (isResponseTooLargeError(error)) {
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'OpenCode response too large' });
+          return;
+        }
+        next(error);
+        return;
+      }
       console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardMessageListRequest', error)}`);
       if (!res.headersSent) {
         res.status(503).json({ error: 'OpenCode service unavailable' });

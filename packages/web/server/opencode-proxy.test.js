@@ -4,7 +4,7 @@ import net from 'node:net';
 import express from 'express';
 import path from 'path';
 
-import { createSseBoundaryTracker, registerOpenCodeProxy, writeSseChunkWithBackpressure } from './lib/opencode/proxy.js';
+import { createSseBoundaryTracker, registerOpenCodeProxy, SESSION_LIST_PAYLOAD_MAX_BYTES, writeSseChunkWithBackpressure } from './lib/opencode/proxy.js';
 
 const listen = (app, host = '127.0.0.1') => new Promise((resolve, reject) => {
   const server = app.listen(0, host, () => resolve(server));
@@ -1049,6 +1049,114 @@ describe('OpenCode proxy SSE forwarding', () => {
 
     const single = await (await fetch(`${base}/api/session/ses_1/message/msg_1`, { headers: asking })).json();
     expect(single).toEqual(message);
+  });
+
+  describe('session payload size cap (#776)', () => {
+    const startProxy = async (mountUpstream) => {
+      const upstream = express();
+      mountUpstream(upstream);
+      upstreamServer = await listen(upstream);
+      const upstreamPort = upstreamServer.address().port;
+      const baseUrl = `http://127.0.0.1:${upstreamPort}`;
+      const app = express();
+      registerOpenCodeProxy(app, {
+        fs: { promises: { realpath: async (value) => value } },
+        os: {},
+        path,
+        OPEN_CODE_READY_GRACE_MS: 0,
+        getRuntime: () => ({
+          openCodePort: upstreamPort,
+          openCodeBaseUrl: baseUrl,
+          isOpenCodeReady: true,
+          openCodeNotReadySince: 0,
+          isRestartingOpenCode: false,
+        }),
+        getOpenCodeAuthHeaders: () => ({}),
+        buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath}`,
+        ensureOpenCodeApiPrefix: () => {},
+        getArchivedSessions: async () => null,
+        getStoredSessionMetadata: async () => null,
+      });
+      proxyServer = await listen(app);
+      return `http://127.0.0.1:${proxyServer.address().port}`;
+    };
+
+    const sendOversized = (res, chunked) => {
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+      const chunk = 'x'.repeat(1024 * 1024);
+      if (!chunked) {
+        res.send('x'.repeat(SESSION_LIST_PAYLOAD_MAX_BYTES + 1));
+        return;
+      }
+      res.on('error', () => {});
+      let sent = 0;
+      const pump = () => {
+        while (sent <= SESSION_LIST_PAYLOAD_MAX_BYTES) {
+          sent += chunk.length;
+          if (!res.write(chunk)) {
+            res.once('drain', pump);
+            return;
+          }
+        }
+        res.end();
+      };
+      pump();
+    };
+
+    it('rejects a session list whose declared length crosses the cap with a 502', async () => {
+      const base = await startProxy((upstream) => {
+        upstream.get('/api/session', (_req, res) => sendOversized(res, false));
+      });
+      const response = await fetch(`${base}/api/session`);
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'OpenCode response too large' });
+    });
+
+    it('rejects a session list that crosses the cap mid-stream (no declared length)', async () => {
+      const base = await startProxy((upstream) => {
+        upstream.get('/api/session', (_req, res) => sendOversized(res, true));
+      });
+      const response = await fetch(`${base}/api/session`);
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'OpenCode response too large' });
+    });
+
+    it('serves a session list body that lands exactly on the cap', async () => {
+      const prefix = '[{"id":"ses_big","title":"';
+      const suffix = '"}]';
+      const body = prefix + 'a'.repeat(SESSION_LIST_PAYLOAD_MAX_BYTES - prefix.length - suffix.length) + suffix;
+      expect(Buffer.byteLength(body)).toBe(SESSION_LIST_PAYLOAD_MAX_BYTES);
+      const base = await startProxy((upstream) => {
+        upstream.get('/api/session', (_req, res) => {
+          res.setHeader('content-type', 'application/json; charset=utf-8');
+          res.send(body);
+        });
+      });
+      const response = await fetch(`${base}/api/session`);
+      expect(response.status).toBe(200);
+      const payload = await response.json();
+      expect(payload[0].id).toBe('ses_big');
+    });
+
+    it('rejects an oversized session detail body with a 502', async () => {
+      const base = await startProxy((upstream) => {
+        upstream.get('/api/session/ses_1', (_req, res) => sendOversized(res, false));
+      });
+      const response = await fetch(`${base}/api/session/ses_1`);
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'OpenCode response too large' });
+    });
+
+    it('rejects an oversized shelled message page with a 502', async () => {
+      const base = await startProxy((upstream) => {
+        upstream.get('/api/session/ses_1/message', (_req, res) => sendOversized(res, false));
+      });
+      const response = await fetch(`${base}/api/session/ses_1/message?limit=50`, {
+        headers: { 'x-openchamber-part-shells': 'v1' },
+      });
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'OpenCode response too large' });
+    });
   });
 
   it('folds OpenChamber-owned archive state and metadata onto sessions it serves', async () => {
