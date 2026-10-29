@@ -4,8 +4,15 @@ const DRAIN_POLL_MS = 1000;
 export const resolveOpenCodeDrainGraceMs = (env) => {
   const raw = env.OPENCHAMBER_OPENCODE_DRAIN_GRACE_MS;
   if (raw === undefined || raw === '') return DEFAULT_OPENCODE_DRAIN_GRACE_MS;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_OPENCODE_DRAIN_GRACE_MS;
+  // Only a plain decimal spelling counts, matching the sibling strict
+  // readers (self-handoff.js, fs/routes.js): a bare Number(...) would
+  // silently honour '1e3' (a 1 s grace), '0x10' (16 ms), '5.9', '+5000',
+  // and '5000.0', and a whitespace-only value would become a zero grace
+  // instead of the default.
+  const text = String(raw).trim();
+  if (!/^\d+$/.test(text)) return DEFAULT_OPENCODE_DRAIN_GRACE_MS;
+  const value = Number(text);
+  return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_OPENCODE_DRAIN_GRACE_MS;
 };
 
 // An OpenCode that has been replaced stays up until nothing depends on it: no proxied
