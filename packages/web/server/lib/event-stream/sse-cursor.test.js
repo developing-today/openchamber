@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createSseCursor, decodeOpenChamberCursor, encodeOpenChamberCursor, isOpenChamberCursor, isOpenCodeEventId, isResyncBlock, parseSseBlock } from './sse-cursor.js';
+import { createSseCursor, decodeOpenChamberCursor, encodeOpenChamberCursor, isOpenChamberCursor, isOpenCodeEventId, isResyncBlock, parseSseBlock, SSE_CURSOR_MAX_PENDING_CHARS } from './sse-cursor.js';
 
 describe('SSE cursor', () => {
   it('tracks the id of the last complete block and reports every block in order', () => {
@@ -68,6 +68,61 @@ describe('SSE cursor', () => {
 
     expect(block.resync).toBe(true);
     expect(cursor.lastEventId()).toBe('');
+  });
+
+  it('discards an oversized block through its separator without corrupting the cursor', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('data: {"forged":"')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    // The remainder of the same oversized block: the `id:` line inside it belongs to the
+    // discarded block, so it must not move the cursor, and its terminating separator is
+    // consumed by the discard rather than closing a block.
+    expect(cursor.observe('aaaa"\nid: forged\n\n')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    const blocks = cursor.observe('id: ws:9\ndata: {"n":9}\n\n');
+    expect(blocks.map((block) => [block.id, block.data])).toEqual([['ws:9', '{"n":9}']]);
+    expect(cursor.lastEventId()).toBe('ws:9');
+  });
+
+  it('discards through a separator that is split across chunks', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    expect(cursor.observe('y\n')).toEqual([]);
+    expect(cursor.observe('\n')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    const blocks = cursor.observe('id: ws:5\ndata: {"n":5}\n\n');
+    expect(blocks).toHaveLength(1);
+    expect(cursor.lastEventId()).toBe('ws:5');
+  });
+
+  it('recovers through a CRLF separator split as CRLF + CR across chunks while discarding', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    // The oversized block's terminating separator arrives as \r\n\r, completed by the
+    // leading \n of the next chunk. Retaining only the final \r would lose the preceding
+    // \n, miss the separator, and discard the valid block that follows it.
+    expect(cursor.observe('\r\n\r')).toEqual([]);
+    const blocks = cursor.observe('\nid: ws:1\r\ndata: {}\r\n\r\n');
+    expect(blocks.map((block) => [block.id, block.data])).toEqual([['ws:1', '{}']]);
+    expect(cursor.lastEventId()).toBe('ws:1');
+  });
+
+  it('bounds pending at the default cap on a separator-less flood', () => {
+    const cursor = createSseCursor();
+
+    expect(cursor.observe('x'.repeat(SSE_CURSOR_MAX_PENDING_CHARS + 1))).toEqual([]);
+    // Terminate the discarded flood block, then a genuine block parses normally.
+    expect(cursor.observe('\n\n')).toEqual([]);
+
+    const blocks = cursor.observe('id: ws:1\ndata: {"n":1}\n\n');
+    expect(blocks).toHaveLength(1);
+    expect(cursor.lastEventId()).toBe('ws:1');
   });
 
   it('starts from the id the browser already holds', () => {

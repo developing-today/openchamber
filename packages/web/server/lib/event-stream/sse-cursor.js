@@ -85,9 +85,30 @@ export function isResyncBlock({ data }) {
   }
 }
 
-export function createSseCursor(initialLastEventId = '') {
+// Cap on one partial (separator-less) SSE block retained between observe() calls. Same bound
+// and reasoning as UPSTREAM_SSE_MAX_BUFFERED_CHARS in upstream-reader.js: complete blocks may be
+// larger, but a stream that never sends the separator must not retain (and re-concatenate) a
+// partial block without bound.
+export const SSE_CURSOR_MAX_PENDING_CHARS = 4 * 1024 * 1024;
+
+export function createSseCursor(initialLastEventId = '', { maxPendingChars = SSE_CURSOR_MAX_PENDING_CHARS } = {}) {
   let lastEventId = initialLastEventId;
   let pending = '';
+  // After an overflow, the rest of the oversized block is still in flight and must be
+  // discarded through its terminating separator, not parsed: its remaining lines are not a
+  // new block, and an `id:` line inside it (e.g. inside a long data payload) would otherwise
+  // be taken as a fresh block and corrupt the cursor. While discarding, only the trailing
+  // separator prefix is retained: a normalized trailing `\n`, `\r`, or `\n\r` (a CRLF pair
+  // split at its CR, after a completed CRLF line ending) can still complete a `\n\n`
+  // separator with the next chunk, so dropping any of it would miss that separator.
+  let discarding = false;
+  let discardTail = '';
+  // The suffix of a normalized string that could be the first half of a split separator.
+  const separatorTail = (value) => {
+    if (value.endsWith('\n\r')) return '\n\r';
+    if (value.endsWith('\n') || value.endsWith('\r')) return value.slice(-1);
+    return '';
+  };
 
   return {
     lastEventId() {
@@ -96,7 +117,21 @@ export function createSseCursor(initialLastEventId = '') {
     // Feeds decoded text and returns the complete blocks it closed, in stream order. Text that
     // does not end a block is held until the next call.
     observe(text) {
-      pending = `${pending}${text}`.replace(/\r\n/g, '\n');
+      let incoming = `${text}`;
+      if (discarding) {
+        const raw = `${discardTail}${incoming}`;
+        const scan = raw.replace(/\r\n/g, '\n');
+        const end = scan.indexOf('\n\n');
+        if (end === -1) {
+          discardTail = separatorTail(scan);
+          return [];
+        }
+        discarding = false;
+        discardTail = '';
+        incoming = scan.slice(end + 2);
+        if (incoming.length === 0) return [];
+      }
+      pending = `${pending}${incoming}`.replace(/\r\n/g, '\n');
       const blocks = [];
       for (let end = pending.indexOf('\n\n'); end !== -1; end = pending.indexOf('\n\n')) {
         const block = parseSseBlock(pending.slice(0, end));
@@ -105,6 +140,16 @@ export function createSseCursor(initialLastEventId = '') {
         const resync = isResyncBlock(block);
         if (resync && block.id === undefined) lastEventId = '';
         blocks.push({ ...block, resync });
+      }
+      if (pending.length > maxPendingChars) {
+        // The retained partial block can never be trusted to complete within the cap, and the
+        // cursor only advances on complete blocks, so dropping it loses no cursor state. The
+        // discard continues through the block's terminating separator (see `discarding`
+        // above): resuming parsing immediately would let the remainder of this same block
+        // pose as a new block and corrupt the cursor.
+        discarding = true;
+        discardTail = separatorTail(pending);
+        pending = '';
       }
       return blocks;
     },
