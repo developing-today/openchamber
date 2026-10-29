@@ -93,9 +93,14 @@ concurrency:
 - Issue/PR *management* automation no longer runs on events at all:
   `pr-intake`, `issue-intake`, and `label-merge-conflict` were
   replaced by the single scheduled `repo-sweeper.yml` (every 15
-  minutes, one live run: a single concurrency group with
-  `cancel-in-progress: true`), which does PR size/parking labels,
-  merge-conflict labels, and issue intake in one pass.
+  minutes), which does PR size/parking labels, merge-conflict
+  labels, and issue intake in one pass. The sweeper has no
+  workflow-level concurrency block (#758): the label passes carry
+  per-job groups with `cancel-in-progress: true`, and each
+  issue-intake leg carries a per-issue group with the literal
+  `cancel-in-progress: false` and no `queue: max`, so a tick can
+  never cancel a running intake and at most one leg per issue
+  waits pending.
 - **Never** pair `queue: max` with a cancel-in-progress expression
   that evaluates `true` for an `issues` / `pull_request_target`
   event: that is a GitHub validation error that killed issue-intake
