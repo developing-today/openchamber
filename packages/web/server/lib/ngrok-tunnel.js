@@ -277,12 +277,19 @@ export function pollNgrokPublicUrl({ fetchImpl, timeoutMs = NGROK_POLL_TIMEOUT_M
   let currentController = null;
 
   const tick = async () => {
-    if (stopped || inFlight) {
+    if (stopped) {
       return;
     }
+    // Check the captured URL before the in-flight guard: child output can
+    // supply the URL while a poll fetch is stalled, and it must resolve
+    // startup promptly instead of waiting out that attempt (or the 30 s
+    // startup timeout firing first).
     const existing = typeof getPublicUrl === 'function' ? getPublicUrl() : null;
     if (existing) {
       onPublicUrl?.(existing);
+      return;
+    }
+    if (inFlight) {
       return;
     }
     inFlight = true;

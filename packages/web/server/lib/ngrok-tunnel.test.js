@@ -219,6 +219,25 @@ describe('pollNgrokPublicUrl', () => {
     expect(inFlight).toBe(0);
   });
 
+  it('resolves a child-output URL while a poll fetch is in flight', async () => {
+    let captured = null;
+    const seen = [];
+    const neverAnswers = (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+    const poller = pollNgrokPublicUrl({
+      fetchImpl: neverAnswers,
+      timeoutMs: 10000,
+      intervalMs: 10,
+      getPublicUrl: () => captured,
+      onPublicUrl: (url) => { seen.push(url); poller.stop(); },
+    });
+    await wait(50);
+    captured = 'https://child.ngrok-free.app';
+    await wait(60);
+    expect(seen).toEqual(['https://child.ngrok-free.app']);
+  });
+
   it('leaves nothing pending after stop() during an in-flight attempt', async () => {
     let calls = 0;
     let inFlight = 0;
