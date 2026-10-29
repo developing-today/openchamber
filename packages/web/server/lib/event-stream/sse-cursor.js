@@ -97,10 +97,18 @@ export function createSseCursor(initialLastEventId = '', { maxPendingChars = SSE
   // After an overflow, the rest of the oversized block is still in flight and must be
   // discarded through its terminating separator, not parsed: its remaining lines are not a
   // new block, and an `id:` line inside it (e.g. inside a long data payload) would otherwise
-  // be taken as a fresh block and corrupt the cursor. While discarding, only the last raw
-  // character is retained when it could be half of a separator split across observe() calls.
+  // be taken as a fresh block and corrupt the cursor. While discarding, only the trailing
+  // separator prefix is retained: a normalized trailing `\n`, `\r`, or `\n\r` (a CRLF pair
+  // split at its CR, after a completed CRLF line ending) can still complete a `\n\n`
+  // separator with the next chunk, so dropping any of it would miss that separator.
   let discarding = false;
   let discardTail = '';
+  // The suffix of a normalized string that could be the first half of a split separator.
+  const separatorTail = (value) => {
+    if (value.endsWith('\n\r')) return '\n\r';
+    if (value.endsWith('\n') || value.endsWith('\r')) return value.slice(-1);
+    return '';
+  };
 
   return {
     lastEventId() {
@@ -115,7 +123,7 @@ export function createSseCursor(initialLastEventId = '', { maxPendingChars = SSE
         const scan = raw.replace(/\r\n/g, '\n');
         const end = scan.indexOf('\n\n');
         if (end === -1) {
-          discardTail = raw.endsWith('\n') || raw.endsWith('\r') ? raw.slice(-1) : '';
+          discardTail = separatorTail(scan);
           return [];
         }
         discarding = false;
@@ -140,7 +148,7 @@ export function createSseCursor(initialLastEventId = '', { maxPendingChars = SSE
         // above): resuming parsing immediately would let the remainder of this same block
         // pose as a new block and corrupt the cursor.
         discarding = true;
-        discardTail = pending.endsWith('\n') ? '\n' : '';
+        discardTail = separatorTail(pending);
         pending = '';
       }
       return blocks;

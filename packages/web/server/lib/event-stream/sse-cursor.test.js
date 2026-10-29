@@ -100,6 +100,19 @@ describe('SSE cursor', () => {
     expect(cursor.lastEventId()).toBe('ws:5');
   });
 
+  it('recovers through a CRLF separator split as CRLF + CR across chunks while discarding', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    // The oversized block's terminating separator arrives as \r\n\r, completed by the
+    // leading \n of the next chunk. Retaining only the final \r would lose the preceding
+    // \n, miss the separator, and discard the valid block that follows it.
+    expect(cursor.observe('\r\n\r')).toEqual([]);
+    const blocks = cursor.observe('\nid: ws:1\r\ndata: {}\r\n\r\n');
+    expect(blocks.map((block) => [block.id, block.data])).toEqual([['ws:1', '{}']]);
+    expect(cursor.lastEventId()).toBe('ws:1');
+  });
+
   it('bounds pending at the default cap on a separator-less flood', () => {
     const cursor = createSseCursor();
 
