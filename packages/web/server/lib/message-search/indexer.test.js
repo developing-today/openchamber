@@ -431,6 +431,69 @@ describe.skipIf(!open)('message search index', () => {
     await local.idle();
     expect(search('backfill').map((hit) => hit.id)).toEqual(['u1']);
   });
+
+  it('does not start a fresh read after stop aborts the revert-boundary lookup', async () => {
+    fake.session('a', { revert: { messageID: 'u2' } });
+    fake.user('a', 'u1', 'keep this request');
+    fake.user('a', 'u2', 'undo this request');
+    let listCalls = 0;
+    const client = {
+      session: {
+        get: fake.client.session.get,
+        list: fake.client.session.list,
+        message: {
+          get: (_params, options) => neverSettles(options),
+        },
+      },
+      message: {
+        list: (params, options) => {
+          listCalls += 1;
+          return neverSettles(options);
+        },
+      },
+    };
+    const local = createMessageSearchIndexer({ store, createClient: () => client, pageSize: 2, liveDebounceMs: 0, backfillPauseMs: 0, logger: { warn: () => {} } });
+    local.processPayload({ type: 'session.idle', properties: { sessionID: 'a' } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    local.stop();
+    const settled = await Promise.race([local.idle().then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]);
+    expect(settled).toBe(true);
+    expect(listCalls).toBe(0);
+  });
+
+  it('does not mark a session synced when the revert-boundary lookup times out', async () => {
+    fake.session('a', { revert: { messageID: 'u2' } });
+    fake.user('a', 'u1', 'keep this request');
+    fake.user('a', 'u2', 'undo this request');
+    let stallBoundary = true;
+    const client = {
+      session: {
+        get: fake.client.session.get,
+        list: fake.client.session.list,
+        message: {
+          get: (params, options) => (stallBoundary ? neverSettles(options) : fake.client.session.message.get(params, options)),
+        },
+      },
+      message: fake.client.message,
+    };
+    const local = createMessageSearchIndexer({
+      store,
+      createClient: () => client,
+      pageSize: 2,
+      liveDebounceMs: 0,
+      backfillPauseMs: 0,
+      readTimeoutMs: 50,
+      logger: { warn: () => {} },
+    });
+    await expect(local.syncSession('a', '')).rejects.toBeTruthy();
+    expect(store.readSession('a')?.synced_updated_at ?? null).toBeNull();
+
+    stallBoundary = false;
+    await local.syncSession('a', '');
+    expect(search('keep').map((hit) => hit.id)).toEqual(['u1']);
+    expect(search('undo')).toEqual([]);
+  });
 });
 
 describe('snippets', () => {

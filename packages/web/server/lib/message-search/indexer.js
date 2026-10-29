@@ -133,6 +133,15 @@ export const createMessageSearchIndexer = ({
   // an abort gets a fresh controller, so a restarted indexer reads normally.
   let runController = null;
   const runSignal = () => {
+    // Once stopped, cancellation is sticky: a read that starts (or a sync
+    // that continues) after stop() must see the aborted signal, not a
+    // fresh controller — otherwise idle() waits on that read's deadline
+    // instead of settling at once.
+    if (stopped) {
+      if (!runController) runController = new AbortController();
+      if (!runController.signal.aborted) runController.abort();
+      return runController.signal;
+    }
     if (!runController || runController.signal.aborted) runController = new AbortController();
     return runController.signal;
   };
@@ -195,9 +204,18 @@ export const createMessageSearchIndexer = ({
     let cutoff = Number.POSITIVE_INFINITY;
     if (revertId) {
       // Unknown boundary: index nothing rather than text the user took back.
-      const reverted = createdSchema.safeParse(
-        await readWithDeadline((options) => client.session.message.get({ sessionID: sessionId, messageID: revertId }, options)).catch(() => null),
-      );
+      let revertedRaw = null;
+      try {
+        revertedRaw = await readWithDeadline((options) => client.session.message.get({ sessionID: sessionId, messageID: revertId }, options));
+      } catch (error) {
+        // Only a genuinely missing boundary uses the index-nothing
+        // fallback. A timeout or a stop abort must fail this sync (so
+        // it is not marked synced) and stop any further reads, so the
+        // session is retried on a later connect instead of being
+        // silently dropped from search.
+        if (!isTag(error, 'MessageNotFoundError')) throw error;
+      }
+      const reverted = createdSchema.safeParse(revertedRaw);
       cutoff = reverted.success ? reverted.data.time.created : Number.NEGATIVE_INFINITY;
     }
 
