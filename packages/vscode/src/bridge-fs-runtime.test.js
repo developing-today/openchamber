@@ -1,22 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { promisify } from 'node:util';
+import { EventEmitter } from 'node:events';
 
-const execCalls = [];
-const execMock = mock(() => {
-  throw new Error('exec should be called through promisify');
+const spawnCalls = [];
+let spawnExitCode = 0;
+let spawnStdout = '/repo/.git\n/repo/.git\n';
+let spawnStderr = '';
+
+const spawnMock = mock((file, args, options) => {
+  spawnCalls.push({ file, args, options });
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = mock(() => true);
+  setTimeout(() => {
+    if (spawnStdout) {
+      child.stdout.emit('data', Buffer.from(spawnStdout));
+    }
+    if (spawnStderr) {
+      child.stderr.emit('data', Buffer.from(spawnStderr));
+    }
+    child.emit('close', spawnExitCode, null);
+  }, 10);
+  return child;
 });
 
-execMock[promisify.custom] = (command, options) => {
-  execCalls.push({ command, options });
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ stdout: '/repo/.git\n/repo/.git\n', stderr: '' });
-    }, 10);
-  });
-};
-
 mock.module('child_process', () => ({
-  exec: execMock,
+  spawn: spawnMock,
 }));
 
 mock.module('vscode', () => ({
@@ -53,7 +62,10 @@ const deps = {
 
 describe('bridge fs exec git read cache', () => {
   beforeEach(() => {
-    execCalls.length = 0;
+    spawnCalls.length = 0;
+    spawnExitCode = 0;
+    spawnStdout = '/repo/.git\n/repo/.git\n';
+    spawnStderr = '';
     clearGitReadCacheForTests();
   });
 
@@ -68,12 +80,12 @@ describe('bridge fs exec git read cache', () => {
 
     expect(first?.success).toBe(true);
     expect(second?.success).toBe(true);
-    expect(execCalls).toHaveLength(1);
+    expect(spawnCalls).toHaveLength(1);
 
     const spacedCommand = 'git   rev-parse   --absolute-git-dir   --git-common-dir';
     const cached = await handleFsBridgeMessage({ id: '3', type: 'api:fs:exec', payload: { commands: [spacedCommand], cwd } }, deps);
 
-    expect(execCalls).toHaveLength(1);
+    expect(spawnCalls).toHaveLength(1);
     expect(cached?.data?.results?.[0]).toMatchObject({
       command: spacedCommand,
       success: true,
@@ -88,7 +100,60 @@ describe('bridge fs exec git read cache', () => {
     await handleFsBridgeMessage({ id: '1', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps);
     await handleFsBridgeMessage({ id: '2', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps);
 
-    expect(execCalls).toHaveLength(2);
+    expect(spawnCalls).toHaveLength(2);
+  });
+});
+
+describe('bridge fs exec spawn launch', () => {
+  beforeEach(() => {
+    spawnCalls.length = 0;
+    spawnExitCode = 0;
+    spawnStdout = '/repo/.git\n/repo/.git\n';
+    spawnStderr = '';
+    clearGitReadCacheForTests();
+  });
+
+  it('launches the command as a single argv entry, not an interpolated exec string', async () => {
+    // A command packed with constructs an outer shell would rewrite if the
+    // command were interpolated into a shell string: double quotes, $VAR,
+    // and a single-quoted command substitution.
+    const command = `printf '%s' "$(echo outer)" '$HOME'`;
+    const cwd = '/repo';
+
+    const response = await handleFsBridgeMessage(
+      { id: '1', type: 'api:fs:exec', payload: { commands: [command], cwd } },
+      deps,
+    );
+
+    expect(response?.success).toBe(true);
+    expect(spawnCalls).toHaveLength(1);
+    const expectedShell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
+    const expectedFlag = process.platform === 'win32' ? '/c' : '-c';
+    expect(spawnCalls[0].file).toBe(expectedShell);
+    expect(spawnCalls[0].args).toEqual([expectedFlag, command]);
+    expect(spawnCalls[0].options).toMatchObject({ cwd, windowsHide: true });
+  });
+
+  it('reports a non-zero exit as a result instead of throwing', async () => {
+    spawnExitCode = 3;
+    spawnStdout = 'partial out\n';
+    spawnStderr = 'boom\n';
+    const command = 'git status --porcelain';
+    const cwd = '/repo';
+
+    const response = await handleFsBridgeMessage(
+      { id: '1', type: 'api:fs:exec', payload: { commands: [command], cwd } },
+      deps,
+    );
+
+    expect(response?.success).toBe(true);
+    expect(response?.data?.results?.[0]).toMatchObject({
+      command,
+      success: false,
+      exitCode: 3,
+      stdout: 'partial out',
+      stderr: 'boom',
+    });
   });
 });
 
