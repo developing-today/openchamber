@@ -528,6 +528,19 @@ describe('jev endpoint', () => {
     // The full stream is 4 MiB; the client must stop near the 1 MiB cap.
     expect(pulled * chunk.byteLength).toBeLessThan(2 * JEV_MAX_RESPONSE_BYTES);
   });
+
+  it('accepts a small answer prefixed with a UTF-8 BOM', async () => {
+    const json = new TextEncoder().encode(JSON.stringify({ answers: {} }));
+    const body = new Uint8Array(3 + json.byteLength);
+    body.set([0xef, 0xbb, 0xbf]);
+    body.set(json, 3);
+    const fetchImpl = async () => new Response(body, { status: 200 });
+    const result = await createJevClient({ fetchImpl }).ask(
+      { state: 'x', questions: {} },
+      { url: 'https://example.com/v1/systemone', model: 'jev-latest' },
+    );
+    expect(result.answers).toEqual({});
+  });
 });
 
 describe('parseCustomEndpointUrl', () => {

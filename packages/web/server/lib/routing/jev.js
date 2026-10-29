@@ -152,7 +152,10 @@ export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS 
       if (bounded.tooLarge) {
         throw Object.assign(new Error(`Jev response exceeded ${JEV_MAX_RESPONSE_BYTES} bytes`), { code: 'response_too_large' });
       }
-      const text = bounded.text;
+      // Response.text() (the previous read) strips a leading UTF-8 BOM; the bounded
+      // reader's utf8 decode preserves it and JSON.parse rejects it, so strip it here
+      // to keep BOM-prefixed endpoint answers working.
+      const text = bounded.text.replace(/^\uFEFF/, '');
       const body = responseSchema.safeParse(JSON.parse(text));
       if (!body.success) throw new Error('Jev response has no answers');
       return { answers: body.data.answers, ms: Date.now() - started };
