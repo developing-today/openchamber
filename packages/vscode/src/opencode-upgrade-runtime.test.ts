@@ -152,4 +152,34 @@ describe('VS Code OpenCode upgrades', () => {
     assert.equal((await upgradeManagedOpenCode()).status, 409);
   });
 
+  test('returns unavailable/error when local probe stalls', async () => {
+    const manager = createManager();
+    const fetch = mock.method(globalThis, 'fetch', async (input: Parameters<typeof globalThis.fetch>[0], options?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('registry.npmjs.org') || url.includes('/@opencode/cli/latest')) {
+        return Response.json({ version: '2.0.22' });
+      }
+      if (url.endsWith('/api/info')) {
+        // Simulate stall that hits the AbortSignal. Node's AbortSignal timeout
+        // triggers on its own timer. If we just listen, the test suite waits.
+        // We'll throw immediately simulating an abort if signal is provided,
+        // or wait a short time. Actually, if signal is present, we can just throw
+        // an Error immediately to mock AbortSignal behavior in a sync-friendly way.
+        if (options?.signal) {
+          throw new Error('The operation was aborted due to timeout');
+        }
+        return new Promise<Response>(() => {});
+      }
+      return Response.json({});
+    });
+    try {
+      const status = await getOpenCodeUpgradeStatus(manager);
+      assert.equal(status.available, null);
+      assert.equal(status.error, 'The operation was aborted due to timeout');
+      assert.deepEqual(status.upgrade, { supported: true, manager: 'opencode', reason: null });
+    } finally {
+      fetch.mock.restore();
+    }
+  });
+
 });

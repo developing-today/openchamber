@@ -284,6 +284,58 @@ describe('VS Code system bridge api:quota:giftReset:use', () => {
   });
 });
 
+describe('VS Code system bridge api:opencode/version', () => {
+  test('returns error shape when local probe stalls', async () => {
+    // Simulate a fetch that throws a timeout error if an AbortSignal is passed
+    globalThis.fetch = mock(async (input, options) => {
+      if (options?.signal) {
+        throw new Error('The operation was aborted due to timeout');
+      }
+      return { ok: true, json: async () => ({ version: '2.0.22' }) };
+    });
+
+    const manager = {
+      getApiUrl: () => 'http://127.0.0.1:4096',
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+    };
+
+    const response = await handleSystemBridgeMessage({
+      id: 'probe-stall',
+      type: 'api:opencode/version',
+    }, { manager }, deps);
+
+    expect(response).toEqual({
+      id: 'probe-stall',
+      type: 'api:opencode/version',
+      success: true,
+      data: { version: null, error: 'The operation was aborted due to timeout' },
+    });
+  });
+
+  test('returns version on success', async () => {
+    globalThis.fetch = mock(async () => {
+      return { ok: true, json: async () => ({ version: '2.0.22' }) };
+    });
+
+    const manager = {
+      getApiUrl: () => 'http://127.0.0.1:4096',
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+    };
+
+    const response = await handleSystemBridgeMessage({
+      id: 'probe-success',
+      type: 'api:opencode/version',
+    }, { manager }, deps);
+
+    expect(response).toEqual({
+      id: 'probe-success',
+      type: 'api:opencode/version',
+      success: true,
+      data: { version: '2.0.22' },
+    });
+  });
+});
+
 describe('VS Code v2 migration bridge', () => {
   test('waits for the manager to finish installing and restarting', async () => {
     let completed = false;
