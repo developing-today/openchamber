@@ -672,7 +672,52 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       if (!isEventStream) {
-        res.end(await upstream.text());
+        // The upstream answered the event route with a non-SSE body (a JSON
+        // error payload, a misconfigured server's page). Stream it through
+        // with backpressure: the old `await upstream.text()` buffered the
+        // whole body before sending anything, so a large or never-ending
+        // body pinned the request, held the status and headers back, and
+        // grew memory without bound (#759). The SSE stall window bounds
+        // silence on this branch too: a body that goes quiet for that long
+        // aborts the upstream, and the response ends with the bytes that
+        // already streamed, so the client sees the truncation.
+        res.flushHeaders?.();
+        const nonSseReader = upstream.body.getReader();
+        let nonSseStallTimer = null;
+        const armNonSseStallTimer = () => {
+          clearTimeout(nonSseStallTimer);
+          nonSseStallTimer = setTimeout(() => {
+            abortController.abort();
+          }, getSseUpstreamStallTimeoutMs());
+          nonSseStallTimer.unref?.();
+        };
+        try {
+          armNonSseStallTimer();
+          for (;;) {
+            const { done, value } = await nonSseReader.read();
+            if (done) {
+              break;
+            }
+            if (value && value.length > 0) {
+              armNonSseStallTimer();
+              if (!await writeSseChunkWithBackpressure(res, value, abortController.signal)) {
+                break;
+              }
+            }
+          }
+        } catch {
+          // A stall abort or a reset upstream ends the response here with
+          // the bytes already streamed.
+        } finally {
+          clearTimeout(nonSseStallTimer);
+          try {
+            nonSseReader.releaseLock();
+          } catch {
+          }
+        }
+        if (!res.writableEnded && !res.destroyed) {
+          res.end();
+        }
         return;
       }
 
@@ -914,7 +959,12 @@ export const registerOpenCodeProxy = (app, deps) => {
     const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
       method: 'GET',
       headers,
-      ...(typeof timeoutMs === 'number' ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      // The whole body is read and parsed below, so this fetch cannot
+      // stream the way the event route's non-SSE branch does (#759). It
+      // stays bounded in time instead: a caller with no tighter budget
+      // gets the proxy's long-request deadline, the same one the response
+      // deadline middleware applies to the route.
+      signal: AbortSignal.timeout(typeof timeoutMs === 'number' ? timeoutMs : PROXY_REQUEST_TIMEOUT_MS),
     });
     const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
     const bodyText = await upstream.text();

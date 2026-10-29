@@ -208,6 +208,143 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(stallTimeoutReads).toBeGreaterThanOrEqual(3);
   });
 
+  it('streams a non-SSE answer on the event route instead of buffering it whole', async () => {
+    let upstreamEnded = false;
+    const upstream = express();
+    upstream.get('/api/event', (_req, res) => {
+      res.setHeader('Content-Type', 'text/plain');
+      res.flushHeaders();
+      res.write('first-');
+      setTimeout(() => {
+        upstreamEnded = true;
+        res.end('second');
+      }, 250);
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getSseUpstreamStallTimeoutMs: () => 1000,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/global/event`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(response.status).toBe(200);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const first = await reader.read();
+    // The first chunk reaches the client while the upstream is still open:
+    // the proxy streams the body through instead of waiting for its end.
+    expect(upstreamEnded).toBe(false);
+    expect(decoder.decode(first.value)).toContain('first-');
+
+    let body = decoder.decode(first.value);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      body += decoder.decode(value);
+    }
+    expect(body).toBe('first-second');
+  });
+
+  it('ends a non-SSE answer on the event route when the upstream goes silent and never ends', async () => {
+    const upstream = express();
+    upstream.get('/api/event', (_req, res) => {
+      res.setHeader('Content-Type', 'text/plain');
+      res.flushHeaders();
+      res.write('tick-');
+      // The upstream then goes silent without ever ending the body.
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getSseUpstreamStallTimeoutMs: () => 60,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/global/event`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(response.status).toBe(200);
+    // The stall window aborts the silent upstream and ends the response with
+    // the bytes that already streamed, instead of pinning the request.
+    await expect(response.text()).resolves.toBe('tick-');
+  });
+
+  it('passes a normal non-SSE error answer on the event route through unchanged', async () => {
+    const upstream = express();
+    upstream.get('/api/event', (_req, res) => {
+      res.status(502);
+      res.setHeader('Content-Type', 'application/json');
+      res.end('{"error":"boom"}');
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getSseUpstreamStallTimeoutMs: () => 1000,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/global/event`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(response.status).toBe(502);
+    await expect(response.text()).resolves.toBe('{"error":"boom"}');
+  });
+
   it('holds a request through OpenCode warmup and succeeds once ready (no 503/backoff)', async () => {
     const upstream = express();
     upstream.get('/api/config/providers', (_req, res) => {
