@@ -65,6 +65,12 @@ export const fetchFaviconDataUrl = async ({ fetchImpl, url, session, maxBytes, m
 
     const declaredLength = Number(response.headers.get('content-length'));
     if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      // Rejecting on the declared size alone is not enough: abort the
+      // request and cancel the body so a host that stalls after sending
+      // headers cannot hold the connection open past the deadline (which
+      // the finally block is about to clear).
+      controller.abort();
+      await response.body?.cancel().catch(() => {});
       throw new Error('Favicon is not a usable size');
     }
 

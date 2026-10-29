@@ -55,20 +55,33 @@ test('a body that stalls mid-stream settles with a timeout instead of hanging', 
 
 test('a declared content-length above the cap is rejected before the body is read', async () => {
   let pulls = 0;
+  let cancelled = false;
+  let requestSignal;
   const body = new ReadableStream({
     pull(controller) {
       pulls += 1;
       controller.enqueue(new Uint8Array(8));
     },
+    cancel() {
+      cancelled = true;
+    },
   });
-  const fetchImpl = async () => new Response(body, {
-    status: 200,
-    headers: { 'content-type': 'image/png', 'content-length': String(MAX_BYTES + 1) },
-  });
+  const fetchImpl = async (_url, { signal }) => {
+    requestSignal = signal;
+    return new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'image/png', 'content-length': String(MAX_BYTES + 1) },
+    });
+  };
   await assert.rejects(fetchFaviconDataUrl(fetchArgs(fetchImpl)), /Favicon is not a usable size/);
   // The Response constructor itself performs one stream pull to prime its
   // internal queue; the handler must add none of its own before rejecting.
   assert.ok(pulls <= 1, "expected no body read before rejection");
+  // The rejection must release the network resources: abort the request and
+  // cancel the body, so a host stalling after its headers cannot hold the
+  // connection open once the deadline timer is cleared.
+  assert.equal(requestSignal.aborted, true);
+  assert.equal(cancelled, true);
 });
 
 test('an oversized streamed body is rejected after the cap, not buffered whole', async () => {
