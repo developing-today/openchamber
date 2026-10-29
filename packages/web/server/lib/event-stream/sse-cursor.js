@@ -85,7 +85,13 @@ export function isResyncBlock({ data }) {
   }
 }
 
-export function createSseCursor(initialLastEventId = '') {
+// Cap on one partial (separator-less) SSE block retained between observe() calls. Same bound
+// and reasoning as UPSTREAM_SSE_MAX_BUFFERED_CHARS in upstream-reader.js: complete blocks may be
+// larger, but a stream that never sends the separator must not retain (and re-concatenate) a
+// partial block without bound.
+export const SSE_CURSOR_MAX_PENDING_CHARS = 4 * 1024 * 1024;
+
+export function createSseCursor(initialLastEventId = '', { maxPendingChars = SSE_CURSOR_MAX_PENDING_CHARS } = {}) {
   let lastEventId = initialLastEventId;
   let pending = '';
 
@@ -105,6 +111,14 @@ export function createSseCursor(initialLastEventId = '') {
         const resync = isResyncBlock(block);
         if (resync && block.id === undefined) lastEventId = '';
         blocks.push({ ...block, resync });
+      }
+      if (pending.length > maxPendingChars) {
+        // The retained partial block can never be trusted to complete within the cap, and the
+        // cursor only advances on complete blocks, so dropping the partial block loses no
+        // cursor state: the next complete block is parsed fresh and moves the cursor as usual.
+        // Dropping (rather than keeping a tail) is deliberate — a tail could splice the end of
+        // the flooded block onto the next block and corrupt its id/data.
+        pending = '';
       }
       return blocks;
     },

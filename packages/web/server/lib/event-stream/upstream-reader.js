@@ -3,6 +3,12 @@ import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from './timeouts.js';
 
 export { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS };
 export const DEFAULT_UPSTREAM_RECONNECT_DELAY_MS = 250;
+// Cap on one partial (separator-less) SSE block retained between chunks. A complete block may be
+// larger — it is drained as soon as its separator arrives — but a stream that never sends the
+// separator must not grow this buffer without bound: the proxy's boundary tracker caps its tail
+// at 4096 chars and the WS layer caps per-client buffering at 16 MiB, so a 4 MiB partial-block
+// cap sits between those precedents and far above any heartbeat or ordinary event fragment.
+export const UPSTREAM_SSE_MAX_BUFFERED_CHARS = 4 * 1024 * 1024;
 const DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS = 5_000;
 const DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER = 2;
 const INITIAL_RECONNECT_DELAY_MS = 0;
@@ -74,6 +80,7 @@ export function createUpstreamSseReader({
   reconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   reconnectMaxDelayMs = DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS,
   reconnectBackoffMultiplier = DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER,
+  maxBufferedChars = UPSTREAM_SSE_MAX_BUFFERED_CHARS,
   setTimeoutImpl = globalThis.setTimeout,
   onEvent,
   onConnect,
@@ -213,9 +220,26 @@ export function createUpstreamSseReader({
               }
               separatorIndex = buffer.indexOf('\n\n');
             }
+
+            if (!stopped && !signal?.aborted && buffer.length > maxBufferedChars) {
+              // A separator-less stream would retain this partial block forever (and the stall
+              // timer resets on every chunk, so it cannot save us). End the read observably:
+              // name the overflow, drop the partial block, and abort so the outer loop
+              // reconnects from the last complete event id.
+              abortReason = 'upstream_buffer_overflow';
+              onError?.({
+                type: 'upstream_buffer_overflow',
+                bufferedChars: buffer.length,
+                maxBufferedChars,
+              });
+              buffer = '';
+              consecutiveReconnectFailures += 1;
+              controller.abort();
+              break;
+            }
           }
 
-          if (!stopped && !signal?.aborted && buffer.trim().length > 0) {
+          if (!stopped && !signal?.aborted && abortReason !== 'upstream_buffer_overflow' && buffer.trim().length > 0) {
             const block = buffer.trim();
             const envelope = parseBlock(block);
             if (envelope?.payload) {
@@ -232,7 +256,7 @@ export function createUpstreamSseReader({
             }
           }
         } catch (error) {
-          if (!stopped && !signal?.aborted && abortReason !== 'upstream_stalled') {
+          if (!stopped && !signal?.aborted && abortReason !== 'upstream_stalled' && abortReason !== 'upstream_buffer_overflow') {
             consecutiveReconnectFailures += 1;
             onError?.({
               type: 'stream_error',

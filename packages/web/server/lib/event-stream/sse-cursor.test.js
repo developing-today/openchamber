@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createSseCursor, decodeOpenChamberCursor, encodeOpenChamberCursor, isOpenChamberCursor, isOpenCodeEventId, isResyncBlock, parseSseBlock } from './sse-cursor.js';
+import { createSseCursor, decodeOpenChamberCursor, encodeOpenChamberCursor, isOpenChamberCursor, isOpenCodeEventId, isResyncBlock, parseSseBlock, SSE_CURSOR_MAX_PENDING_CHARS } from './sse-cursor.js';
 
 describe('SSE cursor', () => {
   it('tracks the id of the last complete block and reports every block in order', () => {
@@ -68,6 +68,27 @@ describe('SSE cursor', () => {
 
     expect(block.resync).toBe(true);
     expect(cursor.lastEventId()).toBe('');
+  });
+
+  it('drops a separator-less flood past the pending cap without corrupting the next block', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    const blocks = cursor.observe('id: ws:9\ndata: {"n":9}\n\n');
+    expect(blocks.map((block) => [block.id, block.data])).toEqual([['ws:9', '{"n":9}']]);
+    expect(cursor.lastEventId()).toBe('ws:9');
+  });
+
+  it('bounds pending at the default cap on a separator-less flood', () => {
+    const cursor = createSseCursor();
+
+    expect(cursor.observe('x'.repeat(SSE_CURSOR_MAX_PENDING_CHARS + 1))).toEqual([]);
+
+    const blocks = cursor.observe('id: ws:1\ndata: {"n":1}\n\n');
+    expect(blocks).toHaveLength(1);
+    expect(cursor.lastEventId()).toBe('ws:1');
   });
 
   it('starts from the id the browser already holds', () => {

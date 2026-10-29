@@ -50,6 +50,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `timeouts.js`: the three windows and their environment overrides. `OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_MS` sets the stall window, `OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS` the concurrent one and `OPENCHAMBER_RESUME_IDLE_TIMEOUT_MS` the resume idle bound (10 s). Each is read once at startup, as whole milliseconds from 1,000 to 600,000; a value outside that, or not a whole number, logs a warning and keeps its default.
 - `DEFAULT_UPSTREAM_RECONNECT_DELAY_MS`: default delay between upstream reconnect attempts.
 - `createUpstreamSseReader(...)`: creates a start/stop reader for OpenCode SSE streams. The reader parses SSE blocks, tracks the latest `Last-Event-ID`, reconnects after closed or stalled upstream streams, and reports events through callbacks.
+- `UPSTREAM_SSE_MAX_BUFFERED_CHARS` (4 MiB): cap on the reader's retained partial (separator-less) block, and `SSE_CURSOR_MAX_PENDING_CHARS` (4 MiB): the same cap for `createSseCursor`'s pending block in `sse-cursor.js`. Complete blocks may be larger; only text retained waiting for a `\n\n` separator is bounded.
 
 ### Cursor helpers
 - `isOpenCodeEventId(id)`: true for OpenCode's `<instance>:<sequence>` form, the only id OpenCode can replay from.
@@ -113,6 +114,10 @@ The directory WS bridge and the SSE proxy (`/api/global/event`, used by Capacito
 ### Why a versioned cursor and not a raw OpenCode id
 
 OpenCode cannot replay an OpenChamber local frame, and a raw OpenCode id carries no OpenChamber position, so after a restart it can resume past a local frame the browser missed. The versioned cursor carries both the stream position and the upstream id; the `occ1.` prefix keeps it from ever being mistaken for an OpenCode id. Raw OpenCode ids remain accepted as a legacy cursor, and only while no local frame is known.
+
+### Why partial SSE buffers are capped, and overflow drops the partial block
+
+A separator-less upstream stream otherwise grows the reader's and the proxy cursor's partial-block buffers without bound, and the stall watchdog cannot help because it resets on every chunk. Overflow in the reader is observable: it reports `upstream_buffer_overflow`, aborts, and reconnects from the last complete event id. The cursor has no error channel and its state only advances on complete blocks, so it drops the oversized partial block whole — keeping a tail could splice the flood onto the next block and corrupt its id — and parses the next complete block fresh.
 
 ### Why local frames are persisted and upstream frames are not
 
