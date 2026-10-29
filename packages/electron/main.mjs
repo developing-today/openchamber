@@ -1,4 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
+import { OPEN_IN_APP_SPAWN_TIMEOUT_MS, WHERE_SPAWN_TIMEOUT_MS, WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS } from './spawn-sync-timeouts.mjs';
 import { compareSemver } from './semver-compare.mjs';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
@@ -4006,7 +4007,7 @@ const WINDOWS_APP_ID_BY_NAME = new Map([
 const getWindowsAppIdForName = (appName) => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
 
 const runWhere = (program) => {
-  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
+  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true, timeout: WHERE_SPAWN_TIMEOUT_MS });
   if (result.error || result.status !== 0) return null;
   const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
   return first || null;
@@ -4053,6 +4054,7 @@ const resolveWindowsTerminalPackagePath = () => {
     const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], {
       encoding: 'utf8',
       windowsHide: true,
+      timeout: WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS,
     });
     if (!result.error && result.status === 0) {
       const packagePath = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
@@ -4356,7 +4358,7 @@ const runSpecChain = (specs, appName) => {
 
   const failures = [];
   for (const spec of specs) {
-    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true });
+    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true, timeout: OPEN_IN_APP_SPAWN_TIMEOUT_MS });
     if (result.error) {
       failures.push(`${spec.program}: ${result.error.message}`);
       continue;
