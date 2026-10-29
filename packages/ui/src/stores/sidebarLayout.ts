@@ -7,7 +7,8 @@ import { z } from 'zod';
  * state, and how the List view lays out chats and projects.
  *
  * One value, stored per surface kind with the other sidebar toggles
- * (`sidebarLayout`). The phone sheet and VS Code keep the classic layout.
+ * (`sidebarLayout`). VS Code keeps the classic layout; the phone sheet draws
+ * the same value as the desktop and web sidebar, keeping its own order.
  */
 
 /** Live states a top-level session can be in, as the attention sections see it. */
