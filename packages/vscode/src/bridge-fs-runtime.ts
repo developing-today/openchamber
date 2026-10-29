@@ -449,8 +449,7 @@ export async function handleFsBridgeMessage(
 
             // Append at most the bytes left under the cap and report
             // overflow, so a capped stream stops at the cap.
-            const appendCapped = (current: string, currentBytes: number, chunk: unknown) => {
-              const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+            const appendCapped = (current: string, currentBytes: number, buffer: Buffer) => {
               if (currentBytes >= FS_EXEC_OUTPUT_LIMIT_BYTES) {
                 return { value: current, bytes: currentBytes, exceeded: true };
               }
