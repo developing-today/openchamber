@@ -11,6 +11,7 @@ import path from 'path';
 import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { sessionCookieNameForRequest } from './session-cookie.js';
+import { parsePositiveIntWithDefault } from '../shared/parse-int.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
@@ -31,17 +32,11 @@ const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
 const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
 
 // A positive whole number of attempts from the environment, else the default.
-// Only a plain decimal spelling counts: a bare Number(...) would silently
-// honour '-5' (lockout after one failure), '2.9', and '1e3' (a 1000-attempt
-// budget) for the login brute-force limit.
-export const readRateLimitMaxAttempts = (raw, fallback) => {
-  const text = String(raw ?? '').trim();
-  if (!/^\d+$/.test(text)) {
-    return fallback;
-  }
-  const value = Number(text);
-  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
-};
+// The strict plain-decimal judgement lives in shared/parse-int.js (design
+// #802 phase 2, #804): a bare Number(...) would silently honour '-5' (lockout
+// after one failure), '2.9', and '1e3' (a 1000-attempt budget) for the login
+// brute-force limit. The exported name is kept for its importers.
+export const readRateLimitMaxAttempts = parsePositiveIntWithDefault;
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = readRateLimitMaxAttempts(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS, 10);

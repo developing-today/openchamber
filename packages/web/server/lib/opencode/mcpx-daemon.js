@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { readBoundedResponseText } from '../guests/response-body.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 export const MCPX_DAEMON_TIMEOUT_MS = 10_000;
 export const MCPX_DAEMON_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;

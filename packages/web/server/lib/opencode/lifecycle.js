@@ -6,6 +6,7 @@ import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries, commandIdentifiesOurServer } from './managed-process-registry.js';
+import { parsePositiveIntWithDefault } from '../shared/parse-int.js';
 import {
   clearManagedOpenCodeState,
   createLaunchFingerprint,
@@ -45,18 +46,12 @@ const execFileAsync = (file, args, options) =>
     execFile(file, args, options, (error, stdout, stderr) => (error ? reject(error) : resolve({ stdout, stderr })));
   });
 
-// A positive whole number from the environment, else the fallback. Only a
-// plain decimal spelling counts: a bare parseInt would silently honour
-// '5000junk' as 5000, truncate '5.9' to 5, and read '1e3' as a 1 ms health
-// timeout. Same strict judgement as readRateLimitMaxAttempts in ui-auth.
-export const parsePositiveInt = (value, fallback) => {
-  const text = String(value ?? '').trim();
-  if (!/^\d+$/.test(text)) {
-    return fallback;
-  }
-  const parsed = Number(text);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-};
+// A positive whole number from the environment, else the fallback. The
+// strict plain-decimal judgement lives in shared/parse-int.js (design #802
+// phase 2, #804): a bare parseInt would silently honour '5000junk' as 5000,
+// truncate '5.9' to 5, and read '1e3' as a 1 ms health timeout. The exported
+// name is kept for its importers.
+export const parsePositiveInt = parsePositiveIntWithDefault;
 
 const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000);
 const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
