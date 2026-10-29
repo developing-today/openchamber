@@ -351,8 +351,6 @@ jobs:
       fail-fast: false
       matrix:
         target: ${{ fromJson(needs.issue-collect.outputs.targets) }}
-    needs: gate
-    if: needs.gate.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
