@@ -18,22 +18,47 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 const SPEECH_REQUEST_TIMEOUT_MS = 60_000;
 
 // The SDK deadline covers the wait for the response. The speech body is
-// read after the create call settles, so that read races the same budget:
-// a server that answers and then stalls the body fails the request the
-// same way, and its stream is cancelled instead of held open.
+// read after the create call settles, so that read is bounded by the same
+// budget: a server that answers and then stalls the body fails the request
+// the same way. The body is consumed through its reader so the deadline
+// can cancel the ACTIVE read — body.cancel() cannot do that once a read
+// has locked the stream (e.g. from arrayBuffer()), which would leave the
+// upstream connection open (Codex P2 on PR #839).
 const readSpeechBody = async (response, timeoutMs) => {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    return response.arrayBuffer();
+  }
+  const reader = response.body.getReader();
+  const readAll = (async () => {
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+    const body = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return body.buffer;
+  })();
   let timer = null;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      // Reject first so the timeout error wins the race, then cancel
+      // through the reader that owns the locked stream: this terminates
+      // the pending read and closes the upstream connection.
+      reject(new Error(`Speech request timed out after ${timeoutMs} ms`));
+      reader.cancel().catch(() => {});
+    }, timeoutMs);
+    timer.unref?.();
+  });
   try {
-    return await Promise.race([
-      response.arrayBuffer(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          response.body?.cancel().catch(() => {});
-          reject(new Error(`Speech request timed out after ${timeoutMs} ms`));
-        }, timeoutMs);
-        timer.unref?.();
-      }),
-    ]);
+    return await Promise.race([readAll, deadline]);
   } finally {
     if (timer) clearTimeout(timer);
   }
