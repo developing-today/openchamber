@@ -489,6 +489,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.status.sent": "Надіслано",
   "sessions.scheduledTasks.dialog.status.skipped": "Пропущено",
   "sessions.scheduledTasks.dialog.status.cancelled": "Скасовано",
+  'sessions.scheduledTasks.dialog.status.timeout': 'Час вичерпано',
   "sessions.scheduledTasks.dialog.nextRun.label": "Далі",
   "sessions.scheduledTasks.dialog.lastRun.label": "Останній запуск",
   "sessions.scheduledTasks.dialog.lastRun.runningNow": "виконується зараз",

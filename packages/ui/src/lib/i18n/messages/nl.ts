@@ -479,6 +479,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'Verzonden',
   'sessions.scheduledTasks.dialog.status.skipped': 'Overgeslagen',
   'sessions.scheduledTasks.dialog.status.cancelled': 'Geannuleerd',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Time-out',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Volgende',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Laatste uitvoering',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'loopt nu',

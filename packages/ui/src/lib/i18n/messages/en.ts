@@ -479,6 +479,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'Sent',
   'sessions.scheduledTasks.dialog.status.skipped': 'Skipped',
   'sessions.scheduledTasks.dialog.status.cancelled': 'Cancelled',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Timed out',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Next',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Last run',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'running now',

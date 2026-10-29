@@ -402,6 +402,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'Gönderildi',
   'sessions.scheduledTasks.dialog.status.skipped': 'Atlandı',
   'sessions.scheduledTasks.dialog.status.cancelled': 'İptal edildi',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Zaman aşımı',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Sıradaki',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Son çalıştırma',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'şimdi çalışıyor',

@@ -9,11 +9,25 @@ import { createExistingSessionTasks } from './existing-session.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
-const DEFAULT_MAX_RUN_MS = 30 * 60 * 1000;
+// Shipped posture (#765): no practical cap by default — a fleet queue-lane
+// run legitimately needs far longer than the old hard 30 minutes. A per-task
+// `maxRunDurationMs` or the server-wide `scheduledTasksMaxRunDurationMs`
+// setting can still bound a run where a bound is genuinely wanted.
+const DEFAULT_MAX_RUN_MS = 24 * 60 * 60 * 1000;
 const JITTER_MAX_MS = 2_000;
 const TASK_TITLE_MAX_LENGTH = 120;
 const TASK_DUE_SLACK_MS = 5_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+// Effective run limit for a task: its own `maxRunDurationMs` wins, then the
+// server-wide value, then the shipped default. Non-positive or non-finite
+// values mean "not set"; the result is clamped to the largest delay a timer
+// can hold.
+const resolveEffectiveMaxRunMs = (task, serverMaxRunMs) => {
+  const candidate = [task?.maxRunDurationMs, serverMaxRunMs, DEFAULT_MAX_RUN_MS]
+    .find((value) => Number.isFinite(value) && value > 0);
+  return Math.min(Math.floor(candidate), MAX_TIMER_DELAY_MS);
+};
+
 
 const buildTaskKey = (projectID, taskID) => `${projectID}:${taskID}`;
 
@@ -276,7 +290,20 @@ export const createScheduledTasksRuntime = (deps) => {
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
     maxRunDurationMs = DEFAULT_MAX_RUN_MS,
+    resolveServerMaxRunDurationMs = null,
   } = deps;
+
+  const resolveEffectiveMaxRunMsForTask = async (task) => {
+    let serverMaxRunMs = maxRunDurationMs;
+    if (resolveServerMaxRunDurationMs) {
+      try {
+        serverMaxRunMs = (await resolveServerMaxRunDurationMs(task)) ?? maxRunDurationMs;
+      } catch {
+        serverMaxRunMs = maxRunDurationMs;
+      }
+    }
+    return resolveEffectiveMaxRunMs(task, serverMaxRunMs);
+  };
 
   // Every OpenCode route lives under /api in v2 and the client appends it, so
   // the client only wants the origin. Directory scoping is a request header.
@@ -989,11 +1016,16 @@ export const createScheduledTasksRuntime = (deps) => {
 
       try {
         const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
+        const effectiveMaxRunMs = await resolveEffectiveMaxRunMsForTask(task);
         let timeoutID;
         const timeoutPromise = new Promise((_, reject) => {
           timeoutID = setTimeout(() => {
-            reject(new Error('scheduled task run timed out'));
-          }, maxRunDurationMs);
+            const timeoutError = new Error(
+              `scheduled task run exceeded its configured limit of ${effectiveMaxRunMs} ms`,
+            );
+            timeoutError.code = 'SCHEDULED_TASK_RUN_TIMEOUT';
+            reject(timeoutError);
+          }, effectiveMaxRunMs);
         });
 
         const result = await Promise.race([runPromise, timeoutPromise]).finally(() => {
@@ -1010,7 +1042,9 @@ export const createScheduledTasksRuntime = (deps) => {
           { projectID, taskID, status, reason, sessionID, durationMs }
         );
       } catch (error) {
-        status = 'error';
+        // A run stopped by its configured limit is not a failure: record it
+        // as 'timeout' so the watchdog can tell a capped run from a crash.
+        status = error?.code === 'SCHEDULED_TASK_RUN_TIMEOUT' ? 'timeout' : 'error';
         errorMessage = safeErrorMessage(error);
         logger.warn?.('[ScheduledTasks] run failed', {
           projectID,
@@ -1049,7 +1083,7 @@ export const createScheduledTasksRuntime = (deps) => {
       const statePatch = {
         lastStatus: status,
         lastDurationMs: durationMs,
-        lastError: status === 'error' ? errorMessage : undefined,
+        lastError: status === 'error' || status === 'timeout' ? errorMessage : undefined,
         lastSessionId: sessionID ?? createdSessionID,
         nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
         updatedAt: finishedAt,
@@ -1086,7 +1120,7 @@ export const createScheduledTasksRuntime = (deps) => {
             ...(latestTask.state || {}),
             lastStatus: status,
             lastDurationMs: durationMs,
-            lastError: status === 'error' ? errorMessage : undefined,
+            lastError: status === 'error' || status === 'timeout' ? errorMessage : undefined,
             lastSessionId: sessionID ?? createdSessionID,
             nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
             updatedAt: finishedAt,

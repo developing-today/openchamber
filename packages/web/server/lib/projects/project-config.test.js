@@ -36,6 +36,28 @@ describe('project-config runtime', () => {
       await expect(runtime.upsertScheduledTask('project-test', { ...input, targetSessionId: '' })).rejects.toThrow('execution.providerID is required');
     } finally { await cleanup(); }
   });
+  it('round-trips a per-task run limit and the timeout status (#765)', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const base = {
+        name: 'Long lane',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+        execution: { prompt: 'Work the queue', providerID: 'openai', modelID: 'gpt-5' },
+      };
+      const saved = await runtime.upsertScheduledTask('project-test', { ...base, maxRunDurationMs: 90_000.7 });
+      expect(saved.task.maxRunDurationMs).toBe(90_000);
+      await runtime.updateScheduledTaskState('project-test', saved.task.id, { lastStatus: 'timeout', lastError: 'scheduled task run exceeded its configured limit of 90000 ms' });
+      expect((await runtime.listScheduledTasks('project-test'))[0]).toMatchObject({
+        maxRunDurationMs: 90_000,
+        state: { lastStatus: 'timeout' },
+      });
+      const cleared = await runtime.upsertScheduledTask('project-test', { ...base, id: saved.task.id, maxRunDurationMs: null });
+      expect(cleared.task.maxRunDurationMs).toBeUndefined();
+      const invalid = await runtime.upsertScheduledTask('project-test', { ...base, name: 'No limit', maxRunDurationMs: -5 });
+      expect(invalid.task.maxRunDurationMs).toBeUndefined();
+    } finally { await cleanup(); }
+  });
   it('creates and persists a scheduled task', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {

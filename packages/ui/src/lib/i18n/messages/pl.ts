@@ -680,6 +680,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': 'Wysłano',
   'sessions.scheduledTasks.dialog.status.skipped': 'Pominięto',
   'sessions.scheduledTasks.dialog.status.cancelled': 'Anulowano',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Przekroczono limit czasu',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Następne',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Ostatnie uruchomienie',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'uruchomione teraz',

@@ -39,7 +39,7 @@ const clampLength = (value, maxLength) => {
 };
 
 const normalizeStatus = (value) => {
-  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled') {
+  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled' || value === 'timeout') {
     return value;
   }
   return 'idle';
@@ -348,6 +348,17 @@ const normalizeTaskForStorage = (value, options) => {
   // removed loop files across restarts. Unknown to the UI model.
   const loopFile = asNonEmptyString(value.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
 
+  // Per-task run limit (#765): a positive finite millisecond count. An
+  // explicit null clears it; an absent value keeps the stored one; anything
+  // else means "inherit the server-wide setting / shipped default".
+  const maxRunDurationMs = value.maxRunDurationMs === null
+    ? undefined
+    : (Number.isFinite(value.maxRunDurationMs) && value.maxRunDurationMs > 0
+      ? Math.floor(value.maxRunDurationMs)
+      : (Number.isFinite(existingTask?.maxRunDurationMs) && existingTask.maxRunDurationMs > 0
+        ? Math.floor(existingTask.maxRunDurationMs)
+        : undefined));
+
   const nowMs = Math.max(0, Math.round(now));
   const baseState = normalizeState(value.state, existingTask?.state);
   const state = {
@@ -365,6 +376,7 @@ const normalizeTaskForStorage = (value, options) => {
     state,
     ...(loopFile ? { loopFile } : {}),
   };
+  if (maxRunDurationMs) storedTask.maxRunDurationMs = maxRunDurationMs;
   if (targetSessionId) storedTask.targetSessionId = targetSessionId;
   return storedTask;
 };
