@@ -7,7 +7,8 @@
  */
 
 import { buildResult } from '../../utils/index.js';
-import { resolveAntigravityAuth, isConfigured, DEFAULT_PROJECT_ID } from './auth.js';
+import { readOpenCodeCredentials } from '../../../opencode/auth.js';
+import { resolveAntigravityAuth, resolveAntigravityStoreAuth, isConfigured, DEFAULT_PROJECT_ID } from './auth.js';
 import {
   refreshAntigravityToken,
   fetchAntigravityModels,
@@ -21,9 +22,26 @@ export { isConfigured } from './auth.js';
 export const providerId = 'antigravity';
 export const providerName = 'Antigravity';
 
+const resolveAuthCandidates = async () => {
+  const candidates = [];
+  const fileAuth = resolveAntigravityAuth();
+  if (fileAuth) {
+    candidates.push(fileAuth);
+  }
+  try {
+    const storeAuth = resolveAntigravityStoreAuth(await readOpenCodeCredentials());
+    if (storeAuth && !candidates.some((candidate) => candidate.refreshToken === storeAuth.refreshToken)) {
+      candidates.push(storeAuth);
+    }
+  } catch {
+    // Credential store unwired or unreachable: the accounts file alone decides.
+  }
+  return candidates;
+};
+
 export const fetchQuota = async () => {
-  const auth = resolveAntigravityAuth();
-  if (!auth) {
+  const candidates = await resolveAuthCandidates();
+  if (!candidates.length) {
     return buildResult({
       providerId,
       providerName,
@@ -33,7 +51,15 @@ export const fetchQuota = async () => {
     });
   }
 
-  const accessToken = await refreshAntigravityToken(auth.refreshToken);
+  let accessToken = null;
+  let auth = null;
+  for (const candidate of candidates) {
+    accessToken = await refreshAntigravityToken(candidate.refreshToken);
+    if (accessToken) {
+      auth = candidate;
+      break;
+    }
+  }
   if (!accessToken) {
     return buildResult({
       providerId,
