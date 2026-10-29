@@ -18,6 +18,7 @@ import { z } from 'zod';
 const PAGE_SIZE = 100;
 const SESSION_PAGE_SIZE = 200;
 const LIVE_DEBOUNCE_MS = 1_500;
+const INDEXER_READ_TIMEOUT_MS = 5_000;
 const BACKFILL_PAUSE_MS = 25;
 const ROLES = ['user', 'assistant'];
 
@@ -83,15 +84,30 @@ const readSearchableText = (message) => {
   return joinParts(message, textPartSchema);
 };
 
-const messageExists = async (client, sessionId, messageId) => {
-  if (!messageId) return false;
-  try {
-    await client.session.message.get({ sessionID: sessionId, messageID: messageId });
-    return true;
-  } catch (error) {
-    if (isTag(error, 'MessageNotFoundError')) return false;
-    throw error;
+// Compose signals so any one of them aborts the result, mirroring
+// AbortSignal.any where the runtime has it and composing manually where
+// it does not (the oldest supported hosts lack AbortSignal.any). The
+// returned detach removes the forwarding listeners once settled.
+const combineAbortSignals = (signals) => {
+  const anyImpl = AbortSignal.any;
+  if (anyImpl) {
+    return { signal: anyImpl(signals), detach: () => {} };
   }
+  const controller = new AbortController();
+  const forwarders = signals.map((signal) => () => controller.abort(signal.reason));
+  signals.forEach((signal, index) => {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      signal.addEventListener('abort', forwarders[index], { once: true });
+    }
+  });
+  return {
+    signal: controller.signal,
+    detach: () => {
+      signals.forEach((signal, index) => signal.removeEventListener('abort', forwarders[index]));
+    },
+  };
 };
 
 // An assistant record is still being written until OpenCode stamps it
@@ -106,10 +122,53 @@ export const createMessageSearchIndexer = ({
   pageSize = PAGE_SIZE,
   liveDebounceMs = LIVE_DEBOUNCE_MS,
   backfillPauseMs = BACKFILL_PAUSE_MS,
+  readTimeoutMs = INDEXER_READ_TIMEOUT_MS,
   // Read per record, so switching it takes effect from the next one.
   includeReasoning = () => false,
   logger = console,
 }) => {
+  // One controller for the active runs: created when a drain or backfill
+  // run starts, aborted by stop() so an in-flight read rejects at once and
+  // idle() settles instead of waiting on OpenCode. A run that starts after
+  // an abort gets a fresh controller, so a restarted indexer reads normally.
+  let runController = null;
+  const runSignal = () => {
+    // Once stopped, cancellation is sticky: a read that starts (or a sync
+    // that continues) after stop() must see the aborted signal, not a
+    // fresh controller — otherwise idle() waits on that read's deadline
+    // instead of settling at once.
+    if (stopped) {
+      if (!runController) runController = new AbortController();
+      if (!runController.signal.aborted) runController.abort();
+      return runController.signal;
+    }
+    if (!runController || runController.signal.aborted) runController = new AbortController();
+    return runController.signal;
+  };
+
+  // Every client read carries a per-call deadline, composed with the run
+  // signal — either firing aborts the read. The deadline value matches the
+  // sibling bounded clients (session-work, session-assist: 5 s).
+  const readWithDeadline = async (call) => {
+    const combined = combineAbortSignals([runSignal(), AbortSignal.timeout(readTimeoutMs)]);
+    try {
+      return await call({ signal: combined.signal });
+    } finally {
+      combined.detach();
+    }
+  };
+
+  const messageExists = async (client, sessionId, messageId) => {
+    if (!messageId) return false;
+    try {
+      await readWithDeadline((options) => client.session.message.get({ sessionID: sessionId, messageID: messageId }, options));
+      return true;
+    } catch (error) {
+      if (isTag(error, 'MessageNotFoundError')) return false;
+      throw error;
+    }
+  };
+
   const liveTimers = new Map();
   const liveQueue = new Map();
   const backfillQueue = new Map();
@@ -122,7 +181,7 @@ export const createMessageSearchIndexer = ({
     const client = createClient(directoryHint);
     let session;
     try {
-      session = sessionSchema.parse(await client.session.get({ sessionID: sessionId }));
+      session = sessionSchema.parse(await readWithDeadline((options) => client.session.get({ sessionID: sessionId }, options)));
     } catch (error) {
       if (isTag(error, 'SessionNotFoundError')) {
         store.deleteSession(sessionId);
@@ -145,9 +204,18 @@ export const createMessageSearchIndexer = ({
     let cutoff = Number.POSITIVE_INFINITY;
     if (revertId) {
       // Unknown boundary: index nothing rather than text the user took back.
-      const reverted = createdSchema.safeParse(
-        await client.session.message.get({ sessionID: sessionId, messageID: revertId }).catch(() => null),
-      );
+      let revertedRaw = null;
+      try {
+        revertedRaw = await readWithDeadline((options) => client.session.message.get({ sessionID: sessionId, messageID: revertId }, options));
+      } catch (error) {
+        // Only a genuinely missing boundary uses the index-nothing
+        // fallback. A timeout or a stop abort must fail this sync (so
+        // it is not marked synced) and stop any further reads, so the
+        // session is retried on a later connect instead of being
+        // silently dropped from search.
+        if (!isTag(error, 'MessageNotFoundError')) throw error;
+      }
+      const reverted = createdSchema.safeParse(revertedRaw);
       cutoff = reverted.success ? reverted.data.time.created : Number.NEGATIVE_INFINITY;
     }
 
@@ -166,12 +234,12 @@ export const createMessageSearchIndexer = ({
       for (;;) {
         let page;
         try {
-          page = messagePageSchema.parse(await client.message.list({
+          page = messagePageSchema.parse(await readWithDeadline((options) => client.message.list({
             sessionID: sessionId,
             limit: pageSize,
             type: role,
             ...(cursor ? { cursor } : { order: 'asc' }),
-          }));
+          }, options)));
         } catch (error) {
           if (cursor && !retried && (isTag(error, 'InvalidCursorError') || isTag(error, 'InvalidRequestError'))) return startOver();
           throw error;
@@ -235,11 +303,12 @@ export const createMessageSearchIndexer = ({
   const drain = () => {
     if (draining || stopped) return draining;
     draining = (async () => {
+      runSignal();
       for (let job = takeNext(); job && !stopped; job = takeNext()) {
         try {
           await syncSession(job.sessionId, job.directory);
         } catch (error) {
-          logger.warn?.('[message-search] could not index a session:', error?.message ?? error);
+          if (!stopped) logger.warn?.('[message-search] could not index a session:', error?.message ?? error);
         }
         if (job.fromBackfill) {
           backfill = { ...backfill, done: backfill.done + 1 };
@@ -272,12 +341,13 @@ export const createMessageSearchIndexer = ({
    */
   const startBackfill = async () => {
     const run = ++backfillRun;
+    runSignal();
     const client = createClient('');
     const listed = new Map();
     let cursor = null;
     try {
       for (;;) {
-        const page = sessionPageSchema.parse(await client.session.list({ parentID: null, limit: SESSION_PAGE_SIZE, ...(cursor ? { cursor } : { order: 'desc' }) }));
+        const page = sessionPageSchema.parse(await readWithDeadline((options) => client.session.list({ parentID: null, limit: SESSION_PAGE_SIZE, ...(cursor ? { cursor } : { order: 'desc' }) }, options)));
         for (const record of page.data) {
           const session = sessionSchema.safeParse(record);
           if (session.success && !session.data.parentID) listed.set(session.data.id, session.data);
@@ -287,7 +357,7 @@ export const createMessageSearchIndexer = ({
         cursor = next;
       }
     } catch (error) {
-      logger.warn?.('[message-search] could not list sessions:', error?.message ?? error);
+      if (!stopped) logger.warn?.('[message-search] could not list sessions:', error?.message ?? error);
       return;
     }
     if (run !== backfillRun || stopped) return;
@@ -353,6 +423,7 @@ export const createMessageSearchIndexer = ({
 
     stop() {
       stopped = true;
+      runController?.abort();
       for (const timer of liveTimers.values()) clearTimeout(timer);
       liveTimers.clear();
     },
