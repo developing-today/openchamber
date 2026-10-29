@@ -13,6 +13,11 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
 // used by checkNgrokApiReachability below.
 const AVAILABILITY_CHECK_TIMEOUT_MS = 5000;
 const NGROK_API_URL = 'http://127.0.0.1:4040/api/tunnels';
+// The agent API is on localhost and answers in milliseconds when healthy,
+// so its readiness-poll deadline is far shorter than the 5 s internet
+// reachability check above and far under the 30 s startup timeout.
+const NGROK_POLL_TIMEOUT_MS = 2000;
+const NGROK_POLL_INTERVAL_MS = 250;
 const NGROK_PUBLIC_URL_REGEX = /https:\/\/[^\s"']+/i;
 const NGROK_AUTHTOKEN_HELP = 'Run: ngrok config add-authtoken <your-ngrok-token>';
 const getNgrokInstallInfo = () => getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
@@ -230,12 +235,24 @@ const appendNgrokOutputSummary = (message, lines) => {
   return summary ? `${message}: ${summary}` : message;
 };
 
-async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
+export async function fetchNgrokPublicUrl({ fetchImpl = globalThis.fetch, timeoutMs = NGROK_POLL_TIMEOUT_MS, signal } = {}) {
   if (typeof fetchImpl !== 'function') {
     return null;
   }
+  // One controller carries both the deadline and the caller's signal, so
+  // either aborts the fetch -- including a response.json() body read that
+  // is still in flight when the deadline (or the caller) fires. The timer
+  // is only cleared after the body read settles, in finally.
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  if (signal?.aborted) {
+    controller.abort();
+  } else if (signal) {
+    signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(NGROK_API_URL, { method: 'GET' });
+    const response = await fetchImpl(NGROK_API_URL, { method: 'GET', signal: controller.signal });
     if (!response.ok) {
       return null;
     }
@@ -246,7 +263,62 @@ async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
     return normalizeNgrokPublicUrl(httpsTunnel?.public_url) || normalizeNgrokPublicUrl(fallbackTunnel?.public_url);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
+    if (signal) {
+      signal.removeEventListener('abort', onExternalAbort);
+    }
   }
+}
+
+export function pollNgrokPublicUrl({ fetchImpl, timeoutMs = NGROK_POLL_TIMEOUT_MS, intervalMs = NGROK_POLL_INTERVAL_MS, getPublicUrl, onPublicUrl } = {}) {
+  let stopped = false;
+  let inFlight = false;
+  let currentController = null;
+
+  const tick = async () => {
+    if (stopped) {
+      return;
+    }
+    // Check the captured URL before the in-flight guard: child output can
+    // supply the URL while a poll fetch is stalled, and it must resolve
+    // startup promptly instead of waiting out that attempt (or the 30 s
+    // startup timeout firing first).
+    const existing = typeof getPublicUrl === 'function' ? getPublicUrl() : null;
+    if (existing) {
+      onPublicUrl?.(existing);
+      return;
+    }
+    if (inFlight) {
+      return;
+    }
+    inFlight = true;
+    const controller = new AbortController();
+    currentController = controller;
+    try {
+      const fetched = await fetchNgrokPublicUrl({ fetchImpl, timeoutMs, signal: controller.signal });
+      const resolved = (typeof getPublicUrl === 'function' ? getPublicUrl() : null) || fetched;
+      if (resolved && !stopped) {
+        onPublicUrl?.(resolved);
+      }
+    } catch {
+      // fetchNgrokPublicUrl already settles failures as null; defensive only.
+    } finally {
+      inFlight = false;
+      if (currentController === controller) {
+        currentController = null;
+      }
+    }
+  };
+
+  const timer = setInterval(tick, intervalMs);
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+      currentController?.abort();
+    },
+  };
 }
 
 export async function startNgrokQuickTunnel({ port }) {
@@ -299,13 +371,16 @@ export async function startNgrokQuickTunnel({ port }) {
 
   await new Promise((resolve, reject) => {
     let settled = false;
+    let poller = null;
     const finish = (handler, value) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timeout);
-      clearInterval(checkReady);
+      // Abort (not just stop polling) so no poll fetch stays pending
+      // after the startup promise settles for any reason.
+      poller?.stop();
       child.off('error', onError);
       child.off('exit', onExit);
       handler(value);
@@ -316,12 +391,13 @@ export async function startNgrokQuickTunnel({ port }) {
       finish(reject, new Error(appendNgrokOutputSummary('Ngrok tunnel URL not received within 30 seconds', recentOutput)));
     }, DEFAULT_STARTUP_TIMEOUT_MS);
 
-    const checkReady = setInterval(async () => {
-      publicUrl = publicUrl || await fetchNgrokPublicUrl();
-      if (publicUrl) {
+    poller = pollNgrokPublicUrl({
+      getPublicUrl: () => publicUrl,
+      onPublicUrl: (url) => {
+        publicUrl = url;
         finish(resolve, null);
-      }
-    }, 250);
+      },
+    });
 
     const onError = (error) => {
       finish(reject, new Error(`Ngrok failed to start: ${error.message}`));

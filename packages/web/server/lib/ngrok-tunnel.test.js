@@ -7,6 +7,8 @@ import {
   checkNgrokAuthtokenConfigured,
   checkNgrokAvailable,
   extractNgrokPublicUrlFromText,
+  fetchNgrokPublicUrl,
+  pollNgrokPublicUrl,
   summarizeNgrokOutput,
 } from './ngrok-tunnel.js';
 
@@ -118,5 +120,142 @@ describe('ngrok availability checks', () => {
 
     expect(result.configured).toBe(false);
     expect(Date.now() - startedAt).toBeLessThan(10000);
+  });
+});
+
+describe('fetchNgrokPublicUrl', () => {
+  const tunnelPayload = (tunnels) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ tunnels }),
+  });
+
+  it('prefers the https tunnel and falls back to any tunnel', async () => {
+    const preferred = await fetchNgrokPublicUrl({
+      fetchImpl: async () => tunnelPayload([
+        { proto: 'http', public_url: 'https://fallback.ngrok-free.app' },
+        { proto: 'https', public_url: 'https://demo.ngrok-free.app' },
+      ]),
+    });
+    expect(preferred).toBe('https://demo.ngrok-free.app');
+
+    const fallback = await fetchNgrokPublicUrl({
+      fetchImpl: async () => tunnelPayload([
+        { proto: 'http', public_url: 'https://fallback.ngrok-free.app' },
+      ]),
+    });
+    expect(fallback).toBe('https://fallback.ngrok-free.app');
+  });
+
+  it('returns null for a non-ok response', async () => {
+    const result = await fetchNgrokPublicUrl({
+      fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+    });
+    expect(result).toBeNull();
+  });
+
+  it('settles a never-answering fetch as null within the deadline', async () => {
+    const neverAnswers = (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+    const startedAt = Date.now();
+    const result = await fetchNgrokPublicUrl({ fetchImpl: neverAnswers, timeoutMs: 40 });
+    expect(result).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+  });
+
+  it('settles a stalled response body read as null within the deadline', async () => {
+    let capturedSignal = null;
+    const stalledBody = async (_url, { signal }) => {
+      capturedSignal = signal;
+      return {
+        ok: true,
+        status: 200,
+        json: () => new Promise((_resolve, reject) => {
+          capturedSignal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+      };
+    };
+    const startedAt = Date.now();
+    const result = await fetchNgrokPublicUrl({ fetchImpl: stalledBody, timeoutMs: 40 });
+    expect(result).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+  });
+
+  it('settles promptly when the caller aborts', async () => {
+    const caller = new AbortController();
+    const neverAnswers = (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+    const startedAt = Date.now();
+    const pending = fetchNgrokPublicUrl({ fetchImpl: neverAnswers, timeoutMs: 10000, signal: caller.signal });
+    setTimeout(() => caller.abort(), 20);
+    expect(await pending).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+  });
+});
+
+describe('pollNgrokPublicUrl', () => {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('never accumulates in-flight fetches against a wedged agent', async () => {
+    let calls = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const neverAnswers = (_url, { signal }) => {
+      calls += 1;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => { inFlight -= 1; reject(new Error('aborted')); }, { once: true });
+      });
+    };
+    const poller = pollNgrokPublicUrl({ fetchImpl: neverAnswers, timeoutMs: 40, intervalMs: 10, onPublicUrl: () => {} });
+    await wait(180);
+    poller.stop();
+    await wait(20);
+    expect(maxInFlight).toBe(1);
+    expect(calls).toBeGreaterThan(1);
+    expect(inFlight).toBe(0);
+  });
+
+  it('resolves a child-output URL while a poll fetch is in flight', async () => {
+    let captured = null;
+    const seen = [];
+    const neverAnswers = (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+    const poller = pollNgrokPublicUrl({
+      fetchImpl: neverAnswers,
+      timeoutMs: 10000,
+      intervalMs: 10,
+      getPublicUrl: () => captured,
+      onPublicUrl: (url) => { seen.push(url); poller.stop(); },
+    });
+    await wait(50);
+    captured = 'https://child.ngrok-free.app';
+    await wait(60);
+    expect(seen).toEqual(['https://child.ngrok-free.app']);
+  });
+
+  it('leaves nothing pending after stop() during an in-flight attempt', async () => {
+    let calls = 0;
+    let inFlight = 0;
+    const neverAnswers = (_url, { signal }) => {
+      calls += 1;
+      inFlight += 1;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => { inFlight -= 1; reject(new Error('aborted')); }, { once: true });
+      });
+    };
+    const poller = pollNgrokPublicUrl({ fetchImpl: neverAnswers, timeoutMs: 10000, intervalMs: 10, onPublicUrl: () => {} });
+    await wait(50);
+    expect(inFlight).toBe(1);
+    poller.stop();
+    await wait(30);
+    expect(inFlight).toBe(0);
+    const callsAfterStop = calls;
+    await wait(50);
+    expect(calls).toBe(callsAfterStop);
   });
 });
