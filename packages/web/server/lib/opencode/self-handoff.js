@@ -34,7 +34,10 @@ export const resolveHandoffTimeoutMs = (env = process.env) => {
   const raw = String(env.OPENCHAMBER_HANDOFF_TIMEOUT_MS ?? '').trim();
   if (!/^\d+$/.test(raw)) return DEFAULT_HANDOFF_TIMEOUT_MS;
   const value = Number(raw);
-  return Number.isInteger(value) && value > 0 ? value : DEFAULT_HANDOFF_TIMEOUT_MS;
+  // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
+  // instead, so a larger configured timeout falls back to the default
+  // rather than killing every handoff successor immediately.
+  return Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : DEFAULT_HANDOFF_TIMEOUT_MS;
 };
 
 // The successor runs the same CLI entry in foreground mode, so it writes its own pid and instance

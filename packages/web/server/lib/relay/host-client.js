@@ -74,7 +74,9 @@ export const resolveBatchWindowMs = (option, rawEnvValue = process.env.OPENCHAMB
   // shared/parse-int.js (design #802 phase 2, #804): a bare parseInt would
   // silently honour '150junk' as 150, truncate '2.9' to 2, read '1e3' as a
   // 1 ms window, and read '0x10' as 0. Zero stays a valid window here.
-  return parseBoundedIntWithDefault(rawEnvValue, DEFAULT_BATCH_WINDOW_MS, 0, Number.MAX_SAFE_INTEGER);
+  // The upper bound is Node's timer maximum (2^31 - 1 ms): the value feeds
+  // the flush timer, and a larger delay fires after ~1 ms instead.
+  return parseBoundedIntWithDefault(rawEnvValue, DEFAULT_BATCH_WINDOW_MS, 0, 2_147_483_647);
 };
 
 // Bun's WebSocket puts the full dial URL into its error messages, and that URL

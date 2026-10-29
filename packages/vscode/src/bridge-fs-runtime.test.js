@@ -223,3 +223,24 @@ describe('bridge fs env readers', () => {
     });
   }
 });
+
+describe('bridge fs check-ignore timeout timer bound', () => {
+  const name = 'OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS';
+  let saved;
+  beforeEach(() => {
+    saved = process.env[name];
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[name];
+    else process.env[name] = saved;
+  });
+
+  it('falls back to the default above the timer maximum', () => {
+    process.env[name] = '2147483647';
+    expect(createGitCheckIgnoreTimeoutMs()).toBe(2_147_483_647);
+    process.env[name] = '3000000000';
+    expect(createGitCheckIgnoreTimeoutMs()).toBe(2500);
+    process.env[name] = '9007199254740993';
+    expect(createGitCheckIgnoreTimeoutMs()).toBe(2500);
+  });
+});

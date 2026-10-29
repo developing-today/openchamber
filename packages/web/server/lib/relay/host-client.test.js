@@ -610,6 +610,12 @@ describe('relay batch window env parsing (#689)', () => {
     }
   });
 
+  it('falls back to the 150 ms default above the timer maximum', () => {
+    expect(resolveBatchWindowMs(undefined, '2147483647')).toBe(2_147_483_647);
+    expect(resolveBatchWindowMs(undefined, '3000000000')).toBe(150);
+    expect(resolveBatchWindowMs(undefined, '9007199254740993')).toBe(150);
+  });
+
   it('keeps an explicit option ahead of the environment', () => {
     expect(resolveBatchWindowMs(0, '250')).toBe(0);
     expect(resolveBatchWindowMs(42, '150junk')).toBe(42);

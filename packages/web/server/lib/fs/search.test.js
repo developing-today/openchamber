@@ -135,4 +135,10 @@ describe('git check-ignore timeout env reader (#696)', () => {
       expect(readWith(invalid)).toBe(2500);
     }
   });
+
+  it('falls back to the default above the timer maximum', () => {
+    expect(readWith('2147483647')).toBe(2_147_483_647);
+    expect(readWith('3000000000')).toBe(2500);
+    expect(readWith('9007199254740993')).toBe(2500);
+  });
 });
