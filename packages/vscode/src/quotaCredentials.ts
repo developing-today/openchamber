@@ -74,10 +74,12 @@ export const deleteLegacyOllamaCloudCredential = () => {
   }
 };
 
-export const importCursorCredential = () => {
+const SQLITE_READ_TIMEOUT_MS = 5_000;
+
+export const importCursorCredential = ({ timeoutMs = SQLITE_READ_TIMEOUT_MS }: { timeoutMs?: number } = {}) => {
   const db = path.join(os.homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
   if (process.platform !== 'darwin' || !fs.existsSync(db)) throw new Error('Cursor credential import is unavailable');
-  const rows = JSON.parse(execFileSync('sqlite3', ['-json', db, "SELECT key,value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/refreshToken');"], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }) || '[]') as Array<{ key: string; value: string }>;
+  const rows = JSON.parse(execFileSync('sqlite3', ['-json', db, "SELECT key,value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/refreshToken');"], { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }) || '[]') as Array<{ key: string; value: string }>;
   const credential = normalizeCredential('cursor', { accessToken: rows.find((row) => row.key.endsWith('accessToken'))?.value, refreshToken: rows.find((row) => row.key.endsWith('refreshToken'))?.value });
   if (!credential) throw new Error('Cursor credentials are unavailable');
   return credential;

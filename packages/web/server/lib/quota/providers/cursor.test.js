@@ -1,3 +1,6 @@
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchQuota } from './cursor.js';
@@ -427,5 +430,79 @@ describe('Cursor request deadline', () => {
     expect(result.configured).toBe(true);
     expect(result.error).toBe('Request timed out');
     expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe('Cursor credential import sqlite deadline', () => {
+  const originalHome = process.env.HOME;
+  const originalPath = process.env.PATH;
+  const originalDataDir = process.env.OPENCHAMBER_DATA_DIR;
+  let home = null;
+
+  const setupFakeSqlite = (script) => {
+    // cursor.js binds STATE_DB from HOME at module load, so each test needs
+    // a fresh module registry after HOME moves to the fake home.
+    vi.resetModules();
+    home = mkdtempSync(join(tmpdir(), 'oc-cursor-import-'));
+    const dbDir = join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage');
+    mkdirSync(dbDir, { recursive: true });
+    writeFileSync(join(dbDir, 'state.vscdb'), '');
+    const binDir = join(home, 'bin');
+    mkdirSync(binDir);
+    const sqlite = join(binDir, 'sqlite3');
+    writeFileSync(sqlite, script);
+    chmodSync(sqlite, 0o755);
+    process.env.HOME = home;
+    process.env.PATH = `${binDir}:${originalPath}`;
+    // The credential store prefers OPENCHAMBER_DATA_DIR over HOME, so the
+    // successful import would write its fixture tokens over a real
+    // cursor.json wherever that variable points; isolate it too.
+    process.env.OPENCHAMBER_DATA_DIR = join(home, 'data');
+  };
+
+  afterEach(() => {
+    vi.resetModules();
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = originalDataDir;
+    process.env.PATH = originalPath;
+    if (home) rmSync(home, { recursive: true, force: true });
+    home = null;
+  });
+
+  it('reports credentials unavailable within the deadline when sqlite3 hangs', async () => {
+    setupFakeSqlite('#!/bin/sh\nwhile :; do :; done\n');
+    const { importCursorCredential } = await import('./cursor.js');
+
+    const startedAt = Date.now();
+    await expect(importCursorCredential({ timeoutMs: 250 })).rejects.toThrow('Cursor credentials are unavailable');
+    const elapsed = Date.now() - startedAt;
+
+    // The first read is bounded by the 250 ms timeout and the import fails
+    // fast on it: the import settles in well under the time a single
+    // unbounded read could take.
+    expect(elapsed).toBeGreaterThanOrEqual(200);
+    expect(elapsed).toBeLessThan(5_000);
+  });
+
+  it('reports credentials unavailable when only the refresh-token read hangs', async () => {
+    const token = futureToken();
+    setupFakeSqlite(`#!/bin/sh\ncase "$3" in *refreshToken*) while :; do :; done ;; *) printf '%s' '[{"value":"${token}"}]' ;; esac\n`);
+    const { importCursorCredential } = await import('./cursor.js');
+
+    const startedAt = Date.now();
+    await expect(importCursorCredential({ timeoutMs: 250 })).rejects.toThrow('Cursor credentials are unavailable');
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+  });
+
+  it('imports the stored tokens when sqlite3 answers promptly', async () => {
+    const token = futureToken();
+    setupFakeSqlite(`#!/bin/sh\nprintf '%s' '[{"value":"${token}"}]'\n`);
+    const { importCursorCredential } = await import('./cursor.js');
+
+    const result = await importCursorCredential({ timeoutMs: 5_000 });
+
+    expect(result).toMatchObject({ configured: true, hasRefreshToken: true });
   });
 });

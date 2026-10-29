@@ -25,6 +25,7 @@ const REFRESH_URL = `${BASE_URL}/oauth/token`;
 const CLIENT_ID = 'KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB';
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const STATE_DB = join(homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+const SQLITE_READ_TIMEOUT_MS = 5_000;
 
 export const providerId = 'cursor';
 export const providerName = 'Cursor';
@@ -40,7 +41,7 @@ const readJwtPayload = (token) => {
   }
 };
 
-const readStateValue = (key) => {
+const readStateValue = (key, { timeoutMs = SQLITE_READ_TIMEOUT_MS } = {}) => {
   if (!existsSync(STATE_DB)) return null;
   try {
     const escapedKey = String(key).replace(/'/g, "''");
@@ -50,13 +51,18 @@ const readStateValue = (key) => {
       `SELECT value FROM ItemTable WHERE key = '${escapedKey}' LIMIT 1;`
     ], {
       encoding: 'utf8',
+      timeout: timeoutMs,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore']
     });
     const parsed = JSON.parse(rows || '[]');
     const value = parsed?.[0]?.value;
     return typeof value === 'string' && value.trim() ? value.trim() : null;
-  } catch {
+  } catch (error) {
+    // A timeout is not a missing value: returning null here would let the
+    // import persist a half-read credential (one token read, the other
+    // silently empty). Rethrow so the import fails as unavailable instead.
+    if (error?.code === 'ETIMEDOUT' || error?.signal === 'SIGTERM') throw error;
     return null;
   }
 };
@@ -114,11 +120,16 @@ const persistAccessToken = (auth, accessToken) => {
   if (auth.source === 'managed') writeManagedCredential(providerId, { accessToken, refreshToken: auth.refreshToken || '' });
 };
 
-export const importCursorCredential = async () => {
-  const credential = {
-    accessToken: readStateValue('cursorAuth/accessToken') || '',
-    refreshToken: readStateValue('cursorAuth/refreshToken') || '',
-  };
+export const importCursorCredential = async ({ timeoutMs } = {}) => {
+  let credential;
+  try {
+    credential = {
+      accessToken: readStateValue('cursorAuth/accessToken', { timeoutMs }) || '',
+      refreshToken: readStateValue('cursorAuth/refreshToken', { timeoutMs }) || '',
+    };
+  } catch {
+    throw new Error('Cursor credentials are unavailable');
+  }
   if (!credential.accessToken && !credential.refreshToken) throw new Error('Cursor credentials are unavailable');
   const accessToken = await resolveCredentialAccessToken({ ...credential, source: 'import' });
   if (!accessToken) throw new Error('Cursor credentials are invalid');
