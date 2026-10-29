@@ -77,6 +77,16 @@ const fetchLatestVersion = async (): Promise<string> => {
   return version;
 };
 
+// The local /api/info probe shares fetchLatestVersion's 10s deadline: it runs
+// in a Promise.all beside it, so an unbounded local stall would hang the pair.
+const OPENCODE_INFO_DEADLINE_MS = 10_000;
+let infoProbeDeadlineMs = OPENCODE_INFO_DEADLINE_MS;
+
+/** Test hook: replace the /api/info probe deadline; no argument restores the default. */
+export const setInfoProbeDeadlineForTest = (ms: number = OPENCODE_INFO_DEADLINE_MS): void => {
+  infoProbeDeadlineMs = ms;
+};
+
 export const getOpenCodeUpgradeStatus = async (manager?: OpenCodeUpgradeManager): Promise<Record<string, unknown>> => {
   const upgrade = getCapability(manager);
   const apiUrl = getApiUrl(manager);
@@ -85,7 +95,7 @@ export const getOpenCodeUpgradeStatus = async (manager?: OpenCodeUpgradeManager)
   try {
     const [healthResponse, latestVersion] = await Promise.all([
       // OpenCode 2.0.8 replaced `/api/health` with `/api/info`.
-      fetch(new URL('/api/info', apiUrl).toString(), { method: 'GET', headers: { Accept: 'application/json', ...manager.getOpenCodeAuthHeaders() } }),
+      fetch(new URL('/api/info', apiUrl).toString(), { method: 'GET', headers: { Accept: 'application/json', ...manager.getOpenCodeAuthHeaders() }, signal: AbortSignal.timeout(infoProbeDeadlineMs) }),
       fetchLatestVersion(),
     ]);
     const health = await healthResponse.json().catch(() => null) as { version?: unknown; error?: unknown } | null;

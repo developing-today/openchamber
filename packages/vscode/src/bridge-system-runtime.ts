@@ -65,6 +65,17 @@ type SystemRuntimeDeps = {
   clientReloadDelayMs: number;
 };
 
+// The local /api/info version probe carries the same 10s deadline as the
+// upgrade status probe in opencode-upgrade-runtime.ts: a stalled local
+// OpenCode must answer with the handler's error shape, not hang it forever.
+const OPENCODE_VERSION_DEADLINE_MS = 10_000;
+let versionProbeDeadlineMs = OPENCODE_VERSION_DEADLINE_MS;
+
+/** Test hook: replace the /api/info version probe deadline; no argument restores the default. */
+export const setVersionProbeDeadlineForTest = (ms: number = OPENCODE_VERSION_DEADLINE_MS): void => {
+  versionProbeDeadlineMs = ms;
+};
+
 const getOpenChamberConfigDir = (): string => {
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA;
@@ -201,6 +212,7 @@ export async function handleSystemBridgeMessage(
         const response = await fetch(new URL('api/info', base).toString(), {
           method: 'GET',
           headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
+          signal: AbortSignal.timeout(versionProbeDeadlineMs),
         });
         const health = await response.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
         if (!response.ok) {

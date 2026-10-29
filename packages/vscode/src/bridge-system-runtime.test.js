@@ -68,7 +68,7 @@ mock.module('./quotaCredentials', () => ({
 }));
 mock.module('./sessionActivityWatcher', () => ({ getSessionActivitySnapshot: mock() }));
 
-const { handleSystemBridgeMessage } = await import('./bridge-system-runtime.ts');
+const { handleSystemBridgeMessage, setVersionProbeDeadlineForTest } = await import('./bridge-system-runtime.ts');
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -298,5 +298,53 @@ describe('VS Code v2 migration bridge', () => {
     expect(response.success).toBe(false);
     const manager = { installV2: async () => { throw new Error('Installation failed'); } };
     await expect(handleSystemBridgeMessage({ id: 'failed', type: 'api:opencode/install-v2' }, { manager }, deps)).rejects.toThrow('Installation failed');
+  });
+});
+
+describe('VS Code system bridge api:opencode/version probe deadline (#789)', () => {
+  const versionCtx = {
+    manager: {
+      getApiUrl: () => 'http://127.0.0.1:3902',
+      getOpenCodeAuthHeaders: () => ({}),
+    },
+  };
+
+  test('settles with the error shape when /api/info never answers', async () => {
+    const originalFetch = globalThis.fetch;
+    setVersionProbeDeadlineForTest(50);
+    globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    });
+    try {
+      const started = Date.now();
+      const response = await handleSystemBridgeMessage(
+        { id: 'ver_1', type: 'api:opencode/version' },
+        versionCtx,
+        deps,
+      );
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(response?.success).toBe(true);
+      expect(response?.data?.version).toBeNull();
+      expect(String(response?.data?.error ?? '').length).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setVersionProbeDeadlineForTest();
+    }
+  });
+
+  test('answers the version on the healthy path', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({ version: '2.0.21' });
+    try {
+      const response = await handleSystemBridgeMessage(
+        { id: 'ver_2', type: 'api:opencode/version' },
+        versionCtx,
+        deps,
+      );
+      expect(response?.success).toBe(true);
+      expect(response?.data?.version).toBe('2.0.21');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
