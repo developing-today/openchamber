@@ -69,6 +69,14 @@ const WEEKLY_SECONDS = 7 * 24 * 60 * 60;
 // The Muse CLI's own login store. Read-only; the token is never written back.
 const MUSE_AUTH_PATH = path.join(os.homedir(), '.config', 'muse', 'auth.json');
 
+/** Epoch ms of the last successful (ok: true) usage read in this process, or null. */
+let lastSuccessAt = null;
+
+/** Test seam: clears the in-process last-success state between cases. */
+export const resetMetaQuotaCache = () => {
+  lastSuccessAt = null;
+};
+
 /** The Meta account OAuth token from the Muse CLI's login store, or null. */
 export const readMuseAccountToken = ({ filePath = MUSE_AUTH_PATH } = {}) => {
   try {
@@ -123,6 +131,20 @@ const errorMessage = (body) => asNonEmptyString(asObject(body?.error)?.message)
  */
 const requestPlanUsage = async (bearer, fetchImpl) => {
   const timeoutSignal = AbortSignal.timeout(15_000);
+  const failureFromError = (error) => {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    return {
+      kind: 'error',
+      failureClass: error instanceof SyntaxError ? 'malformed' : 'transport',
+      message: isTimeout
+        ? 'Request timed out'
+        : error instanceof SyntaxError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed')
+    };
+  };
   let response;
   try {
     response = await fetchImpl(META_KEY_URL, {
@@ -137,24 +159,19 @@ const requestPlanUsage = async (bearer, fetchImpl) => {
       signal: timeoutSignal
     });
   } catch (error) {
-    const isTimeout = error instanceof DOMException && (
-      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
-    );
-    return {
-      kind: 'error',
-      message: isTimeout
-        ? 'Request timed out'
-        : error instanceof SyntaxError
-          ? 'Invalid response from provider'
-          : (error instanceof Error ? error.message : 'Request failed')
-    };
+    return failureFromError(error);
   }
 
+  // The body read can fail two ways: invalid JSON (a SyntaxError — the
+  // response really is malformed) or a transport failure (the connection
+  // dropped, or the deadline above fired mid-body). Keep the error from
+  // readBody so the caller classifies the two differently instead of
+  // reporting both as malformed.
   const readBody = async () => {
     try {
-      return asObject(await response.json());
-    } catch {
-      return null;
+      return { body: asObject(await response.json()), error: null };
+    } catch (error) {
+      return { body: null, error };
     }
   };
 
@@ -163,17 +180,19 @@ const requestPlanUsage = async (bearer, fetchImpl) => {
   }
 
   if (response.status === 402 || response.status === 429) {
-    const body = await readBody();
+    const { body } = await readBody();
     return { kind: 'exhausted', ...readQuotaErrorDetail(body), message: errorMessage(body) };
   }
 
   if (!response.ok) {
-    return { kind: 'error', message: `API error: ${response.status}` };
+    return { kind: 'error', failureClass: 'http-error', message: `API error: ${response.status}` };
   }
 
-  const body = await readBody();
+  const { body, error: bodyError } = await readBody();
   if (!body) {
-    return { kind: 'error', message: 'Invalid response from provider' };
+    return bodyError
+      ? failureFromError(bodyError)
+      : { kind: 'error', failureClass: 'malformed', message: 'Invalid response from provider' };
   }
 
   if (body.is_subs_active === false) {
@@ -233,13 +252,16 @@ const usageResult = (body) => {
     // body that does not say the subscription is active carries no such
     // signal and stays a failure.
     if (body.is_subs_active !== true) {
-      return buildResult({
-        providerId,
-        providerName,
-        ok: false,
-        configured: true,
-        error: 'No quota data in response'
-      });
+      return {
+        ...buildResult({
+          providerId,
+          providerName,
+          ok: false,
+          configured: true,
+          error: 'Usage unknown — Meta plan-usage read returned no quota data'
+        }),
+        failureClass: 'no-data'
+      };
     }
     windows = buildWindows({ window: {}, weekly: {} });
   }
@@ -268,37 +290,47 @@ const exhaustedResult = ({ resetAt, limitKind, tier, message }) => {
     }),
     quotaExhausted: true,
     quotaResetAt: resetAt,
-    quotaLimitKind: limitKind
+    quotaLimitKind: limitKind,
+    failureClass: 'exhausted'
   };
 };
 
-const unauthorizedResult = () => buildResult({
-  providerId,
-  providerName,
-  ok: false,
-  configured: true,
-  error: 'Meta plan usage needs the account login — sign in with the Muse Code CLI or store its account token'
+const unauthorizedResult = () => ({
+  ...buildResult({
+    providerId,
+    providerName,
+    ok: false,
+    configured: true,
+    error: 'Meta plan usage needs the account login — sign in with the Muse Code CLI or store its account token'
+  }),
+  failureClass: 'unauthorized'
 });
 
-const inactiveResult = () => buildResult({
-  providerId,
-  providerName,
-  ok: false,
-  configured: true,
-  error: 'Meta subscription is inactive'
+const inactiveResult = () => ({
+  ...buildResult({
+    providerId,
+    providerName,
+    ok: false,
+    configured: true,
+    error: 'Meta subscription is inactive'
+  }),
+  failureClass: 'inactive'
 });
 
 const outcomeToResult = (outcome) => {
   if (outcome.kind === 'exhausted') return exhaustedResult(outcome);
   if (outcome.kind === 'inactive') return inactiveResult();
   if (outcome.kind === 'error') {
-    return buildResult({
-      providerId,
-      providerName,
-      ok: false,
-      configured: true,
-      error: outcome.message
-    });
+    return {
+      ...buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: outcome.message
+      }),
+      failureClass: outcome.failureClass ?? 'transport'
+    };
   }
   if (outcome.kind === 'usage') return usageResult(outcome.body);
   return unauthorizedResult();
@@ -322,13 +354,24 @@ export const fetchQuota = async ({
     });
   }
 
+  // Every configured result carries the last-success timestamp: a success
+  // moves it to this read's time; a failure leaves it where the last success
+  // put it (null when no read has succeeded yet in this process), so a
+  // consumer can tell a stale picture from a live one.
+  const finishRead = (result) => {
+    if (result.ok) {
+      lastSuccessAt = result.fetchedAt ?? Date.now();
+    }
+    return { ...result, lastSuccessAt };
+  };
+
   const first = await requestPlanUsage(primary, fetchImpl);
-  if (first.kind !== 'unauthorized') return outcomeToResult(first);
+  if (first.kind !== 'unauthorized') return finishRead(outcomeToResult(first));
 
   // OpenCode holds a credential the key endpoint refuses (the minted inference
   // key). The account token the read needs lives in the Muse CLI's login store.
   const fallback = readAccountToken?.() ?? null;
-  if (!fallback || fallback === primary) return unauthorizedResult();
+  if (!fallback || fallback === primary) return finishRead(unauthorizedResult());
 
-  return outcomeToResult(await requestPlanUsage(fallback, fetchImpl));
+  return finishRead(outcomeToResult(await requestPlanUsage(fallback, fetchImpl)));
 };
