@@ -1,6 +1,6 @@
 import { afterEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode, type OpenCodeUpgradeManager } from './opencode-upgrade-runtime';
+import { getOpenCodeUpgradeStatus, setInfoProbeDeadlineForTest, upgradeManagedOpenCode, type OpenCodeUpgradeManager } from './opencode-upgrade-runtime';
 
 const originalFetch = globalThis.fetch;
 const originalLowerRegistry = process.env.npm_config_registry;
@@ -152,4 +152,29 @@ describe('VS Code OpenCode upgrades', () => {
     assert.equal((await upgradeManagedOpenCode()).status, 409);
   });
 
+});
+
+describe('VS Code OpenCode upgrade status probe deadline (#789)', () => {
+  test('settles as unavailable when /api/info never answers', async () => {
+    setInfoProbeDeadlineForTest(50);
+    // SAFETY: the stub answers the registry route at once and stalls only the
+    // local /api/info probe, rejecting when its signal aborts.
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (String(input).endsWith('/api/info')) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      }
+      return Response.json({ version: '2.0.22' });
+    }) as typeof fetch;
+    try {
+      const started = Date.now();
+      const status = await getOpenCodeUpgradeStatus(createManager());
+      assert.ok(Date.now() - started < 5_000, 'status must settle near the deadline, not hang');
+      assert.equal(status.available, null);
+      assert.ok(String(status.error ?? '').length > 0);
+    } finally {
+      setInfoProbeDeadlineForTest();
+    }
+  });
 });
