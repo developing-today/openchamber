@@ -436,6 +436,7 @@ describe('Cursor request deadline', () => {
 describe('Cursor credential import sqlite deadline', () => {
   const originalHome = process.env.HOME;
   const originalPath = process.env.PATH;
+  const originalDataDir = process.env.OPENCHAMBER_DATA_DIR;
   let home = null;
 
   const setupFakeSqlite = (script) => {
@@ -453,12 +454,18 @@ describe('Cursor credential import sqlite deadline', () => {
     chmodSync(sqlite, 0o755);
     process.env.HOME = home;
     process.env.PATH = `${binDir}:${originalPath}`;
+    // The credential store prefers OPENCHAMBER_DATA_DIR over HOME, so the
+    // successful import would write its fixture tokens over a real
+    // cursor.json wherever that variable points; isolate it too.
+    process.env.OPENCHAMBER_DATA_DIR = join(home, 'data');
   };
 
   afterEach(() => {
     vi.resetModules();
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = originalDataDir;
     process.env.PATH = originalPath;
     if (home) rmSync(home, { recursive: true, force: true });
     home = null;
