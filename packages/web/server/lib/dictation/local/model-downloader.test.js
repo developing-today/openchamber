@@ -71,6 +71,43 @@ describe('downloadToFile', () => {
     expect(fs.existsSync(file)).toBe(false);
   });
 
+  it('rejects a download whose body stalls, and discards the temp file', async () => {
+    const file = tempFile();
+    // Sends one chunk, then silence: the stream never ends and never
+    // errors, the way a stalled endpoint behaves.
+    const body = new ReadableStream({
+      start(streamController) {
+        streamController.enqueue(CONTENT.subarray(0, 4));
+      },
+    });
+    const started = Date.now();
+    await expect(
+      downloadToFile('https://example.test/archive.tar.bz2', file, undefined, {
+        ...PINS,
+        fetchImpl: fetchReturning(body),
+        stallTimeoutMs: 50,
+      }),
+    ).rejects.toThrow(/timed out/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.readdirSync(path.dirname(file))).toEqual([]);
+  });
+
+  it('rejects a download whose response never arrives', async () => {
+    const file = tempFile();
+    const fetchImpl = (_url, { signal } = {}) => new Promise((_resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+    await expect(
+      downloadToFile('https://example.test/archive.tar.bz2', file, undefined, { ...PINS, fetchImpl, stallTimeoutMs: 50 }),
+    ).rejects.toThrow(/timed out/);
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
   it('refuses to download a model with no pins, before fetching', async () => {
     const file = tempFile();
     let fetched = false;
