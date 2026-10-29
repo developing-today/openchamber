@@ -15,13 +15,17 @@ const __dirname = path.dirname(__filename);
 const TRY_CF_URL_REGEX = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
+// spawnSync blocks the whole server event loop while it waits, so a hung
+// cloudflared binary must be bounded: probe timeouts elsewhere in the tree
+// use 5-10 s (package-manager), matching the ngrok availability checks.
+const AVAILABILITY_CHECK_TIMEOUT_MS = 5000;
 const MANAGED_TUNNEL_STARTUP_TIMEOUT_MS = 20000;
 const MANAGED_TUNNEL_LIVENESS_FALLBACK_MS = 6000;
 const TUNNEL_MODE_QUICK = 'quick';
 const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
 const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
 
-export async function checkCloudflaredAvailable() {
+export async function checkCloudflaredAvailable({ timeoutMs = AVAILABILITY_CHECK_TIMEOUT_MS } = {}) {
   const target = resolveExecutableLaunchTarget('cloudflared');
   if (target) {
     try {
@@ -30,6 +34,7 @@ export async function checkCloudflaredAvailable() {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         env: target.env,
+        timeout: timeoutMs,
       });
       if (result.status === 0) {
         return { available: true, path: target.command, version: result.stdout.trim() };

@@ -7,12 +7,17 @@ import { getTunnelDependencyInstallInfo } from './tunnels/install-help.js';
 import { TUNNEL_PROVIDER_NGROK } from './tunnels/types.js';
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
+// spawnSync blocks the whole server event loop while it waits, so a hung
+// ngrok binary must be bounded: probe timeouts elsewhere in the tree use
+// 5-10 s (package-manager) and this matches the 5 s reachability deadline
+// used by checkNgrokApiReachability below.
+const AVAILABILITY_CHECK_TIMEOUT_MS = 5000;
 const NGROK_API_URL = 'http://127.0.0.1:4040/api/tunnels';
 const NGROK_PUBLIC_URL_REGEX = /https:\/\/[^\s"']+/i;
 const NGROK_AUTHTOKEN_HELP = 'Run: ngrok config add-authtoken <your-ngrok-token>';
 const getNgrokInstallInfo = () => getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
 
-export async function checkNgrokAvailable() {
+export async function checkNgrokAvailable({ timeoutMs = AVAILABILITY_CHECK_TIMEOUT_MS } = {}) {
   const target = resolveExecutableLaunchTarget('ngrok');
   if (target) {
     try {
@@ -21,6 +26,7 @@ export async function checkNgrokAvailable() {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         env: target.env,
+        timeout: timeoutMs,
       });
       if (result.status === 0) {
         return { available: true, path: target.command, version: result.stdout.trim() || result.stderr.trim() };
@@ -32,7 +38,7 @@ export async function checkNgrokAvailable() {
   return { available: false, path: null, version: null };
 }
 
-export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
+export async function checkNgrokAuthtokenConfigured(ngrokPath = null, { timeoutMs = AVAILABILITY_CHECK_TIMEOUT_MS } = {}) {
   if (typeof process.env.NGROK_AUTHTOKEN === 'string' && process.env.NGROK_AUTHTOKEN.trim().length > 0) {
     return { configured: true, detail: 'NGROK_AUTHTOKEN is set.' };
   }
@@ -50,6 +56,7 @@ export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       env: target.env,
+      timeout: timeoutMs,
     });
     const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
     if (result.status === 0) {
