@@ -104,4 +104,48 @@ describe('OpenAI audio SDK compatibility', () => {
     });
     expect(result).toBe('Hello from transcription');
   });
+
+  it('fails a speech request whose server never responds, at the configured deadline', async () => {
+    const baseURL = await listen(() => {
+      // Accepts the request and never answers: a wedged local speech server.
+    });
+
+    await expect(new TTSService().generateSpeechStream({
+      text: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1, baseURL, timeoutMs: 250,
+    })).rejects.toThrow('timed out');
+  });
+
+  it('fails a speech request whose server answers and then stalls the body', async () => {
+    let serverSawClose = false;
+    const baseURL = await listen(async (request, response) => {
+      response.on('close', () => { serverSawClose = true; });
+      response.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      response.write('partial-audio');
+      // The body never ends: the create call has settled, so only the
+      // body-phase deadline can fail this request.
+    });
+
+    await expect(new TTSService().generateSpeechStream({
+      text: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1, baseURL, timeoutMs: 250,
+    })).rejects.toThrow('Speech request timed out after 250 ms');
+
+    // The deadline must also terminate the active body read and close the
+    // upstream connection, not just reject for the caller (Codex P2 on
+    // PR #839: body.cancel() cannot cancel a read-locked stream).
+    for (let attempt = 0; attempt < 80 && !serverSawClose; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(serverSawClose).toBe(true);
+  });
+
+  it('fails a transcription whose server never responds, at the configured deadline', async () => {
+    const baseURL = await listen(() => {
+      // Accepts the upload and never answers.
+    });
+
+    await expect(transcribeAudio({
+      audioBuffer: Buffer.from('transcription-input'), mimeType: 'audio/webm',
+      model: 'whisper-1', baseURL, timeoutMs: 250,
+    })).rejects.toThrow('timed out');
+  });
 });
