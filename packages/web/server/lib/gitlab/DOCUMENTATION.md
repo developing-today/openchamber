@@ -47,6 +47,8 @@ This module owns GitLab instance validation, authentication, remote resolution, 
 - `GET /uploads/:secret/:filename` (read context plus `owner`/`repo` in the query) streams a Markdown attachment of a project in the bound network through `GET /projects/:id/uploads/:secret/:filename`, which any member with the Guest role can read. `client.js` `createGitLabDownloader` sends the credential to the instance only and follows a storage redirect once without it, over HTTPS or on the instance; `Range` passes through for seeking. The uploads API answers every file as `application/octet-stream`, so for that type (or none) the file name's extension picks the media type. Only raster images and MP4/WebM/QuickTime video are served, with `nosniff` and a sandboxing CSP, so an uploaded page or SVG never runs on this server's origin. A refused file answers 404 and never invalidates the account. The route accepts the URL auth token, since `img` and `video` cannot send headers.
 - Shared picker and sidebar consumers select GitLab only from a matching repository remote. Self-managed hosts must already appear in source-control instance discovery; unknown hosts are never inferred as GitLab.
 
+- Every request through `client.js` has a deadline: the requester applies the 10s `GITLAB_REQUEST_TIMEOUT_MS` per attempt, combined with the signal GitBeaker supplies, and the downloader applies the same bound per fetch, combined with the route caller's disconnect signal. A deadline abort classifies as `unreachable` through `classifyGitLabFailure`. Read retries apply to a timed-out attempt as they do to 429/502; a mutation that times out is sent once. The downloader bound covers each fetch up to the response headers, and the body it returns streams on without it.
+
 ## Structure
 
 - `instance.js`: instance origin normalization and transport policy.
@@ -54,7 +56,7 @@ This module owns GitLab instance validation, authentication, remote resolution, 
 - `device-flow.js`: host probe, device authorization, and token exchange.
 - `verify.js` and `user.js`: token verification and payload parsing.
 - `glab-credential.js`: host-scoped CLI credential retrieval.
-- `client.js`: GitBeaker client factory with OpenChamber's own requester: redirects are refused so the credential header never leaves the instance, and only reads retry after 429/502. Mutations are sent once so an ambiguous proxy failure reaches the durable executor.
+- `client.js`: GitBeaker client factory with OpenChamber's own requester: redirects are refused so the credential header never leaves the instance, and only reads retry after 429/502. Mutations are sent once so an ambiguous proxy failure reaches the durable executor. Every requester attempt and every downloader fetch carries the 10s `GITLAB_REQUEST_TIMEOUT_MS` deadline, combined with the caller signal.
 - `changeRequestContext` with `includeTimeline` (`/pulls/context?timeline=1`, only the board and picker preview ask) also returns the newest 50 `commits`, oldest first, `commitsComplete: false` when there are more, and `verdicts`: approvals and change requests GitLab records as system notes. Without it the context carries neither and makes no commit request, so attaching a merge request costs what it did.
 - Resource lists page by GitLab's `x-next-page` header. Notes, diffs, issue comments, and branches are read to completion within 20 pages of 100; past that the read fails rather than returning a capped list as complete. Merges send the preflighted head as `sha`, and GitLab's 409 maps to `SOURCE_CONTROL_MUTATION_TARGET_MISMATCH`. Fork merge requests expose their source project as `headProject`, and CI jobs are read from the pipeline's own project.
 - `repo.js`: instance-bound remote parsing, ranking, and directory resolution.
@@ -70,3 +72,7 @@ This module owns GitLab instance validation, authentication, remote resolution, 
 ### Why the SSH clone URL may name another host and the web URLs may not
 
 A self-managed GitLab sets its SSH host separately (`gitlab_ssh_host`), often a different name behind a reverse proxy, so requiring the instance host there rejected every project on such instances. The web and HTTP clone URLs stay bound to the instance because the server and UI may open them; the SSH URL is only passed through as `sshUrl` and nothing connects to it, so its project path is the check that still catches a mismatched payload.
+
+### Why the client deadline runs through its own AbortController
+
+`AbortSignal.timeout` rejects with a `TimeoutError`, and `classifyGitLabFailure` maps aborts to `unreachable` by the `AbortError` name. The deadline therefore aborts through a controller the module owns and combines that signal with the caller's through `AbortSignal.any`: a stall surfaces as an `AbortError` in the class routes already handle, caller cancellation still aborts the request, and the retry loop can tell the two apart through the controller's own state. `classifyGitLabFailure` also accepts `TimeoutError`, for the signal GitBeaker itself builds from its queryTimeout.
