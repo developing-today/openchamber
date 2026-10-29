@@ -164,3 +164,50 @@ describe('GitLab file downloads', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('GitLab client error body bound', () => {
+  it('surfaces a small JSON error message verbatim', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ message: 'project not found' }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+    await expect(client.Users.showCurrentUser()).rejects.toThrow('project not found');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('truncates a long error body to the excerpt instead of embedding it whole', async () => {
+    const fetch = vi.fn(async () => new Response('x'.repeat(500), { status: 500 }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+    const error = await client.Users.showCurrentUser().catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message.length).toBe(200);
+    expect(error.cause.description.length).toBe(200);
+  });
+
+  it('cuts an oversize streamed error body at the cap instead of buffering it whole', async () => {
+    let pulled = 0;
+    const chunk = new Uint8Array(1024).fill(120);
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 32) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+    const fetch = vi.fn(async () => new Response(stream, { status: 500 }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+    const error = await client.Users.showCurrentUser().catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('GitLab request failed with status 500');
+    expect(error.cause.description.length).toBeLessThanOrEqual(200);
+    expect(pulled).toBeLessThan(32);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
