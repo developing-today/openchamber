@@ -135,7 +135,8 @@ const refreshAccessToken = async (auth) => {
       grant_type: 'refresh_token',
       client_id: CLIENT_ID,
       refresh_token: auth.refreshToken
-    })
+    }),
+    signal: AbortSignal.timeout(15_000)
   });
 
   const body = await response.json().catch(() => null);
@@ -175,7 +176,8 @@ const connectPost = async (url, accessToken, body = {}) => {
       'Content-Type': 'application/json',
       'Connect-Protocol-Version': '1'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000)
   });
 
   if (!response.ok) {
@@ -190,7 +192,8 @@ const connectGet = async (url, accessToken) => {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
-    }
+    },
+    signal: AbortSignal.timeout(15_000)
   });
 
   if (!response.ok) {
@@ -438,7 +441,7 @@ export const fetchQuota = async () => {
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: error?.name === 'TimeoutError' ? 'Request timed out' : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

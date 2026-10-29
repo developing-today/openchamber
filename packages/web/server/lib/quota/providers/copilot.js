@@ -124,6 +124,8 @@ export const fetchQuota = async () => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch(copilotUserUrl(entry?.enterpriseUrl), {
       method: 'GET',
@@ -132,7 +134,8 @@ export const fetchQuota = async () => {
         Accept: 'application/json',
         'Editor-Version': 'vscode/1.96.2',
         'X-Github-Api-Version': '2025-04-01'
-      }
+      },
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -154,12 +157,17 @@ export const fetchQuota = async () => {
       usage: { windows: buildCopilotWindows(payload) }
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };
@@ -182,6 +190,8 @@ export const fetchQuotaAddon = async () => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch(copilotUserUrl(entry?.enterpriseUrl), {
       method: 'GET',
@@ -190,7 +200,8 @@ export const fetchQuotaAddon = async () => {
         Accept: 'application/json',
         'Editor-Version': 'vscode/1.96.2',
         'X-Github-Api-Version': '2025-04-01'
-      }
+      },
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -212,12 +223,17 @@ export const fetchQuotaAddon = async () => {
       usage: { windows: buildCopilotWindows(payload) }
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId: providerIdAddon,
       providerName: providerNameAddon,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

@@ -223,3 +223,20 @@ describe('MiniMax shared provider', () => {
     expect(result.usage.windows.weekly.windowSeconds).toBeNull();
   });
 });
+
+describe('MiniMax request deadline', () => {
+  it('reports no usable data when both endpoints time out, with a deadline on each request', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await provider.fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('API returned no usable quota data');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      expect(call[1].signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+});

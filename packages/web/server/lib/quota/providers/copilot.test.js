@@ -179,3 +179,20 @@ describe('GitHub Copilot quota provider', () => {
     expect(result.usage.windows.premium_interactions.valueLabel ?? null).toBeNull();
   });
 });
+
+describe('GitHub Copilot request deadline', () => {
+  it.each([
+    ['primary provider', fetchQuota],
+    ['add-on provider', fetchQuotaAddon],
+  ])('recognizes the timeout exception from AbortSignal.timeout for the %s', async (_name, fetchProviderQuota) => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchProviderQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Request timed out');
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});

@@ -78,7 +78,8 @@ const attachZaiGiftResets = async (windows, apiKey) => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(15_000)
     });
     if (!response.ok) return;
     const payload = await response.json();
@@ -131,7 +132,8 @@ export const useZaiGiftReset = async ({ recordId, resetType }) => {
       resetType,
       recordId,
       requestId: crypto.randomUUID()
-    })
+    }),
+    signal: AbortSignal.timeout(15_000)
   });
 
   const payload = await response.json().catch(() => null);
@@ -156,13 +158,16 @@ export const fetchQuota = async () => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch('https://api.z.ai/api/monitor/usage/quota/limit', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -229,12 +234,17 @@ export const fetchQuota = async () => {
       planLabel: typeof payload?.data?.level === 'string' && payload.data.level ? payload.data.level : null
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

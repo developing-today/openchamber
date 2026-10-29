@@ -305,3 +305,25 @@ describe('Z.ai gift reset activation', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('Z.ai request deadline', () => {
+  it('recognizes the timeout exception from AbortSignal.timeout', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Request timed out');
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('carries a deadline on the gift reset activation request', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(useZaiGiftReset({ recordId: 1, resetType: 'WEEK' })).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
