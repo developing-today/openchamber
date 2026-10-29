@@ -30,6 +30,12 @@ describe('bridge fs env readers judge values by their whole text', () => {
     });
   }
 
+  for (const [label, source] of [['helpers', helpersSource], ['runtime', runtimeSource]] as const) {
+    test(`${label} check-ignore timeout reader falls back above the timer maximum`, () => {
+      assert.match(source, /raw <= 2_147_483_647/);
+    });
+  }
+
   test('runtime read-cache TTL reader parses a plain decimal, never bare Number(...)', () => {
     assert.doesNotMatch(runtimeSource, /Number\(process\.env\.OPENCHAMBER_GIT_READ_CACHE_TTL_MS\)/);
     assert.match(runtimeSource, /parsePlainDecimalInt\(process\.env\.OPENCHAMBER_GIT_READ_CACHE_TTL_MS\)/);
