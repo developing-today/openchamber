@@ -97,4 +97,30 @@ describe('NanoGPT quota provider', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('passes an AbortSignal with a deadline to the usage fetch', async () => {
+    let captured;
+    const result = await fetchQuota({
+      readAuth: () => ({ 'nano-gpt': { key: 'test-token' } }),
+      fetchImpl: async (_url, options) => {
+        captured = options;
+        return Response.json({});
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(captured.signal).toBeInstanceOf(AbortSignal);
+    expect(captured.signal.aborted).toBe(false);
+  });
+
+  it('reports a stalled request as an error when its own 15s signal aborts it', async () => {
+    const result = await fetchQuota({
+      readAuth: () => ({ 'nano-gpt': { key: 'test-token' } }),
+      fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+  }, 25_000);
 });
