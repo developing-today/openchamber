@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { registerOpenCodeRoutes } from './routes.js';
+import { registerOpenCodeRoutes, setOpenCodeInfoDeadlineForTest } from './routes.js';
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  setOpenCodeInfoDeadlineForTest();
 });
 
 const jsonResponse = (payload, status = 200) => new Response(JSON.stringify(payload), {
@@ -190,5 +191,47 @@ describe('OpenCode v1 migration routes', () => {
     expect(JSON.stringify(failed.body)).not.toContain('private installer output');
     installOpenCodeV2.mockResolvedValueOnce(undefined);
     await request(app).post('/api/opencode/install-v2').expect(200);
+  });
+});
+
+describe('OpenCode version route probe deadlines (#796)', () => {
+  const stalledInfoFetch = (input, init) => {
+    if (String(input).endsWith('/api/info')) {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    }
+    return Promise.resolve(jsonResponse({ version: '2.0.22' }));
+  };
+
+  it('settles /api/opencode/version with its error shape when /api/info never answers', async () => {
+    setOpenCodeInfoDeadlineForTest(50);
+    globalThis.fetch = vi.fn(stalledInfoFetch);
+    const { app } = createApp();
+    const started = Date.now();
+    const response = await request(app).get('/api/opencode/version').expect(500);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(response.body.version).toBeNull();
+    expect(String(response.body.error ?? '').length).toBeGreaterThan(0);
+    const infoCall = globalThis.fetch.mock.calls.find(([url]) => String(url).endsWith('/api/info'));
+    expect(infoCall[1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('settles /api/opencode/upgrade-status with its error shape when /api/info never answers', async () => {
+    setOpenCodeInfoDeadlineForTest(50);
+    globalThis.fetch = vi.fn(stalledInfoFetch);
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+    const started = Date.now();
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(500);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(response.body.available).toBeNull();
+    expect(String(response.body.error ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('answers /api/opencode/version on the healthy path', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ version: '2.0.21' }));
+    const { app } = createApp();
+    const response = await request(app).get('/api/opencode/version').expect(200);
+    expect(response.body).toEqual({ version: '2.0.21' });
   });
 });

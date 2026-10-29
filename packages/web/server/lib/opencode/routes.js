@@ -24,6 +24,17 @@ import { discoverProviderModels } from './model-discovery.js';
 import { readDisabledProviders, setProviderDisabled } from './providers.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
+// The local /api/info probes share one named 3s deadline: a stalled
+// OpenCode must settle the version, upgrade-status and health answers with
+// their existing error shapes instead of hanging them forever.
+const OPENCODE_INFO_DEADLINE_MS = 3_000;
+let openCodeInfoDeadlineMs = OPENCODE_INFO_DEADLINE_MS;
+
+/** Test hook: replace the /api/info probe deadline; no argument restores the default. */
+export const setOpenCodeInfoDeadlineForTest = (ms = OPENCODE_INFO_DEADLINE_MS) => {
+  openCodeInfoDeadlineMs = ms;
+};
+
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
@@ -180,6 +191,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         fetch(buildOpenCodeUrl('/api/info', ''), {
           method: 'GET',
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+          signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
         }),
         fetchLatestOpenCodeVersion(),
       ]);
@@ -222,7 +234,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        signal: AbortSignal.timeout(3_000),
+        signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
@@ -268,6 +280,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
