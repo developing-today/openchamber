@@ -70,13 +70,19 @@ const boundResponseBody = (response, signal, cleanup) => {
         controller.enqueue(value);
       } catch (error) {
         settle();
-        await reader.cancel().catch(() => {});
         controller.error(error);
+        // Cancellation is best-effort cleanup only, never awaited before
+        // erroring: a pending cancel (e.g. the other branch of a cloned
+        // response still unread) would otherwise hold the error hostage
+        // and defeat the body deadline this wrapper exists to enforce.
+        reader.cancel().catch(() => {});
       }
     },
-    async cancel() {
+    cancel() {
       settle();
-      await reader.cancel().catch(() => {});
+      // Same rule as the error path: never let a pending underlying
+      // cancellation hold the wrapped stream's consumer hostage.
+      reader.cancel().catch(() => {});
     },
   });
   return new Response(stream, {

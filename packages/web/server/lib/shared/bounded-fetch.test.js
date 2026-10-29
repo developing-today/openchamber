@@ -57,6 +57,28 @@ describe('fetchWithDeadline', () => {
     await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' });
   });
 
+  it('the body deadline still fires when the underlying cancellation never settles', async () => {
+    // Regression (Codex P2 on PR #806): if reader.cancel() stays pending —
+    // as it does for a cloned response whose other branch is still unread —
+    // awaiting it before erroring the wrapped stream leaves response.text()
+    // pending past the deadline.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start() {
+              // Headers arrived; the body never produces a byte.
+            },
+            cancel() {
+              return new Promise(() => {});
+            },
+          }),
+        ),
+    );
+    const response = await fetchWithDeadline(fetchImpl, 'https://example.test', {}, { timeoutMs: 30 });
+    await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' });
+  });
+
   it('returns an under-deadline body unchanged', async () => {
     const fetchImpl = vi.fn(async () => new Response('complete'));
     const response = await fetchWithDeadline(fetchImpl, 'https://example.test', {}, { timeoutMs: 1000 });
