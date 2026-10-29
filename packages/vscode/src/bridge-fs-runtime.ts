@@ -70,6 +70,19 @@ export const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
+export const FS_EXEC_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
+
+// Per-stream byte cap for api:fs:exec command output, the same cap and env
+// var as the web twin in packages/web/server/lib/fs/routes.js. A verbose
+// command otherwise grows extension-host memory for the full timeout.
+export const createFsExecOutputMaxBytes = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES);
+  if (raw !== null && raw > 0) return raw;
+  return FS_EXEC_OUTPUT_MAX_BYTES;
+};
+
+const FS_EXEC_OUTPUT_LIMIT_BYTES = createFsExecOutputMaxBytes();
+
 const normalizeCommand = (command: unknown): string =>
   typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
 
@@ -419,7 +432,33 @@ export async function handleFsBridgeMessage(
           new Promise((resolve) => {
             let stdout = '';
             let stderr = '';
+            let stdoutBytes = 0;
+            let stderrBytes = 0;
             let timedOut = false;
+            let outputTooLarge = false;
+
+            const killForOutputLimit = () => {
+              if (outputTooLarge) return;
+              outputTooLarge = true;
+              try {
+                child.kill('SIGKILL');
+              } catch {
+                // The process already exited.
+              }
+            };
+
+            // Append at most the bytes left under the cap and report
+            // overflow, so a capped stream stops at the cap.
+            const appendCapped = (current: string, currentBytes: number, buffer: Buffer) => {
+              if (currentBytes >= FS_EXEC_OUTPUT_LIMIT_BYTES) {
+                return { value: current, bytes: currentBytes, exceeded: true };
+              }
+              const remaining = FS_EXEC_OUTPUT_LIMIT_BYTES - currentBytes;
+              if (buffer.length <= remaining) {
+                return { value: current + buffer.toString(), bytes: currentBytes + buffer.length, exceeded: false };
+              }
+              return { value: current + buffer.subarray(0, remaining).toString(), bytes: FS_EXEC_OUTPUT_LIMIT_BYTES, exceeded: true };
+            };
 
             let child: ReturnType<typeof spawn>;
             try {
@@ -450,10 +489,18 @@ export async function handleFsBridgeMessage(
             }, 300000);
 
             child.stdout?.on('data', (chunk) => {
-              stdout += chunk.toString();
+              if (outputTooLarge) return;
+              const appended = appendCapped(stdout, stdoutBytes, chunk);
+              stdout = appended.value;
+              stdoutBytes = appended.bytes;
+              if (appended.exceeded) killForOutputLimit();
             });
             child.stderr?.on('data', (chunk) => {
-              stderr += chunk.toString();
+              if (outputTooLarge) return;
+              const appended = appendCapped(stderr, stderrBytes, chunk);
+              stderr = appended.value;
+              stderrBytes = appended.bytes;
+              if (appended.exceeded) killForOutputLimit();
             });
 
             child.on('error', (error) => {
@@ -478,7 +525,10 @@ export async function handleFsBridgeMessage(
               if (typeof code === 'number') {
                 result.exitCode = code;
               }
-              if (timedOut) {
+              if (outputTooLarge) {
+                result.success = false;
+                result.error = `Command output exceeded the ${FS_EXEC_OUTPUT_LIMIT_BYTES} byte limit (output-too-large)`;
+              } else if (timedOut) {
                 result.error = `Command timed out after 300000ms` + (signal ? ` (${signal})` : '');
               }
               resolve(result);
