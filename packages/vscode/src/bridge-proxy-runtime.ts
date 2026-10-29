@@ -74,9 +74,21 @@ type ProxyRuntimeDeps = {
   sanitizeForwardHeaders: (input: Record<string, string> | undefined) => Record<string, string>;
   collectHeaders: (headers: Headers) => Record<string, string>;
   base64EncodeUtf8: (text: string) => string;
+  /** Test seam: overrides the api:proxy forward deadline; production callers omit it. */
+  proxyDeadlineMs?: number;
 };
 
 const proxyAbortControllers = new Map<string, AbortController>();
+
+// Every api:proxy forward carries this deadline, in line with the
+// api:session:message forward's 45s below: a local OpenCode that accepts a
+// connection and then stalls must fail the request, not hang it forever.
+// The signal passed to fetch also bounds the body read in
+// performApiProxyFetch, not only the wait for response headers.
+const API_PROXY_DEADLINE_MS = 45_000;
+
+const apiProxyDeadlineSignal = (deps: ProxyRuntimeDeps): AbortSignal =>
+  AbortSignal.timeout(deps.proxyDeadlineMs ?? API_PROXY_DEADLINE_MS);
 
 // ---------------------------------------------------------------------------
 // In-flight read coalescing (parity with the web runtimeFetch coalescer)
@@ -93,9 +105,12 @@ const proxyAbortControllers = new Map<string, AbortController>();
 // Scope is deliberately tight: GET only, an allowlist of read paths. The shared
 // fetch runs without a per-request AbortController, so one caller's
 // `api:proxy:abort` cannot cancel the read for the others (these reads are fast
-// and idempotent — losing abort for them is harmless). The entry is removed as
-// soon as the request settles, so this only ever shares overlapping in-flight
-// requests; it never serves a stale response.
+// and idempotent — losing abort for them is harmless). It does carry the shared
+// proxy deadline, which no single caller owns: on expiry the shared fetch
+// settles with the standard failure payload, the entry is removed, and a later
+// identical read retries upstream instead of joining a dead promise. The entry
+// is removed as soon as the request settles, so this only ever shares
+// overlapping in-flight requests; it never serves a stale response.
 // ---------------------------------------------------------------------------
 const COALESCE_READ_PATH = /^\/api\/(config|location|agent|project|command|model|provider)(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<ApiProxyResponsePayload>>();
@@ -367,7 +382,7 @@ export async function handleProxyBridgeMessage(
           const shared = await existing;
           return { id, type, success: true, data: { ...shared, headers: { ...shared.headers } } };
         }
-        const pending = performApiProxyFetch(targetUrl, 'GET', requestHeaders, undefined, undefined, deps);
+        const pending = performApiProxyFetch(targetUrl, 'GET', requestHeaders, undefined, apiProxyDeadlineSignal(deps), deps);
         READ_COALESCE.set(coalesceKey, pending);
         pending.then(
           () => READ_COALESCE.delete(coalesceKey),
@@ -384,7 +399,14 @@ export async function handleProxyBridgeMessage(
         const data = await overlayOwnedSessionState(
           normalizedMethod,
           normalizedPath,
-          await performApiProxyFetch(targetUrl, normalizedMethod, requestHeaders, requestBody, abortController.signal, deps),
+          await performApiProxyFetch(
+            targetUrl,
+            normalizedMethod,
+            requestHeaders,
+            requestBody,
+            AbortSignal.any([abortController.signal, apiProxyDeadlineSignal(deps)]),
+            deps,
+          ),
           deps.sessionState,
         );
         return { id, type, success: true, data };
