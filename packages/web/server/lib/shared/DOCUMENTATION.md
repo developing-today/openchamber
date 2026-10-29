@@ -103,6 +103,49 @@ the shared functions, so existing importers are unaffected:
 - `gitlab/validation.js`: `isString`, `isPlainObject`
 - `quota/utils/transformers.js`: `asNonEmptyString`
 
+## Bounded-call primitives (design #802 phase 1, #803)
+
+Three outbound-call primitives live here beside the guards, under the same
+admission rule: the dominant, behaviour-defining spelling is shared, and a
+variant that answers differently stays with its owner.
+
+- `bounded-fetch.js` — `fetchWithDeadline(fetchImpl, url, init, { timeoutMs, signal, headersOnly })`.
+  A per-attempt deadline that **composes** with the caller's signal (either
+  firing aborts the call; `AbortSignal.any` where available, a composed
+  controller otherwise) and never replaces it — the gitlab
+  `fetchWithTimeout` overwrite-and-clear-at-headers behaviour is the
+  anti-pattern this replaces. By default the deadline stays armed until the
+  response body has been fully read (the returned Response's body stream is
+  raced against the deadline); `headersOnly: true` is the explicit opt-in
+  to clear it when the headers arrive. Only the wrapped Response's status,
+  headers and body are contractual; other Response metadata of the original
+  is not carried over.
+- `response-body.js` — `readBoundedResponseText` / `readBoundedResponseBytes`
+  (plus `discardResponseBody`). The cap is enforced **during** the read: a
+  declared `content-length` over the cap refuses before reading, the stream
+  is cancelled the moment the cap is crossed, and oversize is reported as
+  `{ tooLarge: true }` — never a truncated body returned as complete.
+  `guests/response-body.js` re-exports all three, so the guests importers
+  keep working unchanged.
+- `parse-int.js` — `parsePositiveIntWithDefault` and
+  `parseBoundedIntWithDefault`. The strict plain-decimal judgement the eight
+  private copies used to spell per module: optional surrounding whitespace,
+  ASCII digits only, caller-supplied fallback for anything else (`'1e3'`,
+  `'0x10'`, `'5000junk'`, `'5.9'`, `''`, `'-5'` never parse). The positive
+  spelling requires a value above zero; the bounded spelling checks an
+  inclusive `[min, max]` and lets `'0'` be a real value when the range
+  allows it.
+
+### What stays out
+
+- Parsers that accept a sign, a fraction, or a non-decimal spelling: no
+  shared copy accepts them, and a caller that truly needs one keeps a
+  local, differently-named variant.
+- Deadline policies (which timeout, retry, or backoff a call site wants):
+  the primitive supplies the bound, the caller supplies the number.
+- Domain-shaped readers and fetchers (quota, gitlab, proxy): they compose
+  these primitives in phase 2 instead of moving here.
+
 ## Notes for contributors
 
 - Add a predicate here only when two or more feature modules need the exact
