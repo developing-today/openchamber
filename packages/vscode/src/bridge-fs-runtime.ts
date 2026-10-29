@@ -396,9 +396,7 @@ export async function handleFsBridgeMessage(
       try {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
         const resolvedCwd = deps.resolveUserPath(cwd, workspaceRoot);
-        const { exec } = await import('child_process');
-        const { promisify } = await import('util');
-        const execAsync = promisify(exec);
+        const { spawn } = await import('child_process');
         const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
         const shellFlag = process.platform === 'win32' ? '/c' : '-c';
 
@@ -407,33 +405,85 @@ export async function handleFsBridgeMessage(
           PATH: process.env.PATH,
         };
 
-        const runCommand = async (cmd: string): Promise<FsExecCommandResult> => {
-          try {
-            const { stdout, stderr } = await execAsync(`${shell} ${shellFlag} "${cmd.replace(/"/g, '\\"')}"`, {
-              cwd: resolvedCwd,
-              env: augmentedEnv,
-              windowsHide: true,
-              timeout: 300000,
+        // Launch through argv spawn, the same form the web server uses
+        // (packages/web/server/lib/fs/routes.js, runCommandInDirectory): the
+        // command reaches the shell as a single argv entry and is parsed
+        // exactly once. Interpolating it into an exec string instead let an
+        // outer shell expand $VAR and $(...) inside the caller's quoting
+        // before the intended shell ever ran. On Windows this is
+        // spawn('cmd.exe', ['/c', cmd]): cmd.exe still receives the command
+        // as one argument and there is no outer shell there either. The
+        // timeout kills this shell directly, so no grandchild shell can
+        // outlive it.
+        const runCommand = (cmd: string): Promise<FsExecCommandResult> =>
+          new Promise((resolve) => {
+            let stdout = '';
+            let stderr = '';
+            let timedOut = false;
+
+            let child: ReturnType<typeof spawn>;
+            try {
+              child = spawn(shell, [shellFlag, cmd], {
+                cwd: resolvedCwd,
+                env: augmentedEnv,
+                windowsHide: true,
+                stdio: ['ignore', 'pipe', 'pipe'],
+              });
+            } catch (error) {
+              resolve({
+                command: cmd,
+                success: false,
+                stdout: '',
+                stderr: '',
+                error: error instanceof Error ? error.message : 'Command execution failed',
+              });
+              return;
+            }
+
+            const timeout = setTimeout(() => {
+              timedOut = true;
+              try {
+                child.kill('SIGKILL');
+              } catch {
+                // The process already exited.
+              }
+            }, 300000);
+
+            child.stdout?.on('data', (chunk) => {
+              stdout += chunk.toString();
             });
-            return {
-              command: cmd,
-              success: true,
-              exitCode: 0,
-              stdout: (stdout || '').trim(),
-              stderr: (stderr || '').trim(),
-            };
-          } catch (execError) {
-            const err = execError as { code?: number; stdout?: string; stderr?: string; message?: string };
-            return {
-              command: cmd,
-              success: false,
-              exitCode: typeof err.code === 'number' ? err.code : 1,
-              stdout: (err.stdout || '').trim(),
-              stderr: (err.stderr || '').trim(),
-              error: err.message,
-            };
-          }
-        };
+            child.stderr?.on('data', (chunk) => {
+              stderr += chunk.toString();
+            });
+
+            child.on('error', (error) => {
+              clearTimeout(timeout);
+              resolve({
+                command: cmd,
+                success: false,
+                stdout: stdout.trim(),
+                stderr: stderr.trim(),
+                error: error.message || 'Command execution failed',
+              });
+            });
+
+            child.on('close', (code, signal) => {
+              clearTimeout(timeout);
+              const result: FsExecCommandResult = {
+                command: cmd,
+                success: code === 0 && !timedOut,
+                stdout: stdout.trim(),
+                stderr: stderr.trim(),
+              };
+              if (typeof code === 'number') {
+                result.exitCode = code;
+              }
+              if (timedOut) {
+                result.error = `Command timed out after 300000ms` + (signal ? ` (${signal})` : '');
+              }
+              resolve(result);
+            });
+          });
 
         const runCommandWithGitReadCache = async (cmd: string): Promise<FsExecCommandResult> => {
           const cacheable = GIT_READ_CACHE_TTL_MS > 0 && isCacheableGitReadCommand(cmd);
