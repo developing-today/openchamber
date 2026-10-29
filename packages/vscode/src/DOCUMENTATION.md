@@ -70,6 +70,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `bridge-fs-runtime.ts`
   - Bridge handlers for filesystem-related message routes.
   - Uses shared FS helpers via injected dependencies.
+  - `api:fs:exec` caps each output stream at `createFsExecOutputMaxBytes` (`OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES`, default 4 MiB), the same cap as web `/api/fs/exec`. A command that passes the cap is killed and resolves with an `output-too-large` error and the streams truncated to the cap.
 
 - `bridge-fs-helpers-runtime.ts`
   - Filesystem/path/search helper functions:

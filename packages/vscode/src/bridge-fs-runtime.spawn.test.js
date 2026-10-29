@@ -70,6 +70,31 @@ describe('bridge fs exec spawn behaviour (real shell)', () => {
     expect(result).toMatchObject({ success: true, exitCode: 0, stdout: 'hello' });
   });
 
+  it('returns output under the exec cap whole', async () => {
+    if (!onPosix) return;
+    const result = await runOne("head -c 100000 /dev/zero | tr '\\0' 'a'");
+    expect(result.success).toBe(true);
+    expect(result.stdout).toHaveLength(100000);
+  });
+
+  it('stops an over-cap stdout command and marks output-too-large', async () => {
+    if (!onPosix) return;
+    const result = await runOne("head -c 5000000 /dev/zero | tr '\\0' 'a'");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('output-too-large');
+    expect(result.stdout.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(result.stdout.length).toBeLessThan(5000000);
+  });
+
+  it('bounds stderr the same way', async () => {
+    if (!onPosix) return;
+    const result = await runOne("head -c 5000000 /dev/zero | tr '\\0' 'e' >&2");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('output-too-large');
+    expect(result.stderr.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(result.stderr.length).toBeLessThan(5000000);
+  });
+
   it('reports a non-zero exit with trimmed output instead of throwing', async () => {
     if (!onPosix) return;
     const result = await runOne("printf ' out '; printf ' err ' >&2; exit 3");
