@@ -35,6 +35,8 @@ const fetchQuotaForEntry = async (entry) => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const headers = {
       Authorization: `Bearer ${accessToken}`,
@@ -43,7 +45,8 @@ const fetchQuotaForEntry = async (entry) => {
     };
     const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
       method: 'GET',
-      headers
+      headers,
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -149,12 +152,17 @@ const fetchQuotaForEntry = async (entry) => {
       accountLabel: asNonEmptyString(payload?.email) ?? asNonEmptyString(payload?.account_id)
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

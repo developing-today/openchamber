@@ -72,6 +72,7 @@ All providers should return results via shared helpers to preserve API shape:
 - Unsupported provider requests should return `ok: false`, `configured: false`, `error: Unsupported provider`
 
 Provider modules must export `providerId`, `providerName`, `aliases`, `isConfigured(auth?)`, and `fetchQuota()`.
+Every provider fetch carries a 15-second `AbortSignal.timeout` deadline. A stalled endpoint returns the provider's `ok: false` result (`Request timed out` where the provider names its errors) and releases the dispatcher's `pendingFetches` entry, so the next request fetches fresh.
 `fetchQuota()` should return a quota result with `usage.windows` keyed by window name (for example `5h`, `7d`, `daily`) and optional provider-specific `usage.models` data.
 A module may also export `fetchQuotaForCredential(credentialRow)` to opt into per-credential quota (below); its row in `providers/index.js` then carries `credentialAliases` (the integration ids its credentials live under) and the dispatcher handles enumeration.
 

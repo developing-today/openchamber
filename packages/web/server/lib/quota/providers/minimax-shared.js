@@ -49,6 +49,7 @@ const fetchEndpoint = async (url, apiKey) => {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) return null;
     const payload = await response.json();

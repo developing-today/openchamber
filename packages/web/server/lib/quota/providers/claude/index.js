@@ -84,6 +84,8 @@ const fetchQuotaUncoalesced = async () => {
       ?? failure('Rate limited. Retrying soon.');
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   let response;
   try {
     response = await fetch(USAGE_URL, {
@@ -91,10 +93,14 @@ const fetchQuotaUncoalesced = async () => {
       headers: {
         Authorization: `Bearer ${credential.accessToken}`,
         'anthropic-beta': OAUTH_BETA_HEADER
-      }
+      },
+      signal: timeoutSignal
     });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : 'Request failed');
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    return failure(isTimeout ? 'Request timed out' : (error instanceof Error ? error.message : 'Request failed'));
   }
 
   if (response.status === 429) {

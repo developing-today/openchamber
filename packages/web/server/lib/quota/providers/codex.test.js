@@ -167,3 +167,18 @@ describe('Codex quota windows', () => {
     expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
   });
 });
+
+describe('Codex request deadline', () => {
+  it('recognizes the timeout exception from AbortSignal.timeout', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});

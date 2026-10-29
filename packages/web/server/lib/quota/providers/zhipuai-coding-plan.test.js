@@ -162,3 +162,18 @@ describe('Zhipu AI Coding Plan quota provider', () => {
     expect(result.error).toBe('API error: 1001');
   });
 });
+
+describe('Zhipu AI Coding Plan request deadline', () => {
+  it('recognizes the timeout exception from AbortSignal.timeout', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
