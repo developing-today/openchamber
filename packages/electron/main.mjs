@@ -69,6 +69,7 @@ import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, create
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
+import { fetchFaviconDataUrl } from './favicon-fetch.mjs';
 import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
@@ -4759,21 +4760,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('Unsupported favicon URL');
       }
 
-      const response = await electronNet.fetch(parsed.toString(), {
+      // The icon URL is page-controlled, so the fetch itself is bounded in
+      // favicon-fetch.mjs: one deadline over headers and body, and a body
+      // read that stops at the cap instead of buffering the whole response.
+      return fetchFaviconDataUrl({
+        fetchImpl: (url, options) => electronNet.fetch(url, options),
+        url: parsed.toString(),
         session: session.fromPartition(BROWSER_PANEL_PARTITION),
+        maxBytes: MAX_FAVICON_BYTES,
+        mimeTypes: FAVICON_MIME_TYPES,
       });
-      if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
-
-      const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (!FAVICON_MIME_TYPES.has(mime)) throw new Error('Favicon is not an image');
-
-      const buffer = Buffer.from(await response.arrayBuffer());
-      // A tab icon is a few kilobytes; anything of a different order is not one,
-      // and is not worth holding in memory for every tab.
-      if (buffer.length === 0 || buffer.length > MAX_FAVICON_BYTES) {
-        throw new Error('Favicon is not a usable size');
-      }
-      return { dataUrl: `data:${mime};base64,${buffer.toString('base64')}` };
     }
 
     // Scoped to the browser panel's own partition, so clearing it can never
