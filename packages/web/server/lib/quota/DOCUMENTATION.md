@@ -32,7 +32,7 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
-| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent) |
+| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent), or the active `google` OAuth login in OpenCode's credential store |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
@@ -188,6 +188,10 @@ return configured failure without querying quota with expired access.
 Refreshes are read-only with respect to OpenCode credentials. Neither a guessed
 client nor refreshed tokens are written back. Refresh-token rotation and changes
 to quota endpoint semantics are outside this compatibility fix.
+
+### Why the Antigravity provider reads the credential store, not only the accounts file
+
+The plugin's current versions sign in through OpenCode's credential store (the `google` integration's OAuth credential, written by its `antigravity` auth method) and never write the legacy accounts file. The file also lives in the OpenCode config directory, where a config redeploy can remove it without touching the live login. Reading only the file therefore reports a working login as "not configured" — silently, with no error row. The provider resolves both sources (accounts file first, then the credential store, deduplicated by refresh token) and tries each candidate's refresh in order. Regenerating the accounts file from the store was rejected: a copied refresh token rots when the stored login rotates, and two writers for one login invite divergence.
 
 ## Antigravity quota and limit semantics
 
