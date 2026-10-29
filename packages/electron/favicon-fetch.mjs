@@ -58,20 +58,23 @@ export const fetchFaviconDataUrl = async ({ fetchImpl, url, session, maxBytes, m
       if (controller.signal.aborted) throw timeoutError();
       throw error;
     });
-    if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
+    // Rejecting before the body is read is not enough on its own: abort
+    // the request and cancel the body so a host that stalls after sending
+    // headers cannot hold the connection open past the deadline (which
+    // the finally block is about to clear).
+    const rejectBeforeRead = async (error) => {
+      controller.abort();
+      await response.body?.cancel().catch(() => {});
+      throw error;
+    };
+    if (!response.ok) await rejectBeforeRead(new Error(`Favicon request failed (${response.status})`));
 
     const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    if (!mimeTypes.has(mime)) throw new Error('Favicon is not an image');
+    if (!mimeTypes.has(mime)) await rejectBeforeRead(new Error('Favicon is not an image'));
 
     const declaredLength = Number(response.headers.get('content-length'));
     if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-      // Rejecting on the declared size alone is not enough: abort the
-      // request and cancel the body so a host that stalls after sending
-      // headers cannot hold the connection open past the deadline (which
-      // the finally block is about to clear).
-      controller.abort();
-      await response.body?.cancel().catch(() => {});
-      throw new Error('Favicon is not a usable size');
+      await rejectBeforeRead(new Error('Favicon is not a usable size'));
     }
 
     let buffer;

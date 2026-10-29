@@ -84,6 +84,34 @@ test('a declared content-length above the cap is rejected before the body is rea
   assert.equal(cancelled, true);
 });
 
+test('status and MIME rejections abort the request and cancel the body', async () => {
+  const cases = [
+    { responseInit: { status: 404, headers: { 'content-type': 'image/png' } }, error: /Favicon request failed \(404\)/ },
+    { responseInit: { status: 200, headers: { 'content-type': 'text/html' } }, error: /Favicon is not an image/ },
+  ];
+  for (const { responseInit, error } of cases) {
+    let cancelled = false;
+    let requestSignal;
+    const body = new ReadableStream({
+      pull() {
+        // Stall after the headers: only the rejection's abort/cancel can
+        // release this connection.
+        return new Promise(() => {});
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchImpl = async (_url, { signal }) => {
+      requestSignal = signal;
+      return new Response(body, responseInit);
+    };
+    await assert.rejects(fetchFaviconDataUrl(fetchArgs(fetchImpl)), error);
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(cancelled, true);
+  }
+});
+
 test('an oversized streamed body is rejected after the cap, not buffered whole', async () => {
   let pulls = 0;
   const body = new ReadableStream({
