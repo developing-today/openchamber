@@ -168,6 +168,14 @@ describe('quota endpoint resolution', () => {
     expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: 'nope' })).toBe('http://127.0.0.1:4096');
   });
 
+  it('honours OPENCODE_PORT only as a plain decimal port in range', () => {
+    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: '4097' })).toBe('http://127.0.0.1:4097');
+    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: '65535' })).toBe('http://127.0.0.1:65535');
+    for (const spelling of ['1e3', '4096junk', '99999', '65536', '0', '0x10', '40.96']) {
+      expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: spelling })).toBe('http://127.0.0.1:4096');
+    }
+  });
+
   it('builds the Basic header only when a server password is set', () => {
     expect(buildOpenCodeAuthHeaders({})).toEqual({});
     expect(buildOpenCodeAuthHeaders({ OPENCODE_SERVER_PASSWORD: 'pw' })).toEqual({
@@ -657,6 +665,9 @@ describe('quota fetch timeout and concurrency', () => {
     expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '0' })).toBe(10_000);
     expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '-5' })).toBe(10_000);
     expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: 'nope' })).toBe(10_000);
+    for (const spelling of ['1e3', '10000junk', '10.9', '250ms', '0x10']) {
+      expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: spelling })).toBe(10_000);
+    }
   });
 
   it('answers a timeout row for a slow provider and keeps the rest of the batch', async () => {
