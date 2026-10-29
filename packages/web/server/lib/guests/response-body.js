@@ -34,3 +34,49 @@ export const readBoundedResponseText = async (response, maxBytes) => {
   }
   return { tooLarge: false, text: Buffer.concat(chunks, size).toString('utf8') };
 };
+
+/**
+ * The same bounded read for a binary answer (a surface frame): the cap is
+ * enforced while the body streams in, and the stream is cancelled as soon
+ * as it crosses the limit, so a body with no declared length cannot grow
+ * memory past the cap before a post-read length check would see it.
+ *
+ * @param {Response} response
+ * @param {number} maxBytes
+ * @returns {Promise<{ tooLarge: false, bytes: Buffer } | { tooLarge: true }>}
+ */
+export const readBoundedResponseBytes = async (response, maxBytes) => {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    return { tooLarge: true };
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { tooLarge: false, bytes: Buffer.alloc(0) };
+  }
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { tooLarge: true };
+    }
+    chunks.push(value);
+  }
+  return { tooLarge: false, bytes: Buffer.concat(chunks, size) };
+};
+
+/**
+ * Drops a response body nobody reads (a control/input acknowledgement, a
+ * pump answer that is not a frame) without buffering it: the stream is
+ * cancelled instead of drained whole into memory just to be thrown away.
+ *
+ * @param {Response} response
+ */
+export const discardResponseBody = async (response) => {
+  await response.body?.cancel().catch(() => {});
+};
