@@ -54,11 +54,12 @@ export const resolveAntigravityAuth = () => {
  * an API key carries no refresh token and resolves to null.
  */
 export const resolveAntigravityStoreAuth = (auth) => {
-  if (!auth || typeof auth !== 'object') {
+  const authObject = asObject(auth);
+  if (!authObject) {
     return null;
   }
 
-  const entry = normalizeAuthEntry(getAuthEntry(auth, ['google', 'google.oauth']));
+  const entry = normalizeAuthEntry(getAuthEntry(authObject, ['google', 'google.oauth']));
   const entryObject = asObject(entry);
   if (!entryObject) {
     return null;
