@@ -1450,11 +1450,25 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      let timeout = null;
       try {
         const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
         const scopedDirectory = getValidatedDefaultDirectory();
         if (scopedDirectory) headers['x-opencode-directory'] = encodeURIComponent(scopedDirectory);
-        const response = await fetch(buildOpenCodeUrl('/api/agent'), { method: 'GET', headers });
+        // Bound each attempt the way waitForOpenCodeReady bounds its health
+        // checks, so one stalled /api/agent request cannot defeat the overall
+        // deadline. The abort stays live until the body has been read,
+        // because response.json() is just as unbounded against a stall.
+        const controller = new AbortController();
+        timeout = setTimeout(
+          () => controller.abort(),
+          Math.min(HEALTH_CHECK_TIMEOUT_MS, Math.max(deadline - Date.now(), 1)),
+        );
+        const response = await fetch(buildOpenCodeUrl('/api/agent'), {
+          method: 'GET',
+          headers,
+          signal: controller.signal,
+        });
 
         if (response.ok) {
           // OpenCode 2.x answers `/api/*` with `{ location, data }`.
@@ -1465,6 +1479,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           }
         }
       } catch {
+      } finally {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
       }
 
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
