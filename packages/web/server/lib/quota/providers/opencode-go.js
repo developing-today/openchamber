@@ -172,7 +172,7 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl 
   }
   const windows = parseConsoleGoUsage(payload);
   if (Object.keys(windows).length === 0) throw new Error('OpenCode Go usage data could not be parsed');
-  return windows;
+  return { windows, planLabel: payload.product };
 };
 
 /**
@@ -255,7 +255,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
         const balanceRead = isConsoleSignInExpired(consoleCredential.expires)
           ? Promise.resolve(null)
           : fetchConsoleBillingBalance(consoleCredential, fetchImpl);
-        const windows = await fetchConsoleGoUsage(consoleCredential, fetchImpl);
+        const { windows, planLabel } = await fetchConsoleGoUsage(consoleCredential, fetchImpl);
         const balance = await balanceRead;
         const usageWindows = balance === null
           ? windows
@@ -268,7 +268,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
                 valueLabel: `$${formatMoney(balance)}`,
               }),
             };
-        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows } });
+        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows }, planLabel });
       } catch (consoleError) {
         if (!apiKey) throw consoleError;
       }
