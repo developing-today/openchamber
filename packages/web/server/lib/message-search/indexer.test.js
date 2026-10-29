@@ -330,6 +330,107 @@ describe.skipIf(!open)('message search index', () => {
     expect(new Set(ids).size).toBe(6);
     expect(search('shared', { sessionId: 'a', order: 'asc', limit: 1 })[0].id).toBe('a0');
   });
+
+  // A read that never settles on its own but honours its signal, the way a
+  // stalled OpenCode read behaves once a deadline or stop aborts it.
+  const neverSettles = (options) => new Promise((_, reject) => {
+    const signal = options?.signal;
+    if (!signal) return;
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  });
+
+  it('aborts the in-flight read on stop so idle() settles promptly', async () => {
+    const seen = [];
+    const stalled = {
+      session: {
+        get: (_params, options) => {
+          seen.push(options);
+          return neverSettles(options);
+        },
+        list: fake.client.session.list,
+        message: fake.client.session.message,
+      },
+      message: fake.client.message,
+    };
+    const local = createMessageSearchIndexer({ store, createClient: () => stalled, pageSize: 2, liveDebounceMs: 0, backfillPauseMs: 0, logger: { warn: () => {} } });
+    local.processPayload({ type: 'session.idle', properties: { sessionID: 'a' } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.signal).toBeInstanceOf(AbortSignal);
+
+    local.stop();
+    const settled = await Promise.race([local.idle().then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]);
+    expect(settled).toBe(true);
+  });
+
+  it('times out a stalled live read, logs it, and indexes the next session', async () => {
+    fake.session('a');
+    fake.session('b');
+    fake.user('b', 'u1', 'later session words');
+    const warnings = [];
+    const client = {
+      session: {
+        get: (params, options) => (params.sessionID === 'a' ? neverSettles(options) : fake.client.session.get(params, options)),
+        list: fake.client.session.list,
+        message: fake.client.session.message,
+      },
+      message: fake.client.message,
+    };
+    const local = createMessageSearchIndexer({
+      store,
+      createClient: () => client,
+      pageSize: 2,
+      liveDebounceMs: 0,
+      backfillPauseMs: 0,
+      readTimeoutMs: 50,
+      logger: { warn: (...args) => warnings.push(args) },
+    });
+    local.processPayload({ type: 'session.idle', properties: { sessionID: 'a' } });
+    local.processPayload({ type: 'session.idle', properties: { sessionID: 'b' } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const drained = await Promise.race([local.idle().then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 2_000))]);
+    expect(drained).toBe(true);
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    expect(search('later session').map((hit) => hit.id)).toEqual(['u1']);
+  });
+
+  it('fails a stalled backfill page (logged) and starts a fresh walk on the next connect', async () => {
+    fake.session('a');
+    fake.user('a', 'u1', 'backfill words');
+    let stallList = true;
+    const warnings = [];
+    const client = {
+      session: {
+        get: fake.client.session.get,
+        list: (params, options) => (stallList ? neverSettles(options) : fake.client.session.list(params, options)),
+        message: fake.client.session.message,
+      },
+      message: fake.client.message,
+    };
+    const local = createMessageSearchIndexer({
+      store,
+      createClient: () => client,
+      pageSize: 2,
+      liveDebounceMs: 0,
+      backfillPauseMs: 0,
+      readTimeoutMs: 50,
+      logger: { warn: (...args) => warnings.push(args) },
+    });
+    local.onConnected();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(warnings.some((args) => String(args[0]).includes('could not list sessions'))).toBe(true);
+    expect(search('backfill')).toEqual([]);
+
+    stallList = false;
+    local.onConnected();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await local.idle();
+    expect(search('backfill').map((hit) => hit.id)).toEqual(['u1']);
+  });
 });
 
 describe('snippets', () => {
