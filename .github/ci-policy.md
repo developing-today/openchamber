@@ -12,6 +12,19 @@ developing-today/code#1599.
 Tuning this policy means editing this table by PR — never rewriting
 the pipeline to match a new dividing line.
 
+## Merge requirement
+
+**Merge requirement: the basic-validation (PR) tier only. The full
+suite runs on main and is NOT a merge gate.**
+
+In this repo the basic tier is named **basic**: the `pr checks` jobs
+display-named `basic: lint` and `basic: type-check` in
+oc-review.yml. The main-tier jobs are display-named
+`full (main tier): tests` and `full (main tier): build`. Only the
+basic tier may be required to merge. (This file documents the
+requirement; branch-protection settings themselves are a maintainer
+action and are not changed by the CI redesign.)
+
 ## Two tiers
 
 - **PR tier — "mostly valid" gate.** A PR is mergeable when the PR
@@ -71,10 +84,18 @@ concurrency:
   runs are keyed by `run_id` so they are never cancelled.
 - Scheduled singleton/deploy workflows keep `cancel-in-progress:
   false` on purpose; they are not checks.
-- Event bots (`issue-intake`, `pr-intake`, `pr-review`, `bot-help`,
+- Event bots kept event-based (`pr-review`, `bot-help`,
   `bot-summarize`) key their groups per issue/PR (or per comment), so
   bursts queue or run per item instead of collapsing into one
-  repo-wide group and silently replacing each other.
+  repo-wide group and silently replacing each other. A human waits
+  synchronously on each of these (a review verdict, a help answer, a
+  summary), which is why they stay event-based.
+- Issue/PR *management* automation no longer runs on events at all:
+  `pr-intake`, `issue-intake`, and `label-merge-conflict` were
+  replaced by the single scheduled `repo-sweeper.yml` (every 15
+  minutes, one live run: a single concurrency group with
+  `cancel-in-progress: true`), which does PR size/parking labels,
+  merge-conflict labels, and issue intake in one pass.
 - **Never** pair `queue: max` with a cancel-in-progress expression
   that evaluates `true` for an `issues` / `pull_request_target`
   event: that is a GitHub validation error that killed issue-intake

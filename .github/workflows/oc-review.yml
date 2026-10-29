@@ -7,6 +7,11 @@ name: pr checks
 # (tests + build) runs on push to main and on the nightly backstop below.
 # Dedup: push is restricted to branches: [main], so a PR branch push fires
 # pull_request only -- a commit never runs the same suite twice.
+# MERGE REQUIREMENT (Drew, 2026-10-29): the basic tier only -- the jobs
+# named "basic: lint" and "basic: type-check" below. tests/build are the
+# full main tier; they are NOT a merge gate. The workflow name stays
+# "pr checks" because the Phase 3 watcher (main-broken.yml) references
+# it by that name.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -40,6 +45,7 @@ permissions:
 # job, not the sum.
 jobs:
   type-check:
+    name: "basic: type-check"
     timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
@@ -54,6 +60,7 @@ jobs:
         run: bun run type-check
 
   lint:
+    name: "basic: lint"
     timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
@@ -72,6 +79,7 @@ jobs:
   # Main tier only (Phase 2): skipped on pull_request events; runs on
   # push to main, on the nightly schedule, and on manual dispatch.
   tests:
+    name: "full (main tier): tests"
     if: github.event_name != 'pull_request'
     timeout-minutes: 20
     runs-on: ubuntu-24.04
@@ -98,6 +106,7 @@ jobs:
   # build's memory ceiling. The packages whose `build` is only a type-check (`tsc -b`)
   # (ui) or a no-op (electron) are covered by the type-check job.
   build:
+    name: "full (main tier): build"
     if: github.event_name != 'pull_request'
     timeout-minutes: 20
     runs-on: ubuntu-24.04
