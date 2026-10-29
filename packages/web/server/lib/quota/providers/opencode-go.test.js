@@ -184,7 +184,26 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
       fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'go-plus' }))),
     });
     expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('go-plus');
     expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('exposes the Console product as planLabel on the quota result', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'go' }))),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('go');
+  });
+
+  it('leaves planLabel unset on the API-key path', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => apiKeyAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBeUndefined();
   });
 
   it('skips only the unusable meters and keeps the rest', () => {
@@ -209,7 +228,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
 
   it('calls the Console Go status endpoint with the Console token and organization', async () => {
     let request;
-    const windows = await fetchConsoleGoUsage(
+    const { windows, planLabel } = await fetchConsoleGoUsage(
       { access: 'console-access', orgID: 'org_TESTORG123', expires: Date.now() + 60_000 },
       async (url, options) => {
         request = { url, options };
@@ -225,6 +244,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(request.options.headers['x-opencode-session']).toBeUndefined();
     expect(request.options.redirect).toBe('error');
     expect(windows.weekly.usedPercent).toBe(40);
+    expect(planLabel).toBe('go');
   });
 
   it('prefers the selected Console account and organization over the legacy key', async () => {
