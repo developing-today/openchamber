@@ -90,6 +90,63 @@ describe('downloadModel', () => {
     expect(fs.existsSync(`${file}.part`)).toBe(false);
   });
 
+  it('times out a download whose response never arrives and leaves nothing behind', async () => {
+    const file = tempFile();
+    const fetchImpl = vi.fn(() => new Promise(() => {}));
+    const startedAt = Date.now();
+    await expect(downloadModel({ file, model: modelFor(), fetchImpl, stallTimeoutMs: 100 })).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringMatching(/timed out .* without receiving data/),
+    });
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(fetchImpl.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(`${file}.part`)).toBe(false);
+  });
+
+  it('times out a download whose body goes silent mid-stream and discards the partial file', async () => {
+    const file = tempFile();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(CONTENT.subarray(0, 4));
+      },
+      pull() {
+        return new Promise(() => {});
+      },
+    });
+    const fetchImpl = vi.fn(async () => new Response(body, { status: 200 }));
+    await expect(downloadModel({ file, model: modelFor(), fetchImpl, stallTimeoutMs: 100 })).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringMatching(/timed out .* without receiving data/),
+    });
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(`${file}.part`)).toBe(false);
+  });
+
+  it('lets a slow download finish while bytes keep arriving inside the stall bound', async () => {
+    const file = tempFile();
+    const chunks = [];
+    for (let offset = 0; offset < CONTENT.length; offset += 5) chunks.push(CONTENT.subarray(offset, offset + 5));
+    let index = 0;
+    const body = new ReadableStream({
+      async pull(controller) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        if (index >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[index]);
+        index += 1;
+      },
+    });
+    const fetchImpl = vi.fn(async () => new Response(body, { status: 200 }));
+    // Six chunks at 40 ms gaps: total time passes the 150 ms stall bound,
+    // but no gap does, so the download must complete.
+    const status = await downloadModel({ file, model: modelFor(), fetchImpl, stallTimeoutMs: 150 });
+    expect(status).toMatchObject({ installed: true });
+    expect(fs.readFileSync(file)).toEqual(CONTENT);
+  });
+
   it('keeps an installed file of the pinned size without downloading it again', async () => {
     const file = tempFile();
     fs.writeFileSync(file, CONTENT);
