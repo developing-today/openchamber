@@ -1,3 +1,5 @@
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
+
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
 const FILE_SEARCH_MAX_VISITED_FILES = 10_000;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
@@ -97,17 +99,12 @@ const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
 };
 
 export const createGitCheckIgnoreTimeoutMs = () => {
-  // Only a plain decimal spelling counts: a bare Number(...) would silently
-  // honour '' and ' ' as 0 (disarming the check-ignore kill timeout), '1e3'
-  // as 1000, '0x10' as 16, and '5.9' as a fractional timeout. Same strict
-  // judgement as readRateLimitMaxAttempts in ui-auth. An explicit '0' still
-  // disables the timeout.
-  const text = String(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS ?? '').trim();
-  if (/^\d+$/.test(text)) {
-    const raw = Number(text);
-    if (Number.isSafeInteger(raw) && raw >= 0) return raw;
-  }
-  return 2500;
+  // The strict plain-decimal judgement lives in shared/parse-int.js (design
+  // #802 phase 2, #804): a bare Number(...) would silently honour '' and ' '
+  // as 0 (disarming the check-ignore kill timeout), '1e3' as 1000, '0x10' as
+  // 16, and '5.9' as a fractional timeout. An explicit '0' still disables
+  // the timeout.
+  return parseBoundedIntWithDefault(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS, 2500, 0, Number.MAX_SAFE_INTEGER);
 };
 
 export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {

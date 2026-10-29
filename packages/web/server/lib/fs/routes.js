@@ -4,6 +4,7 @@ import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import { createGitCheckIgnoreTimeoutMs } from './search.js';
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -123,18 +124,11 @@ export const mintOutsideFileGrant = async (targetPath, {
   };
 };
 
-// A whole number from the environment, else null. Only a plain decimal
-// spelling counts: a bare Number(...) would silently honour '' and ' ' as 0,
-// '1e3' as 1000, '0x10' as 16, and '5.9' as a fractional value. Same strict
-// judgement as readRateLimitMaxAttempts in ui-auth.
-const parsePlainDecimalInt = (raw) => {
-  const text = String(raw ?? '').trim();
-  if (!/^\d+$/.test(text)) {
-    return null;
-  }
-  const value = Number(text);
-  return Number.isSafeInteger(value) ? value : null;
-};
+// A whole number from the environment, else null. The strict plain-decimal
+// judgement lives in shared/parse-int.js (design #802 phase 2, #804): a bare
+// Number(...) would silently honour '' and ' ' as 0, '1e3' as 1000, '0x10' as
+// 16, and '5.9' as a fractional value.
+const parsePlainDecimalInt = (raw) => parseBoundedIntWithDefault(raw, null, 0, Number.MAX_SAFE_INTEGER);
 
 export const createCommandTimeoutMs = () => {
   const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);

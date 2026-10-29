@@ -1,3 +1,5 @@
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
+
 /**
  * Body handling for `POST /api/guests/upload`: a raw zip sent as
  * `application/octet-stream`. The archive is collected into memory (the
@@ -8,18 +10,11 @@
 
 const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
-// A whole number from the environment, else null. Only a plain decimal
-// spelling counts: a bare Number(...) would silently honour '' and ' ' as 0,
-// '1e3' as 1000, '0x10' as 16, and '5.9' as a fractional value. Same strict
-// judgement as parsePlainDecimalInt in fs/routes (#696).
-const parsePlainDecimalInt = (raw) => {
-  const text = String(raw ?? '').trim();
-  if (!/^\d+$/.test(text)) {
-    return null;
-  }
-  const value = Number(text);
-  return Number.isSafeInteger(value) ? value : null;
-};
+// A whole number from the environment, else null. The strict plain-decimal
+// judgement lives in shared/parse-int.js (design #802 phase 2, #804): a bare
+// Number(...) would silently honour '' and ' ' as 0, '1e3' as 1000, '0x10' as
+// 16, and '5.9' as a fractional value.
+const parsePlainDecimalInt = (raw) => parseBoundedIntWithDefault(raw, null, 0, Number.MAX_SAFE_INTEGER);
 
 export const guestUploadMaxBytes = () => {
   const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES);

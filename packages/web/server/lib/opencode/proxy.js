@@ -16,7 +16,7 @@ import { beginUpstreamRequest } from './upstream-requests.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
-import { readBoundedResponseText } from '../guests/response-body.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 // How long a browser's SSE stream waits, with no block forwarded, for OpenCode to take it back.

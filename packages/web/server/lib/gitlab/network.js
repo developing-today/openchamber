@@ -1,3 +1,4 @@
+import { fetchWithDeadline } from '../shared/bounded-fetch.js';
 import { isString } from './validation.js';
 
 export class GitLabRequestError extends Error {
@@ -17,11 +18,11 @@ export function classifyGitLabFailure(error) {
 }
 
 export async function fetchWithTimeout(fetchImpl, url, init = {}, timeoutMs = 10_000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetchImpl(url, { ...init, redirect: 'error', signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  // Delegates to the shared deadline (design #802 phase 2, #804), keeping
+  // this name and signature for its importers. Two behaviour changes are
+  // the design's intended contract: the caller's signal (init.signal)
+  // composes with the deadline instead of being overwritten by it, and the
+  // deadline stays armed until the response body has been read instead of
+  // clearing when the headers arrive.
+  return fetchWithDeadline(fetchImpl, url, { ...init, redirect: 'error' }, { timeoutMs, signal: init?.signal });
 }

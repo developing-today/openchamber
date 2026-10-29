@@ -126,7 +126,11 @@ variant that answers differently stays with its owner.
   is cancelled the moment the cap is crossed, and oversize is reported as
   `{ tooLarge: true }` — never a truncated body returned as complete.
   `guests/response-body.js` re-exports all three, so the guests importers
-  keep working unchanged.
+  keep working unchanged. Phase 2 (#804) pointed the two importers outside
+  guests/ at this module directly (`opencode/proxy.js`,
+  `opencode/mcpx-daemon.js`), and `opencode/model-discovery.js` /
+  `opencode/theme-catalog.js` now compose `readBoundedResponseBytes` under
+  their own error shapes instead of keeping private reader loops.
 - `parse-int.js` — `parsePositiveIntWithDefault` and
   `parseBoundedIntWithDefault`. The strict plain-decimal judgement the eight
   private copies used to spell per module: optional surrounding whitespace,
@@ -134,10 +138,33 @@ variant that answers differently stays with its owner.
   `'0x10'`, `'5000junk'`, `'5.9'`, `''`, `'-5'` never parse). The positive
   spelling requires a value above zero; the bounded spelling checks an
   inclusive `[min, max]` and lets `'0'` be a real value when the range
-  allows it.
+  allows it. Phase 2 (#804) migrated seven of the eight private copies
+  (`fs/routes.js` and `guests/upload.js` through their `parsePlainDecimalInt`
+  delegations, `fs/search.js`, `opencode/lifecycle.js`,
+  `opencode/draining-opencode.js`, `relay/host-client.js`,
+  `ui-auth/ui-auth.js`); call sites with no upper bound pass
+  `Number.MAX_SAFE_INTEGER` as the max, which no safe-integer value can
+  cross.
+
+- `gitlab/network.js` `fetchWithTimeout` delegates to `fetchWithDeadline`
+  (phase 2, #804), keeping its exported name and signature; its callers in
+  `verify.js` and `device-flow.js` get the composed-signal, body-covering
+  contract. `gitlab/client.js` keeps its own `deadlineSignal`: its retry
+  policy has to tell a deadline abort from a caller abort (`timedOut()`),
+  which the primitive does not expose, and its downloader bounds the wait
+  for headers only because the body streams to the route caller.
 
 ### What stays out
 
+- `opencode/self-handoff.js` `resolveHandoffTimeoutMs` (phase 2, #804):
+  a deliberate variant of the strict parser. It checks
+  `Number.isInteger`, where the shared spellings check
+  `Number.isSafeInteger`, so a digit string beyond the safe-integer range
+  (26 digits, say) yields that huge value there and the fallback here.
+  Every other spelling judgement matches. It stays local under design
+  rule 5 — a copy that answers differently for a real input is recorded,
+  not silently redefined — until the design owner rules the difference a
+  bug or a feature.
 - Parsers that accept a sign, a fraction, or a non-decimal spelling: no
   shared copy accepts them, and a caller that truly needs one keeps a
   local, differently-named variant.

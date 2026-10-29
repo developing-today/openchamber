@@ -11,6 +11,7 @@ import { createOutboundFrameBatcher, decodeFrameBatch, decodeTunnelFrame, decode
 import { createTunnelHost } from './tunnel-host.js';
 import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-scheduler.js';
 import { redactSensitiveText } from '../source-control/url-redaction.js';
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
 import { z } from 'zod';
 
 // The relay asks a peer to close its own socket with this plaintext frame
@@ -69,16 +70,11 @@ const DEFAULT_BATCH_WINDOW_MS = 150;
 // the 150 ms default. Only applies on directions where batching was negotiated.
 export const resolveBatchWindowMs = (option, rawEnvValue = process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS) => {
   if (Number.isFinite(option) && option >= 0) return option;
-  // Only a plain decimal spelling counts: a bare parseInt would silently
-  // honour '150junk' as 150, truncate '2.9' to 2, read '1e3' as a 1 ms
-  // window, and read '0x10' as 0. Same strict judgement as
-  // readRateLimitMaxAttempts in ui-auth; zero stays a valid window here.
-  const text = String(rawEnvValue ?? '').trim();
-  if (/^\d+$/.test(text)) {
-    const envValue = Number(text);
-    if (Number.isSafeInteger(envValue) && envValue >= 0) return envValue;
-  }
-  return DEFAULT_BATCH_WINDOW_MS;
+  // The strict plain-decimal judgement for the env spelling lives in
+  // shared/parse-int.js (design #802 phase 2, #804): a bare parseInt would
+  // silently honour '150junk' as 150, truncate '2.9' to 2, read '1e3' as a
+  // 1 ms window, and read '0x10' as 0. Zero stays a valid window here.
+  return parseBoundedIntWithDefault(rawEnvValue, DEFAULT_BATCH_WINDOW_MS, 0, Number.MAX_SAFE_INTEGER);
 };
 
 // Bun's WebSocket puts the full dial URL into its error messages, and that URL
