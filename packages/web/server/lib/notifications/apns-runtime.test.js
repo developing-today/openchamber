@@ -352,3 +352,105 @@ describe('apns runtime direct fallback (relay disabled)', () => {
     expect(JSON.parse(Buffer.from(parts[1], 'base64url').toString()).iss).toBe('TEAM123');
   });
 });
+
+describe('apns runtime deadlines (#798)', () => {
+  // A wedged peer: accepts the request and never answers, but like a real
+  // fetch it rejects when the caller's signal aborts.
+  const stalledFetch = (signals) =>
+    vi.fn(async (url, init) => {
+      signals.push(init?.signal ?? null);
+      return new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+
+  it('settles token registration when the relay register fetch never answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const signals = [];
+      vi.stubGlobal('fetch', stalledFetch(signals));
+      process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+      const runtime = createApnsRuntime(makeDeps());
+
+      const registration = runtime.addOrUpdateApnsToken('s1', 'tokenStalled');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(registration).resolves.toBeUndefined();
+
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      expect(signals[0].aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles the fanout when the relay send fetch never answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const signals = [];
+      const fetchMock = vi.fn(async (url, init) => {
+        if (isRegister([url])) return jsonResponse({ ok: true });
+        signals.push(init?.signal ?? null);
+        return new Promise((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+      const runtime = createApnsRuntime(makeDeps());
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'x' }, {});
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(sending).resolves.toBeUndefined();
+
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      expect(signals[0].aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('destroys a stalled direct APNs request at its deadline and settles the send', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+      const destroyedWith = [];
+      const close = vi.fn();
+      const http2 = {
+        connect: () => ({
+          on: () => {},
+          close,
+          request: () => {
+            const listeners = {};
+            const req = {
+              on: (event, cb) => { listeners[event] = cb; return req; },
+              setEncoding: () => req,
+              end: () => {},
+              destroy: (error) => {
+                destroyedWith.push(error);
+                queueMicrotask(() => listeners.error?.(error));
+              },
+            };
+            return req;
+          },
+        }),
+      };
+      const runtime = createApnsRuntime(
+        makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
+      );
+      await runtime.addOrUpdateApnsToken('s', 'tokenDirect');
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'ready-x' });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(sending).resolves.toBeUndefined();
+
+      expect(destroyedWith).toHaveLength(1);
+      expect(destroyedWith[0].message).toContain('APNs request timed out');
+      expect(close).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

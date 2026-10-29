@@ -27,6 +27,22 @@ const MAX_TOKENS_PER_SESSION = 10;
 // APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
 
+// Every outbound APNs path carries a deadline: a stalled relay or APNs
+// stream settles (warn-and-continue) instead of hanging token registration
+// or the push fanout. The relay is a small JSON POST and registration is a
+// foreground phone request, so its bound is tight; APNs answers are
+// normally sub-second, so the direct bound only fires on a genuine wedge.
+const APNS_RELAY_REQUEST_TIMEOUT_MS = 10_000;
+const APNS_DIRECT_REQUEST_TIMEOUT_MS = 30_000;
+
+// AbortController + explicit timer (the template-runtime.js pattern in this
+// folder): the timer is clearable on settle and drivable by test fake timers.
+const createTimeoutSignal = (timeoutMs) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+};
+
 const trimmedEnv = (name) => {
   const value = process.env[name];
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -89,11 +105,18 @@ export const createApnsRuntime = (deps) => {
       const ts = Date.now();
       // platform is part of the signed message so it can't be tampered en route.
       const sig = signRelayMessage(privateKey, `${ts}.${token}.${platform}`);
-      const res = await fetch(relay.registerUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token, platform, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
-      });
+      const { signal, cleanup } = createTimeoutSignal(APNS_RELAY_REQUEST_TIMEOUT_MS);
+      let res;
+      try {
+        res = await fetch(relay.registerUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token, platform, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
+          signal,
+        });
+      } finally {
+        cleanup();
+      }
       if (!res.ok) console.warn(`[Push relay] register-token failed status=${res.status}`);
     } catch (error) {
       console.warn('[Push relay] register-token request failed:', error?.message ?? error);
@@ -360,6 +383,14 @@ export const createApnsRuntime = (deps) => {
         return;
       }
 
+      // Bound the request with an own wall-clock timer armed at creation: a
+      // stream inactivity timeout may never start behind a session whose
+      // connect stalled, so only this settles every case. Destroying the
+      // request routes into the error handler below (warn + resolve).
+      const timeout = setTimeout(() => {
+        req.destroy(new Error(`APNs request timed out after ${APNS_DIRECT_REQUEST_TIMEOUT_MS}ms`));
+      }, APNS_DIRECT_REQUEST_TIMEOUT_MS);
+
       let status = 0;
       let responseBody = '';
       req.on('response', (resHeaders) => {
@@ -370,6 +401,7 @@ export const createApnsRuntime = (deps) => {
         responseBody += chunk;
       });
       req.on('end', async () => {
+        clearTimeout(timeout);
         if (status === 200) {
           resolve();
           return;
@@ -388,6 +420,7 @@ export const createApnsRuntime = (deps) => {
         resolve();
       });
       req.on('error', (error) => {
+        clearTimeout(timeout);
         console.warn('[APNs] request error:', error?.message ?? error);
         resolve();
       });
@@ -430,11 +463,13 @@ export const createApnsRuntime = (deps) => {
       ts,
       sig,
     });
+    const { signal, cleanup } = createTimeoutSignal(APNS_RELAY_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(relay.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: requestBody,
+        signal,
       });
       if (!res.ok) {
         console.warn(`[APNs relay] send failed status=${res.status}`);
@@ -449,6 +484,10 @@ export const createApnsRuntime = (deps) => {
       }
     } catch (error) {
       console.warn('[APNs relay] request failed:', error?.message ?? error);
+    } finally {
+      // The signal stays live until res.json() above has been read: the body
+      // read is part of the stall surface.
+      cleanup();
     }
   };
 
