@@ -73,6 +73,33 @@ describe('Kimi for Coding quota provider', () => {
     expect(result.usage.windows.weekly.usedPercent).toBeNull();
   });
 
+  it('passes an AbortSignal with a deadline to the primary usage fetch', async () => {
+    let captured;
+    const fetchImpl = async (_url, init) => {
+      captured = init;
+      return mockResponse({ usage: null, limits: [] });
+    };
+
+    const result = await fetchQuota({ readAuth, fetchImpl });
+
+    expect(result.ok).toBe(true);
+    expect(captured.signal).toBeInstanceOf(AbortSignal);
+    expect(captured.signal.aborted).toBe(false);
+  });
+
+  it('reports a stalled primary fetch as an error when its own 15s signal aborts it', async () => {
+    const fetchImpl = (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      });
+    });
+
+    const result = await fetchQuota({ readAuth, fetchImpl });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+  }, 25_000);
+
   it('reports not configured when no credentials are stored', async () => {
     const result = await fetchQuota({ readAuth: () => ({}), fetchImpl: async () => { throw new Error('Unexpected fetch'); } });
 

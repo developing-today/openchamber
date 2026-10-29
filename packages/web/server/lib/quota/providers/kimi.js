@@ -154,7 +154,8 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(15_000)
     });
 
     if (!response.ok) {
