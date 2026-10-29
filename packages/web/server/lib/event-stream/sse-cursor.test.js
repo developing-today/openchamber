@@ -70,10 +70,16 @@ describe('SSE cursor', () => {
     expect(cursor.lastEventId()).toBe('');
   });
 
-  it('drops a separator-less flood past the pending cap without corrupting the next block', () => {
+  it('discards an oversized block through its separator without corrupting the cursor', () => {
     const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
 
-    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    expect(cursor.observe('data: {"forged":"')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    // The remainder of the same oversized block: the `id:` line inside it belongs to the
+    // discarded block, so it must not move the cursor, and its terminating separator is
+    // consumed by the discard rather than closing a block.
+    expect(cursor.observe('aaaa"\nid: forged\n\n')).toEqual([]);
     expect(cursor.lastEventId()).toBe('ws:0');
 
     const blocks = cursor.observe('id: ws:9\ndata: {"n":9}\n\n');
@@ -81,10 +87,25 @@ describe('SSE cursor', () => {
     expect(cursor.lastEventId()).toBe('ws:9');
   });
 
+  it('discards through a separator that is split across chunks', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    expect(cursor.observe('y\n')).toEqual([]);
+    expect(cursor.observe('\n')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    const blocks = cursor.observe('id: ws:5\ndata: {"n":5}\n\n');
+    expect(blocks).toHaveLength(1);
+    expect(cursor.lastEventId()).toBe('ws:5');
+  });
+
   it('bounds pending at the default cap on a separator-less flood', () => {
     const cursor = createSseCursor();
 
     expect(cursor.observe('x'.repeat(SSE_CURSOR_MAX_PENDING_CHARS + 1))).toEqual([]);
+    // Terminate the discarded flood block, then a genuine block parses normally.
+    expect(cursor.observe('\n\n')).toEqual([]);
 
     const blocks = cursor.observe('id: ws:1\ndata: {"n":1}\n\n');
     expect(blocks).toHaveLength(1);

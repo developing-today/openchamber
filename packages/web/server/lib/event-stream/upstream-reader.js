@@ -93,6 +93,11 @@ export function createUpstreamSseReader({
   let lastEventId = typeof initialLastEventId === 'string' ? initialLastEventId : '';
   let stopListenerAttached = false;
   let consecutiveReconnectFailures = 0;
+  // Buffer overflows need their own counter: a successful HTTP response resets
+  // `consecutiveReconnectFailures` before the read starts, so an overflow-only loop would
+  // otherwise always reconnect at the base delay. This counter survives reconnects and is
+  // reset only when a complete event is delivered (healthy progress).
+  let overflowReconnectFailures = 0;
   // A function delay belongs to a caller that keeps its own backoff (space
   // events); a number is the base of this reader's exponential backoff.
   const nextReconnectDelay = () => (reconnectDelayMs instanceof Function
@@ -207,6 +212,7 @@ export function createUpstreamSseReader({
               buffer = buffer.slice(separatorIndex + 2);
               const envelope = parseBlock(block);
               if (envelope?.payload) {
+                overflowReconnectFailures = 0;
                 if (typeof envelope.eventId === 'string' && envelope.eventId.length > 0) {
                   lastEventId = envelope.eventId;
                 }
@@ -233,7 +239,8 @@ export function createUpstreamSseReader({
                 maxBufferedChars,
               });
               buffer = '';
-              consecutiveReconnectFailures += 1;
+              overflowReconnectFailures += 1;
+              consecutiveReconnectFailures = overflowReconnectFailures;
               controller.abort();
               break;
             }
@@ -243,6 +250,7 @@ export function createUpstreamSseReader({
             const block = buffer.trim();
             const envelope = parseBlock(block);
             if (envelope?.payload) {
+              overflowReconnectFailures = 0;
               if (typeof envelope.eventId === 'string' && envelope.eventId.length > 0) {
                 lastEventId = envelope.eventId;
               }

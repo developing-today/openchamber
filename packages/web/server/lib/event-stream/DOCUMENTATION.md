@@ -117,7 +117,7 @@ OpenCode cannot replay an OpenChamber local frame, and a raw OpenCode id carries
 
 ### Why partial SSE buffers are capped, and overflow drops the partial block
 
-A separator-less upstream stream otherwise grows the reader's and the proxy cursor's partial-block buffers without bound, and the stall watchdog cannot help because it resets on every chunk. Overflow in the reader is observable: it reports `upstream_buffer_overflow`, aborts, and reconnects from the last complete event id. The cursor has no error channel and its state only advances on complete blocks, so it drops the oversized partial block whole — keeping a tail could splice the flood onto the next block and corrupt its id — and parses the next complete block fresh.
+A separator-less upstream stream otherwise grows the reader's and the proxy cursor's partial-block buffers without bound, and the stall watchdog cannot help because it resets on every chunk. Overflow in the reader is observable: it reports `upstream_buffer_overflow`, aborts, and reconnects from the last complete event id, with a backoff counter that survives the reconnect's successful-response reset and only clears when a complete event is delivered, so a repeatedly flooding upstream backs off instead of hot-looping. The cursor has no error channel and its state only advances on complete blocks, so it drops the oversized partial block and keeps discarding through that block's terminating separator — resuming parsing immediately would let the remainder of the same block pose as a new block and corrupt its id — then parses the next complete block fresh.
 
 ### Why local frames are persisted and upstream frames are not
 

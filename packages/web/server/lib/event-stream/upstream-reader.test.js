@@ -190,6 +190,52 @@ describe('createUpstreamSseReader', () => {
     expect(attempt).toBe(2);
   });
 
+  it('escalates the reconnect delay across repeated buffer overflows', async () => {
+    const recordedDelays = [];
+    let attempt = 0;
+    let reader;
+
+    const setTimeoutImpl = (handler, ms) => {
+      recordedDelays.push(ms);
+      return globalThis.setTimeout(handler, 0);
+    };
+
+    reader = createUpstreamSseReader({
+      buildUrl: () => 'http://127.0.0.1:4096/api/event',
+      reconnectDelayMs: 10,
+      reconnectMaxDelayMs: 40,
+      reconnectBackoffMultiplier: 2,
+      maxBufferedChars: 32,
+      setTimeoutImpl,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        if (attempt <= 3) {
+          // Each attempt connects (HTTP 200) and then floods separator-less past the cap.
+          // The successful connect must not reset the overflow backoff schedule.
+          return createSseResponse({
+            signal: options.signal,
+            blocks: ['x'.repeat(40)],
+          });
+        }
+        return createSseResponse({
+          signal: options.signal,
+          blocks: [
+            'data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n',
+          ],
+        });
+      },
+      onError() {},
+      onEvent() {
+        reader.stop();
+      },
+    });
+
+    await reader.start();
+
+    expect(attempt).toBe(4);
+    expect(recordedDelays.slice(0, 3)).toEqual([10, 20, 40]);
+  });
+
   it('caps the partial buffer at the default bound on a single separator-less flood chunk', async () => {
     const errors = [];
     let reader;
