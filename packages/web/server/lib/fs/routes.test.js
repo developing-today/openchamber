@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createCommandTimeoutMs, createGitReadCacheTtlMs, createUploadMaxBytes, mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import { createCommandTimeoutMs, createExecOutputMaxBytes, createGitReadCacheTtlMs, createUploadMaxBytes, mintOutsideFileGrant, registerFsRoutes } from './routes.js';
 import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
 
 const createRouteRegistry = () => {
@@ -2743,11 +2743,75 @@ describe('GET /api/fs/find-in-files', () => {
   });
 });
 
+describe('fs exec output cap (#737)', () => {
+  const createStreamSpawn = ({ stdout = '', stderr = '' } = {}) => {
+    const kills = [];
+    const spawn = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = (signal) => { kills.push(signal); };
+      queueMicrotask(() => {
+        if (stdout) child.stdout.emit('data', Buffer.from(stdout));
+        if (stderr) child.stderr.emit('data', Buffer.from(stderr));
+        child.emit('close', 0, null);
+      });
+      return child;
+    });
+    return { spawn, kills };
+  };
+
+  beforeEach(() => {
+    process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES = '16';
+  });
+
+  afterEach(() => {
+    delete process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES;
+  });
+
+  it('returns output under the cap whole', async () => {
+    const { spawn, kills } = createStreamSpawn({ stdout: 'hello\n' });
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['echo hello'], cwd: '/repo' });
+
+    expect(res.body.results[0].success).toBe(true);
+    expect(res.body.results[0].stdout).toBe('hello');
+    expect(res.body.results[0].error).toBeUndefined();
+    expect(kills).toEqual([]);
+  });
+
+  it('kills the child and truncates stdout at the cap', async () => {
+    const { spawn, kills } = createStreamSpawn({ stdout: 'x'.repeat(64) });
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['yes x'], cwd: '/repo' });
+
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('output-too-large');
+    expect(res.body.results[0].stdout).toBe('x'.repeat(16));
+    expect(kills).toEqual(['SIGKILL']);
+  });
+
+  it('bounds stderr the same way', async () => {
+    const { spawn, kills } = createStreamSpawn({ stderr: 'e'.repeat(64) });
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['noisy'], cwd: '/repo' });
+
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('output-too-large');
+    expect(res.body.results[0].stderr).toBe('e'.repeat(16));
+    expect(kills).toEqual(['SIGKILL']);
+  });
+});
+
 describe('fs env readers (#696)', () => {
   const readers = [
     ['OPENCHAMBER_FS_EXEC_TIMEOUT_MS', createCommandTimeoutMs, 5 * 60 * 1000],
     ['OPENCHAMBER_GIT_READ_CACHE_TTL_MS', createGitReadCacheTtlMs, 30 * 1000],
     ['OPENCHAMBER_FS_UPLOAD_MAX_BYTES', createUploadMaxBytes, 100 * 1024 * 1024],
+    ['OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES', createExecOutputMaxBytes, 4 * 1024 * 1024],
   ];
 
   const readWith = (name, value, reader) => {
@@ -2782,5 +2846,6 @@ describe('fs env readers (#696)', () => {
     expect(readWith('OPENCHAMBER_GIT_READ_CACHE_TTL_MS', '0', createGitReadCacheTtlMs)).toBe(0);
     expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '0', createCommandTimeoutMs)).toBe(5 * 60 * 1000);
     expect(readWith('OPENCHAMBER_FS_UPLOAD_MAX_BYTES', '0', createUploadMaxBytes)).toBe(100 * 1024 * 1024);
+    expect(readWith('OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES', '0', createExecOutputMaxBytes)).toBe(4 * 1024 * 1024);
   });
 });
