@@ -9,6 +9,36 @@ import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
+// Speech generation is a synchronous user-facing call, usually against a
+// local model server the user pointed the service at. The OpenAI SDK
+// defaults (a 10 minute timeout and 2 retries) would hold a voice route
+// for about half an hour when that server wedges, so the deadline here is
+// the whole budget: 60 s, no retries. The user re-issues the request from
+// the UI; a stall retry only multiplies the wait.
+const SPEECH_REQUEST_TIMEOUT_MS = 60_000;
+
+// The SDK deadline covers the wait for the response. The speech body is
+// read after the create call settles, so that read races the same budget:
+// a server that answers and then stalls the body fails the request the
+// same way, and its stream is cancelled instead of held open.
+const readSpeechBody = async (response, timeoutMs) => {
+  let timer = null;
+  try {
+    return await Promise.race([
+      response.arrayBuffer(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          response.body?.cancel().catch(() => {});
+          reject(new Error(`Speech request timed out after ${timeoutMs} ms`));
+        }, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 // Voice options from OpenAI
 /** @public */
 export const TTS_VOICES = [
@@ -61,7 +91,7 @@ export class TTSService {
     // If API key changed or client doesn't exist, create new client
     if (apiKey && (!this._client || this._lastApiKey !== apiKey)) {
       const OpenAI = await loadOpenAI();
-      this._client = new OpenAI({ apiKey });
+      this._client = new OpenAI({ apiKey, timeout: SPEECH_REQUEST_TIMEOUT_MS, maxRetries: 0 });
       this._lastApiKey = apiKey;
     }
 
@@ -84,6 +114,7 @@ export class TTSService {
       instructions,
       apiKey,
       baseURL,
+      timeoutMs = SPEECH_REQUEST_TIMEOUT_MS,
     } = options;
 
     const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
@@ -99,6 +130,8 @@ export class TTSService {
       if (apiKey) clientOpts.apiKey = apiKey;
       if (!apiKey) clientOpts.apiKey = 'not-required';
       if (normalizedBaseURL) clientOpts.baseURL = normalizedBaseURL;
+      clientOpts.timeout = timeoutMs;
+      clientOpts.maxRetries = 0;
       const OpenAI = await loadOpenAI();
       client = new OpenAI(clientOpts);
     } else {
@@ -130,9 +163,9 @@ export class TTSService {
           };
 
       console.log('[TTSService] Generating speech — model:', model, 'voice:', voice, 'baseURL:', normalizedBaseURL ?? '(openai)');
-      const response = await client.audio.speech.create(speechParams);
+      const response = await client.audio.speech.create(speechParams, { timeout: timeoutMs });
 
-      const arrayBuffer = await response.arrayBuffer();
+      const arrayBuffer = await readSpeechBody(response, timeoutMs);
       // Servers that ignore `response_format` may still label the bytes
       // correctly (or return an unexpected type); pass the upstream label
       // through and only fall back to mp3 when the server omits the header.
@@ -151,6 +184,7 @@ export class TTSService {
    * Generate speech and return as a buffer (for caching)
    */
   async generateSpeechBuffer(options) {
+    const { timeoutMs = SPEECH_REQUEST_TIMEOUT_MS } = options;
     const client = await this._getClient();
     if (!client) {
       throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY environment variable or configure OpenAI in OpenCode.');
@@ -172,9 +206,9 @@ export class TTSService {
         speed,
         ...(instructions && { instructions }),
         response_format: 'mp3',
-      });
+      }, { timeout: timeoutMs });
 
-      const arrayBuffer = await response.arrayBuffer();
+      const arrayBuffer = await readSpeechBody(response, timeoutMs);
       return Buffer.from(arrayBuffer);
     } catch (error) {
       console.error('[TTSService] Error generating speech buffer:', error);
