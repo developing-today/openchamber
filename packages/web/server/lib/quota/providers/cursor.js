@@ -25,6 +25,7 @@ const REFRESH_URL = `${BASE_URL}/oauth/token`;
 const CLIENT_ID = 'KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB';
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const STATE_DB = join(homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+const SQLITE_READ_TIMEOUT_MS = 5_000;
 
 export const providerId = 'cursor';
 export const providerName = 'Cursor';
@@ -40,7 +41,7 @@ const readJwtPayload = (token) => {
   }
 };
 
-const readStateValue = (key) => {
+const readStateValue = (key, { timeoutMs = SQLITE_READ_TIMEOUT_MS } = {}) => {
   if (!existsSync(STATE_DB)) return null;
   try {
     const escapedKey = String(key).replace(/'/g, "''");
@@ -50,6 +51,7 @@ const readStateValue = (key) => {
       `SELECT value FROM ItemTable WHERE key = '${escapedKey}' LIMIT 1;`
     ], {
       encoding: 'utf8',
+      timeout: timeoutMs,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore']
     });
@@ -114,10 +116,10 @@ const persistAccessToken = (auth, accessToken) => {
   if (auth.source === 'managed') writeManagedCredential(providerId, { accessToken, refreshToken: auth.refreshToken || '' });
 };
 
-export const importCursorCredential = async () => {
+export const importCursorCredential = async ({ timeoutMs } = {}) => {
   const credential = {
-    accessToken: readStateValue('cursorAuth/accessToken') || '',
-    refreshToken: readStateValue('cursorAuth/refreshToken') || '',
+    accessToken: readStateValue('cursorAuth/accessToken', { timeoutMs }) || '',
+    refreshToken: readStateValue('cursorAuth/refreshToken', { timeoutMs }) || '',
   };
   if (!credential.accessToken && !credential.refreshToken) throw new Error('Cursor credentials are unavailable');
   const accessToken = await resolveCredentialAccessToken({ ...credential, source: 'import' });
