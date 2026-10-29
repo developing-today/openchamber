@@ -733,6 +733,44 @@ describe('OpenCode lifecycle', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
+  it('settles waitForAgentPresence within its deadline when /api/agent never answers', async () => {
+    const signals = [];
+    globalThis.fetch = vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/info')) {
+        return { ok: true, json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+      }
+      signals.push(init?.signal ?? null);
+      // A wedged OpenCode: accepts the request and never answers, but like a
+      // real fetch it rejects when the caller's signal aborts.
+      return new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const startedAt = Date.now();
+    await expect(runtime.waitForAgentPresence('build', 500, 50)).rejects.toThrow(
+      'Agent "build" not available after OpenCode restart',
+    );
+    // Without a per-attempt deadline the first stalled fetch never settles,
+    // so the wait would hang far past its own 500 ms deadline.
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+  });
+
   it('records an authoritative error terminal event when bootstrap fails', async () => {
     const runtime = createRuntime({
       syncFromHmrState: vi.fn(() => {
