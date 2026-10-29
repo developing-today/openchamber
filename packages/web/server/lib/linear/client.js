@@ -4,6 +4,7 @@ import {
   setLinearAuth,
   clearLinearAuth,
   isLinearAccessTokenStale,
+  readLinearVaultToken,
 } from './auth.js';
 import { refreshAccessToken } from './oauth.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
@@ -100,11 +101,27 @@ function readIdentity(payload) {
   };
 }
 
-export async function fetchLinearGraphql(accessToken, query, variables) {
-  const token = readTrimmedString(accessToken);
-  if (!token) {
+// Callers pass either a bare token string (OAuth, sent as Bearer) or an
+// authorization object from getValidLinearAuthorization: vault (apiKey)
+// credentials send the resolved personal key bare, without Bearer (#304).
+function normalizeAuthorization(input) {
+  if (isPlainObject(input)) {
+    const token = readTrimmedString(input.token);
+    if (!token) {
+      return null;
+    }
+    return { token, source: (input.source === 'vault' || input.kind === 'apiKey') ? 'vault' : 'oauth' };
+  }
+  const token = readTrimmedString(input);
+  return token ? { token, source: 'oauth' } : null;
+}
+
+export async function fetchLinearGraphql(authorization, query, variables) {
+  const authz = normalizeAuthorization(authorization);
+  if (!authz) {
     throw new LinearApiError('Linear is not connected', 401);
   }
+  const token = authz.token;
 
   const body = { query };
   if (isPlainObject(variables)) {
@@ -119,7 +136,7 @@ export async function fetchLinearGraphql(accessToken, query, variables) {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        Authorization: <redacted> === 'vault' ? token : `Bearer ${token}`,
         'public-file-urls-expire-in': LINEAR_PUBLIC_FILE_URL_TTL_SECONDS,
       },
       body: JSON.stringify(body),
@@ -157,8 +174,8 @@ export async function fetchLinearGraphql(accessToken, query, variables) {
   return data;
 }
 
-export async function fetchLinearIdentity(accessToken) {
-  const data = await fetchLinearGraphql(accessToken, VIEWER_QUERY);
+export async function fetchLinearIdentity(authorization) {
+  const data = await fetchLinearGraphql(authorization, VIEWER_QUERY);
   const identity = readIdentity({ data });
   if (!identity) {
     throw new LinearApiError('Linear GraphQL response did not include a viewer', 502);
@@ -187,7 +204,22 @@ export async function getValidLinearAccessToken(workspaceId) {
   const auth = workspaceId
     ? getLinearAuthByWorkspaceId(workspaceId)
     : getLinearAuth();
-  if (!auth?.accessToken) {
+  if (!auth) {
+    return null;
+  }
+  if (auth.tokenReference) {
+    // Vault credential: resolve at call time; the key lives in memory only.
+    // An unresolvable reference is a connect error, not a silent 401 loop.
+    const outcome = await readLinearVaultToken(auth.tokenReference);
+    if (!outcome?.ok) {
+      throw new LinearApiError(
+        `Linear vault credential could not be read (${outcome?.reason || 'vault-unavailable'})`,
+        502,
+      );
+    }
+    return outcome.value;
+  }
+  if (!auth.accessToken) {
     return null;
   }
   if (!isLinearAccessTokenStale(auth.expiresAt)) {
@@ -215,4 +247,27 @@ export async function getValidLinearAccessToken(workspaceId) {
     });
   inFlightRefreshByWorkspace.set(key, promise);
   return promise;
+}
+
+/**
+ * The authorization for the current (or named) workspace: `{ token, source }`
+ * where source is 'vault' for a 1Password API-key credential (token sent
+ * bare) or 'oauth' (token sent as Bearer). Null when not connected.
+ */
+export async function getValidLinearAuthorization(workspaceId) {
+  const auth = workspaceId
+    ? getLinearAuthByWorkspaceId(workspaceId)
+    : getLinearAuth();
+  if (!auth) {
+    return null;
+  }
+  const token = await getValidLinearAccessToken(workspaceId);
+  if (!token) {
+    return null;
+  }
+  return {
+    token,
+    source: auth.tokenReference ? 'vault' : 'oauth',
+    workspaceId: auth.workspaceId,
+  };
 }

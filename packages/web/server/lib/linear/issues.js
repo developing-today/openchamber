@@ -1,5 +1,5 @@
 import { clearLinearAuth, getLinearAuth, getLinearAuthByWorkspaceId } from './auth.js';
-import { fetchLinearGraphql, getValidLinearAccessToken } from './client.js';
+import { fetchLinearGraphql, getValidLinearAuthorization } from './client.js';
 import { isPlainObject, isString, readFiniteNumber, readTrimmedString } from './parse.js';
 
 const PAGE_SIZE = 50;
@@ -398,11 +398,11 @@ function readIssueNodes(connection) {
 
 async function withLinearToken(run, workspaceId) {
   try {
-    const token = await getValidLinearAccessToken(workspaceId);
-    if (!token) {
+    const authorization = await getValidLinearAuthorization(workspaceId);
+    if (!authorization) {
       return { connected: false };
     }
-    return await run(token);
+    return await run(authorization);
   } catch (error) {
     if (error?.status === 401) {
       const failed = workspaceId
