@@ -34,16 +34,29 @@ on:
 permissions:
   contents: read
 
-# Exactly one live sweeper run: a new tick cancels a still-running
-# previous sweep (its passes are idempotent label/comment syncs).
-concurrency:
-  group: repo-sweeper
-  cancel-in-progress: true
+# Concurrency audit (#758, re-checking the #77/#84 lessons): this
+# workflow deliberately has NO workflow-level concurrency block. A
+# workflow-level cancel-in-progress cancels the whole run, intake
+# legs included, and this workflow mixes two kinds of work:
+#   - The label passes (pr-intake, merge-conflict, issue-collect)
+#     are idempotent syncs. Each one carries its own job-level
+#     group with cancel-in-progress: true, so a new tick replaces
+#     only the same pass in an older run.
+#   - issue-intake legs carry a per-issue job-level group with
+#     cancel-in-progress as the literal false, so a tick can never
+#     cancel a running intake, however long it takes. The group
+#     sets no queue: max, so GitHub keeps at most one pending leg
+#     per issue and a newer sweep displaces that pending leg. A
+#     leg that starts after the original intake already posted
+#     re-checks the marker in its post step and posts nothing.
 
 jobs:
   pr-intake:
     name: Sweep PR intake (size + parking labels)
     timeout-minutes: 20
+    concurrency:
+      group: repo-sweeper-pr-intake
+      cancel-in-progress: true
     if: ${{ github.repository == 'openchamber/openchamber' || github.repository == 'developing-today/openchamber' }}
     runs-on: ubuntu-latest
     permissions:
@@ -258,6 +271,9 @@ jobs:
   merge-conflict:
     name: Sweep merge-conflict labels
     timeout-minutes: 10
+    concurrency:
+      group: repo-sweeper-merge-conflict
+      cancel-in-progress: true
     if: ${{ github.repository == 'openchamber/openchamber' || github.repository == 'developing-today/openchamber' }}
     runs-on: ubuntu-latest
     permissions:
@@ -294,6 +310,9 @@ jobs:
   issue-collect:
     name: Collect un-intaked open issues
     timeout-minutes: 10
+    concurrency:
+      group: repo-sweeper-issue-collect
+      cancel-in-progress: true
     if: ${{ github.repository == 'openchamber/openchamber' || github.repository == 'developing-today/openchamber' }}
     runs-on: ubuntu-latest
     permissions: {}
@@ -345,6 +364,14 @@ jobs:
   issue-intake:
     name: Intake issue ${{ matrix.target.number }}
     timeout-minutes: 35
+    # Per-issue group: legs for different issues run in parallel,
+    # legs for the same issue serialize. Literal false, per the
+    # #84 audit in main-broken.yml: a running intake is never
+    # cancelled, and with no queue: max at most one leg per issue
+    # waits pending.
+    concurrency:
+      group: repo-sweeper-issue-intake-${{ matrix.target.number }}
+      cancel-in-progress: false
     needs: issue-collect
     if: ${{ needs.issue-collect.outputs.targets != '[]' }}
     strategy:
@@ -496,6 +523,14 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ matrix.target.number }}
         run: |
+          # A pending duplicate leg for this issue can start after
+          # the original leg already posted its comment. Re-check
+          # the marker against the live comments before posting.
+          if gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --paginate --jq '.[].body // ""' | grep -qF '**For the maintainer:**'; then
+            echo "::notice::an intake comment already exists for #${ISSUE_NUMBER}; skipping the duplicate post and label sync"
+            exit 0
+          fi
+
           message="$RUNNER_TEMP/intake-message.md"
           trailer_pattern='^[[:space:]]*<!-- intake (\{.*\}) -->[[:space:]]*$'
 
