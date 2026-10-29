@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchQuota, isConfigured, readMuseAccountToken } from './meta.js';
+import { fetchQuota, isConfigured, readMuseAccountToken, resetMetaQuotaCache } from './meta.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetMetaQuotaCache();
 });
 
 const jsonResponse = (body, { ok = true, status = 200 } = {}) => ({
@@ -180,7 +181,22 @@ describe('Meta quota windows', () => {
 
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
-    expect(result.error).toBe('No quota data in response');
+    expect(result.error).toBe('Usage unknown — Meta plan-usage read returned no quota data');
+    expect(result.failureClass).toBe('no-data');
+    expect(result.lastSuccessAt).toBeNull();
+  });
+
+  it('carries the last success timestamp on a later failure, and the failure class', async () => {
+    const okFetch = vi.fn().mockResolvedValue(jsonResponse(USAGE_PAYLOAD));
+    const okResult = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl: okFetch });
+    expect(okResult.ok).toBe(true);
+    expect(okResult.lastSuccessAt).toBe(okResult.fetchedAt);
+
+    const failFetch = vi.fn().mockResolvedValue(jsonResponse({}, { ok: false, status: 500 }));
+    const failResult = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl: failFetch });
+    expect(failResult.ok).toBe(false);
+    expect(failResult.failureClass).toBe('http-error');
+    expect(failResult.lastSuccessAt).toBe(okResult.fetchedAt);
   });
 });
 
@@ -300,6 +316,34 @@ describe('Meta failure classes', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Invalid response from provider');
+  });
+
+  it('reports a body-read transport failure as transport, not malformed', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new TypeError('terminated'); },
+    });
+
+    const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+    expect(result.ok).toBe(false);
+    expect(result.failureClass).toBe('transport');
+    expect(result.error).toBe('terminated');
+  });
+
+  it('reports a body-read timeout as a timeout, not malformed', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new DOMException('The operation timed out.', 'TimeoutError'); },
+    });
+
+    const result = await fetchQuota({ readAuth: mintedKeyAuth, readAccountToken: accountToken, fetchImpl });
+
+    expect(result.ok).toBe(false);
+    expect(result.failureClass).toBe('transport');
+    expect(result.error).toBe('Request timed out');
   });
 
   it('reports a normalized timeout', async () => {
