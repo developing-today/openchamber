@@ -17,6 +17,26 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const buildTaskKey = (projectID, taskID) => `${projectID}:${taskID}`;
 
+// Compose abort signals so any one of them aborts the result, mirroring
+// AbortSignal.any where the runtime has it and composing manually where
+// it does not (the oldest supported hosts lack AbortSignal.any). A single
+// present signal passes through unchanged.
+const composeAbortSignals = (signals) => {
+  const present = signals.filter(Boolean);
+  if (present.length === 0) return null;
+  if (present.length === 1) return present[0];
+  if (AbortSignal.any) return AbortSignal.any(present);
+  const controller = new AbortController();
+  for (const signal of present) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
+};
+
 const parseTimeParts = (time) => {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof time === 'string' ? time : '');
   if (!match) {
@@ -281,14 +301,21 @@ export const createScheduledTasksRuntime = (deps) => {
   // Every OpenCode route lives under /api in v2 and the client appends it, so
   // the client only wants the origin. Directory scoping is a request header.
   const openCodeOrigin = () => new URL(buildOpenCodeUrl('/api/info', '')).origin;
-  const createScopedClient = (directory) => OpenCode.make({
+  const createScopedClient = (directory, runSignal = null) => OpenCode.make({
     baseUrl: openCodeOrigin(),
     headers: {
       ...getOpenCodeAuthHeaders(),
       ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
     },
-    fetch: async (...args) => {
-      const response = await fetch(...args);
+    // The run signal is composed with any signal the SDK put on the
+    // request, never replacing it: aborting the run (the watchdog) cancels
+    // whatever call is in flight.
+    fetch: async (input, init) => {
+      const requestSignal = init?.signal ?? ('signal' in Object(input) ? input.signal : null);
+      const signal = composeAbortSignals([runSignal, requestSignal]);
+      const requestInit = { ...init };
+      if (signal) requestInit.signal = signal;
+      const response = await fetch(input, requestInit);
       assertOpenCodeApiResponse(response);
       return response;
     },
@@ -543,7 +570,7 @@ export const createScheduledTasksRuntime = (deps) => {
     ? sessionKnowledgeRuntime.sync(sessionID, projectPath)
     : Promise.resolve(false));
 
-  const runPrompt = async ({ client, sessionID, projectPath, task, goalSpec = null }) => {
+  const runPrompt = async ({ client, sessionID, projectPath, task, goalSpec = null, signal = null }) => {
     await syncKnowledge(sessionID, projectPath);
 
     // A v2 prompt carries a single authored text. The goal briefing therefore
@@ -552,9 +579,11 @@ export const createScheduledTasksRuntime = (deps) => {
     // execution unless `resume: false`: without it the model would start on
     // the briefing alone, before the task arrived.
     if (task.execution.goalEnabled) {
+      signal?.throwIfAborted();
       await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget, goalSpec), resume: false });
     }
 
+    signal?.throwIfAborted();
     await client.session.prompt({
       sessionID,
       text: expandSnippets(task.execution.prompt, projectPath),
@@ -582,16 +611,18 @@ export const createScheduledTasksRuntime = (deps) => {
     return command ? { ...parsed, template: command.template } : null;
   };
 
-  const runScheduledCommand = async ({ client, sessionID, projectPath, command, goalIntro = null }) => {
+  const runScheduledCommand = async ({ client, sessionID, projectPath, command, goalIntro = null, signal = null }) => {
     await syncKnowledge(sessionID, projectPath);
     // The command route takes no extra parts, so a goal objective the writer
     // rewrote, which is not the command's own text, goes in first as a
     // synthetic message that does not start execution.
     if (goalIntro) {
+      signal?.throwIfAborted();
       await client.session.synthetic({ sessionID, text: goalIntro, resume: false });
     }
     // Agent, model and variant are session properties in v2 and were already
     // set when the run created the session; the command body only carries text.
+    signal?.throwIfAborted();
     await client.session.command({
       sessionID,
       // OpenCode 2.0.8 renamed the command body field `command` to `name`.
@@ -600,7 +631,7 @@ export const createScheduledTasksRuntime = (deps) => {
     });
   };
 
-  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {
+  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated, signal = null) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -620,13 +651,14 @@ export const createScheduledTasksRuntime = (deps) => {
 
     const baseUrl = openCodeOrigin();
     const authHeaders = getOpenCodeAuthHeaders();
-    const client = createScopedClient(directory);
+    const client = createScopedClient(directory, signal);
     const selection = await resolveRunSelection(projectID, task);
 
     // Agent, model and variant belong to the session in v2: a scheduled run
     // fixes them here instead of repeating them on every prompt.
     let sessionID;
     try {
+      signal?.throwIfAborted();
       const session = await client.session.create({
         title,
         location: { directory },
@@ -706,9 +738,10 @@ export const createScheduledTasksRuntime = (deps) => {
         projectPath: directory,
         command: scheduledCommand,
         goalIntro: goalSpec ? buildGoalIntroText(task.execution.goalTokenBudget, goalSpec) : null,
+        signal,
       });
     } else {
-      await runPrompt({ client, sessionID, projectPath: directory, task, goalSpec });
+      await runPrompt({ client, sessionID, projectPath: directory, task, goalSpec, signal });
     }
 
     const finishedAt = Date.now();
@@ -988,10 +1021,16 @@ export const createScheduledTasksRuntime = (deps) => {
       };
 
       try {
-        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
+        // One controller per run: when the watchdog fires it aborts the
+        // run at the same moment it rejects the race, so the run is
+        // cancelled — its in-flight call aborts and no later step can
+        // dispatch — not merely disowned while it keeps executing.
+        const runController = new AbortController();
+        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession, runController.signal);
         let timeoutID;
         const timeoutPromise = new Promise((_, reject) => {
           timeoutID = setTimeout(() => {
+            runController.abort(new Error('scheduled task run timed out'));
             reject(new Error('scheduled task run timed out'));
           }, maxRunDurationMs);
         });
@@ -1000,6 +1039,11 @@ export const createScheduledTasksRuntime = (deps) => {
           if (timeoutID) {
             clearTimeout(timeoutID);
           }
+          // The race has settled. A run that lost to the watchdog unwinds
+          // in the background on its aborted signal; its rejection is
+          // expected and must never surface, and terminal state stays
+          // recorded solely by this caller.
+          runPromise.catch(() => {});
         });
         sessionID = result.sessionID;
         sessionDirectory = result.directory;

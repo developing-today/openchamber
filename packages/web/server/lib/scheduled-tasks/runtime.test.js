@@ -450,6 +450,73 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(patches[startIndex + 1]).toEqual({ lastSessionId: 'ses_failed' });
     expect(patches.at(-1)).toMatchObject({ lastStatus: 'error', lastSessionId: 'ses_failed' });
   });
+
+  it('cancels the run when the watchdog fires: nothing is dispatched after the timeout', async () => {
+    const posts = [];
+    let createSignal = null;
+    let stallCreate = true;
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push(pathname);
+      if (pathname === '/api/session' && init.method === 'POST' && stallCreate) {
+        createSignal = init.signal;
+        // A create that only settles when its signal aborts, the way a
+        // stalled OpenCode does once the watchdog cancels the run.
+        return new Promise((_, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        });
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      maxRunDurationMs: 50,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('timed out');
+    // The composed run signal reached the transport and aborted at the cap.
+    expect(createSignal?.aborted).toBe(true);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'error' });
+
+    // Give the losing run every chance to leak its prompt the way it used
+    // to (the creator probe saw it land 800 ms after the timeout record).
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(posts.filter((pathname) => pathname.endsWith('/prompt') || pathname.endsWith('/command') || pathname.endsWith('/synthetic'))).toEqual([]);
+
+    // The freed slot is truthful: a successor run completes normally.
+    stallCreate = false;
+    posts.length = 0;
+    const second = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+    expect(second.ok).toBe(true);
+    expect(posts.some((pathname) => pathname.endsWith('/prompt'))).toBe(true);
+  });
 });
 
 describe('scheduled-tasks runtime chats scope', () => {

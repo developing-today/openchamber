@@ -166,6 +166,10 @@ stored next to `useDefaults` is kept only for when the task is pinned again.
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
+  - The max-run watchdog cancels the run it times out: a per-run abort
+    signal reaches the run's scoped client (composed with any request
+    signal) and the dispatch steps check it before sending, so a timed-out
+    run is inert — not still executing — when its slot is released
   - Emits OpenChamber task-run events
 
 - `packages/web/server/lib/scheduled-tasks/loops.js`
