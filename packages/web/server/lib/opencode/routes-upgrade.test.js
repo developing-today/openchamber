@@ -217,6 +217,32 @@ describe('OpenCode version route probe deadlines (#796)', () => {
     expect(infoCall[1].signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('reads the /api/info body before the registry settles, so a slow registry cannot abort a prompt answer', async () => {
+    setOpenCodeInfoDeadlineForTest(50);
+    globalThis.fetch = vi.fn(async (input, init) => {
+      if (String(input).endsWith('/api/info')) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => {
+            // A real aborted response rejects its body read; the prompt
+            // answer must already be consumed by then.
+            if (init?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+            return { version: '2.0.21', pid: 1, urls: [], paths: { tmp: '/tmp' } };
+          },
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return jsonResponse({ version: '2.0.22' });
+    });
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(200);
+
+    expect(response.body).toMatchObject({ available: true, currentVersion: '2.0.21', latestVersion: '2.0.22' });
+  });
+
   it('settles /api/opencode/upgrade-status with its error shape when /api/info never answers', async () => {
     setOpenCodeInfoDeadlineForTest(50);
     globalThis.fetch = vi.fn(stalledInfoFetch);
