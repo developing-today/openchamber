@@ -2608,6 +2608,19 @@ describe('Kimi for Coding credential lookup (VS Code parity)', () => {
     assert.equal(authorization, 'Bearer legacy-key');
   });
 
+  test('passes a deadline signal to the Kimi Code usages fetch', async () => {
+    let usagesSignal: unknown;
+    const result = await fetchKimiQuota({
+      readAuth: () => ({ 'kimi-for-coding': { key: 'test-token' } }),
+      fetchImpl: async (url, init) => {
+        if (url === 'https://api.kimi.com/coding/v1/usages') usagesSignal = init?.signal;
+        return Response.json({ usage: null, limits: [] });
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.ok(usagesSignal instanceof AbortSignal);
+  });
+
   test('shows the pay-as-you-go balance when the Kimi Code address refuses a platform key', async () => {
     const urls: string[] = [];
     const result = await fetchKimiQuota({
