@@ -8,6 +8,7 @@ import { fetchQuota, useZaiGiftReset } from './zai.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const mockResponse = (body) => ({
@@ -259,6 +260,49 @@ describe('Z.ai quota provider', () => {
     expect(result.ok).toBe(true);
     expect(windows['5h'].giftReset).toBeUndefined();
   });
+
+  it('times out a stalled quota call instead of hanging', async () => {
+    const nativeTimeout = AbortSignal.timeout;
+    const requestedDeadlines = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      requestedDeadlines.push(milliseconds);
+      // Abort quickly so the test proves the deadline path without waiting the
+      // production 15 seconds; the collected argument keeps it asserted.
+      return nativeTimeout(1);
+    });
+    vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(requestedDeadlines[0]).toBe(15_000);
+  });
+
+  it('leaves the quota result intact when the gift-reset call stalls', async () => {
+    const nativeTimeout = AbortSignal.timeout;
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => nativeTimeout(1));
+    vi.stubGlobal('fetch', vi.fn((url, options) => {
+      if (String(url).includes('customer-package-reset/list')) {
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+        });
+      }
+      return Promise.resolve(mockResponse({
+        data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 42 }] },
+      }));
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(42);
+    expect(result.usage.windows['5h'].giftReset).toBeUndefined();
+  });
 });
 
 describe('Z.ai gift reset activation', () => {
@@ -303,5 +347,16 @@ describe('Z.ai gift reset activation', () => {
 
     await expect(useZaiGiftReset({ recordId: 1, resetType: 'FOREVER' })).rejects.toThrow('Invalid gift reset request');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('aborts a stalled activation instead of hanging', async () => {
+    const nativeTimeout = AbortSignal.timeout;
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => nativeTimeout(1));
+    vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    })));
+
+    await expect(useZaiGiftReset({ recordId: 1, resetType: 'WEEK' }))
+      .rejects.toMatchObject({ name: 'TimeoutError' });
   });
 });

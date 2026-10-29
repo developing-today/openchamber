@@ -119,13 +119,16 @@ export const fetchQuota = async () => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch('https://open.bigmodel.cn/api/monitor/usage/quota/limit', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -195,12 +198,17 @@ export const fetchQuota = async () => {
       planLabel: asNonEmptyString(payload?.data?.level)
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : error instanceof Error ? error.message : 'Request failed'
     });
   }
 };

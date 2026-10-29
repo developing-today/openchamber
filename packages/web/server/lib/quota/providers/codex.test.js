@@ -4,10 +4,11 @@ vi.mock('../../opencode/auth.js', () => ({
   readOpenCodeCredentials: async () => ({ openai: { access: 'test-token' } }),
 }));
 
-import { fetchQuota } from './codex.js';
+import { fetchQuota, fetchQuotaForCredential } from './codex.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const mockUsage = (rateLimit) => {
@@ -165,5 +166,30 @@ describe('Codex quota windows', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
+  });
+
+  it.each([
+    ['the active credential', () => fetchQuota()],
+    ['a stored credential row', () => fetchQuotaForCredential({ value: { access: 'test-token' } })],
+  ])('times out a stalled endpoint for %s instead of hanging', async (_path, run) => {
+    const nativeTimeout = AbortSignal.timeout;
+    const requestedDeadlines = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      requestedDeadlines.push(milliseconds);
+      // Abort quickly so the test proves the deadline path without waiting the
+      // production 15 seconds; the collected argument keeps it asserted.
+      return nativeTimeout(1);
+    });
+    vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    })));
+
+    const result = await run();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(requestedDeadlines).toEqual([15_000]);
   });
 });

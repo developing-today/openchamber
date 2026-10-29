@@ -16,6 +16,7 @@ import { fetchQuota, fetchQuotaAddon } from './copilot.js';
 afterEach(() => {
   copilotAuth.enterpriseUrl = null;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const payload = {
@@ -177,5 +178,30 @@ describe('GitHub Copilot quota provider', () => {
     expect(result.ok).toBe(true);
     expect(result.usage.windows.premium_interactions.usedPercent).toBeCloseTo(24.5);
     expect(result.usage.windows.premium_interactions.valueLabel ?? null).toBeNull();
+  });
+
+  it.each([
+    ['primary provider', fetchQuota],
+    ['add-on provider', fetchQuotaAddon],
+  ])('times out a stalled endpoint for the %s instead of hanging', async (_name, fetchProviderQuota) => {
+    const nativeTimeout = AbortSignal.timeout;
+    const requestedDeadlines = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      requestedDeadlines.push(milliseconds);
+      // Abort quickly so the test proves the deadline path without waiting the
+      // production 15 seconds; the collected argument keeps it asserted.
+      return nativeTimeout(1);
+    });
+    vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    })));
+
+    const result = await fetchProviderQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(requestedDeadlines).toEqual([15_000]);
   });
 });

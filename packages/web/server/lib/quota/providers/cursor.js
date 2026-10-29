@@ -135,7 +135,8 @@ const refreshAccessToken = async (auth) => {
       grant_type: 'refresh_token',
       client_id: CLIENT_ID,
       refresh_token: auth.refreshToken
-    })
+    }),
+    signal: AbortSignal.timeout(15_000)
   });
 
   const body = await response.json().catch(() => null);
@@ -175,7 +176,8 @@ const connectPost = async (url, accessToken, body = {}) => {
       'Content-Type': 'application/json',
       'Connect-Protocol-Version': '1'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000)
   });
 
   if (!response.ok) {
@@ -190,7 +192,8 @@ const connectGet = async (url, accessToken) => {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
-    }
+    },
+    signal: AbortSignal.timeout(15_000)
   });
 
   if (!response.ok) {
@@ -361,18 +364,21 @@ export const isConfigured = () => {
 };
 
 export const fetchQuota = async () => {
-  const accessToken = await resolveAccessToken();
-  if (!accessToken) {
-    return buildResult({
-      providerId,
-      providerName,
-      ok: false,
-      configured: false,
-      error: 'Not configured'
-    });
-  }
-
   try {
+    // Token refresh runs inside the deadline too: a stalled refresh is the
+    // first request a stale Cursor credential makes, and it must not hang the
+    // route before the first usage call is even attempted.
+    const accessToken = await resolveAccessToken();
+    if (!accessToken) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: false,
+        error: 'Not configured'
+      });
+    }
+
     const [usage, plan, credits] = await Promise.all([
       connectPost(USAGE_URL, accessToken),
       connectPost(PLAN_URL, accessToken).catch(() => null),
@@ -433,12 +439,17 @@ export const fetchQuota = async () => {
       usage: { windows }
     });
   } catch (error) {
+    // A stalled endpoint reaches here as the AbortSignal.timeout DOMException;
+    // report it as a deadline, not as the runtime's abort wording.
+    const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : error instanceof Error ? error.message : 'Request failed'
     });
   }
 };

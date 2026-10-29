@@ -38,8 +38,25 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   delete process.env.CURSOR_TOKEN;
+  delete process.env.CURSOR_REFRESH_TOKEN;
 });
+
+const stallFetch = () => {
+  const nativeTimeout = AbortSignal.timeout;
+  const requestedDeadlines = [];
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+    requestedDeadlines.push(milliseconds);
+    // Abort quickly so the test proves the deadline path without waiting the
+    // production 15 seconds; the collected argument keeps it asserted.
+    return nativeTimeout(1);
+  });
+  vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+  })));
+  return requestedDeadlines;
+};
 
 describe('Cursor quota', () => {
   it('does not fabricate on-demand exhaustion when spendLimitUsage omits the remaining amount', async () => {
@@ -413,5 +430,30 @@ describe('Cursor quota', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('No active Cursor subscription');
+  });
+
+  it('times out a stalled usage call instead of hanging', async () => {
+    const requestedDeadlines = stallFetch();
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(requestedDeadlines[0]).toBe(15_000);
+  });
+
+  it('times out a stalled token refresh instead of hanging', async () => {
+    delete process.env.CURSOR_TOKEN;
+    process.env.CURSOR_REFRESH_TOKEN = 'refresh-token';
+    const requestedDeadlines = stallFetch();
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Request timed out');
+    expect(requestedDeadlines).toEqual([15_000]);
   });
 });

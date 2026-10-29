@@ -22,6 +22,7 @@ const provider = createMiniMaxCodingPlanProvider({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   configureOpenCodeCredentials(null);
   credentialEntries = [{ active: true, integrationID: 'minimax-test', value: { type: 'key', key: 'test-key' } }];
 });
@@ -221,5 +222,29 @@ describe('MiniMax shared provider', () => {
     const result = await provider.fetchQuota();
     expect(result.usage.windows['5h'].windowSeconds).toBeNull();
     expect(result.usage.windows.weekly.windowSeconds).toBeNull();
+  });
+
+  it('times out a stalled endpoint instead of hanging or spending a second deadline', async () => {
+    const nativeTimeout = AbortSignal.timeout;
+    const requestedDeadlines = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      requestedDeadlines.push(milliseconds);
+      // Abort quickly so the test proves the deadline path without waiting the
+      // production 15 seconds; the collected argument keeps it asserted.
+      return nativeTimeout(1);
+    });
+    const fetchMock = vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await provider.fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(requestedDeadlines).toEqual([15_000]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

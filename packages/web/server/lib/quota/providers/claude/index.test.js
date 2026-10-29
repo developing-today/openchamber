@@ -45,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('Claude quota provider', () => {
@@ -144,5 +145,27 @@ describe('Claude quota provider', () => {
     expect(result.ok).toBe(false);
     expect(result.usage).toBeNull();
     expect(result.error).toBe('socket hang up');
+  });
+
+  it('times out a stalled endpoint instead of hanging', async () => {
+    const nativeTimeout = AbortSignal.timeout;
+    const requestedDeadlines = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      requestedDeadlines.push(milliseconds);
+      // Abort quickly so the test proves the deadline path without waiting the
+      // production 15 seconds; the collected argument keeps it asserted.
+      return nativeTimeout(1);
+    });
+    vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(requestedDeadlines).toEqual([15_000]);
   });
 });

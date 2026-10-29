@@ -42,6 +42,7 @@ const isUsablePayload = (payload) => {
 };
 
 const fetchEndpoint = async (url, apiKey) => {
+  const timeoutSignal = AbortSignal.timeout(15_000);
   try {
     const response = await fetch(url, {
       method: 'GET',
@@ -49,12 +50,21 @@ const fetchEndpoint = async (url, apiKey) => {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: timeoutSignal,
     });
     if (!response.ok) return null;
     const payload = await response.json();
     if (!isUsablePayload(payload)) return null;
     return payload;
-  } catch {
+  } catch (error) {
+    // A stalled endpoint is not the "this plan has no token endpoint" case the
+    // fallback covers: the second endpoint would spend another deadline on a
+    // provider that is not answering, so report the timeout instead.
+    if (error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    )) {
+      throw new Error('Request timed out');
+    }
     return null;
   }
 };

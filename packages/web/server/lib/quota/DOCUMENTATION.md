@@ -77,6 +77,18 @@ A module may also export `fetchQuotaForCredential(credentialRow)` to opt into pe
 
 exe.dev, Cursor, and ZenMux credentials are explicitly managed through Settings. exe.dev usage uses a separately generated HTTPS API token restricted to `billing credits usage` and aggregates every `exe-*` model provider into one monthly credit window. Generate the token with `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`. ZenMux usage uses an optional Platform API key pasted on the Usage page; the OpenCode chat key is never used, and a missing Platform API key means ZenMux quota is not fetched. The server validates managed credentials before atomic `0600` writes and never returns secrets through its API. OpenChamber never scans browser cookie stores or automatically reads Cursor storage; Cursor import is an explicit one-time user action and never modifies Cursor's database.
 
+## Request deadlines
+
+Every provider HTTP call carries an abort deadline. The quota providers use 15 seconds (`AbortSignal.timeout(15_000)`; xAI and OpenCode Go name the same 15 seconds `REQUEST_TIMEOUT_MS`). A stalled endpoint therefore answers that provider's normal failure result, `ok: false` with `Request timed out`, instead of holding the quota route open. The same deadline covers the calls that are not the main quota read: Cursor's token refresh, and Z.ai's gift-reset list and activation. Result shapes are unchanged.
+
+`fetchQuotaForProvider` in `providers/index.js` coalesces concurrent refreshes in `pendingFetches`. The deadline settles the provider's promise, so the existing `.finally` releases the entry and the next request fetches fresh instead of reusing a promise that will never settle.
+
+The MiniMax providers report a timed-out first endpoint immediately instead of trying the coding-plan endpoint: the fallback exists for a plan that does not serve the token-plan route, and a provider that failed to answer would spend a second deadline on the same silence.
+
+### Why the deadline lives on each fetch and not in the dispatcher
+
+A dispatcher-level timeout would have to abandon the provider's pending promise, but that promise keeps its `pendingFetches` entry until it settles, which wedges the provider exactly as before. Bounding the fetch lets the provider return its own error result, which also releases the entry. The CLI's own per-provider timeout (see Entrypoints) is a separate, row-level guard for the process that has no server to ask.
+
 Command Code usage resolves account scope through `GET /alpha/whoami`, then reads server-backed credit balances and five-hour/weekly limits from `GET /alpha/billing/credits?orgId=...`. Personal accounts return `org: null` and use `/alpha/billing/credits` without an `orgId`; organization accounts include their organization id. Web/Electron and VS Code read the standard `command-code` OpenCode auth entry (including OAuth `access`) or `COMMAND_CODE_API_KEY`; credentials remain in the owning runtime and are never returned to shared UI.
 
 ## Open Design (AMR) quota

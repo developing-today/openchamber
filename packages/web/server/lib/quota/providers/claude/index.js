@@ -91,10 +91,14 @@ const fetchQuotaUncoalesced = async () => {
       headers: {
         Authorization: `Bearer ${credential.accessToken}`,
         'anthropic-beta': OAUTH_BETA_HEADER
-      }
+      },
+      signal: AbortSignal.timeout(15_000)
     });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : 'Request failed');
+    const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+    return failure(isTimeout
+      ? 'Request timed out'
+      : error instanceof Error ? error.message : 'Request failed');
   }
 
   if (response.status === 429) {
