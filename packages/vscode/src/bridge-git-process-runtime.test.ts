@@ -136,6 +136,8 @@ test('git exec env readers fall back to the documented defaults', () => {
     process.env.OPENCHAMBER_GIT_EXEC_TIMEOUT_MS = '5.9';
     process.env.OPENCHAMBER_GIT_EXEC_OUTPUT_MAX_BYTES = '0';
     assert.equal(createGitExecTimeoutMs(), GIT_EXEC_DEFAULT_TIMEOUT_MS);
+    process.env.OPENCHAMBER_GIT_EXEC_TIMEOUT_MS = '2147483648';
+    assert.equal(createGitExecTimeoutMs(), GIT_EXEC_DEFAULT_TIMEOUT_MS);
     assert.equal(createGitExecMaxOutputBytes(), GIT_EXEC_DEFAULT_MAX_OUTPUT_BYTES);
   } finally {
     if (timeoutEnv === undefined) delete process.env.OPENCHAMBER_GIT_EXEC_TIMEOUT_MS;

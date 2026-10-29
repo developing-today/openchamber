@@ -105,7 +105,10 @@ export const GIT_EXEC_DEFAULT_MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 
 export const createGitExecTimeoutMs = () => {
   const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_EXEC_TIMEOUT_MS);
-  if (raw !== null && raw >= 0) return raw;
+  // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
+  // instead, so a larger configured deadline falls back to the default
+  // rather than expiring every command immediately.
+  if (raw !== null && raw >= 0 && raw <= 2_147_483_647) return raw;
   return GIT_EXEC_DEFAULT_TIMEOUT_MS;
 };
 
@@ -135,6 +138,7 @@ export const execGit = async (
   let timedOut = false;
   let outputTooLarge = false;
   let termination: Promise<void> | undefined;
+  let rejectExit: ((error: Error) => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Append at most the bytes left under the per-stream cap and report
   // overflow, so a capped stream is truncated to the cap and never grows
@@ -155,6 +159,10 @@ export const execGit = async (
       }
       outputTooLarge = true;
       termination = process.terminate();
+      // Handle a termination failure as it happens, like the timeout
+      // path: the promise can reject before the close await below
+      // reaches it, and an unhandled rejection can crash the host.
+      void termination.catch((error: Error) => rejectExit?.(error));
       return;
     }
     if (isStderr) {
@@ -169,6 +177,7 @@ export const execGit = async (
   process.child.stderr.on('data', (data: Buffer) => appendChunk(data, true));
   try {
     const exit = await new Promise<Awaited<typeof process.closed>>((resolve, reject) => {
+      rejectExit = reject;
       void process.closed.then(resolve);
       if (timeoutMs > 0) {
         timer = setTimeout(() => {
