@@ -90,6 +90,29 @@ const API_PROXY_DEADLINE_MS = 45_000;
 const apiProxyDeadlineSignal = (deps: ProxyRuntimeDeps): AbortSignal =>
   AbortSignal.timeout(deps.proxyDeadlineMs ?? API_PROXY_DEADLINE_MS);
 
+// AbortSignal.any is missing on the oldest supported extension hosts
+// (VS Code 1.85 ships Electron 25 / Node 18.15; AbortSignal.any needs
+// Node 18.17+), so compose the signals manually when it is unavailable,
+// mirroring packages/ui's client fetch. Dropping either source here would
+// lose caller cancellation or the proxy deadline on those hosts.
+const combineAbortSignals = (signals: AbortSignal[]): AbortSignal => {
+  // SAFETY: feature-detecting an optional static the oldest supported
+  // runtime lacks; the cast only reads the optional member.
+  const anyImpl = (AbortSignal as { any?: (values: AbortSignal[]) => AbortSignal }).any;
+  if (anyImpl) {
+    return anyImpl(signals);
+  }
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
+};
+
 // ---------------------------------------------------------------------------
 // In-flight read coalescing (parity with the web runtimeFetch coalescer)
 //
@@ -404,7 +427,7 @@ export async function handleProxyBridgeMessage(
             normalizedMethod,
             requestHeaders,
             requestBody,
-            AbortSignal.any([abortController.signal, apiProxyDeadlineSignal(deps)]),
+            combineAbortSignals([abortController.signal, apiProxyDeadlineSignal(deps)]),
             deps,
           ),
           deps.sessionState,

@@ -327,6 +327,74 @@ describe('VS Code API proxy deadline (#788)', () => {
     }
   });
 
+  // Runs `run` with AbortSignal.any removed, simulating the oldest
+  // supported extension host (VS Code 1.85 / Node 18.15), and restores it.
+  const withoutAbortSignalAny = async (run: () => Promise<void>) => {
+    const descriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+    Reflect.deleteProperty(AbortSignal, 'any');
+    try {
+      await run();
+    } finally {
+      if (descriptor) Object.defineProperty(AbortSignal, 'any', descriptor);
+    }
+  };
+
+  test('still bounds a plain forward on hosts without AbortSignal.any', async () => {
+    const originalFetch = globalThis.fetch;
+    const counter = { count: 0 };
+    try {
+      await withoutAbortSignalAny(async () => {
+        globalThis.fetch = stalledFetch(counter);
+        const started = Date.now();
+        const response = await handleProxyBridgeMessage(
+          { id: 'stall_no_any', type: 'api:proxy', payload: { method: 'POST', path: '/api/session/abc/prompt', bodyBase64: Buffer.from('{}').toString('base64') } },
+          ctx,
+          { ...deps, proxyDeadlineMs: 50 },
+        );
+        assert.ok(Date.now() - started < 5_000, 'forward must settle near the deadline, not hang');
+        assert.equal(response?.success, true);
+        assert.equal(payloadOf(response)?.status, 502);
+        assert.equal(counter.count, 1);
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('still propagates caller aborts on hosts without AbortSignal.any', async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedSignal: AbortSignal | undefined;
+    try {
+      await withoutAbortSignalAny(async () => {
+        // SAFETY: test double for the global fetch; only the captured signal is read.
+        globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          capturedSignal = init?.signal ?? undefined;
+          return new Promise<Response>((_resolve, reject) => {
+            capturedSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+          });
+        }) as typeof fetch;
+
+        const pending = handleProxyBridgeMessage(
+          { id: 'req_no_any', type: 'api:proxy', payload: { method: 'POST', path: '/api/session/abc/prompt', bodyBase64: Buffer.from('{}').toString('base64') } },
+          ctx,
+          deps,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.equal(capturedSignal?.aborted, false);
+
+        await handleProxyBridgeMessage({ id: 'abort_no_any', type: 'api:proxy:abort', payload: { requestID: 'req_no_any' } }, ctx, deps);
+        assert.equal(capturedSignal?.aborted, true);
+
+        const response = await pending;
+        assert.equal(response?.success, true);
+        assert.equal(payloadOf(response)?.status, 502);
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('evicts a stalled coalesced read so joined callers fail and a later read retries', async () => {
     const originalFetch = globalThis.fetch;
     const counter = { count: 0 };
