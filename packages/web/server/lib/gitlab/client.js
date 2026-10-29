@@ -8,6 +8,13 @@ import { isPlainObject, isString } from './validation.js';
 // already be applied, so it surfaces to the durable executor instead.
 const RETRY_STATUSES = new Set([429, 502]);
 const MAX_READ_ATTEMPTS = 3;
+// Every request carries this per-attempt deadline, combined with the signal
+// the caller supplied (the downloader disconnect signal, or the one
+// GitBeaker builds from its queryTimeout). A self-managed instance that
+// accepts a connection and then stalls otherwise hangs a request for
+// GitBeaker's five-minute default, and the downloader without any bound.
+// The module's other fetches use the same 10s bound (network.js).
+const GITLAB_REQUEST_TIMEOUT_MS = 10_000;
 
 const decamelize = (key) => key.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase();
 
@@ -64,6 +71,32 @@ async function requestError(request, response) {
 
 const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
+// The deadline aborts through its own controller, so a stall rejects with
+// an AbortError, which classifyGitLabFailure (network.js) maps to
+// unreachable. A caller abort arrives through the combined signal with
+// timedOut() false, so the two stay distinguishable for the retry policy.
+function deadlineSignal(callerSignal) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => { controller.abort(); }, GITLAB_REQUEST_TIMEOUT_MS);
+  return {
+    signal: callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal,
+    timedOut: () => controller.signal.aborted,
+    clear: () => { clearTimeout(timer); },
+  };
+}
+
+// One fetch bounded by the deadline. The bound covers the call itself,
+// which for the downloader means the wait for response headers: the body
+// it returns streams to the route caller without the deadline running.
+async function fetchOnceWithDeadline(fetchImpl, url, init, callerSignal) {
+  const deadline = deadlineSignal(callerSignal);
+  try {
+    return await fetchImpl(new Request(url, { ...init, signal: deadline.signal }));
+  } finally {
+    deadline.clear();
+  }
+}
+
 function createRequesterFn(fetchImpl) {
   return (serviceOptions) => {
     const send = async (method, endpoint, { body, searchParams, sudo, signal, asStream = false } = {}) => {
@@ -81,13 +114,23 @@ function createRequesterFn(fetchImpl) {
       url.search = formatQuery(searchParams);
       const attempts = method === 'GET' ? MAX_READ_ATTEMPTS : 1;
       for (let attempt = 1; ; attempt += 1) {
-        const request = new Request(url, { method, headers, body: payload, signal, redirect: 'error' });
-        const response = await fetchImpl(request);
-        if (response.ok) {
-          return { body: await parseBody(response, asStream), headers: Object.fromEntries(response.headers.entries()), status: response.status };
+        const deadline = deadlineSignal(signal);
+        try {
+          const request = new Request(url, { method, headers, body: payload, signal: deadline.signal, redirect: 'error' });
+          const response = await fetchImpl(request);
+          if (response.ok) {
+            return { body: await parseBody(response, asStream), headers: Object.fromEntries(response.headers.entries()), status: response.status };
+          }
+          if (attempt >= attempts || !RETRY_STATUSES.has(response.status)) throw await requestError(request, response);
+          await response.body?.cancel().catch(() => {});
+        } catch (error) {
+          // A deadline abort retries like a 429/502 for reads and surfaces
+          // for mutations, which are sent once. A caller abort has
+          // timedOut() false and surfaces at once for every method.
+          if (!deadline.timedOut() || attempt >= attempts) throw error;
+        } finally {
+          deadline.clear();
         }
-        if (attempt >= attempts || !RETRY_STATUSES.has(response.status)) throw await requestError(request, response);
-        await response.body?.cancel().catch(() => {});
         await delay(2 ** attempt * 250);
       }
     };
@@ -107,7 +150,7 @@ export function createGitLabDownloader({ origin, token, tokenType = 'token', fet
   return async (apiPath, { range, signal } = {}) => {
     const headers = range ? { range } : {};
     const url = new URL(`api/v4/${apiPath}`, `${origin}/`);
-    const response = await fetchImpl(new Request(url, { headers: { ...headers, ...credential }, redirect: 'manual', signal }));
+    const response = await fetchOnceWithDeadline(fetchImpl, url, { headers: { ...headers, ...credential }, redirect: 'manual' }, signal);
     if (response.status < 300 || response.status >= 400) return response;
     await response.body?.cancel().catch(() => {});
     const location = response.headers.get('location');
@@ -115,7 +158,7 @@ export function createGitLabDownloader({ origin, token, tokenType = 'token', fet
     if (!next || (next.protocol !== 'https:' && next.origin !== url.origin)) {
       throw new Error('GitLab redirected the file to an address it may not be read from');
     }
-    return fetchImpl(new Request(next, { headers, redirect: 'error', signal }));
+    return fetchOnceWithDeadline(fetchImpl, next, { headers, redirect: 'error' }, signal);
   };
 }
 

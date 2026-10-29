@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGitLabClient, createGitLabDownloader } from './client.js';
+import { classifyGitLabFailure } from './network.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -67,6 +68,73 @@ describe('GitLab client credentials', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('GitLab client request deadlines', () => {
+  const stalledFetch = () => vi.fn((request) => new Promise((_resolve, reject) => {
+    request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
+  }));
+
+  it('rejects a read that never answers at the deadline, retrying each attempt', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const fetch = stalledFetch();
+      vi.stubGlobal('fetch', fetch);
+      const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+      const pending = client.Users.showCurrentUser().catch((error) => error);
+      await vi.runAllTimersAsync();
+      const error = await pending;
+      expect(error).toMatchObject({ name: 'AbortError' });
+      expect(classifyGitLabFailure(error)).toBe('unreachable');
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends a mutation that never answers exactly once before the deadline rejects it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const fetch = stalledFetch();
+      vi.stubGlobal('fetch', fetch);
+      const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+      const pending = client.MergeRequests.create(1, 'feature', 'main', 'Title').catch((error) => error);
+      await vi.runAllTimersAsync();
+      const error = await pending;
+      expect(error).toMatchObject({ name: 'AbortError' });
+      expect(classifyGitLabFailure(error)).toBe('unreachable');
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects a download that never answers at the deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const fetch = stalledFetch();
+      const download = createGitLabDownloader({ origin: 'https://gitlab.example.com', token: 'pat-token', fetch });
+      const pending = download('projects/2/uploads/abc/demo.mp4').catch((error) => error);
+      await vi.runAllTimersAsync();
+      const error = await pending;
+      expect(error).toMatchObject({ name: 'AbortError' });
+      expect(classifyGitLabFailure(error)).toBe('unreachable');
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts a download promptly when the caller signal aborts', async () => {
+    const fetch = stalledFetch();
+    const download = createGitLabDownloader({ origin: 'https://gitlab.example.com', token: 'pat-token', fetch });
+    const controller = new AbortController();
+    const pending = download('projects/2/uploads/abc/demo.mp4', { signal: controller.signal });
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    await rejection;
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
 

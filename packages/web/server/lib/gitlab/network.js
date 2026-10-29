@@ -11,7 +11,7 @@ export class GitLabRequestError extends Error {
 export function classifyGitLabFailure(error) {
   if (error instanceof GitLabRequestError) return error.kind;
   const code = isString(error?.code) ? error.code : '';
-  if (error?.name === 'AbortError' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ECONNREFUSED'
+  if (error?.name === 'AbortError' || error?.name === 'TimeoutError' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ECONNREFUSED'
     || code === 'ECONNRESET' || code === 'EAI_AGAIN' || code.startsWith('ERR_TLS')) return 'unreachable';
   return 'provider-error';
 }
