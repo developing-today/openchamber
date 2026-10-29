@@ -12,6 +12,7 @@ import {
   fetchConsoleGoUsage,
   fetchOpenCodeGoUsage,
   fetchQuota,
+  fetchQuotaForCredential,
   isConfigured,
   parseConsoleBillingBalance,
   parseConsoleGoUsage,
@@ -496,5 +497,78 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     });
     expect(result.ok).toBe(true);
     expect(seen).toEqual(['https://opencode.ai/zen/go/v1/usage']);
+  });
+});
+
+describe('OpenCode Go quota provider — per-credential (per-workspace)', () => {
+  const consoleRow = (orgID, access = 'console-access') => ({
+    id: `cred_${orgID}`,
+    integrationID: 'opencode',
+    label: undefined,
+    active: false,
+    value: consoleAuth({ orgID, access }).opencode,
+  });
+
+  it('fetches one workspace row with that row\'s own Console token and organization', async () => {
+    const seen = [];
+    const result = await fetchQuotaForCredential(consoleRow('org_WORKSPACE1', 'ws-token'), {
+      fetchImpl: async (url, options) => {
+        seen.push({ url, options });
+        return new Response(JSON.stringify(url === CONSOLE_BILLING_STATUS_URL ? {} : consolePayload()));
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('go');
+    expect(result.accountLabel).toBe('org_WORKSPACE1');
+    const statusCall = seen.find((call) => call.url === CONSOLE_STATUS_URL);
+    expect(statusCall.options.headers.Authorization).toBe('Bearer ws-token');
+    expect(statusCall.options.headers['x-org-id']).toBe('org_WORKSPACE1');
+  });
+
+  it('answers distinct rows for two workspaces', async () => {
+    const fetchFor = (used) => async (url) => new Response(JSON.stringify(
+      url === CONSOLE_BILLING_STATUS_URL ? {} : consolePayload({ meters: {
+        fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '1000', usedMicroCents: used },
+      } }),
+    ));
+    const first = await fetchQuotaForCredential(consoleRow('org_FIRST123'), { fetchImpl: fetchFor('250') });
+    const second = await fetchQuotaForCredential(consoleRow('org_SECOND123'), { fetchImpl: fetchFor('900') });
+    expect(first.usage.windows['5h'].usedPercent).toBe(25);
+    expect(second.usage.windows['5h'].usedPercent).toBe(90);
+    expect(first.accountLabel).toBe('org_FIRST123');
+    expect(second.accountLabel).toBe('org_SECOND123');
+  });
+
+  it('keeps the API-key semantics for a key row on opencode-go', async () => {
+    const result = await fetchQuotaForCredential(
+      { id: 'cred_key', integrationID: 'opencode-go', active: true, value: { type: 'api', key: 'test-key' } },
+      { fetchImpl: async () => new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })) },
+    );
+    expect(result).toMatchObject({ ok: true, configured: true });
+    expect(result.accountLabel).toBeUndefined();
+    expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('keeps the absent-subscription meaning for a 403 on a key stored on opencode', async () => {
+    const result = await fetchQuotaForCredential(
+      { id: 'cred_console_key', integrationID: 'opencode', active: true, value: { type: 'api', key: 'console-key' } },
+      { fetchImpl: async () => new Response('', { status: 403 }) },
+    );
+    expect(result).toMatchObject({ ok: false, configured: true, error: 'No active OpenCode Go subscription on the selected Console account' });
+  });
+
+  it('returns its own error row instead of throwing when the workspace read fails', async () => {
+    const result = await fetchQuotaForCredential(consoleRow('org_BROKEN12'), {
+      fetchImpl: async () => new Response('', { status: 502 }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toMatch(/HTTP 502/);
+    expect(result.accountLabel).toBe('org_BROKEN12');
+  });
+
+  it('reports an empty row as not configured', async () => {
+    const result = await fetchQuotaForCredential({ id: 'cred_empty', integrationID: 'opencode', value: null });
+    expect(result).toMatchObject({ ok: false, configured: false, error: 'Not configured' });
   });
 });

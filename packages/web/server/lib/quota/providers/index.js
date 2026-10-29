@@ -236,7 +236,9 @@ const registry = {
     providerName: opencodeGo.providerName,
     aliases: opencodeGo.aliases,
     isConfigured: opencodeGo.isConfigured,
-    fetchQuota: opencodeGo.fetchQuota
+    fetchQuota: opencodeGo.fetchQuota,
+    credentialAliases: ['opencode-go', 'opencode'],
+    fetchQuotaForCredential: opencodeGo.fetchQuotaForCredential
   },
   neuralwatt: {
     providerId: neuralwatt.providerId,
