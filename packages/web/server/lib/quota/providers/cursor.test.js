@@ -479,10 +479,21 @@ describe('Cursor credential import sqlite deadline', () => {
     await expect(importCursorCredential({ timeoutMs: 250 })).rejects.toThrow('Cursor credentials are unavailable');
     const elapsed = Date.now() - startedAt;
 
-    // Two sequential reads, each bounded by the 250 ms timeout: the import
-    // settles in well under the time a single unbounded read could take.
-    expect(elapsed).toBeGreaterThanOrEqual(400);
+    // The first read is bounded by the 250 ms timeout and the import fails
+    // fast on it: the import settles in well under the time a single
+    // unbounded read could take.
+    expect(elapsed).toBeGreaterThanOrEqual(200);
     expect(elapsed).toBeLessThan(5_000);
+  });
+
+  it('reports credentials unavailable when only the refresh-token read hangs', async () => {
+    const token = futureToken();
+    setupFakeSqlite(`#!/bin/sh\ncase "$3" in *refreshToken*) while :; do :; done ;; *) printf '%s' '[{"value":"${token}"}]' ;; esac\n`);
+    const { importCursorCredential } = await import('./cursor.js');
+
+    const startedAt = Date.now();
+    await expect(importCursorCredential({ timeoutMs: 250 })).rejects.toThrow('Cursor credentials are unavailable');
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
   });
 
   it('imports the stored tokens when sqlite3 answers promptly', async () => {

@@ -58,7 +58,11 @@ const readStateValue = (key, { timeoutMs = SQLITE_READ_TIMEOUT_MS } = {}) => {
     const parsed = JSON.parse(rows || '[]');
     const value = parsed?.[0]?.value;
     return typeof value === 'string' && value.trim() ? value.trim() : null;
-  } catch {
+  } catch (error) {
+    // A timeout is not a missing value: returning null here would let the
+    // import persist a half-read credential (one token read, the other
+    // silently empty). Rethrow so the import fails as unavailable instead.
+    if (error?.code === 'ETIMEDOUT' || error?.signal === 'SIGTERM') throw error;
     return null;
   }
 };
@@ -117,10 +121,15 @@ const persistAccessToken = (auth, accessToken) => {
 };
 
 export const importCursorCredential = async ({ timeoutMs } = {}) => {
-  const credential = {
-    accessToken: readStateValue('cursorAuth/accessToken', { timeoutMs }) || '',
-    refreshToken: readStateValue('cursorAuth/refreshToken', { timeoutMs }) || '',
-  };
+  let credential;
+  try {
+    credential = {
+      accessToken: readStateValue('cursorAuth/accessToken', { timeoutMs }) || '',
+      refreshToken: readStateValue('cursorAuth/refreshToken', { timeoutMs }) || '',
+    };
+  } catch {
+    throw new Error('Cursor credentials are unavailable');
+  }
   if (!credential.accessToken && !credential.refreshToken) throw new Error('Cursor credentials are unavailable');
   const accessToken = await resolveCredentialAccessToken({ ...credential, source: 'import' });
   if (!accessToken) throw new Error('Cursor credentials are invalid');
