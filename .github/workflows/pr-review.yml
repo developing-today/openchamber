@@ -385,11 +385,6 @@ jobs:
 
           find "$context" -type f | head -n 200
 
-      - name: Record review start
-        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
-        id: review-start
-        run: echo "started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-
       - name: Review pull request
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         id: review-run
@@ -456,6 +451,7 @@ jobs:
           exit "$review_status"
 
       - name: Post review
+        id: post-review
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -471,8 +467,17 @@ jobs:
             exit 1
           fi
 
-          gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            -f body="${heading}${message#*"$heading"}" > /dev/null
+          # The verdict step verifies this exact comment by id: concurrent
+          # review runs on the same PR each post their own comment, and a
+          # timestamp-based pick can consume another run's verdict.
+          comment_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            -f body="${heading}${message#*"$heading"}")"
+          comment_id="$(printf '%s' "$comment_json" | jq -r '.id // empty')"
+          if [ -z "$comment_id" ]; then
+            echo "::error::Posting the review returned no comment id."
+            exit 1
+          fi
+          echo "comment_id=$comment_id" >> "$GITHUB_OUTPUT"
 
       - name: Verify and enforce review verdict
         id: verdict
@@ -481,7 +486,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
-          REVIEW_STARTED_AT: ${{ steps.review-start.outputs.started_at }}
+          REVIEW_COMMENT_ID: ${{ steps.post-review.outputs.comment_id }}
           REVIEW_RUN_OUTCOME: ${{ steps.review-run.outcome }}
           REVIEW_TIMED_OUT: ${{ steps.review-run.outputs.timed_out }}
           REVIEW_DURATION_SECONDS: ${{ steps.review-run.outputs.duration_seconds }}
@@ -517,13 +522,23 @@ jobs:
             fail_automation "OpenCode review did not complete successfully."
           fi
 
-          review_json="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            --paginate \
-            | jq -s --arg started_at "$REVIEW_STARTED_AT" '[.[][] | select(.created_at >= $started_at and .user.login == "openchamber-bot[bot]" and (.body | contains("<h3>Code Review Summary</h3>")) and (.body | contains("<!-- oc-review-meta ")))] | last // empty')"
-
-          if [ -z "$review_json" ]; then
+          if [ -z "$REVIEW_COMMENT_ID" ]; then
             fail_automation "Review completed without creating a new structured OpenChamber Bot PR comment."
+          fi
+
+          # Fetch the exact comment this run posted, by id. Selecting by
+          # timestamp instead would let a concurrent review run's comment
+          # satisfy this run's verdict check.
+          if ! review_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${REVIEW_COMMENT_ID}")"; then
+            fail_automation "The review comment this run posted ($REVIEW_COMMENT_ID) could not be read back."
+          fi
+
+          review_author="$(printf '%s' "$review_json" | jq -r '.user.login // empty')"
+          review_issue_url="$(printf '%s' "$review_json" | jq -r '.issue_url // empty')"
+          if [ "$review_author" != "openchamber-bot[bot]" ] \
+            || [ "$review_issue_url" != "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}" ] \
+            || ! printf '%s' "$review_json" | jq -e '.body | contains("<h3>Code Review Summary</h3>") and contains("<!-- oc-review-meta ")' > /dev/null; then
+            fail_automation "The review comment this run posted ($REVIEW_COMMENT_ID) is not this run's structured review comment on PR #${PR_NUMBER}."
           fi
 
           if ! metadata="$(printf '%s' "$review_json" | jq -er '.body | capture("<!-- oc-review-meta (?<json>\\{[^\\n]+\\}) -->").json | fromjson')"; then
