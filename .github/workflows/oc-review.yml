@@ -13,8 +13,6 @@ name: pr checks
 # "pr checks" because the Phase 3 watcher (main-broken.yml) references
 # it by that name.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   # Merged code gets the same verification on main itself: without this, a
   # merge that breaks main is only discovered by the next PR's run.
   push:

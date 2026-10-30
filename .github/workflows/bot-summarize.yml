@@ -9,7 +9,7 @@ on:
 # the pending second one. Queue every run.
 concurrency:
   group: bot-summarize-${{ github.event_name }}-${{ github.event.issue.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: max
 
 jobs:

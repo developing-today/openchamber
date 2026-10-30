@@ -51,7 +51,7 @@ permissions:
 # run, so two different failures never displace each other.
 concurrency:
   group: main-broken-${{ github.event.workflow_run.id || inputs.run_id || github.run_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: max
 
 jobs:

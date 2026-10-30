@@ -22,7 +22,7 @@ permissions:
 # inputs and queue every run.
 concurrency:
   group: sdk-preview-publish-${{ inputs.preview_number }}-${{ inputs.dry_run }}
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: max
 
 jobs:

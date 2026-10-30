@@ -22,7 +22,7 @@ on:
 # distinguishing inputs and queue every run.
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.macos_version }}-${{ inputs.ref || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: max
 
 permissions:

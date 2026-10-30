@@ -35,7 +35,7 @@ permissions:
 
 concurrency:
   group: opencode-update
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   FAILURE_ISSUE_TITLE: "chore(deps): automated opencode update failing"

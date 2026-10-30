@@ -13,7 +13,7 @@ on:
 # number and queue every run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: max
 
 jobs:

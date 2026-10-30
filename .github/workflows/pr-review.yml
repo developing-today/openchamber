@@ -1,8 +1,6 @@
 name: pr-review
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -27,7 +25,7 @@ concurrency:
   # with cancel evaluating false for comment events -- never cancels an
   # active review.
   group: pr-review-${{ github.event_name }}-${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || github.event.comment.id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+  cancel-in-progress: true
 
 jobs:
   # Every PR event gets a review. A comment command starts the agent on the

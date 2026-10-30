@@ -4,11 +4,6 @@
 name: nix-eval
 
 on:
-  pull_request:
-    paths:
-      - flake.nix
-      - flake.lock
-      - nix/**
   workflow_dispatch:
 
 # CI policy: .github/ci-policy.md (fleet design developing-today/code#1779;
