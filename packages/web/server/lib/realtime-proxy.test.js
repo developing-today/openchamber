@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import express from 'express';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
+import net from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { attachRealtimeProxy, buildRealtimeProxySseUrl, buildRealtimeProxyWsUrl } from './realtime-proxy.js';
@@ -20,12 +22,13 @@ const closeServer = async (server) => {
   await new Promise((resolve) => server.close(() => resolve()));
 };
 
-const startProxyServer = async ({ apiBaseUrl, authToken = 'ui-token', originAllowed = true } = {}) => {
+const startProxyServer = async ({ apiBaseUrl, authToken = 'ui-token', originAllowed = true, proxyOptions = {} } = {}) => {
   const app = express();
   const server = http.createServer(app);
   const runtime = attachRealtimeProxy({
     app,
     server,
+    ...proxyOptions,
     getDesktopRuntimeConfig: () => ({
       apiBaseUrl,
       requestHeaders: { 'X-Proxy-Auth': 'secret' },
@@ -285,4 +288,132 @@ describe('realtime proxy', () => {
       uiAuthController.dispose?.();
     }
   });
+});
+
+describe('realtime proxy WebSocket bounds', () => {
+  // A raw TCP host for the upstream side: it can stall the handshake
+  // forever, or complete it by hand and then read nothing — the two stall
+  // shapes the bounds exist for. A real WebSocket server cannot be made to
+  // stall either way on every runtime.
+  const startRawHost = async ({ completeHandshake }) => {
+    const state = { handshakes: 0, sockets: new Set() };
+    const server = net.createServer((socket) => {
+      state.sockets.add(socket);
+      socket.on('close', () => state.sockets.delete(socket));
+      let upgraded = false;
+      let head = Buffer.alloc(0);
+      socket.on('data', (chunk) => {
+        if (upgraded) return;
+        head = Buffer.concat([head, chunk]);
+        const end = head.indexOf('\r\n\r\n');
+        if (end === -1 || !completeHandshake) return;
+        const key = /sec-websocket-key:\s*(\S+)/i.exec(head.subarray(0, end).toString())?.[1];
+        const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+        upgraded = true;
+        state.handshakes += 1;
+        socket.pause();
+      });
+    });
+    const origin = await listen(server);
+    return { origin, state };
+  };
+
+  const connectClient = async (origin, target) => {
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
+      headers: { Origin: 'openchamber-ui://app' },
+    });
+    await new Promise((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    return client;
+  };
+
+  const nextClose = (client) => new Promise((resolve) => client.once('close', (code) => resolve(code)));
+
+  const destroyHostSockets = (host) => {
+    for (const socket of host.state.sockets) socket.destroy();
+  };
+
+  it('closes the client when the upstream handshake never completes', async () => {
+    const host = await startRawHost({ completeHandshake: false });
+    const { origin, runtime } = await startProxyServer({
+      apiBaseUrl: host.origin,
+      proxyOptions: { handshakeTimeoutMs: 300 },
+    });
+    try {
+      const target = `${host.origin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
+      const startedAt = Date.now();
+      const client = await connectClient(origin, target);
+      const code = await nextClose(client);
+      expect(code).toBe(1011);
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+    } finally {
+      runtime.stop();
+      destroyHostSockets(host);
+    }
+  }, 10_000);
+
+  it('drops the pair when a client floods a stalled handshake past the pending bound', async () => {
+    const host = await startRawHost({ completeHandshake: false });
+    const { origin, runtime } = await startProxyServer({
+      apiBaseUrl: host.origin,
+      proxyOptions: { handshakeTimeoutMs: 30_000, maxPendingBytes: 64 * 1024 },
+    });
+    try {
+      const target = `${host.origin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
+      const client = await connectClient(origin, target);
+      const closed = nextClose(client);
+      const chunk = Buffer.alloc(64 * 1024, 0x61);
+      client.send(chunk);
+      client.send(chunk);
+      expect(await closed).toBe(1013);
+      // The upstream attempt was terminated, not left holding the queue.
+      const deadline = Date.now() + 3_000;
+      while (host.state.sockets.size > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(host.state.sockets.size).toBe(0);
+    } finally {
+      runtime.stop();
+      destroyHostSockets(host);
+    }
+  }, 10_000);
+
+  it('closes the pair when the upstream stops draining after connect', async () => {
+    const host = await startRawHost({ completeHandshake: true });
+    const { origin, runtime } = await startProxyServer({
+      apiBaseUrl: host.origin,
+      proxyOptions: { maxBufferedBytes: 64 * 1024 },
+    });
+    try {
+      const target = `${host.origin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
+      const client = await connectClient(origin, target);
+      const closed = nextClose(client);
+      const deadline = Date.now() + 3_000;
+      while (host.state.handshakes === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(host.state.handshakes).toBe(1);
+      const chunk = Buffer.alloc(64 * 1024, 0x62);
+      let sent = 0;
+      const TOTAL = 32 * 1024 * 1024;
+      const timer = setInterval(() => {
+        if (client.readyState !== WebSocket.OPEN || sent >= TOTAL) {
+          if (sent >= TOTAL) clearInterval(timer);
+          return;
+        }
+        sent += chunk.length;
+        client.send(chunk);
+      }, 5);
+      const code = await closed;
+      clearInterval(timer);
+      expect(code).toBe(1013);
+      expect(sent).toBeLessThan(TOTAL);
+    } finally {
+      runtime.stop();
+      destroyHostSockets(host);
+    }
+  }, 15_000);
 });
