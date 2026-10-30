@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+
 const ACTIONS = ['avoid', 'prefer', 'allow-over-budget'];
 
 export const resolveOpenCodeDataDir = (env = process.env) => {
@@ -49,19 +51,95 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
   const overridesFile = path.join(dataDir, 'route-overrides.json');
   const feedbackFile = path.join(dataDir, 'route-feedback.jsonl');
 
-  const readAll = () => {
+  // A torn or otherwise unparseable overrides file is user data, not an
+  // empty store: move its bytes aside before any later save can overwrite
+  // them, and name the preserved copy so the loss is recoverable.
+  // The parse error itself is never logged: Node's JSON.parse messages
+  // quote the file content, and override text is the user's own sentence.
+  const preserveCorruptFile = () => {
+    // The suffix must be collision-proof: a timestamp alone can repeat, and
+    // rename would silently replace an earlier preserved copy.
+    let preservedFile = null;
+    for (let attempt = 0; attempt < 10 && preservedFile === null; attempt += 1) {
+      const candidate = `${overridesFile}.corrupt-${now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+      if (!fs.existsSync(candidate)) preservedFile = candidate;
+    }
+    if (preservedFile === null) {
+      console.warn('Failed to read route overrides file: the file could not be parsed');
+      console.warn('Failed to preserve the unreadable route overrides file: every preserved-file name collided');
+      return false;
+    }
     try {
-      const list = JSON.parse(fs.readFileSync(overridesFile, 'utf8'))?.overrides;
-      return Array.isArray(list) ? list.map(parseOverride).filter(Boolean) : [];
+      renameSyncWithRetry((from, to) => fs.renameSync(from, to), overridesFile, preservedFile);
+      console.warn(`Failed to read route overrides file: preserved the unreadable file at ${preservedFile}`);
+      return true;
     } catch {
+      console.warn('Failed to read route overrides file: the file could not be parsed');
+      console.warn(`Failed to preserve the unreadable route overrides file at ${preservedFile}`);
+      return false;
+    }
+  };
+
+  // 'none' when no corrupt file is in the way, 'preserved' when one was moved
+  // aside, 'failed' when one is present but could not be preserved — a save
+  // must not overwrite an unpreserved corrupt file.
+  const preserveCorruptFileIfPresent = () => {
+    let raw;
+    try {
+      raw = fs.readFileSync(overridesFile, 'utf8');
+    } catch (error) {
+      // Only a missing file is 'none'. Any other read failure (EACCES,
+      // EISDIR, ...) leaves an existing file whose bytes were neither
+      // parsed nor preserved: report 'failed' so the save refuses rather
+      // than renaming a new file over them.
+      return error?.code === 'ENOENT' ? 'none' : 'failed';
+    }
+    try {
+      JSON.parse(raw);
+      return 'none';
+    } catch {
+      return preserveCorruptFile() ? 'preserved' : 'failed';
+    }
+  };
+
+  const readAll = () => {
+    let raw;
+    try {
+      raw = fs.readFileSync(overridesFile, 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        console.warn('Failed to read route overrides file:', error);
+      }
       return [];
     }
+    let list;
+    try {
+      list = JSON.parse(raw)?.overrides;
+    } catch {
+      preserveCorruptFile();
+      return [];
+    }
+    return Array.isArray(list) ? list.map(parseOverride).filter(Boolean) : [];
   };
 
   const save = (overrides) => {
     const live = overrides.filter((item) => item.until > now());
     fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(overridesFile, JSON.stringify({ version: 1, overrides: live }, null, 2));
+    if (preserveCorruptFileIfPresent() === 'failed') {
+      throw new Error(`Refusing to overwrite the unreadable route overrides file at ${overridesFile}: it could not be preserved`);
+    }
+    const temporaryFile = `${overridesFile}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    try {
+      fs.writeFileSync(temporaryFile, JSON.stringify({ version: 1, overrides: live }, null, 2));
+      renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporaryFile, overridesFile);
+    } catch (error) {
+      try {
+        fs.unlinkSync(temporaryFile);
+      } catch {
+        // The temp file may never have been created; the write error stands.
+      }
+      throw error;
+    }
     return live;
   };
 

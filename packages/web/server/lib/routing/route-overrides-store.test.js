@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createOverrideStore, resolveOpenCodeDataDir } from './route-overrides-store.js';
 
@@ -62,6 +62,60 @@ describe('override store', () => {
       { time: 5_000, key: 'claude', option: 'A', accepted: 'corrected' },
       { time: 5_000, key: 'claude', option: 'A', accepted: false },
     ]);
+  });
+
+  it('preserves a corrupt overrides file instead of silently discarding every rule', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-overrides-'));
+      const store = createOverrideStore({ dataDir: dir, now: () => 5_000 });
+      const corrupt = '{"version":1,"overrides":[{"id":"a","action":"avoid"';
+      fs.writeFileSync(store.overridesFile, corrupt);
+      expect(store.list()).toEqual([]);
+      const preservedName = fs.readdirSync(dir).find((name) => name.startsWith('route-overrides.json.corrupt-5000-'));
+      expect(preservedName).toBeTruthy();
+      const preservedFile = path.join(dir, preservedName);
+      expect(fs.readFileSync(preservedFile, 'utf8')).toBe(corrupt);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(preservedFile));
+      // No warning may quote the corrupt file's content: JSON.parse errors
+      // embed an excerpt, and override text is the user's own sentence.
+      const warned = warn.mock.calls.flat().map(String).join(' ');
+      expect(warned).not.toContain('avoid');
+      // A later save lands in the real file; the corrupt bytes stay preserved.
+      store.add([override({ id: 'fresh' })]);
+      expect(store.list().map((item) => item.id)).toEqual(['fresh']);
+      expect(fs.readFileSync(preservedFile, 'utf8')).toBe(corrupt);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('refuses to overwrite an existing overrides file it cannot read', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-overrides-'));
+    const store = createOverrideStore({ dataDir: dir, now: () => 5_000 });
+    // A directory at the store path makes the guard's read fail with EISDIR:
+    // an existing file whose bytes can be neither parsed nor preserved, so
+    // the save must refuse rather than rename a new file over it.
+    fs.mkdirSync(store.overridesFile);
+    expect(() => store.add([override({ id: 'fresh' })])).toThrow(
+      /Refusing to overwrite the unreadable route overrides file/,
+    );
+    expect(fs.statSync(store.overridesFile).isDirectory()).toBe(true);
+    expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('leaves no temp file behind after a save', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-overrides-'));
+    const store = createOverrideStore({ dataDir: dir, now: () => 5_000 });
+    store.add([override()]);
+    expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('treats a missing overrides file as empty and preserves nothing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-overrides-'));
+    const store = createOverrideStore({ dataDir: dir, now: () => 5_000 });
+    expect(store.list()).toEqual([]);
+    expect(fs.readdirSync(dir)).toEqual([]);
   });
 
   it('places the data under XDG_DATA_HOME', () => {
