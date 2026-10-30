@@ -5,7 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { registerLinearRoutes } from './routes.js';
-import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth, getLinearAuthByWorkspaceId } from './auth.js';
+import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth, getLinearAuthByWorkspaceId, clearLinearAuth } from './auth.js';
 import { toGuestAuthResponse } from '../guests/host-session.js';
 import { fetchLinearGraphql } from './client.js';
 
@@ -742,6 +742,31 @@ describe('Linear vault account route (#304)', () => {
     expect(getLinearAuth().tokenReference).toBe(REFERENCE);
     expect(getLinearAuth().accessToken).toBeNull();
     expect(seen).toEqual([SECRET, SECRET]);
+  });
+
+  it('does not recreate a vault workspace disconnected while the identity request is in flight', async () => {
+    configureLinearVaultReader(async () => ({ ok: true, value: SECRET }));
+    setLinearAuth({
+      tokenReference: REFERENCE,
+      user: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace' },
+      organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+      workspaceId: 'org-1',
+    });
+    // The identity (viewer) request is the moment a disconnect can race:
+    // clear the credential inside the fetch, then let it succeed anyway.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      clearLinearAuth('org-1');
+      return jsonResponse({
+        data: {
+          viewer: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: 'https://example.com/a.png' },
+          organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+        },
+      });
+    }));
+    const app = createApp();
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+    expect(status.body).toEqual({ connected: false });
+    expect(getLinearAuth()).toBeNull();
   });
 
   it('reports a vault account as connected to guest extensions', async () => {

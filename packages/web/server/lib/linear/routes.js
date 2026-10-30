@@ -181,6 +181,18 @@ export function registerLinearRoutes(app) {
     }
     try {
       const identity = await fetchLinearIdentity(authorization);
+      const current = getLinearAuth();
+      if (
+        !current
+        || current.workspaceId !== auth.workspaceId
+        || (current.tokenReference ?? null) !== (auth.tokenReference ?? null)
+      ) {
+        // The saved credential was switched, replaced, or disconnected
+        // while the identity request was in flight: discard this refresh
+        // rather than recreating a deleted credential (or writing this
+        // workspace's identity into another workspace's credential).
+        return current ? toLinearPublicStatus(current, getLinearAuthWorkspaces()) : { connected: false };
+      }
       // A vault workspace keeps only its reference: the resolved key is
       // never written back as an accessToken (#304).
       const next = auth?.tokenReference
