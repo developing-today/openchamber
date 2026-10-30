@@ -139,6 +139,15 @@ export const createSettingsRuntime = (deps) => {
     try {
       return await readJsonFile(filePath);
     } catch (error) {
+      // Only a JSON parse failure means the destination's bytes are
+      // corrupt. A filesystem read error (EIO, EACCES, ...) says nothing
+      // about the bytes — the destination may be perfectly valid — so
+      // propagate it: the migration aborts and both files stay put for a
+      // later retry instead of the valid destination being quarantined
+      // and replaced from the legacy source alone.
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
       let preservedPath = null;
       for (let attempt = 0; attempt < 10 && preservedPath === null; attempt += 1) {
         const candidate = `${filePath}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
