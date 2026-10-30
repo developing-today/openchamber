@@ -10,17 +10,9 @@ name: main-broken watcher
 # then either appends the run to the open `main-broken` issue that
 # already carries that ID or files a new one with the pattern labels and
 # an agent-note:v1 holder trail. Exactly one holder owns a breakage at
-# any moment: Jules first (label `jules`) when this repo can actually
-# run Jules, otherwise the issue is released to the Muse queue at
-# filing (label `queue/queued`).
-#
-# JULES GAP (2026-10-29): the JULES_API_KEY secret is NOT set on
-# developing-today/openchamber and this repo has no issue-labeled Jules
-# job, so the Jules leg below is gated off at runtime (secret presence
-# check + a jules.yml issue-labeled job must exist). Until both exist,
-# every filing takes the released-to-Muse path and says so on the
-# issue. Adding the secret and the job shape turns the leg on with no
-# edit to this workflow.
+# any moment: breakages are handed to the fleet queue via pm-dispatch
+# at filing (label `queue/queued`), and the claiming lane records the
+# next holder transition in the agent-note trail.
 
 on:
   workflow_run:
@@ -56,6 +48,11 @@ concurrency:
 
 jobs:
   watch:
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      id-token: write
     if: >-
       github.repository == 'developing-today/openchamber' &&
       (github.event_name == 'workflow_dispatch' ||
@@ -64,21 +61,14 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (to detect an issue-labeled Jules job)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Append-or-file the breakage issue
+      - name: Compute the breakage and prepare the dispatch
+        id: file-breakage
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           WATCHED_RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
-          # Presence check only; the value is never printed (same gate
-          # shape the bot workflows use for OC_REVIEW_APP_*).
-          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
         run: |
           set -euo pipefail
           run_id="$WATCHED_RUN_ID"
@@ -119,33 +109,23 @@ jobs:
             --search "${breakage_id} in:body" --json number --jq '.[0].number // empty')"
 
           if [ -n "$existing" ]; then
-            append_body="$(printf 'Another failure of the same breakage.\n\n- Run: %s\n- Head commit: %s\n- Failing jobs: %s\n\nagent-note:v1 holder: chain (watcher append) at %s; holder unchanged -- see the filing note on this issue. No duplicate issue, no duplicate Jules spend.\n' \
+            append_body="$(printf 'Another failure of the same breakage.\n\n- Run: %s\n- Head commit: %s\n- Failing jobs: %s\n\nagent-note:v1 holder: chain (watcher append) at %s; holder unchanged -- see the filing note on this issue. No duplicate issue, no duplicate dispatch.\n' \
               "$run_url" "$head_sha" "$failing_csv" "$ts")"
             if [ "$DRY_RUN" = "true" ]; then
-              echo "DRY RUN: would append to existing issue #${existing}:"
+              echo "DRY RUN: would queue a follow-up task on existing issue #${existing}:"
               printf '%s\n' "$append_body"
             else
-              gh issue comment "$existing" --body "$append_body"
-              echo "Appended run to existing breakage issue #${existing}."
+              {
+                echo "mode=append"
+                echo "existing_number=${existing}"
+                echo "title=main-broken: ${GH_REPO} ${workflow_name} @${short_sha} — ${first_failing}"
+                echo "prompt<<PM_DISPATCH_PROMPT_EOF"
+                printf '%s\n' "$append_body"
+                echo "PM_DISPATCH_PROMPT_EOF"
+              } >> "$GITHUB_OUTPUT"
+              echo "Prepared a pm-dispatch follow-up task for existing breakage issue #${existing}."
             fi
             exit 0
-          fi
-
-          # Jules leg: only when Jules can actually act in this repo --
-          # the secret is set, an issue-labeled job exists in jules.yml,
-          # and fewer than 3 open main-broken issues already carry the
-          # `jules` label (free-tier budget guard, design sec.5.2 step 3).
-          jules_ready="false"
-          jules_reason="JULES_API_KEY is not set on this repo and/or no issue-labeled Jules job exists"
-          jules_open_count="0"
-          if [ -n "${JULES_API_KEY:-}" ] && [ -f .github/workflows/jules.yml ] \
-            && grep -q 'issue-labeled' .github/workflows/jules.yml; then
-            jules_open_count="$(gh issue list --state open --label main-broken --label jules --json number --jq 'length')"
-            if [ "$jules_open_count" -lt 3 ]; then
-              jules_ready="true"
-            else
-              jules_reason="Jules budget guard: ${jules_open_count} open main-broken issues already carry the jules label (>= 3)"
-            fi
           fi
 
           error_excerpt="$(gh run view "$run_id" --log-failed 2>/dev/null | head -n 40 || true)"
@@ -175,12 +155,7 @@ jobs:
             echo "agent-note:v1"
             echo "holder: chain (filing)"
             echo "since: ${ts}"
-            if [ "$jules_ready" = "true" ]; then
-              echo "holder: jules, since ${ts} (label \`jules\` applied by the chain; open main-broken issues carrying it before filing: ${jules_open_count})"
-            else
-              echo "jules: skipped -- ${jules_reason}."
-              echo "holder: released by chain at ${ts}, reason: jules-unavailable-or-budget; released to the Muse queue (label \`queue/queued\`). The claiming lane records the next holder transition here."
-            fi
+            echo "holder: released by chain at ${ts}; handed to the fleet queue via pm-dispatch at filing (label \`queue/queued\`). The dispatch records its task id on this issue; the claiming lane records the next holder transition here."
             echo
             echo "Anything that breaks main is top priority. Close this issue only when the main-gate passes on a SHA containing the fix; the \`main-broken\` label comes off only at close."
           } > "$body_file"
@@ -190,14 +165,14 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "DRY RUN: would file a new breakage issue:"
             echo "title: ${title}"
-            echo "labels: kind/ci, priority/critical, main-broken, queue/queued, status/needs-triage (jules_ready=${jules_ready})"
+            echo "labels: kind/ci, priority/critical, main-broken, queue/queued, status/needs-triage"
             cat "$body_file"
             exit 0
           fi
 
           # Coin the pattern labels if any is missing, so filing never
           # fails on an absent label.
-          for spec in 'kind/ci fbca04' 'priority/critical b60205' 'main-broken B60205' 'queue/queued 7057ff' 'status/needs-triage fbca04' 'jules 7057ff'; do
+          for spec in 'kind/ci fbca04' 'priority/critical b60205' 'main-broken B60205' 'queue/queued 7057ff' 'status/needs-triage fbca04'; do
             label_name="${spec% *}"
             label_color="${spec#* }"
             encoded="$(jq -rn --arg v "$label_name" '$v | @uri')"
@@ -207,13 +182,39 @@ jobs:
             fi
           done
 
-          new_url="$(gh issue create --title "$title" --body-file "$body_file" \
-            --label 'kind/ci' --label 'priority/critical' --label 'main-broken' \
-            --label 'queue/queued' --label 'status/needs-triage')"
-          new_number="${new_url##*/}"
-          echo "Filed breakage issue #${new_number}: ${title} (${new_url})"
+          {
+            echo "mode=file"
+            echo "title=${title}"
+            echo "prompt<<PM_DISPATCH_PROMPT_EOF"
+            cat "$body_file"
+            echo "PM_DISPATCH_PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Prepared a pm-dispatch filing for: ${title}"
 
-          if [ "$jules_ready" = "true" ]; then
-            gh issue edit "$new_number" --add-label 'jules'
-            echo "Applied the jules label to #${new_number} (holder: jules)."
-          fi
+      - name: Queue a follow-up task on the existing breakage issue via pm-dispatch
+        if: steps.file-breakage.outputs.mode == 'append'
+        uses: developing-today/code/.github/actions/pm-dispatch-queue@main
+        with:
+          title: ${{ steps.file-breakage.outputs.title }}
+          prompt: ${{ steps.file-breakage.outputs.prompt }}
+          issue_number: ${{ steps.file-breakage.outputs.existing_number }}
+
+      - name: File the breakage issue via pm-dispatch
+        id: dispatch
+        if: steps.file-breakage.outputs.mode == 'file'
+        uses: developing-today/code/.github/actions/pm-dispatch-queue@main
+        with:
+          title: ${{ steps.file-breakage.outputs.title }}
+          prompt: ${{ steps.file-breakage.outputs.prompt }}
+          issue: "true"
+
+      - name: Apply the breakage labels to the filed issue
+        if: steps.file-breakage.outputs.mode == 'file' && steps.dispatch.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh issue edit "${{ steps.dispatch.outputs.issue_number }}" \
+            --add-label 'kind/ci' --add-label 'priority/critical' --add-label 'main-broken' \
+            --add-label 'queue/queued' --add-label 'status/needs-triage'
+          echo "Applied the breakage label set to issue #${{ steps.dispatch.outputs.issue_number }} (${{ steps.dispatch.outputs.issue_url }})."
