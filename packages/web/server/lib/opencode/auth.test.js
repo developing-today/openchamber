@@ -41,6 +41,17 @@ describe('projectCredentialEntries', () => {
     });
   });
 
+  it('stores a __proto__ integration id as an enumerable own entry, not as the prototype', () => {
+    const projected = projectCredentialEntries([
+      entry('__proto__', true, { type: 'key', key: 'proto-key' }),
+      entry('deepseek', true, { type: 'key', key: 'ds' }),
+    ]);
+    expect(Object.hasOwn(projected, '__proto__')).toBe(true);
+    expect(Object.keys(projected)).toEqual(expect.arrayContaining(['__proto__', 'deepseek']));
+    expect(projected['__proto__']).toEqual({ type: 'api', key: 'proto-key' });
+    expect(Object.getPrototypeOf(projected)).toBe(Object.prototype);
+  });
+
   it('keeps only the Console server and organization from OpenCode Console metadata', () => {
     const projected = projectCredentialEntries([
       entry('opencode', true, {
@@ -148,6 +159,21 @@ describe('readOpenCodeCredentials', () => {
     await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
     await expect(getProviderAuth('openai')).resolves.toBeNull();
     expect(requests[0]).toEqual({ url: '/api/credential', authorization: 'Basic test' });
+  });
+
+  it('does not resolve prototype-name provider ids as stored auth', async () => {
+    for (const providerId of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      await expect(getProviderAuth(providerId)).resolves.toBeNull();
+    }
+    await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
+  });
+
+  it('resolves a genuinely stored __proto__ credential', async () => {
+    respond = (res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ data: [entry('__proto__', true, { type: 'key', key: 'proto-key' })] }));
+    };
+    await expect(getProviderAuth('__proto__')).resolves.toEqual({ type: 'api', key: 'proto-key' });
   });
 
   it('lists every stored credential row, not only the active one', async () => {

@@ -261,7 +261,16 @@ const projectCredentialValue = (value) => {
 export const projectCredentialEntries = (entries) => {
   const result = {};
   for (const entry of entries) {
-    if (entry.active) result[entry.integrationID] = projectCredentialValue(entry.value);
+    if (!entry.active) continue;
+    // defineProperty, not plain assignment: assigning a '__proto__'
+    // integration id would set the projection's prototype instead of
+    // creating an enumerable own entry for that credential.
+    Object.defineProperty(result, entry.integrationID, {
+      value: projectCredentialValue(entry.value),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   return result;
 };
@@ -349,7 +358,10 @@ export async function readLocalOpenCodeCredentials() {
  */
 export async function getProviderAuth(providerId) {
   const credentials = await sharedStoredRead(readStored);
-  return credentials[providerId] || null;
+  // Own-property guard: a plain lookup resolves prototype-name ids
+  // ('constructor', 'toString', '__proto__', ...) to inherited
+  // Object.prototype members, fabricating stored auth.
+  return Object.hasOwn(credentials, providerId) ? credentials[providerId] || null : null;
 }
 
 const readAllCredentialRows = async (current) => projectCredentialRows(await current.list());
