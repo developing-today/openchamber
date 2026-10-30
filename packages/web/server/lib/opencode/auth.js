@@ -294,6 +294,19 @@ export function readOpenCodeCredentials() {
 }
 
 /**
+ * The same projected credentials, read straight from OpenCode's credential
+ * store on this machine with no server in between. The served projection
+ * can withhold a secret a consumer must present itself (the stored-login
+ * projection keeps refresh tokens with OpenCode), so a reader that needs
+ * the stored value itself falls back to the store — the seam the quota CLI
+ * already uses when no server is listening. Throws when the store cannot
+ * be read; each caller decides what that means for it.
+ */
+export async function readLocalOpenCodeCredentials() {
+  return projectCredentialEntries(await openCodeLocalCredentialSource().list());
+}
+
+/**
  * The credential stored for one provider, or null. Variables do not count:
  * callers ask whether a login exists in OpenCode's own store.
  */

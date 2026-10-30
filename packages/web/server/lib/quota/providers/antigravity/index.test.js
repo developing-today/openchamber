@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // The credential source is wired through configureOpenCodeCredentials, the
@@ -18,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const originalOpenCodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
+const originalXdgDataHome = process.env.XDG_DATA_HOME;
 let isolatedHome = null;
 
 const loadProvider = async () => {
@@ -25,6 +27,7 @@ const loadProvider = async () => {
   process.env.HOME = isolatedHome;
   process.env.USERPROFILE = isolatedHome;
   process.env.OPENCODE_CONFIG_DIR = path.join(isolatedHome, '.config', 'opencode');
+  process.env.XDG_DATA_HOME = path.join(isolatedHome, '.local', 'share');
   vi.resetModules();
   const [{ configureOpenCodeCredentials }, { fetchQuota }] = await Promise.all([
     import('../../../opencode/auth.js'),
@@ -41,6 +44,29 @@ const googleOAuthEntry = {
   value: { type: 'oauth', methodID: 'antigravity', access: 'access-token', refresh: 'refresh-token', expires: 1 },
 };
 
+// A local OpenCode credential store under the isolated home, holding the
+// google OAuth login with its refresh token — what the provider's direct
+// store read sees on a signed-in machine.
+const createLocalGoogleStore = () => {
+  const dataDir = path.join(isolatedHome, '.local', 'share', 'opencode');
+  fs.mkdirSync(dataDir, { recursive: true });
+  const db = new DatabaseSync(path.join(dataDir, 'opencode.db'));
+  db.exec(`create table credential (
+    id text primary key,
+    integration_id text,
+    label text not null,
+    value text not null,
+    connector_id text,
+    method_id text,
+    active integer,
+    time_created integer not null,
+    time_updated integer not null
+  )`);
+  db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)')
+    .run('cred_google_local', 'google', 'default', JSON.stringify({ type: 'oauth', methodID: 'antigravity', access: 'local-access-token', refresh: 'local-refresh-token', expires: 1 }), 1, 100, 100);
+  db.close();
+};
+
 afterEach(() => {
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
@@ -48,6 +74,8 @@ afterEach(() => {
   else process.env.USERPROFILE = originalUserProfile;
   if (originalOpenCodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
   else process.env.OPENCODE_CONFIG_DIR = originalOpenCodeConfigDir;
+  if (originalXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+  else process.env.XDG_DATA_HOME = originalXdgDataHome;
   if (isolatedHome) fs.rmSync(isolatedHome, { recursive: true, force: true });
   isolatedHome = null;
   vi.resetModules();
@@ -98,5 +126,42 @@ describe('Antigravity fetchQuota credential resolution', () => {
     expect(result.configured).toBe(false);
     expect(result.error).toBe('Not configured');
     expect(fetchStub).not.toHaveBeenCalled();
+  });
+
+  it('resolves the google login from the local store when the served projection withholds its refresh token', async () => {
+    const { configureOpenCodeCredentials, fetchQuota } = await loadProvider();
+    // The served projection keeps the refresh token server-side: the
+    // google entry arrives with an access token only, which the store
+    // resolver cannot use on its own — the direct store read must supply
+    // the candidate instead.
+    configureOpenCodeCredentials({
+      list: async () => [{
+        ...googleOAuthEntry,
+        value: { type: 'oauth', methodID: 'antigravity', access: 'projected-access-token', expires: 1 },
+      }],
+    });
+    createLocalGoogleStore();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })));
+
+    const result = await fetchQuota();
+
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Failed to refresh Antigravity token');
+  });
+
+  it('resolves the google login from the local store when the served credential read fails', async () => {
+    const { configureOpenCodeCredentials, fetchQuota } = await loadProvider();
+    configureOpenCodeCredentials({
+      list: async () => {
+        throw new Error('OpenCode is not connected yet');
+      },
+    });
+    createLocalGoogleStore();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })));
+
+    const result = await fetchQuota();
+
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Failed to refresh Antigravity token');
   });
 });
