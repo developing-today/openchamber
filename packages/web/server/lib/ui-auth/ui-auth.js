@@ -16,10 +16,24 @@ import { parsePositiveIntWithDefault } from '../shared/parse-int.js';
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
 
+// No session may live longer than 400 days, however the value is spelled:
+// a lifetime past that is an effectively non-expiring session, so an
+// oversized value falls back to the default instead of being honoured.
+const MAX_SESSION_TTL_MS = 400 * 24 * HOUR_MS;
+
 // A positive number of hours or days from the environment, else the default.
+// Only a plain decimal spelling counts: digits with at most one decimal
+// point (fractional lifetimes such as '0.5' are intentional). A bare
+// Number(...) would silently honour '1e3' as 1000 units and '0x10' as 16
+// for this security control — the same class #624 removed from the
+// rate-limit reader below.
 export const readSessionTtlMs = (raw, unitMs, fallbackMs) => {
-  const value = Number(String(raw ?? '').trim());
-  return Number.isFinite(value) && value > 0 ? Math.round(value * unitMs) : fallbackMs;
+  const text = String(raw ?? '').trim();
+  if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
+    return fallbackMs;
+  }
+  const ttlMs = Math.round(Number(text) * unitMs);
+  return ttlMs > 0 && ttlMs <= MAX_SESSION_TTL_MS ? ttlMs : fallbackMs;
 };
 
 const SESSION_TTL_MS = readSessionTtlMs(process.env.OPENCHAMBER_UI_SESSION_TTL_HOURS, HOUR_MS, 12 * HOUR_MS);
