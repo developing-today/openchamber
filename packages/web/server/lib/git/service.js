@@ -2195,6 +2195,7 @@ const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new 
   let timedOut = false;
   let spawnError = null;
   let escalationTimer = null;
+  let escalationDone = null;
   const killTree = () => {
     if (!child.pid) return;
     if (process.platform === 'win32') {
@@ -2206,10 +2207,17 @@ const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new 
       return;
     }
     try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
-    escalationTimer = setTimeout(() => {
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
-    }, 1000);
-    escalationTimer.unref?.();
+    // The escalation must run to completion even if the shell dies on
+    // SIGTERM first: a descendant that ignores SIGTERM and holds no pipes
+    // lets the shell's 'close' fire immediately, and cancelling the timer
+    // there would leave that descendant running (#868, Codex on PR #880).
+    escalationDone = new Promise((resolveEscalation) => {
+      escalationTimer = setTimeout(() => {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+        resolveEscalation();
+      }, 1000);
+      escalationTimer.unref?.();
+    });
   };
   const timeoutTimer = setTimeout(() => {
     timedOut = true;
@@ -2220,8 +2228,7 @@ const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new 
   child.once('error', (error) => { spawnError = error; });
   child.once('close', (code, signal) => {
     clearTimeout(timeoutTimer);
-    if (escalationTimer) clearTimeout(escalationTimer);
-    resolve({
+    const finish = () => resolve({
       stdout: Buffer.concat(stdoutChunks).toString('utf8'),
       stderr: Buffer.concat(stderrChunks).toString('utf8'),
       code,
@@ -2229,6 +2236,15 @@ const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new 
       timedOut,
       error: spawnError,
     });
+    if (timedOut && escalationDone) {
+      // Timed out: resolve only once the group SIGKILL above has been
+      // issued, so bootstrap never advances while a SIGTERM-ignoring
+      // descendant may still write into the worktree or hold its ports.
+      void escalationDone.then(finish);
+      return;
+    }
+    if (escalationTimer) clearTimeout(escalationTimer);
+    finish();
   });
 });
 

@@ -1595,13 +1595,46 @@ const runWorktreeStartCommand = async (directory: string, command: string): Prom
   });
 
   let timedOut = false;
+  let termination: Promise<void> | null = null;
+  let signalTimeout: (() => void) | undefined;
+  const timeoutFired = new Promise<void>((resolve) => { signalTimeout = resolve; });
   const timeoutTimer = setTimeout(() => {
     timedOut = true;
-    void terminate().catch(() => {});
+    termination = terminate().catch(() => {});
+    signalTimeout?.();
   }, timeoutMs);
   timeoutTimer.unref?.();
-  const { code, error } = await closed;
+  let exit = await Promise.race([
+    closed,
+    timeoutFired.then(() => null),
+  ]);
+  if (timedOut) {
+    // Termination completes the group escalation (SIGTERM, then SIGKILL)
+    // before this result returns, so bootstrap never advances while a
+    // SIGTERM-ignoring descendant may still be alive.
+    await termination;
+    if (!exit) {
+      // Bounded cleanup path: on Windows a descendant that outlived the
+      // shell can hold its pipes forever, leaving `closed` pending even
+      // after termination gave up (#868, Codex on PR #880). Give `closed`
+      // a short grace, then return the timeout result regardless instead
+      // of wedging bootstrap at git-ready.
+      exit = await Promise.race([
+        closed,
+        new Promise<null>((resolve) => {
+          const grace = setTimeout(() => resolve(null), 1000);
+          grace.unref?.();
+        }),
+      ]);
+      if (!exit) {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        exit = { code: null, signal: null, error: null };
+      }
+    }
+  }
   clearTimeout(timeoutTimer);
+  const { code, error } = exit;
   const stdout = Buffer.concat(stdoutChunks).toString('utf8');
   const stderr = Buffer.concat(stderrChunks).toString('utf8');
 

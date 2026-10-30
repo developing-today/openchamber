@@ -2001,7 +2001,10 @@ describe('createWorktree', () => {
     process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '1000';
 
     const descendantScript = path.join(dataHome, 'descendant.cjs');
-    fs.writeFileSync(descendantScript, 'setTimeout(() => {}, 120_000);\n');
+    // The descendant ignores SIGTERM and holds no pipes: the shell's close
+    // fires as soon as the shell dies, so only the completed SIGKILL
+    // escalation can stop it (Codex repro on PR #880).
+    fs.writeFileSync(descendantScript, "process.on('SIGTERM', () => {});\nsetTimeout(() => {}, 120_000);\n");
     const pidFile = path.join(dataHome, 'descendant.pid');
     const spawnerScript = path.join(dataHome, 'spawner.cjs');
     fs.writeFileSync(

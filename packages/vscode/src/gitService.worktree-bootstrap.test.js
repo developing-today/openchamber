@@ -131,7 +131,9 @@ describe('VS Code worktree bootstrap phases', () => {
     runGit(repository, ['add', 'README.md']);
     runGit(repository, ['commit', '-m', 'init']);
     const descendantScript = path.join(scratch, 'descendant.cjs');
-    fs.writeFileSync(descendantScript, 'setTimeout(() => {}, 120_000);\n');
+    // SIGTERM-ignoring descendant, mirroring the web twin's test: only the
+    // completed SIGKILL escalation stops it.
+    fs.writeFileSync(descendantScript, "process.on('SIGTERM', () => {});\nsetTimeout(() => {}, 120_000);\n");
     const pidFile = path.join(scratch, 'descendant.pid');
     const spawnerScript = path.join(scratch, 'spawner.cjs');
     fs.writeFileSync(
