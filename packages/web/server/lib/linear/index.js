@@ -1,4 +1,6 @@
 export {
+  LinearAuthError,
+  getLinearStorageState,
   getLinearAuth,
   getLinearAuthByWorkspaceId,
   getLinearAuthWorkspaces,
