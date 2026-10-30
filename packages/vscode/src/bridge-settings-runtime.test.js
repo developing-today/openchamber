@@ -15,8 +15,25 @@ mock.module('vscode', () => ({
 const scratchConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-settings-'));
 process.env.XDG_CONFIG_HOME = path.join(scratchConfigRoot, 'xdg');
 process.env.OPENCODE_CONFIG_DIR = '';
+// The magic-prompts (and shared settings) paths are derived from
+// os.homedir() at import time, and Bun's os.homedir() ignores a HOME
+// env var reassigned after process start — so mock the os module's
+// homedir to scratch before importing instead: the tests below must
+// never touch the real ~/.config/openchamber.
+const scratchHome = path.join(scratchConfigRoot, 'home');
+fs.mkdirSync(scratchHome, { recursive: true });
+const realOs = { ...os };
+const osWithScratchHome = { ...realOs, homedir: () => scratchHome, default: { ...realOs, homedir: () => scratchHome } };
+mock.module('os', () => osWithScratchHome);
+mock.module('node:os', () => osWithScratchHome);
 
-const { fetchOpenCodeSkillsFromApi } = await import('./bridge-settings-runtime.ts');
+const {
+  fetchOpenCodeSkillsFromApi,
+  readMagicPromptOverrides,
+  resetAllMagicPromptOverrides,
+  resetMagicPromptOverride,
+  saveMagicPromptOverride,
+} = await import('./bridge-settings-runtime.ts');
 
 const originalFetch = globalThis.fetch;
 
@@ -174,5 +191,100 @@ describe('fetchOpenCodeSkillsFromApi skill scope for subdirectory sessions', () 
     const byPath = await skillsFor(workingDirectory, [agentsSkill]);
 
     expect(byPath.get(agentsSkill)?.scope).toBe('user');
+  });
+});
+
+describe('magic prompt overrides store', () => {
+  const magicDir = path.join(scratchHome, '.config', 'openchamber');
+  const magicPath = path.join(magicDir, 'magic-prompts.json');
+  const corruptSiblings = () =>
+    fs.existsSync(magicDir) ? fs.readdirSync(magicDir).filter((name) => name.includes('.corrupt-')) : [];
+  const tmpSiblings = () =>
+    fs.existsSync(magicDir) ? fs.readdirSync(magicDir).filter((name) => name.includes('.tmp-')) : [];
+  const cleanMagicStore = () => {
+    fs.rmSync(magicDir, { recursive: true, force: true });
+  };
+
+  test('ENOENT yields an empty state silently with no backup', () => {
+    cleanMagicStore();
+    expect(readMagicPromptOverrides()).toEqual({ version: 1, overrides: {} });
+    expect(corruptSiblings()).toEqual([]);
+  });
+
+  test('set / reset / reset-all round trips persist {version:1, overrides}', async () => {
+    cleanMagicStore();
+    await saveMagicPromptOverride('alpha.visible', 'alpha text');
+    const afterTwo = await saveMagicPromptOverride('beta.visible', 'beta text');
+    expect(afterTwo).toEqual({
+      version: 1,
+      overrides: { 'alpha.visible': 'alpha text', 'beta.visible': 'beta text' },
+    });
+    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual(afterTwo);
+    expect(readMagicPromptOverrides()).toEqual(afterTwo);
+
+    const afterReset = await resetMagicPromptOverride('alpha.visible');
+    expect(afterReset.overrides).toEqual({ 'beta.visible': 'beta text' });
+
+    const afterResetAll = await resetAllMagicPromptOverrides();
+    expect(afterResetAll).toEqual({ version: 1, overrides: {} });
+    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual({ version: 1, overrides: {} });
+  });
+
+  test('writes are atomic: no temp files are left behind and the file parses', async () => {
+    cleanMagicStore();
+    await saveMagicPromptOverride('alpha.visible', 'alpha text');
+    expect(tmpSiblings()).toEqual([]);
+    expect(() => JSON.parse(fs.readFileSync(magicPath, 'utf8'))).not.toThrow();
+  });
+
+  test('a corrupt file is preserved as a .corrupt sibling before any overwrite, and a later save does not destroy it', async () => {
+    cleanMagicStore();
+    await saveMagicPromptOverride('alpha.visible', 'alpha text');
+    await saveMagicPromptOverride('beta.visible', 'beta text');
+    // Simulate a torn write.
+    const torn = '{"version":1,"overrides":{"alpha.visible":"alpha te';
+    fs.writeFileSync(magicPath, torn);
+
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(' '));
+    let afterTear;
+    try {
+      afterTear = readMagicPromptOverrides();
+    } finally {
+      console.warn = originalWarn;
+    }
+    expect(afterTear).toEqual({ version: 1, overrides: {} });
+    expect(warnings.some((line) => line.includes(magicPath))).toBe(true);
+
+    const preserved = corruptSiblings();
+    expect(preserved).toHaveLength(1);
+    expect(fs.readFileSync(path.join(magicDir, preserved[0]), 'utf8')).toBe(torn);
+    // The corrupt bytes were moved aside, not copied: the store is gone
+    // until the next save recreates it.
+    expect(fs.existsSync(magicPath)).toBe(false);
+
+    await saveMagicPromptOverride('gamma.visible', 'gamma text');
+    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual({
+      version: 1,
+      overrides: { 'gamma.visible': 'gamma text' },
+    });
+    // The preserved copy is still the only place the torn bytes live.
+    expect(corruptSiblings()).toEqual(preserved);
+    expect(fs.readFileSync(path.join(magicDir, preserved[0]), 'utf8')).toBe(torn);
+  });
+
+  test('reset-all on a corrupt file preserves it instead of silently overwriting it', async () => {
+    cleanMagicStore();
+    fs.mkdirSync(magicDir, { recursive: true });
+    const torn = 'not json at all';
+    fs.writeFileSync(magicPath, torn);
+
+    await resetAllMagicPromptOverrides();
+
+    const preserved = corruptSiblings();
+    expect(preserved).toHaveLength(1);
+    expect(fs.readFileSync(path.join(magicDir, preserved[0]), 'utf8')).toBe(torn);
+    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual({ version: 1, overrides: {} });
   });
 });
