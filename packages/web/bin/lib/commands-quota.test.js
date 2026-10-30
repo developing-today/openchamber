@@ -668,6 +668,11 @@ describe('quota fetch timeout and concurrency', () => {
     for (const spelling of ['1e3', '10000junk', '10.9', '250ms', '0x10']) {
       expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: spelling })).toBe(10_000);
     }
+    // Magnitudes no JS timer can honour fall back instead of overflowing
+    // setTimeout to ~1 ms; the largest honourable value is accepted.
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '2147483647' })).toBe(2_147_483_647);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '3000000000' })).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '9007199254740993' })).toBe(10_000);
   });
 
   it('answers a timeout row for a slow provider and keeps the rest of the batch', async () => {

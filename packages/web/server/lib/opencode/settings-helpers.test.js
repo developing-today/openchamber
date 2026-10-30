@@ -442,6 +442,36 @@ describe('settings helpers', () => {
     });
   });
 
+  it('maps legacy sidebarDetailedZoneRows into sidebarSessionRowDisplay.zoneLines', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ sidebarDetailedZoneRows: true })).toEqual({
+      sidebarSessionRowDisplay: { zoneLines: 'two' },
+    });
+    expect(helpers.sanitizeSettingsUpdate({ sidebarDetailedZoneRows: false })).toEqual({
+      sidebarSessionRowDisplay: { zoneLines: 'one' },
+    });
+    // The new key wins when both are present.
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarDetailedZoneRows: true,
+      sidebarSessionRowDisplay: { zoneLines: 'one' },
+    })).toEqual({
+      sidebarSessionRowDisplay: { zoneLines: 'one' },
+    });
+    // A new-key display without zoneLines still takes the legacy value.
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarDetailedZoneRows: true,
+      sidebarSessionRowDisplay: { showBranch: false },
+    })).toEqual({
+      sidebarSessionRowDisplay: { showBranch: false, zoneLines: 'two' },
+    });
+    expect(helpers.sanitizeSettingsUpdate({ sidebarDetailedZoneRows: 'yes' })).toEqual({});
+    // A profile holding only the old key round-trips through the response.
+    expect(helpers.formatSettingsResponse({ sidebarDetailedZoneRows: true })).toMatchObject({
+      sidebarSessionRowDisplay: { zoneLines: 'two' },
+    });
+  });
+
   it('normalizes desktopWindowControlsPosition and maps legacy auto to right', () => {
     const helpers = createTestHelpers();
 

@@ -725,3 +725,81 @@ describe('notifications for a chat of an isolated space', () => {
     expect(hostFetch).not.toHaveBeenCalled();
   });
 });
+
+describe('notification retention bounds', () => {
+  const makeAskRuntime = () => {
+    const emitDesktopNotification = vi.fn(() => true);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnQuestion: true }),
+      buildTemplateVariables: async () => ({ session_name: 'Fix login redirect loop' }),
+      resolveNotificationTemplate: (template, variables) => template.replace('{last_message}', variables.last_message ?? ''),
+      shouldApplyResolvedTemplateMessage: () => true,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => false,
+      getIsSessionAutoAccepting: async () => false,
+    });
+    return { runtime, emitDesktopNotification };
+  };
+
+  const permissionAsked = (id) => ({
+    type: 'permission.asked',
+    properties: { sessionID: 'ses_1', id, action: 'bash', resources: ['echo ok'] },
+  });
+
+  it('evicts the oldest notified permission requests past the bound and still suppresses a recent duplicate', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { runtime, emitDesktopNotification } = makeAskRuntime();
+      // One more distinct request than the 500-entry bound.
+      for (let i = 1; i <= 501; i += 1) {
+        await runtime.maybeSendPushForTrigger(permissionAsked(`per_${i}`));
+        await vi.advanceTimersByTimeAsync(600);
+      }
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The most recent request is still remembered: no second notification.
+      await runtime.maybeSendPushForTrigger(permissionAsked('per_501'));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The oldest request fell out of the bound, so its re-delivery notifies again.
+      await runtime.maybeSendPushForTrigger(permissionAsked('per_1'));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(502);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 120_000);
+
+  it('evicts the oldest ready-notification cooldown entries past the bound', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
+    try {
+      const { runtime, emitDesktopNotification } = makeRuntime();
+      // One more session than the 500-entry cooldown bound, all at the same
+      // frozen instant, so only eviction — never the 5s cooldown expiring —
+      // can let the first session announce again.
+      for (let i = 1; i <= 501; i += 1) {
+        await runtime.maybeSendPushForTrigger(stepStarted(`ses_${i}`, `msg_${i}`));
+        await runtime.maybeSendPushForTrigger(turnEnded(`ses_${i}`));
+      }
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The most recent session is still inside its cooldown.
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_501'));
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The first session's cooldown entry was evicted, so it announces again.
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(502);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  }, 120_000);
+});

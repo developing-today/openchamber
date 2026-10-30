@@ -238,7 +238,10 @@ const DEFAULT_QUOTA_TIMEOUT_MS = 10_000;
 
 const resolveQuotaTimeoutMs = (env) => {
   const parsed = parsePlainDecimalInt(env.OPENCHAMBER_QUOTA_TIMEOUT_MS);
-  return parsed !== null && parsed > 0 ? parsed : DEFAULT_QUOTA_TIMEOUT_MS;
+  // The value feeds setTimeout, which cannot honour more than 2^31-1 ms: a
+  // larger duration overflows to ~1 ms and every fetch instantly 'times out'.
+  // Fall back to the default instead, the bound createGitExecTimeoutMs uses.
+  return parsed !== null && parsed > 0 && parsed <= 2_147_483_647 ? parsed : DEFAULT_QUOTA_TIMEOUT_MS;
 };
 
 /** Runs `worker` over `items` with at most `limit` in flight; results keep input order. */

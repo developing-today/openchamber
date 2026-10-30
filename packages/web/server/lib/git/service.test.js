@@ -2120,6 +2120,56 @@ describe('createWorktree', () => {
     }
   }, 30_000);
 
+  it('falls back to the default bound for an oversized start-command timeout (#881)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    // 3_000_000_000 ms is above Node's timer maximum (2^31-1): honoured
+    // literally it would overflow to ~1 ms and kill the command at once.
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '3000000000';
+
+    const marker = path.join(dataHome, 'start-command-finished');
+    const slowScript = path.join(dataHome, 'slow.cjs');
+    fs.writeFileSync(
+      slowScript,
+      `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'done'), 500);\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-oversized-timeout',
+        worktreeName: 'start-command-oversized-timeout',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(slowScript)}`,
+      });
+
+      await expect.poll(() => fs.existsSync(marker), { timeout: 15_000 }).toBe(true);
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
+        status: 'ready',
+        phase: 'setup-ready',
+        error: null,
+      });
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
   it('runs the start command OpenCode keeps for the project in the new worktree', async () => {
     if (!canRunGit()) return;
 
