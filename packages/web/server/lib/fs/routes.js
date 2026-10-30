@@ -555,7 +555,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs, execOutputMaxBytes = 4 * 1024 * 1024 }) => {
+const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs, execOutputMaxBytes = 4 * 1024 * 1024, platform = process.platform }) => {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -564,13 +564,61 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
     let timedOut = false;
     let outputTooLarge = false;
 
+    // Overflow and timeout must end the whole command, not just the
+    // shell: a descendant that inherited the pipes keeps them open after
+    // the shell dies, and the result below resolves on 'close', which
+    // waits for pipe EOF -- so a shell-only kill can leave the result
+    // unsettled until the descendant exits on its own. The child is
+    // spawned detached (its own process group) and the kill signals that
+    // group (taskkill /T on Windows). A pid that is not an integer
+    // greater than 1 is never group-signalled (kill(-1) would hit every
+    // process we may signal); pid-less children get the direct kill.
+    // Destroying the pipes afterwards settles 'close' promptly even if
+    // a descendant escaped the group (setsid) while holding them.
+    // This mirrors lib/spaces/run-command.js killProcessTree and the
+    // git service's copy; it is local because this module is loaded
+    // standalone by packaged desktop from a fixed file set.
+    const killCommandTree = () => {
+      const pid = child?.pid;
+      if (Number.isInteger(pid) && pid > 1) {
+        if (platform === 'win32') {
+          try {
+            const killer = spawn(nodePath.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/T', '/F', '/PID', String(pid)], {
+              windowsHide: true,
+              stdio: 'ignore',
+            });
+            killer?.once?.('error', () => {
+              try { child.kill('SIGKILL'); } catch {
+              }
+            });
+          } catch {
+            try { child.kill('SIGKILL'); } catch {
+            }
+          }
+        } else {
+          try {
+            process.kill(-pid, 'SIGKILL');
+          } catch {
+            try { child.kill('SIGKILL'); } catch {
+            }
+          }
+        }
+      } else {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+        }
+      }
+      try { child.stdout?.destroy?.(); } catch {
+      }
+      try { child.stderr?.destroy?.(); } catch {
+      }
+    };
+
     const killForOutputLimit = () => {
       if (outputTooLarge) return;
       outputTooLarge = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-      }
+      killCommandTree();
     };
 
     // Append at most the bytes left under the cap and report overflow, so a
@@ -591,15 +639,15 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
       cwd: resolvedCwd,
       env: execEnv,
       windowsHide: true,
+      // Own process group so killCommandTree can signal the tree; never
+      // on Windows, where detached gives the child its own console.
+      detached: platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-      }
+      killCommandTree();
     }, commandTimeoutMs);
 
     child.stdout?.on('data', (chunk) => {
@@ -814,6 +862,7 @@ export const registerFsRoutes = (app, dependencies) => {
         : { ...process.env, PATH: buildAugmentedPath() },
       commandTimeoutMs,
       execOutputMaxBytes,
+      platform,
     }))().then((result) => {
       // Only cache successful results — failures may be transient.
       if (cacheKey && result && result.success) {

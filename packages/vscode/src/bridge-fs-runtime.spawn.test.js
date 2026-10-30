@@ -95,6 +95,18 @@ describe('bridge fs exec spawn behaviour (real shell)', () => {
     expect(result.stderr.length).toBeLessThan(5000000);
   });
 
+  it('settles an over-cap result promptly when a descendant holds the pipes', async () => {
+    if (!onPosix) return;
+    // The flooding descendant outlives a shell-only kill and keeps the
+    // pipes open; the tree kill must settle the result anyway (#913).
+    const startedAt = Date.now();
+    const result = await runOne("yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' & sleep 60");
+    expect(Date.now() - startedAt).toBeLessThan(20000);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('output-too-large');
+    expect(result.stdout.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+  });
+
   it('reports a non-zero exit with trimmed output instead of throwing', async () => {
     if (!onPosix) return;
     const result = await runOne("printf ' out '; printf ' err ' >&2; exit 3");
