@@ -11,16 +11,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // The provider also falls back to the legacy antigravity-accounts.json in
 // ANTIGRAVITY_ACCOUNTS_PATHS (Codex review on PR #860). Both locations are
 // derived at module load — one from OPENCODE_CONFIG_DIR, one from the home
-// directory — so each test points both at an empty temporary home and
+// directory (USERPROFILE on Windows, HOME elsewhere) — so each test
+// points both env vars at an empty temporary home and
 // imports a fresh module registry; a real accounts file on the machine
 // running the tests can never leak a candidate into these store-only cases.
 const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 const originalOpenCodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
 let isolatedHome = null;
 
 const loadProvider = async () => {
   isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-antigravity-test-'));
   process.env.HOME = isolatedHome;
+  process.env.USERPROFILE = isolatedHome;
   process.env.OPENCODE_CONFIG_DIR = path.join(isolatedHome, '.config', 'opencode');
   vi.resetModules();
   const [{ configureOpenCodeCredentials }, { fetchQuota }] = await Promise.all([
@@ -41,6 +44,8 @@ const googleOAuthEntry = {
 afterEach(() => {
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
+  if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = originalUserProfile;
   if (originalOpenCodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
   else process.env.OPENCODE_CONFIG_DIR = originalOpenCodeConfigDir;
   if (isolatedHome) fs.rmSync(isolatedHome, { recursive: true, force: true });
