@@ -1,3 +1,5 @@
+import { renameWithRetry } from '../shared/atomic-rename.js';
+
 const FILE_VERSION = 1;
 const MAX_PROMPT_TEXT_LENGTH = 200_000;
 const PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
@@ -30,14 +32,9 @@ export const createMagicPromptRuntime = (dependencies) => {
   let writeLock = Promise.resolve();
 
   const readPromptState = async () => {
+    let raw;
     try {
-      const raw = await fsPromises.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      const overrides = sanitizeOverrides(parsed?.overrides);
-      return {
-        version: FILE_VERSION,
-        overrides,
-      };
+      raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         return { version: FILE_VERSION, overrides: {} };
@@ -45,11 +42,47 @@ export const createMagicPromptRuntime = (dependencies) => {
       console.warn('Failed to read magic prompts file:', error);
       return { version: FILE_VERSION, overrides: {} };
     }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      // A torn or otherwise unparseable file is user data, not an empty
+      // store: move its bytes aside before any later write can overwrite
+      // them, and name the preserved copy so the loss is recoverable.
+      const preservedPath = `${filePath}.corrupt-${Date.now()}`;
+      try {
+        await fsPromises.rename(filePath, preservedPath);
+        console.warn(`Failed to read magic prompts file: preserved the unreadable file at ${preservedPath}:`, error);
+      } catch (preserveError) {
+        console.warn('Failed to read magic prompts file:', error);
+        console.warn(`Failed to preserve the unreadable magic prompts file at ${preservedPath}:`, preserveError);
+      }
+      return { version: FILE_VERSION, overrides: {} };
+    }
+    const overrides = sanitizeOverrides(parsed?.overrides);
+    return {
+      version: FILE_VERSION,
+      overrides,
+    };
   };
 
   const writePromptState = async (state) => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
-    await fsPromises.writeFile(filePath, JSON.stringify(state, null, 2), 'utf8');
+    const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      await fsPromises.writeFile(tempPath, JSON.stringify(state, null, 2), 'utf8');
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), tempPath, filePath);
+    } catch (error) {
+      try {
+        if (typeof fsPromises.unlink === 'function') {
+          await fsPromises.unlink(tempPath);
+        }
+      } catch {
+        // The write/rename error is the one the caller needs; a failed
+        // temp cleanup must not mask it.
+      }
+      throw error;
+    }
   };
 
   const persist = async (mutator) => {
