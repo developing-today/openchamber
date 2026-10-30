@@ -882,7 +882,7 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false }: 
   if (resolveGeminiCliAuth(auth)) {
     configured.add('google');
   }
-  if (resolveAntigravityAuth()) {
+  if (resolveAntigravityAuth() || resolveAntigravityStoreAuth(auth)) {
     configured.add('antigravity');
   }
 
@@ -1179,6 +1179,37 @@ const resolveAntigravityAuth = (): GoogleAuthSource | null => {
   return null;
 };
 
+/**
+ * The Antigravity login OpenCode itself holds: the `google` integration's
+ * OAuth credential in the credential store, written by the plugin's
+ * `antigravity` auth method. Current plugin versions sign in through the
+ * credential store and never write the legacy accounts file, so a store-only
+ * sign-in must still read as configured here — the mirror of
+ * `resolveAntigravityStoreAuth` in the web provider's auth module, which
+ * PR #764 added there. The accounts file stays first choice; a `google`
+ * entry that is an API key carries no refresh token and resolves to null.
+ */
+const resolveAntigravityStoreAuth = (auth: AuthFile): GoogleAuthSource | null => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['google', 'google.oauth']));
+  const entryObject = asObject(entry);
+  if (!entryObject) {
+    return null;
+  }
+
+  const oauthObject = asObject(entryObject.oauth) ?? entryObject;
+  const refreshParts = parseGoogleRefreshToken(oauthObject.refresh);
+  if (!refreshParts.refreshToken) {
+    return null;
+  }
+
+  return {
+    sourceId: 'antigravity',
+    sourceLabel: 'Antigravity',
+    refreshToken: refreshParts.refreshToken,
+    projectId: refreshParts.projectId ?? refreshParts.managedProjectId ?? undefined,
+  };
+};
+
 const resolveGoogleAuthSources = (auth: AuthFile): GoogleAuthSource[] => {
   const sources: GoogleAuthSource[] = [];
 
@@ -1433,7 +1464,29 @@ const fetchAntigravityQuotaSummary = async (accessToken: string, projectId?: str
 };
 
 const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
-  const auth = resolveAntigravityAuth();
+  let auth = resolveAntigravityAuth();
+  if (!auth) {
+    let storeReadFailed = false;
+    try {
+      auth = resolveAntigravityStoreAuth(await readOpenCodeCredentials());
+    } catch {
+      storeReadFailed = true;
+    }
+    if (!auth && storeReadFailed) {
+      // A store that could not be read has not answered "no login": for a
+      // store-only sign-in this is a failed refresh, not a missing login,
+      // and reporting Not configured would clear the quota view of a
+      // provider that is configured. (The web provider keeps the same
+      // distinction in its candidate resolution.)
+      return buildResult({
+        providerId: 'antigravity',
+        providerName: 'Antigravity',
+        ok: false,
+        configured: true,
+        error: 'Failed to read OpenCode credentials',
+      });
+    }
+  }
   if (!auth || !auth.refreshToken) {
     return buildResult({
       providerId: 'antigravity',
