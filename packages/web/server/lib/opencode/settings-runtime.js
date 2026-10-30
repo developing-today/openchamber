@@ -115,9 +115,59 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  // Atomic like writeJsonFileAtomic below: the migration callers write the
+  // only merged copy of a project's config and then delete the source, so a
+  // torn write here would destroy both copies at once.
   const writeJsonFile = async (filePath, value) => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
-    await fsPromises.writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
+    const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      await fsPromises.writeFile(tmp, JSON.stringify(value, null, 2), 'utf8');
+      await replaceFile(tmp, filePath);
+    } catch (error) {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
+      throw error;
+    }
+  };
+
+  // Read a migration destination: a torn destination must not abort the
+  // migration forever or, worse, be treated as empty while the source is
+  // deleted. Preserve its bytes to a .corrupt- sibling and continue with no
+  // destination; if preservation itself fails, surface the read error so
+  // the caller aborts and the source stays put for a later retry.
+  const readDestinationJsonFile = async (filePath) => {
+    try {
+      return await readJsonFile(filePath);
+    } catch (error) {
+      // Only a JSON parse failure means the destination's bytes are
+      // corrupt. A filesystem read error (EIO, EACCES, ...) says nothing
+      // about the bytes — the destination may be perfectly valid — so
+      // propagate it: the migration aborts and both files stay put for a
+      // later retry instead of the valid destination being quarantined
+      // and replaced from the legacy source alone.
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+      let preservedPath = null;
+      for (let attempt = 0; attempt < 10 && preservedPath === null; attempt += 1) {
+        const candidate = `${filePath}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+        try {
+          await fsPromises.stat(candidate);
+        } catch {
+          preservedPath = candidate;
+        }
+      }
+      if (preservedPath === null) {
+        throw error;
+      }
+      try {
+        await fsPromises.rename(filePath, preservedPath);
+      } catch {
+        throw error;
+      }
+      console.warn(`Preserved the unreadable project config file at ${preservedPath}:`, error);
+      return null;
+    }
   };
 
   const uniqueStrings = (values) => Array.from(new Set(values.filter((value) => typeof value === 'string' && value.trim().length > 0)));
@@ -313,7 +363,7 @@ export const createSettingsRuntime = (deps) => {
 
     const [oldConfig, newConfig] = await Promise.all([
       readJsonFile(oldConfigPath),
-      readJsonFile(newConfigPath),
+      readDestinationJsonFile(newConfigPath),
     ]);
 
     if (oldConfig || newConfig) {
@@ -514,7 +564,7 @@ export const createSettingsRuntime = (deps) => {
       const targetStorageDir = path.join(PROJECTS_ROOT_DIR, targetStem);
 
       for (const orphan of orphansForProject) {
-        const targetExisting = (await readJsonFile(targetPath)) || {};
+        const targetExisting = (await readDestinationJsonFile(targetPath)) || {};
         // An orphan is named by the file found on disk, so its folder is the raw name.
         const orphanStorageDir = path.join(PROJECTS_ROOT_DIR, orphan.orphanId);
         const merged = mergeProjectConfigData({

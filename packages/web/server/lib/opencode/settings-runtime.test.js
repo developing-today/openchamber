@@ -12,11 +12,12 @@ const createRuntime = async ({
   onPermissionDefaultModeChanged = undefined,
   onLastDirectoryChanged = undefined,
   chatRoots = undefined,
+  fsImpl = fsPromises,
 } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
-    fsPromises,
+    fsPromises: fsImpl,
     path,
     crypto,
     SETTINGS_FILE_PATH: settingsFilePath,
@@ -541,6 +542,140 @@ describe('settings runtime', () => {
       // A second startup finds nothing left to move.
       await runtime.readSettingsFromDiskMigrated();
       expect(JSON.parse(await fsPromises.readFile(path.join(boundedStorageDir, 'context.json'), 'utf8')).notes).toHaveLength(2);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('preserves a torn migration destination and still migrates the source config', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      const oldProjectId = 'legacy-project-id';
+      const newProjectId = createProjectIdFromPath(projectPath);
+      const projectsRoot = path.join(path.dirname(settingsFilePath), 'projects');
+      await fsPromises.mkdir(projectPath, { recursive: true });
+      await fsPromises.mkdir(projectsRoot, { recursive: true });
+      await fsPromises.writeFile(
+        settingsFilePath,
+        JSON.stringify({
+          projects: [{ id: oldProjectId, path: projectPath, addedAt: 1, lastOpenedAt: 1 }],
+          activeProjectId: oldProjectId,
+        }, null, 2),
+        'utf8',
+      );
+      await fsPromises.writeFile(
+        path.join(projectsRoot, `${oldProjectId}.json`),
+        JSON.stringify({ 'setup-worktree': ['bun install'] }, null, 2),
+        'utf8',
+      );
+      const torn = '{"projectTodos":[{"id":"torn"';
+      await fsPromises.writeFile(path.join(projectsRoot, `${newProjectId}.json`), torn, 'utf8');
+
+      await runtime.readSettingsFromDiskMigrated();
+
+      const migratedConfig = JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${newProjectId}.json`), 'utf8'));
+      expect(migratedConfig['setup-worktree']).toEqual(['bun install']);
+      const preserved = (await fsPromises.readdir(projectsRoot)).filter((name) => name.includes('.corrupt-'));
+      expect(preserved).toHaveLength(1);
+      expect(await fsPromises.readFile(path.join(projectsRoot, preserved[0]), 'utf8')).toBe(torn);
+      await expect(fsPromises.readFile(path.join(projectsRoot, `${oldProjectId}.json`), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(warn.mock.calls.some((call) => String(call[0]).includes('Preserved the unreadable project config file'))).toBe(true);
+    } finally {
+      warn.mockRestore();
+      await cleanup();
+    }
+  });
+
+  it('aborts the migration without touching either config when the destination read fails with an I/O error', async () => {
+    const failingFs = {
+      ...fsPromises,
+      readFile: async (file, ...rest) => {
+        const name = String(file);
+        if (name.includes(`${path.sep}projects${path.sep}`) && name.endsWith('.json') && !name.includes('legacy-project-id')) {
+          const error = new Error('simulated read failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.readFile(file, ...rest);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fsImpl: failingFs });
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      const oldProjectId = 'legacy-project-id';
+      const newProjectId = createProjectIdFromPath(projectPath);
+      const projectsRoot = path.join(path.dirname(settingsFilePath), 'projects');
+      await fsPromises.mkdir(projectPath, { recursive: true });
+      await fsPromises.mkdir(projectsRoot, { recursive: true });
+      await fsPromises.writeFile(
+        settingsFilePath,
+        JSON.stringify({
+          projects: [{ id: oldProjectId, path: projectPath, addedAt: 1, lastOpenedAt: 1 }],
+          activeProjectId: oldProjectId,
+        }, null, 2),
+        'utf8',
+      );
+      await fsPromises.writeFile(
+        path.join(projectsRoot, `${oldProjectId}.json`),
+        JSON.stringify({ 'setup-worktree': ['bun install'] }, null, 2),
+        'utf8',
+      );
+      const destination = { projectNotes: 'still valid' };
+      await fsPromises.writeFile(path.join(projectsRoot, `${newProjectId}.json`), JSON.stringify(destination, null, 2), 'utf8');
+
+      await runtime.readSettingsFromDiskMigrated().catch(() => {});
+
+      // The valid destination was not quarantined or replaced, and the
+      // source was not deleted: a later retry can still migrate.
+      expect(JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${newProjectId}.json`), 'utf8'))).toEqual(destination);
+      expect(JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${oldProjectId}.json`), 'utf8'))).toEqual({ 'setup-worktree': ['bun install'] });
+      expect((await fsPromises.readdir(projectsRoot)).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('does not delete the source config when the merged migration write fails', async () => {
+    const failingFs = {
+      ...fsPromises,
+      writeFile: async (file, ...rest) => {
+        if (String(file).includes(`${path.sep}projects${path.sep}`) && String(file).includes('.tmp-')) {
+          const error = new Error('simulated write failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.writeFile(file, ...rest);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fsImpl: failingFs });
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      const oldProjectId = 'legacy-project-id';
+      const newProjectId = createProjectIdFromPath(projectPath);
+      const projectsRoot = path.join(path.dirname(settingsFilePath), 'projects');
+      await fsPromises.mkdir(projectPath, { recursive: true });
+      await fsPromises.mkdir(projectsRoot, { recursive: true });
+      await fsPromises.writeFile(
+        settingsFilePath,
+        JSON.stringify({
+          projects: [{ id: oldProjectId, path: projectPath, addedAt: 1, lastOpenedAt: 1 }],
+          activeProjectId: oldProjectId,
+        }, null, 2),
+        'utf8',
+      );
+      await fsPromises.writeFile(
+        path.join(projectsRoot, `${oldProjectId}.json`),
+        JSON.stringify({ 'setup-worktree': ['bun install'] }, null, 2),
+        'utf8',
+      );
+
+      await runtime.readSettingsFromDiskMigrated().catch(() => {});
+
+      expect(JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${oldProjectId}.json`), 'utf8'))).toEqual({ 'setup-worktree': ['bun install'] });
+      await expect(fsPromises.readFile(path.join(projectsRoot, `${newProjectId}.json`), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await fsPromises.readdir(projectsRoot)).filter((name) => name.includes('.tmp-'))).toEqual([]);
     } finally {
       await cleanup();
     }
