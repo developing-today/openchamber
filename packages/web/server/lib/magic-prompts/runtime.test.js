@@ -132,4 +132,34 @@ describe('magic prompts runtime', () => {
     expect(files.some((name) => name.startsWith('magic-prompts.json.corrupt-'))).toBe(true);
     expect(files).not.toContain('magic-prompts.json');
   });
+
+  it('never preserves the valid file a concurrent write saved after a stale corrupt read', async () => {
+    const corrupt = '{ not json';
+    await fsPromises.writeFile(filePath, corrupt, 'utf8');
+    const validState = { version: 1, overrides: { 'beta.visible': 'Beta prompt' } };
+    let reads = 0;
+    const renameCalls = [];
+    const runtime = createRuntime({
+      readFile: async (...args) => {
+        reads += 1;
+        if (reads === 1) {
+          // The stale read that saw the corrupt bytes. The concurrent
+          // write lands before this reader gets to preserve anything.
+          await fsPromises.writeFile(filePath, JSON.stringify(validState), 'utf8');
+          return corrupt;
+        }
+        return fsPromises.readFile(...args);
+      },
+      rename: async (from, to) => {
+        renameCalls.push([from, to]);
+        return fsPromises.rename(from, to);
+      },
+    });
+
+    // The write's state is the answer, and the file it saved stays put:
+    // no .corrupt-* rename may move it aside.
+    await expect(runtime.readPromptState()).resolves.toEqual(validState);
+    expect(renameCalls.filter(([, to]) => String(to).includes('.corrupt-'))).toEqual([]);
+    await expect(fsPromises.readFile(filePath, 'utf8')).resolves.toBe(JSON.stringify(validState));
+  });
 });

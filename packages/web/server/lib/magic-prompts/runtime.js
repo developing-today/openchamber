@@ -31,39 +31,91 @@ export const createMagicPromptRuntime = (dependencies) => {
 
   let writeLock = Promise.resolve();
 
-  const readPromptState = async () => {
-    let raw;
+  const enqueueLocked = (fn) => {
+    writeLock = writeLock.then(fn, fn);
+    return writeLock;
+  };
+
+  const emptyState = () => ({ version: FILE_VERSION, overrides: {} });
+
+  const stateFromParsed = (parsed) => ({
+    version: FILE_VERSION,
+    overrides: sanitizeOverrides(parsed?.overrides),
+  });
+
+  const isEnoent = (error) => Boolean(error && typeof error === 'object' && error.code === 'ENOENT');
+
+  // A torn or otherwise unparseable file is user data, not an empty
+  // store: move its bytes aside before any later write can overwrite
+  // them, and name the preserved copy so the loss is recoverable. Only
+  // call this serialized with writes (or re-validated under the lock):
+  // the file at filePath may have been replaced by a valid write since
+  // the bytes that failed to parse were read.
+  const preserveCorruptFile = async (error) => {
+    const preservedPath = `${filePath}.corrupt-${Date.now()}`;
     try {
-      raw = await fsPromises.readFile(filePath, 'utf8');
-    } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return { version: FILE_VERSION, overrides: {} };
-      }
+      await fsPromises.rename(filePath, preservedPath);
+      console.warn(`Failed to read magic prompts file: preserved the unreadable file at ${preservedPath}:`, error);
+    } catch (preserveError) {
       console.warn('Failed to read magic prompts file:', error);
-      return { version: FILE_VERSION, overrides: {} };
+      console.warn(`Failed to preserve the unreadable magic prompts file at ${preservedPath}:`, preserveError);
     }
-    let parsed;
+  };
+
+  const readRawFile = async () => {
     try {
-      parsed = JSON.parse(raw);
+      return { raw: await fsPromises.readFile(filePath, 'utf8') };
     } catch (error) {
-      // A torn or otherwise unparseable file is user data, not an empty
-      // store: move its bytes aside before any later write can overwrite
-      // them, and name the preserved copy so the loss is recoverable.
-      const preservedPath = `${filePath}.corrupt-${Date.now()}`;
-      try {
-        await fsPromises.rename(filePath, preservedPath);
-        console.warn(`Failed to read magic prompts file: preserved the unreadable file at ${preservedPath}:`, error);
-      } catch (preserveError) {
+      if (!isEnoent(error)) {
         console.warn('Failed to read magic prompts file:', error);
-        console.warn(`Failed to preserve the unreadable magic prompts file at ${preservedPath}:`, preserveError);
       }
-      return { version: FILE_VERSION, overrides: {} };
+      return { missing: true };
     }
-    const overrides = sanitizeOverrides(parsed?.overrides);
-    return {
-      version: FILE_VERSION,
-      overrides,
-    };
+  };
+
+  // Read + parse, preserving a corrupt file inline. Only for callers
+  // already serialized with writes (persist): an unlocked caller must
+  // use readPromptState, which re-validates under the lock.
+  const readPromptStateLocked = async () => {
+    const { raw, missing } = await readRawFile();
+    if (missing) {
+      return emptyState();
+    }
+    try {
+      return stateFromParsed(JSON.parse(raw));
+    } catch (error) {
+      await preserveCorruptFile(error);
+      return emptyState();
+    }
+  };
+
+  const readPromptState = async () => {
+    const { raw, missing } = await readRawFile();
+    if (missing) {
+      return emptyState();
+    }
+    try {
+      return stateFromParsed(JSON.parse(raw));
+    } catch (error) {
+      // The bytes above are stale the moment the read returns: a
+      // concurrent write may already have preserved the corrupt file
+      // and saved valid state in its place, and renaming filePath now
+      // would move that saved state aside. Re-validate under the write
+      // lock before preserving anything; if a write landed in between,
+      // its state is the answer, not an empty store.
+      return enqueueLocked(async () => {
+        const current = await readRawFile();
+        if (current.missing) {
+          return emptyState();
+        }
+        try {
+          return stateFromParsed(JSON.parse(current.raw));
+        } catch {
+          await preserveCorruptFile(error);
+          return emptyState();
+        }
+      });
+    }
   };
 
   const writePromptState = async (state) => {
@@ -85,16 +137,12 @@ export const createMagicPromptRuntime = (dependencies) => {
     }
   };
 
-  const persist = async (mutator) => {
-    const run = async () => {
-      const current = await readPromptState();
-      const next = await mutator(current);
-      await writePromptState(next);
-      return next;
-    };
-    writeLock = writeLock.then(run, run);
-    return writeLock;
-  };
+  const persist = async (mutator) => enqueueLocked(async () => {
+    const current = await readPromptStateLocked();
+    const next = await mutator(current);
+    await writePromptState(next);
+    return next;
+  });
 
   const setOverride = async (id, text) => {
     const normalizedId = typeof id === 'string' ? id.trim() : '';
