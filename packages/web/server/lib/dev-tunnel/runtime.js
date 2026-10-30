@@ -41,6 +41,14 @@ const CONNECT_TIMEOUT_MS = 5_000;
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1'];
 /** Bytes the page may send before the dev server connection is up. */
 const MAX_PENDING_BYTES = 256 * 1024;
+/**
+ * Bytes held for a dev server that has stopped reading after connect. A
+ * WebSocket cannot be paused on every runtime this server runs on, so past
+ * this bound the connection is dropped instead of buffering the whole
+ * stream in memory — the pre-connect cap below applied after connect. The
+ * bound matches the 1 MB run-ahead the opposite direction allows itself.
+ */
+const MAX_HELD_BYTES = 1_000_000;
 
 const parseRequestedPort = (url) => {
   try {
@@ -96,6 +104,9 @@ export function createDevTunnelRuntime({
     let connected = false;
     let pendingWrites = [];
     let pendingBytes = 0;
+    let heldWrites = [];
+    let heldBytes = 0;
+    let upstreamBackedUp = false;
 
     let settled = false;
     const teardown = () => {
@@ -104,6 +115,8 @@ export function createDevTunnelRuntime({
       openSockets -= 1;
       clearTimeout(connectTimer);
       pendingWrites = [];
+      heldWrites = [];
+      heldBytes = 0;
       try { upstream?.destroy(); } catch { /* already gone */ }
       try { socket.close(); } catch { /* already closing */ }
     };
@@ -131,6 +144,16 @@ export function createDevTunnelRuntime({
           };
           setTimeout(resume, 20);
         }
+      });
+      upstream.on('drain', () => {
+        // Write the held bytes out in order; a write that reports a full
+        // buffer again leaves the rest held for the next drain.
+        while (heldWrites.length > 0) {
+          const next = heldWrites.shift();
+          heldBytes -= next.length;
+          if (!upstream.write(next)) return;
+        }
+        upstreamBackedUp = false;
       });
       upstream.on('error', teardown);
       upstream.on('close', teardown);
@@ -167,7 +190,16 @@ export function createDevTunnelRuntime({
     socket.on('message', (data) => {
       if (settled) return;
       if (connected) {
-        upstream.write(data);
+        if (upstreamBackedUp) {
+          heldWrites.push(data);
+          heldBytes += data.length;
+          if (heldBytes > MAX_HELD_BYTES) {
+            logger.warn?.(`[dev-tunnel] dropped a connection whose dev server on port ${port} stopped reading`);
+            teardown();
+          }
+          return;
+        }
+        if (!upstream.write(data)) upstreamBackedUp = true;
         return;
       }
       pendingWrites.push(data);
