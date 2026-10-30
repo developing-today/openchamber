@@ -4,7 +4,7 @@ import path from 'path';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import * as nativeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn as nodeSpawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -2805,6 +2805,65 @@ describe('fs exec output cap (#737)', () => {
     expect(res.body.results[0].stderr).toBe('e'.repeat(16));
     expect(kills).toEqual(['SIGKILL']);
   });
+});
+
+describe('fs exec tree kill (#913)', () => {
+  // Real shell, real processes: a descendant that inherits the pipes
+  // must not keep a capped or timed-out result from settling, and the
+  // kill must reach the whole process group, not only the shell.
+  const onPosix = process.platform !== 'win32';
+
+  const registerRealExec = () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => tmpdir() },
+      path,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat: async () => ({ isDirectory: () => true }),
+      },
+      spawn: nodeSpawn,
+      crypto: { randomUUID: (() => { let n = 0; return () => `job-${n++}`; })() },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: tmpdir() }),
+      buildAugmentedPath: () => process.env.PATH,
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: tmpdir(),
+    });
+    return getRoute('POST', '/api/fs/exec');
+  };
+
+  afterEach(() => {
+    delete process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS;
+    delete process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES;
+  });
+
+  it('settles a timed-out command promptly when a descendant holds the pipes', async () => {
+    if (!onPosix) return;
+    process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = '300';
+    const handler = registerRealExec();
+
+    const startedAt = Date.now();
+    const res = await callExec(handler, { commands: ['sleep 30 & wait'], cwd: tmpdir() });
+
+    expect(Date.now() - startedAt).toBeLessThan(15000);
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('Command timed out');
+  }, 20000);
+
+  it('settles an over-cap command promptly when the output comes from a descendant', async () => {
+    if (!onPosix) return;
+    process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES = '16';
+    const handler = registerRealExec();
+
+    const startedAt = Date.now();
+    const res = await callExec(handler, { commands: ["yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' & sleep 30"], cwd: tmpdir() });
+
+    expect(Date.now() - startedAt).toBeLessThan(15000);
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('output-too-large');
+    expect(res.body.results[0].stdout).toBe('x'.repeat(16));
+  }, 20000);
 });
 
 describe('fs env readers (#696)', () => {

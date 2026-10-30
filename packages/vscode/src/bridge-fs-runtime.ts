@@ -429,8 +429,9 @@ export async function handleFsBridgeMessage(
         // before the intended shell ever ran. On Windows this is
         // spawn('cmd.exe', ['/c', cmd]): cmd.exe still receives the command
         // as one argument and there is no outer shell there either. The
-        // timeout kills this shell directly, so no grandchild shell can
-        // outlive it.
+        // timeout and the output cap kill the shell's whole process tree
+        // (see killCommandTree below), so no grandchild can outlive it
+        // while holding the result's pipes open.
         const runCommand = (cmd: string): Promise<FsExecCommandResult> =>
           new Promise((resolve) => {
             let stdout = '';
@@ -443,11 +444,52 @@ export async function handleFsBridgeMessage(
             const killForOutputLimit = () => {
               if (outputTooLarge) return;
               outputTooLarge = true;
-              try {
-                child.kill('SIGKILL');
-              } catch {
-                // The process already exited.
+              killCommandTree();
+            };
+
+            // Overflow and timeout must end the whole command, not just
+            // the shell: a descendant that inherited the pipes keeps them
+            // open after the shell dies, and the result resolves on
+            // 'close', which waits for pipe EOF -- so a shell-only kill
+            // can leave the result unsettled until the descendant exits
+            // on its own. The child is spawned detached (its own POSIX
+            // process group, the owned-process.ts pattern) and the group
+            // is signalled; on Windows taskkill /T ends the tree.
+            // Destroying the pipes afterwards settles 'close' promptly
+            // even if a descendant escaped the group while holding them.
+            const killCommandTree = () => {
+              const pid = child.pid;
+              // A pid that is not an integer greater than 1 is never
+              // group-signalled: kill(-1) would hit every process we
+              // may signal, and pid 0 is our own process group.
+              const treePid = pid !== undefined && Number.isInteger(pid) && pid > 1 ? pid : null;
+              if (process.platform === 'win32') {
+                if (treePid !== null) {
+                  try {
+                    const killer = spawn('taskkill.exe', ['/T', '/F', '/PID', String(treePid)], {
+                      windowsHide: true,
+                      stdio: 'ignore',
+                    });
+                    killer.once?.('error', () => {
+                      try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                    });
+                  } catch {
+                    try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                  }
+                } else {
+                  try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                }
+              } else if (treePid !== null) {
+                try {
+                  process.kill(-treePid, 'SIGKILL');
+                } catch {
+                  try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                }
+              } else {
+                try { child.kill('SIGKILL'); } catch { /* already exited */ }
               }
+              try { child.stdout?.destroy?.(); } catch { /* no pipes to destroy */ }
+              try { child.stderr?.destroy?.(); } catch { /* no pipes to destroy */ }
             };
 
             // Append at most the bytes left under the cap and report
@@ -469,6 +511,9 @@ export async function handleFsBridgeMessage(
                 cwd: resolvedCwd,
                 env: augmentedEnv,
                 windowsHide: true,
+                // Own process group so killCommandTree can signal the
+                // tree; never on Windows (owned-process.ts pattern).
+                detached: process.platform !== 'win32',
                 stdio: ['ignore', 'pipe', 'pipe'],
               });
             } catch (error) {
@@ -484,11 +529,7 @@ export async function handleFsBridgeMessage(
 
             const timeout = setTimeout(() => {
               timedOut = true;
-              try {
-                child.kill('SIGKILL');
-              } catch {
-                // The process already exited.
-              }
+              killCommandTree();
             }, 300000);
 
             child.stdout?.on('data', (chunk) => {
