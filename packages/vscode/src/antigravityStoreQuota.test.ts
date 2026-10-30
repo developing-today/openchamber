@@ -85,6 +85,20 @@ describe('VS Code Antigravity quota from the credential store', () => {
     assert.ok(!JSON.stringify(result).includes('store-access'));
   });
 
+  it('reports a credential-store read failure as a refresh error, not as Not configured', async () => {
+    configureOpenCodeCredentials({
+      list: async () => {
+        throw new Error('credential store unavailable');
+      },
+    });
+
+    const result = await fetchQuotaForProvider('antigravity');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Failed to read OpenCode credentials');
+  });
+
   it('does not treat a google API-key entry as an Antigravity login', async () => {
     configureStoreApiKey('api-key-value');
 

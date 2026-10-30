@@ -1466,12 +1466,25 @@ const fetchAntigravityQuotaSummary = async (accessToken: string, projectId?: str
 const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
   let auth = resolveAntigravityAuth();
   if (!auth) {
-    // Best-effort: an unreachable credential store decides nothing, so a
-    // failed read adds no candidate and leaves the file's verdict standing.
+    let storeReadFailed = false;
     try {
       auth = resolveAntigravityStoreAuth(await readOpenCodeCredentials());
     } catch {
-      auth = null;
+      storeReadFailed = true;
+    }
+    if (!auth && storeReadFailed) {
+      // A store that could not be read has not answered "no login": for a
+      // store-only sign-in this is a failed refresh, not a missing login,
+      // and reporting Not configured would clear the quota view of a
+      // provider that is configured. (The web provider keeps the same
+      // distinction in its candidate resolution.)
+      return buildResult({
+        providerId: 'antigravity',
+        providerName: 'Antigravity',
+        ok: false,
+        configured: true,
+        error: 'Failed to read OpenCode credentials',
+      });
     }
   }
   if (!auth || !auth.refreshToken) {
