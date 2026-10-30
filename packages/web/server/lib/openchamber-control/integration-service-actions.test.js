@@ -119,6 +119,13 @@ describe('integration service action contract', () => {
     }
   });
 
+  it('rejects prototype-named actions instead of dispatching inherited members', async () => {
+    const { run } = setup();
+    for (const action of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      await expectError(run(action), 400, /Unsupported integration action/);
+    }
+  });
+
   it('answers 503 before the routes are registered', async () => {
     const actions = createIntegrationServiceActions({ getIntegrationOperations: () => null });
     await expectError(actions.execute('github.status', {}, {}), 503, /finished starting/);
