@@ -4632,13 +4632,15 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         const apiKey = openCodeGoApiKey(auth);
         if (consoleCredential) {
           try {
-            return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
+            const consoleUsage = await fetchOpenCodeGoUsage(consoleCredential);
+            return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: consoleUsage.windows }, planLabel: consoleUsage.planLabel });
           } catch (consoleError) {
             if (!apiKey) throw consoleError;
           }
         }
         if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) } });
+        const apiKeyUsage = await fetchOpenCodeGoUsage(apiKey);
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: apiKeyUsage.windows }, planLabel: apiKeyUsage.planLabel });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }

@@ -3,6 +3,8 @@ import { z } from 'zod';
 // `consoleKey` marks a key from the shared `opencode` integration.
 export type OpenCodeGoApiKeyCredential = { apiKey: string; consoleKey: boolean };
 export type OpenCodeGoConsoleCredential = { accessToken: string; orgID: string; expires?: number | null };
+/** The plan label is the Console product (`go` / `go-plus`); the API-key path has no product and leaves it unset. */
+type OpenCodeGoUsage = { windows: Record<string, OpenCodeGoWindow>; planLabel?: string };
 type OpenCodeGoCredential = OpenCodeGoApiKeyCredential | OpenCodeGoConsoleCredential;
 
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
@@ -174,13 +176,14 @@ const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   if (!response.ok) throw new Error(`OpenCode Console Go status API returned HTTP ${response.status}`);
   const parsed = consoleStatusSchema.safeParse(await response.json().catch(() => null));
   if (!parsed.success) throw new Error('OpenCode Console Go status returned an unreadable response');
-  if (!parsed.data.product || !CONSOLE_PRODUCTS.has(parsed.data.product)) throw new Error(NO_CONSOLE_SUBSCRIPTION);
+  const product = parsed.data.product;
+  if (!product || !CONSOLE_PRODUCTS.has(product)) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   const windows = parseConsoleUsage(parsed.data);
   if (!Object.keys(windows).length) throw new Error('OpenCode Go usage data could not be parsed');
   const balance = await balanceRead;
   if (balance !== null) windows.credits_balance = toBalanceWindow(`$${balance.toFixed(2)}`);
-  return windows;
+  return { windows, planLabel: product };
 };
 
-export const fetchOpenCodeGoUsage = async (credential: OpenCodeGoCredential) =>
-  'apiKey' in credential ? fetchApiKeyUsage(credential) : fetchConsoleUsage(credential);
+export const fetchOpenCodeGoUsage = async (credential: OpenCodeGoCredential): Promise<OpenCodeGoUsage> =>
+  'apiKey' in credential ? { windows: await fetchApiKeyUsage(credential) } : fetchConsoleUsage(credential);
