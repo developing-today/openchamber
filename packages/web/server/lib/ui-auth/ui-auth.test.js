@@ -427,9 +427,13 @@ describe('ui auth client credential seam', () => {
     const { readSessionTtlMs } = await import('./ui-auth.js');
     expect(readSessionTtlMs('24', 1000, 5)).toBe(24_000);
     expect(readSessionTtlMs(' 0.5 ', 1000, 5)).toBe(500);
-    for (const invalid of [undefined, '', 'abc', '0', '-3']) {
+    for (const invalid of [undefined, '', 'abc', '0', '-3', '1e3', '0x10', '+12']) {
       expect(readSessionTtlMs(invalid, 1000, 5)).toBe(5);
     }
+    // The bound is 400 days in ms: exactly that is accepted, past it the
+    // value falls back instead of minting a non-expiring session.
+    expect(readSessionTtlMs('400', 24 * 60 * 60 * 1000, 5)).toBe(400 * 24 * 60 * 60 * 1000);
+    expect(readSessionTtlMs('401', 24 * 60 * 60 * 1000, 5)).toBe(5);
   });
 });
 
