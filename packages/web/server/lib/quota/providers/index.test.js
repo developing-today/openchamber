@@ -95,6 +95,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   for (const filePath of createdConfigPaths.splice(0)) {
     fs.rmSync(filePath, { force: true });
   }
@@ -119,6 +120,30 @@ describe('quota provider registry', () => {
     expect(first).toBe(second);
     await first;
     expect(fetchQuotaForProvider('unsupported-test-provider')).not.toBe(first);
+  });
+
+  it('releases the coalescing entry once a timed-out provider settles', async () => {
+    authState.projected = { 'github-copilot': { type: 'oauth', access: 'gh-token' } };
+    const nativeTimeout = AbortSignal.timeout;
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => nativeTimeout(1));
+    vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    })));
+
+    const timedOut = await fetchQuotaForProvider('github-copilot');
+    expect(timedOut.ok).toBe(false);
+    expect(timedOut.error).toBe('Request timed out');
+
+    // The deadline settles the promise, so its .finally releases the entry and
+    // the next request fetches again instead of reusing the dead promise.
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      quota_snapshots: { premium_interactions: { entitlement: 100, remaining: 80 } },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const fresh = await fetchQuotaForProvider('github-copilot');
+    expect(fresh.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
