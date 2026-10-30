@@ -181,17 +181,30 @@ export const createUiPasskeys = ({
 
     if (fs.existsSync(storeFile)) {
       let parsed;
+      let raw;
       try {
-        const raw = fs.readFileSync(storeFile, 'utf8');
-        parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('Passkey store is not a JSON object');
-        }
+        raw = fs.readFileSync(storeFile, 'utf8');
       } catch (error) {
+        // A missing file (e.g. removed between the existence check and
+        // the read) is still the fresh-store case. Every other read
+        // failure (permissions, I/O) is not corruption: propagate it
+        // without moving or overwriting the active store, so fixing
+        // the underlying problem leaves the passkeys intact.
         if (error?.code !== 'ENOENT') {
-          preserveCorruptStore(error);
+          throw error;
         }
-        parsed = undefined;
+        raw = undefined;
+      }
+      if (raw !== undefined) {
+        try {
+          parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('Passkey store is not a JSON object');
+          }
+        } catch (error) {
+          preserveCorruptStore(error);
+          parsed = undefined;
+        }
       }
       if (parsed !== undefined) {
         store = {

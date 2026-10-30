@@ -211,6 +211,29 @@ describe('ui-passkeys store durability', () => {
     expect(siblingsMatching(storeFile, '.corrupt-').length).toBe(1);
   });
 
+  it('propagates a filesystem read error without moving or replacing the active store', () => {
+    // A directory in place of the store file makes readFileSync fail
+    // with a non-ENOENT filesystem error (EISDIR on Linux) regardless
+    // of the test process's privileges, unlike a mode-000 file under root.
+    const dir = fs.mkdtempSync(path.join(dataDir, 'read-error-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    fs.mkdirSync(storeFile);
+    const controller = createController(storeFile);
+
+    let thrown = null;
+    try {
+      controller.listPasskeys(requestFor());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).not.toBeNull();
+    expect(thrown?.code).not.toBe('ENOENT');
+    // The active store is untouched and nothing was preserved/created.
+    expect(fs.statSync(storeFile).isDirectory()).toBe(true);
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
+  });
+
   it('rewrites an existing store atomically with mode 0600 and no temp leftovers', () => {
     const storeFile = createStoreFile([passkey()]);
     const controller = createController(storeFile);
