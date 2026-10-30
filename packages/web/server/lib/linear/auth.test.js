@@ -13,6 +13,8 @@ import {
   getLinearRedirectUri,
   isLinearAccessTokenStale,
   getLinearAuthFilePath,
+  configureLinearVaultReader,
+  readLinearVaultToken,
   DEFAULT_LINEAR_CLIENT_ID_VALUE,
 } from './auth.js';
 
@@ -242,3 +244,51 @@ function restoreEnv(name, previous) {
   }
   process.env[name] = previous;
 }
+
+describe('Linear vault credentials (#304)', () => {
+  let dataDir;
+  let previousDataDir;
+  const REFERENCE = 'op://Private/Linear/api-key';
+  const USER = { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: 'https://example.com/a.png' };
+  const ORG = { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' };
+
+  beforeEach(() => {
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    dataDir = makeTempDir();
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+  });
+
+  afterEach(() => {
+    restoreEnv('OPENCHAMBER_DATA_DIR', previousDataDir);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('stores only the reference, never a key, and reports source vault', () => {
+    setLinearAuth({ tokenReference: REFERENCE, user: USER, organization: ORG });
+    const stored = getLinearAuth();
+    expect(stored.tokenReference).toBe(REFERENCE);
+    expect(stored.accessToken).toBeNull();
+    expect(stored.tokenType).toBe('apiKey');
+    const fileText = fs.readFileSync(getLinearAuthFilePath(), 'utf8');
+    expect(fileText).toContain(REFERENCE);
+    const status = toLinearPublicStatus(stored);
+    expect(status.connected).toBe(true);
+    expect(status.source).toBe('vault');
+    expect(getLinearAuthWorkspaces()[0].source).toBe('vault');
+    expect(JSON.stringify(status)).not.toContain(REFERENCE);
+  });
+
+  it('rejects an invalid reference and a token-plus-reference write', () => {
+    expect(() => setLinearAuth({ tokenReference: 'not-a-reference', user: USER, organization: ORG })).toThrow();
+    expect(() => setLinearAuth({ tokenReference: REFERENCE, accessToken: 'lin_x', user: USER, organization: ORG })).toThrow(/mutually exclusive/);
+    expect(getLinearAuth()).toBeNull();
+  });
+
+  it('resolves the reference through the configured vault reader only', async () => {
+    configureLinearVaultReader(async (reference) => (reference === REFERENCE
+      ? { ok: true, value: 'lin_api_secret' }
+      : { ok: false, reason: 'not-found' }));
+    await expect(readLinearVaultToken(REFERENCE)).resolves.toEqual({ ok: true, value: 'lin_api_secret' });
+    await expect(readLinearVaultToken('op://Private/Linear/other')).resolves.toEqual({ ok: false, reason: 'not-found' });
+  });
+});

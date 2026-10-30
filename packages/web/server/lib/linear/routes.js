@@ -127,7 +127,7 @@ export function registerLinearRoutes(app) {
     const {
       getLinearAuth,
       getLinearAuthWorkspaces,
-      getValidLinearAccessToken,
+      getValidLinearAuthorization,
       fetchLinearIdentity,
       setLinearAuth,
       clearLinearAuth,
@@ -148,24 +148,45 @@ export function registerLinearRoutes(app) {
       console.error('Failed to complete Linear authorization through broker:', error);
     }
 
-    const accessToken = await getValidLinearAccessToken();
-    if (!accessToken) {
+    let authorization = null;
+    try {
+      authorization = await getValidLinearAuthorization();
+    } catch {
+      // A vault credential that cannot be resolved right now is a connect
+      // error, not a disconnect: keep the stored reference and report the
+      // workspace as it was saved (#304).
+      const saved = getLinearAuth();
+      if (saved) {
+        return toLinearPublicStatus(saved, getLinearAuthWorkspaces());
+      }
+      throw new Error('Linear is not connected');
+    }
+    if (!authorization) {
       return { connected: false };
     }
 
     const auth = getLinearAuth();
     try {
-      const identity = await fetchLinearIdentity(accessToken);
-      const next = setLinearAuth({
-        accessToken,
-        refreshToken: auth?.refreshToken,
-        tokenType: auth?.tokenType,
-        expiresAt: auth?.expiresAt,
-        scope: auth?.scope,
-        user: identity.user,
-        organization: identity.organization,
-        workspaceId: auth?.workspaceId,
-      }, { activate: false });
+      const identity = await fetchLinearIdentity(authorization);
+      // A vault workspace keeps only its reference: the resolved key is
+      // never written back as an accessToken (#304).
+      const next = auth?.tokenReference
+        ? setLinearAuth({
+          tokenReference: auth.tokenReference,
+          user: identity.user,
+          organization: identity.organization,
+          workspaceId: auth?.workspaceId,
+        }, { activate: false })
+        : setLinearAuth({
+          accessToken: authorization.token,
+          refreshToken: auth?.refreshToken,
+          tokenType: auth?.tokenType,
+          expiresAt: auth?.expiresAt,
+          scope: auth?.scope,
+          user: identity.user,
+          organization: identity.organization,
+          workspaceId: auth?.workspaceId,
+        }, { activate: false });
       return toLinearPublicStatus(next, getLinearAuthWorkspaces());
     } catch (error) {
       if (error?.status === 401) {
@@ -202,6 +223,54 @@ export function registerLinearRoutes(app) {
       const status = error?.code === 'LINEAR_CLIENT_ID_MISSING' ? 400 : 500;
       console.error('Failed to start Linear authorization:', error);
       return res.status(status).json({ error: error.message || 'Failed to start Linear authorization' });
+    }
+  });
+
+  app.post('/api/linear/auth/vault', parseJsonBody, async (req, res) => {
+    try {
+      const {
+        readLinearVaultToken,
+        fetchLinearIdentity,
+        setLinearAuth,
+        getLinearAuthWorkspaces,
+        toLinearPublicStatus,
+      } = await getLinearLibraries();
+      const { isVaultReference } = await import('../environment/vault.js');
+      const tokenReference = readTrimmedString(req.body?.tokenReference)
+        || readTrimmedString(req.body?.reference);
+      if (!tokenReference || !isVaultReference(tokenReference)) {
+        return res.status(400).json({
+          error: 'tokenReference must be a 1Password reference such as op://Vault/item/field',
+          code: 'INVALID_REFERENCE',
+        });
+      }
+      const read = await readLinearVaultToken(tokenReference);
+      if (!read?.ok) {
+        return res.status(400).json({
+          error: `The API key could not be read from 1Password (${read?.reason || 'vault-unavailable'})`,
+          code: 'VAULT_READ_FAILED',
+          reason: read?.reason || 'vault-unavailable',
+        });
+      }
+      let identity;
+      try {
+        identity = await fetchLinearIdentity({ token: read.value, source: 'vault' });
+      } catch {
+        return res.status(400).json({
+          error: 'Linear refused the API key from 1Password',
+          code: 'INVALID_TOKEN',
+        });
+      }
+      // Only a key Linear accepted is saved, and only as its reference.
+      const saved = setLinearAuth({
+        tokenReference,
+        user: identity.user,
+        organization: identity.organization,
+      });
+      return res.json(toLinearPublicStatus(saved, getLinearAuthWorkspaces()));
+    } catch (error) {
+      console.error('Failed to add a Linear account from 1Password:', error);
+      return res.status(500).json({ error: error.message || 'Failed to add the Linear account' });
     }
   });
 

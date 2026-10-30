@@ -5,7 +5,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { registerLinearRoutes } from './routes.js';
-import { setLinearAuth, setLinearSessionCommentsEnabled } from './auth.js';
+import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth } from './auth.js';
+import { fetchLinearGraphql } from './client.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-linear-routes-'));
 
@@ -658,5 +659,99 @@ describe('Linear auth routes', () => {
       issueIdentifier: 'ENG-12',
     }).expect(200);
     expect(response.body).toEqual({ connected: false });
+  });
+});
+
+describe('Linear vault account route (#304)', () => {
+  let dataDir;
+  let previousDataDir;
+  const REFERENCE = 'op://Private/Linear/api-key';
+  const SECRET = 'lin_api_secret_value';
+
+  beforeEach(() => {
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    dataDir = makeTempDir();
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    process.env.OPENCHAMBER_PORT = '3001';
+    process.env.OPENCHAMBER_LINEAR_REDIRECT_URI = 'http://127.0.0.1:3001/linear/oauth/callback';
+    delete process.env.OPENCHAMBER_LINEAR_CLIENT_ID;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (previousDataDir === undefined) {
+      delete process.env.OPENCHAMBER_DATA_DIR;
+    } else {
+      process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    }
+    delete process.env.OPENCHAMBER_PORT;
+    delete process.env.OPENCHAMBER_LINEAR_REDIRECT_URI;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const stubViewerFetch = (seen) => {
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      seen.push(init?.headers?.Authorization);
+      return jsonResponse({
+        data: {
+          viewer: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: 'https://example.com/a.png' },
+          organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+        },
+      });
+    }));
+  };
+
+  it('rejects an invalid reference and saves nothing', async () => {
+    const app = createApp();
+    const response = await request(app).post('/api/linear/auth/vault').send({ tokenReference: 'nope' }).expect(400);
+    expect(response.body.code).toBe('INVALID_REFERENCE');
+    expect(getLinearAuth()).toBeNull();
+  });
+
+  it('reports a failed vault read and saves nothing', async () => {
+    configureLinearVaultReader(async () => ({ ok: false, reason: 'op-not-installed' }));
+    const app = createApp();
+    const response = await request(app).post('/api/linear/auth/vault').send({ tokenReference: REFERENCE }).expect(400);
+    expect(response.body.code).toBe('VAULT_READ_FAILED');
+    expect(getLinearAuth()).toBeNull();
+  });
+
+  it('adds a vault workspace from the viewer query, sends the key bare, and never stores it', async () => {
+    configureLinearVaultReader(async (reference) => (reference === REFERENCE
+      ? { ok: true, value: SECRET }
+      : { ok: false, reason: 'not-found' }));
+    const seen = [];
+    stubViewerFetch(seen);
+    const app = createApp();
+    const response = await request(app).post('/api/linear/auth/vault').send({ tokenReference: REFERENCE }).expect(200);
+    expect(response.body.connected).toBe(true);
+    expect(response.body.source).toBe('vault');
+    expect(JSON.stringify(response.body)).not.toContain(SECRET);
+    expect(seen).toEqual([SECRET]);
+
+    const stored = getLinearAuth();
+    expect(stored.tokenReference).toBe(REFERENCE);
+    expect(stored.accessToken).toBeNull();
+
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+    expect(status.body.connected).toBe(true);
+    expect(status.body.source).toBe('vault');
+    expect(JSON.stringify(status.body)).not.toContain(SECRET);
+    // The status refresh must not convert the vault entry into a stored key.
+    expect(getLinearAuth().tokenReference).toBe(REFERENCE);
+    expect(getLinearAuth().accessToken).toBeNull();
+    expect(seen).toEqual([SECRET, SECRET]);
+  });
+
+  it('sends OAuth tokens as Bearer and vault keys bare', async () => {
+    const seen = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      seen.push(init?.headers?.Authorization);
+      return jsonResponse({ data: {} });
+    }));
+    await fetchLinearGraphql('oauth-token', 'query { viewer { id } }');
+    await fetchLinearGraphql({ token: SECRET, source: 'vault' }, 'query { viewer { id } }');
+    expect(seen[0]).toBe('Bearer oauth-token');
+    expect(seen[1]).toBe(SECRET);
   });
 });
