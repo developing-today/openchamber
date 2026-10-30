@@ -169,6 +169,46 @@ describe('client auth pairing store durability', () => {
     }
   });
 
+  it('does not preserve a live replacement when its own read was stale', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { dir, runtime } = await makeRuntime();
+      const storePath = path.join(dir, 'pairing.json');
+      await runtime.createPairingSession({ label: 'Phone' });
+
+      // A second runtime (the CLI process shape) whose first read returns
+      // a stale corrupt snapshot while the file on disk is already the
+      // valid store written above: acting on that snapshot would rename
+      // the live session away (Codex, PR #890).
+      let stalePending = true;
+      const staleRuntime = createClientPairingRuntime({
+        fsPromises: {
+          ...fs,
+          readFile: async (target, ...rest) => {
+            if (stalePending && String(target) === storePath) {
+              stalePending = false;
+              return '{"version":1,"sessions":[{"id":"pair_stale"';
+            }
+            return fs.readFile(target, ...rest);
+          },
+        },
+        path,
+        crypto,
+        storePath,
+        remoteClientAuthRuntime: { createClient: vi.fn(async () => { throw new Error('not used'); }) },
+        ttlMs: 10 * 60 * 1000,
+      });
+
+      const pending = await staleRuntime.listPendingSessions();
+      expect(pending).toHaveLength(1);
+      expect((await fs.readdir(dir)).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+      expect(JSON.parse(await fs.readFile(storePath, 'utf8')).sessions).toHaveLength(1);
+      await fs.rm(dir, { recursive: true, force: true });
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('writes via a temp file renamed into place, and a failed rename leaves the previous store intact', async () => {
     const writeTargets = [];
     const renameCalls = [];

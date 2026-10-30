@@ -134,6 +134,35 @@ describe('push runtime store durability', () => {
     }
   });
 
+  it('keeps the persist queue usable after a preservation failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let failCorruptRename = true;
+      const { filePath, runtime } = await makeRealRuntime({
+        rename: async (from, to) => {
+          if (failCorruptRename && String(to).includes('.corrupt-')) throw new Error('rename failed');
+          return fsReal.rename(from, to);
+        },
+      });
+      await fsReal.writeFile(filePath, '{"version":1,"subscriptionsBySession":{"s1":[', 'utf8');
+
+      // The mutation that hits the unpreservable corrupt file rejects.
+      await expect(runtime.addOrUpdatePushSubscription('session-1', subscription)).rejects.toThrow('Failed to preserve');
+
+      // Once the store is valid again, the next mutation must actually
+      // run: chaining it onto the rejected lock would return the same
+      // preservation error forever (Codex, PR #890).
+      await fsReal.writeFile(filePath, JSON.stringify({ version: 1, subscriptionsBySession: {} }), 'utf8');
+      failCorruptRename = false;
+      await runtime.addOrUpdatePushSubscription('session-2', subscription);
+
+      const stored = JSON.parse(await fsReal.readFile(filePath, 'utf8'));
+      expect(Object.values(stored.subscriptionsBySession).flat()).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('treats a missing subscriptions file as an empty store, silently', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {

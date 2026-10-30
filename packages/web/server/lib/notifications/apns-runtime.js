@@ -185,7 +185,7 @@ export const createApnsRuntime = (deps) => {
     try {
       raw = await fsPromises.readFile(APNS_TOKENS_FILE_PATH, 'utf8');
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (error?.code === 'ENOENT') {
         return emptyStore();
       }
       console.warn('Failed to read APNs tokens file:', error);
@@ -228,11 +228,9 @@ export const createApnsRuntime = (deps) => {
       await renameWithRetry((from, to) => fsPromises.rename(from, to), tempPath, APNS_TOKENS_FILE_PATH);
     } catch (error) {
       try {
-        if (typeof fsPromises.rm === 'function') {
-          await fsPromises.rm(tempPath, { force: true });
-        } else if (typeof fsPromises.unlink === 'function') {
-          await fsPromises.unlink(tempPath);
-        }
+        // rm is the current removal call; fall back to unlink for fs
+        // shims that only implement the older surface.
+        await (fsPromises.rm?.(tempPath, { force: true }) ?? fsPromises.unlink(tempPath));
       } catch {
         // The write/rename error is the one the caller needs; a failed
         // temp cleanup must not mask it.
@@ -242,13 +240,18 @@ export const createApnsRuntime = (deps) => {
   };
 
   const persistTokenUpdate = async (mutate) => {
-    persistLock = persistLock.then(async () => {
+    const run = async () => {
       const current = await readTokensFromDisk({ serialized: true });
       const next = mutate({ version: APNS_TOKENS_VERSION, tokensBySession: current.tokensBySession || {} });
       await writeTokensToDisk(next);
       return next;
-    });
-    return persistLock;
+    };
+    // Same queue-recovery rule as the push store: the failing caller
+    // sees the rejection, later updates must not inherit it (Codex,
+    // PR #890).
+    const result = persistLock.then(run, run);
+    persistLock = result.catch(() => {});
+    return result;
   };
 
   const normalizeTokens = (record) => {

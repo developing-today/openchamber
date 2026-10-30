@@ -516,6 +516,33 @@ describe('apns runtime store durability', () => {
     }
   });
 
+  it('keeps the persist queue usable after a preservation failure', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { filePath } = await makeTempStore();
+      let failCorruptRename = true;
+      const runtime = await makeRealRuntime(filePath, {
+        rename: async (from, to) => {
+          if (failCorruptRename && String(to).includes('.corrupt-')) throw new Error('rename failed');
+          return fsReal.rename(from, to);
+        },
+      });
+      await fsReal.writeFile(filePath, '{"version":1,"tokensBySession":{"s1":[', 'utf8');
+
+      await expect(runtime.addOrUpdateApnsToken('session-1', 'tokenA')).rejects.toThrow('Failed to preserve');
+
+      await fsReal.writeFile(filePath, JSON.stringify({ version: 1, tokensBySession: {} }), 'utf8');
+      failCorruptRename = false;
+      await runtime.addOrUpdateApnsToken('session-2', 'tokenB');
+
+      const stored = JSON.parse(await fsReal.readFile(filePath, 'utf8'));
+      expect(Object.values(stored.tokensBySession).flat().map((entry) => entry.deviceToken)).toEqual(['tokenB']);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('writes via a temp file renamed into place, never directly to the tokens path', async () => {
     process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
     const { dir, filePath } = await makeTempStore();

@@ -140,8 +140,9 @@ export const createClientPairingRuntime = ({
   // A torn or otherwise unparseable file is pairing state, not an empty
   // store: move its bytes aside before any later write can overwrite them,
   // and name the preserved copy so the loss is recoverable. Every
-  // readStore caller runs serialized under withStoreMutation, so the
-  // rename here cannot race an in-process write of this store.
+  // readStore caller runs serialized under withStoreMutation, but that
+  // queue is per-process and the CLI opens the same file: readStore
+  // re-validates the on-disk bytes before this rename runs.
   const preserveCorruptStore = async (error) => {
     const preservedPath = `${storePath}.corrupt-${Date.now()}`;
     try {
@@ -166,6 +167,27 @@ export const createClientPairingRuntime = ({
     try {
       return normalizeStore(JSON.parse(raw));
     } catch (error) {
+      // Another process can share this file, and withStoreMutation
+      // serializes only this process: the bytes above may already have
+      // been preserved and replaced with valid state by the time this
+      // runs. Re-read and compare before renaming anything, so a stale
+      // parse failure can never move a live replacement aside (Codex,
+      // PR #890).
+      let currentRaw;
+      try {
+        currentRaw = await fsPromises.readFile(storePath, 'utf8');
+      } catch {
+        // Already preserved or removed by the other process.
+        return normalizeStore(null);
+      }
+      if (currentRaw !== raw) {
+        try {
+          return normalizeStore(JSON.parse(currentRaw));
+        } catch {
+          // The replacement is corrupt too; fall through and preserve
+          // the bytes that are actually on disk now.
+        }
+      }
       // A mutation must never overwrite bytes whose preservation just
       // failed: they are the only copy of the pairing sessions. Abort
       // instead; the caller can retry once the file is movable.
@@ -185,11 +207,9 @@ export const createClientPairingRuntime = ({
       await renameWithRetry((from, to) => fsPromises.rename(from, to), tempPath, storePath);
     } catch (error) {
       try {
-        if (typeof fsPromises.rm === 'function') {
-          await fsPromises.rm(tempPath, { force: true });
-        } else if (typeof fsPromises.unlink === 'function') {
-          await fsPromises.unlink(tempPath);
-        }
+        // rm is the current removal call; fall back to unlink for fs
+        // shims that only implement the older surface.
+        await (fsPromises.rm?.(tempPath, { force: true }) ?? fsPromises.unlink(tempPath));
       } catch {
         // The write/rename error is the one the caller needs; a failed
         // temp cleanup must not mask it.

@@ -93,7 +93,7 @@ export const createPushRuntime = (deps) => {
     try {
       raw = await fsPromises.readFile(PUSH_SUBSCRIPTIONS_FILE_PATH, 'utf8');
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (error?.code === 'ENOENT') {
         return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
       }
       console.warn('Failed to read push subscriptions file:', error);
@@ -143,11 +143,9 @@ export const createPushRuntime = (deps) => {
       await renameWithRetry((from, to) => fsPromises.rename(from, to), tempPath, PUSH_SUBSCRIPTIONS_FILE_PATH);
     } catch (error) {
       try {
-        if (typeof fsPromises.rm === 'function') {
-          await fsPromises.rm(tempPath, { force: true });
-        } else if (typeof fsPromises.unlink === 'function') {
-          await fsPromises.unlink(tempPath);
-        }
+        // rm is the current removal call; fall back to unlink for fs
+        // shims that only implement the older surface.
+        await (fsPromises.rm?.(tempPath, { force: true }) ?? fsPromises.unlink(tempPath));
       } catch {
         // The write/rename error is the one the caller needs; a failed
         // temp cleanup must not mask it.
@@ -157,7 +155,7 @@ export const createPushRuntime = (deps) => {
   };
 
   const persistPushSubscriptionUpdate = async (mutate) => {
-    persistPushSubscriptionsLock = persistPushSubscriptionsLock.then(async () => {
+    const run = async () => {
       await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
       const current = await readPushSubscriptionsFromDisk({ serialized: true });
       const next = mutate({
@@ -166,9 +164,14 @@ export const createPushRuntime = (deps) => {
       });
       await writePushSubscriptionsToDisk(next);
       return next;
-    });
-
-    return persistPushSubscriptionsLock;
+    };
+    // The failing caller still sees the rejection through the returned
+    // promise, but the queue itself must recover: chaining later updates
+    // onto a rejected lock would wedge every subsequent registration and
+    // removal behind one preservation failure (Codex, PR #890).
+    const result = persistPushSubscriptionsLock.then(run, run);
+    persistPushSubscriptionsLock = result.catch(() => {});
+    return result;
   };
 
   const getOrCreateVapidKeys = async () => {
