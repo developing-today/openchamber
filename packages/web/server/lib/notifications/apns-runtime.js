@@ -9,6 +9,7 @@
 // Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
 // generic, model-based text (no session content) — see APNS.md.
 
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
 import { parsePushKey, sealPushContent } from './push-seal.js';
 import {
@@ -129,10 +130,75 @@ export const createApnsRuntime = (deps) => {
 
   const emptyStore = () => ({ version: APNS_TOKENS_VERSION, tokensBySession: {} });
 
-  const readTokensFromDisk = async () => {
+  // A torn or otherwise unparseable file is device-token state, not an
+  // empty store: move its bytes aside before any later write can overwrite
+  // them, and name the preserved copy so the loss is recoverable.
+  const preserveCorruptApnsTokensFile = async (error) => {
+    const preservedPath = `${APNS_TOKENS_FILE_PATH}.corrupt-${Date.now()}`;
     try {
-      const raw = await fsPromises.readFile(APNS_TOKENS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), APNS_TOKENS_FILE_PATH, preservedPath);
+      console.warn(`Failed to read APNs tokens file: preserved the unreadable file at ${preservedPath}:`, error);
+      return true;
+    } catch (preserveError) {
+      console.warn('Failed to read APNs tokens file:', error);
+      console.warn(`Failed to preserve the unreadable APNs tokens file at ${preservedPath}:`, preserveError);
+      return false;
+    }
+  };
+
+  const handleCorruptApnsTokensFile = async (error, { serialized = false } = {}) => {
+    if (serialized) {
+      // Already under the persist lock, so preserving inline cannot race
+      // an in-process write. A mutation must never overwrite bytes whose
+      // preservation just failed: abort instead; the caller can retry
+      // once the file is movable.
+      const preserved = await preserveCorruptApnsTokensFile(error);
+      if (!preserved) {
+        throw new Error('Failed to preserve the unreadable APNs tokens file; refusing to overwrite it', { cause: error });
+      }
+      return;
+    }
+    // Unlocked reader (the send path): the bytes it read are stale the
+    // moment the read returns — a concurrent persist may already have
+    // preserved the corrupt file and saved valid state in its place, and
+    // renaming the file now would move that saved state aside. Re-validate
+    // under the persist lock before preserving anything.
+    const run = async () => {
+      let currentRaw;
+      try {
+        currentRaw = await fsPromises.readFile(APNS_TOKENS_FILE_PATH, 'utf8');
+      } catch {
+        return;
+      }
+      try {
+        JSON.parse(currentRaw);
+      } catch {
+        await preserveCorruptApnsTokensFile(error);
+      }
+    };
+    persistLock = persistLock.then(run, run);
+    await persistLock;
+  };
+
+  const readTokensFromDisk = async ({ serialized = false } = {}) => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(APNS_TOKENS_FILE_PATH, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return emptyStore();
+      }
+      console.warn('Failed to read APNs tokens file:', error);
+      return emptyStore();
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      await handleCorruptApnsTokensFile(error, { serialized });
+      return emptyStore();
+    }
+    try {
       if (!parsed || typeof parsed !== 'object' || parsed.version !== APNS_TOKENS_VERSION) {
         return emptyStore();
       }
@@ -149,9 +215,6 @@ export const createApnsRuntime = (deps) => {
       }
       return { version: APNS_TOKENS_VERSION, tokensBySession };
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return emptyStore();
-      }
       console.warn('Failed to read APNs tokens file:', error);
       return emptyStore();
     }
@@ -159,17 +222,36 @@ export const createApnsRuntime = (deps) => {
 
   const writeTokensToDisk = async (data) => {
     await fsPromises.mkdir(path.dirname(APNS_TOKENS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(APNS_TOKENS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    const tempPath = `${APNS_TOKENS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      await fsPromises.writeFile(tempPath, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), tempPath, APNS_TOKENS_FILE_PATH);
+    } catch (error) {
+      try {
+        // rm is the current removal call; fall back to unlink for fs
+        // shims that only implement the older surface.
+        await (fsPromises.rm?.(tempPath, { force: true }) ?? fsPromises.unlink(tempPath));
+      } catch {
+        // The write/rename error is the one the caller needs; a failed
+        // temp cleanup must not mask it.
+      }
+      throw error;
+    }
   };
 
   const persistTokenUpdate = async (mutate) => {
-    persistLock = persistLock.then(async () => {
-      const current = await readTokensFromDisk();
+    const run = async () => {
+      const current = await readTokensFromDisk({ serialized: true });
       const next = mutate({ version: APNS_TOKENS_VERSION, tokensBySession: current.tokensBySession || {} });
       await writeTokensToDisk(next);
       return next;
-    });
-    return persistLock;
+    };
+    // Same queue-recovery rule as the push store: the failing caller
+    // sees the rejection, later updates must not inherit it (Codex,
+    // PR #890).
+    const result = persistLock.then(run, run);
+    persistLock = result.catch(() => {});
+    return result;
   };
 
   const normalizeTokens = (record) => {
