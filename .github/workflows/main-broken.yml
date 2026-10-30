@@ -39,11 +39,17 @@ permissions:
 # Concurrency audit (#84): triggers are workflow_run / workflow_dispatch
 # only -- no issues and no pull_request_target event -- and
 # cancel-in-progress is the literal `false`, so queue: max can never pair
-# with a true-evaluating cancel expression here. Group is per watched
-# run, so two different failures never displace each other.
+# with a true-evaluating cancel expression here. The group is a single
+# global group on purpose: filing is a non-atomic search-then-file keyed
+# on the Breakage-ID, and the Breakage-ID is only computed inside the
+# job, so it cannot key the group. Serializing every watcher run is what
+# makes lookup-and-create atomic in effect -- two simultaneous failures
+# carrying the same Breakage-ID can no longer both miss the search and
+# file duplicate breakage issues. queue: max with the literal `false`
+# cancel means runs wait their turn instead of displacing each other.
 concurrency:
-  group: main-broken-${{ github.event.workflow_run.id || inputs.run_id || github.run_id }}
-  cancel-in-progress: true
+  group: main-broken-watcher
+  cancel-in-progress: false
   queue: max
 
 jobs:
