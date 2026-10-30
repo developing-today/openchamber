@@ -74,9 +74,19 @@ export const callDaemon = async (reqPath, method = 'GET', body = null, headers =
   if (socket) {
     return new Promise((resolve, reject) => {
       let settled = false;
+      // Absolute deadline, armed below once the request exists:
+      // req.setTimeout is only an idle timer (it resets on every
+      // chunk), so a trickling response would otherwise hold the
+      // request open far beyond timeoutMs. Cleared on settle.
+      let deadlineTimer = null;
+      const clearDeadline = () => {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+      };
       const fail = (err) => {
         if (settled) return;
         settled = true;
+        clearDeadline();
         reject(err);
       };
       const opt = {
@@ -106,6 +116,7 @@ export const callDaemon = async (reqPath, method = 'GET', body = null, headers =
         res.on('end', () => {
           if (settled) return;
           settled = true;
+          clearDeadline();
           const data = Buffer.concat(chunks, size).toString('utf8');
           if (res.statusCode && res.statusCode >= 400) {
             return reject(new Error(`mcpx daemon HTTP ${res.statusCode}: ${data}`));
@@ -119,6 +130,11 @@ export const callDaemon = async (reqPath, method = 'GET', body = null, headers =
         res.on('error', fail);
       });
 
+      deadlineTimer = setTimeout(() => {
+        fail(timeoutError(timeoutMs));
+        req.destroy();
+      }, timeoutMs);
+      deadlineTimer.unref?.();
       req.setTimeout(timeoutMs, () => {
         fail(timeoutError(timeoutMs));
         req.destroy();
