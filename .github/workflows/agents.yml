@@ -1,14 +1,16 @@
-# Single home for this repo's dispatch-scheduled agents, replacing the
+# Thin caller for this repo's dispatch-scheduled agents: this file is
+# the single home for this repo's scheduled agents, replacing the
 # retired Jules scheduled tasks and the Suggestions task.
+#
+# This file is only a caller: the task list, slot table, and prompts
+# live centrally in developing-today/code — in the reusable workflow
+# .github/workflows/pm-scheduled.yml and the pm-dispatch-task prompt
+# library.
 #
 # Schedule times are America/Chicago local times converted from CDT:
 # the tasks run at 21:00 CDT (02:00 UTC) and suggestions at 09:00 CDT
 # (14:00 UTC). GitHub cron is always UTC, so during CST the local fire
 # time shifts one hour earlier (tasks 20:00, suggestions 08:00).
-#
-# The prompts for each task live in the central library in
-# developing-today/code's pm-dispatch-task action
-# (prompts/<task>.md), so this workflow needs no checkout step.
 name: agents
 
 on:
@@ -34,38 +36,10 @@ permissions:
 
 jobs:
   scheduled:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch bolt
-        id: bolt
-        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'all' || inputs.task == 'bolt'))
-        uses: developing-today/code/.github/actions/pm-dispatch-task@main
-        with:
-          task: bolt
-
-      - name: Dispatch palette
-        id: palette
-        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'all' || inputs.task == 'palette'))
-        uses: developing-today/code/.github/actions/pm-dispatch-task@main
-        with:
-          task: palette
-
-      - name: Dispatch suggestions
-        id: suggestions
-        if: (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'all' || inputs.task == 'suggestions'))
-        uses: developing-today/code/.github/actions/pm-dispatch-task@main
-        with:
-          task: suggestions
-
-      - name: Summary
-        if: always()
-        run: |
-          {
-            echo "## Scheduled agent dispatches"
-            echo ""
-            echo "| Task | task_id | session_id | issue_number | issue_url |"
-            echo "|---|---|---|---|---|"
-            echo "| bolt | ${{ steps.bolt.outputs.task_id }} | ${{ steps.bolt.outputs.session_id }} | ${{ steps.bolt.outputs.issue_number }} | ${{ steps.bolt.outputs.issue_url }} |"
-            echo "| palette | ${{ steps.palette.outputs.task_id }} | ${{ steps.palette.outputs.session_id }} | ${{ steps.palette.outputs.issue_number }} | ${{ steps.palette.outputs.issue_url }} |"
-            echo "| suggestions | ${{ steps.suggestions.outputs.task_id }} | ${{ steps.suggestions.outputs.session_id }} | ${{ steps.suggestions.outputs.issue_number }} | ${{ steps.suggestions.outputs.issue_url }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+    uses: developing-today/code/.github/workflows/pm-scheduled.yml@main
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      schedule: ${{ github.event.schedule }}
+      tasks: ${{ github.event_name == 'workflow_dispatch' && inputs.task != 'all' && inputs.task || '' }}
