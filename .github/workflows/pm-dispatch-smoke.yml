@@ -10,6 +10,19 @@ name: pm-dispatch smoke test (cross-repo)
 on:
   workflow_dispatch:
 
+# Concurrency audit (#84): the trigger is workflow_dispatch only -- no
+# issues and no pull_request_target event -- and cancel-in-progress is
+# the literal `false`, so queue: max can never pair with a true-evaluating
+# cancel expression here. Each run non-idempotently queues one task and
+# files one issue in developing-today/opencode, so two dispatches must
+# never overlap (they would file duplicate smoke artifacts) and a queued
+# dispatch must never be cancelled away either: one static group with
+# queue: max serializes every smoke run.
+concurrency:
+  group: pm-dispatch-smoke
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   smoke:
     permissions:
