@@ -2157,7 +2157,13 @@ const worktreeStartCommandTimeoutMs = () => {
     return WORKTREE_START_COMMAND_TIMEOUT_MS;
   }
   const parsed = Number(raw);
-  return parsed > 0 ? parsed : WORKTREE_START_COMMAND_TIMEOUT_MS;
+  // The value feeds the execFile timeout, which cannot honour more than
+  // 2^31-1 ms: a larger delay overflows Node's timer to ~1 ms and kills
+  // every start command instantly, so fall back to the default instead
+  // (the bound resolveHandoffTimeoutMs and the quota reader also use).
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : WORKTREE_START_COMMAND_TIMEOUT_MS;
 };
 
 const runWorktreeStartCommand = async (directory, command) => {
