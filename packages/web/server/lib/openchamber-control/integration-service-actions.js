@@ -432,7 +432,7 @@ export const createIntegrationServiceActions = (deps) => {
   };
 
   const execute = async (action, input = {}, ctx = {}) => {
-    const handler = handlers[action];
+    const handler = Object.hasOwn(handlers, action) ? handlers[action] : null;
     if (!handler) throw badRequest(`Unsupported integration action: ${action || 'missing'}`);
     try {
       return withoutSecrets(await handler(input ?? {}, ctx));

@@ -206,7 +206,7 @@ const uniqueMatch = (candidates, requested) => {
  */
 export const resolveAgentToolAction = (requested, toolName) => {
   const value = typeof requested === 'string' ? requested.trim() : '';
-  const scoped = ACTIONS_BY_TOOL[toolName] ?? null;
+  const scoped = Object.hasOwn(ACTIONS_BY_TOOL, toolName) ? ACTIONS_BY_TOOL[toolName] : null;
   const known = scoped ?? OPENCHAMBER_ALL_ACTIONS;
 
   if (value && known.includes(value)) {
