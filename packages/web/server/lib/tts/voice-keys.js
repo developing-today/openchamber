@@ -51,6 +51,47 @@ const readStoredKeys = () => {
   }
 };
 
+// The update path cannot treat a malformed file as an empty store the way
+// a read can: it rewrites the file from what it read, so the stored keys
+// would be erased for good. Preserve the malformed bytes to a .corrupt-
+// sibling first (the parse error itself is never logged: it quotes the
+// file, and the file holds API keys), and fail closed when the file cannot
+// even be read — an update that cannot see the current keys must not
+// replace them.
+const preserveMalformedVoiceKeysFile = (filePath) => {
+  let preservedPath = null;
+  for (let attempt = 0; attempt < 10 && preservedPath === null; attempt += 1) {
+    const candidate = `${filePath}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    if (!fs.existsSync(candidate)) preservedPath = candidate;
+  }
+  if (preservedPath === null) return false;
+  try {
+    renameSyncWithRetry((from, to) => fs.renameSync(from, to), filePath, preservedPath);
+    console.warn(`[voice] voice-keys.json is malformed: preserved the unreadable file at ${preservedPath}`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const readStoredKeysForUpdate = (filePath) => {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return {};
+    throw error;
+  }
+  try {
+    return storedKeysSchema.parse(JSON.parse(raw));
+  } catch {
+    if (!preserveMalformedVoiceKeysFile(filePath)) {
+      throw new Error(`Refusing to overwrite the malformed voice keys file at ${filePath}: it could not be preserved`);
+    }
+    return {};
+  }
+};
+
 /** The stored key for one kind, or undefined. */
 export const readVoiceKey = (kind) => readStoredKeys()[kind];
 
@@ -66,14 +107,14 @@ export const describeVoiceKeys = () => {
  */
 export const updateVoiceKeys = (body) => {
   const patch = patchSchema.parse(body);
-  const next = { ...readStoredKeys() };
+  const filePath = voiceKeysPath();
+  const next = { ...readStoredKeysForUpdate(filePath) };
   for (const kind of VOICE_KEY_KINDS) {
     if (!(kind in patch)) continue;
     const value = patch[kind];
     if (value) next[kind] = value;
     else delete next[kind];
   }
-  const filePath = voiceKeysPath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, JSON.stringify(next, null, 2), { encoding: 'utf8', mode: 0o600 });
