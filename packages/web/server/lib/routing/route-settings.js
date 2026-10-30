@@ -7,6 +7,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { DEFAULT_TOGGLES } from './route-interpreter.js';
 
 export const DEFAULT_SETTINGS = {
@@ -40,18 +42,73 @@ const resolveSettingsFile = (env = process.env) => {
   return path.join(dir, 'route-settings.json');
 };
 
-export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => ({
-  read: () => {
+export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
+  // A torn or otherwise unparseable settings file is user data, not the
+  // defaults: move its bytes aside before any later write can overwrite
+  // them, and name the preserved copy so the loss is recoverable.
+  const preserveCorruptFile = (error) => {
+    const preservedFile = `${file}.corrupt-${Date.now()}`;
     try {
-      return normalizeSettings(JSON.parse(fs.readFileSync(file, 'utf8')));
+      renameSyncWithRetry((from, to) => fs.renameSync(from, to), file, preservedFile);
+      console.warn(`Failed to read route settings file: preserved the unreadable file at ${preservedFile}:`, error);
+      return true;
+    } catch (preserveError) {
+      console.warn('Failed to read route settings file:', error);
+      console.warn(`Failed to preserve the unreadable route settings file at ${preservedFile}:`, preserveError);
+      return false;
+    }
+  };
+
+  const preserveCorruptFileIfPresent = () => {
+    let raw;
+    try {
+      raw = fs.readFileSync(file, 'utf8');
     } catch {
+      return;
+    }
+    try {
+      JSON.parse(raw);
+    } catch (error) {
+      preserveCorruptFile(error);
+    }
+  };
+
+  const read = () => {
+    let raw;
+    try {
+      raw = fs.readFileSync(file, 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        console.warn('Failed to read route settings file:', error);
+      }
       return normalizeSettings({});
     }
-  },
-  write: (input) => {
+    try {
+      return normalizeSettings(JSON.parse(raw));
+    } catch (error) {
+      preserveCorruptFile(error);
+      return normalizeSettings({});
+    }
+  };
+
+  const write = (input) => {
     const next = normalizeSettings(input);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(next, null, 2));
+    preserveCorruptFileIfPresent();
+    const temporaryFile = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    try {
+      fs.writeFileSync(temporaryFile, JSON.stringify(next, null, 2));
+      renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporaryFile, file);
+    } catch (error) {
+      try {
+        fs.unlinkSync(temporaryFile);
+      } catch {
+        // The temp file may never have been created; the write error stands.
+      }
+      throw error;
+    }
     return next;
-  },
-});
+  };
+
+  return { read, write };
+};

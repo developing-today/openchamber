@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+
 const ACTIONS = ['avoid', 'prefer', 'allow-over-budget'];
 
 export const resolveOpenCodeDataDir = (env = process.env) => {
@@ -49,19 +51,72 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
   const overridesFile = path.join(dataDir, 'route-overrides.json');
   const feedbackFile = path.join(dataDir, 'route-feedback.jsonl');
 
-  const readAll = () => {
+  // A torn or otherwise unparseable overrides file is user data, not an
+  // empty store: move its bytes aside before any later save can overwrite
+  // them, and name the preserved copy so the loss is recoverable.
+  const preserveCorruptFile = (error) => {
+    const preservedFile = `${overridesFile}.corrupt-${now()}`;
     try {
-      const list = JSON.parse(fs.readFileSync(overridesFile, 'utf8'))?.overrides;
-      return Array.isArray(list) ? list.map(parseOverride).filter(Boolean) : [];
+      renameSyncWithRetry((from, to) => fs.renameSync(from, to), overridesFile, preservedFile);
+      console.warn(`Failed to read route overrides file: preserved the unreadable file at ${preservedFile}:`, error);
+      return true;
+    } catch (preserveError) {
+      console.warn('Failed to read route overrides file:', error);
+      console.warn(`Failed to preserve the unreadable route overrides file at ${preservedFile}:`, preserveError);
+      return false;
+    }
+  };
+
+  const preserveCorruptFileIfPresent = () => {
+    let raw;
+    try {
+      raw = fs.readFileSync(overridesFile, 'utf8');
     } catch {
+      return;
+    }
+    try {
+      JSON.parse(raw);
+    } catch (error) {
+      preserveCorruptFile(error);
+    }
+  };
+
+  const readAll = () => {
+    let raw;
+    try {
+      raw = fs.readFileSync(overridesFile, 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        console.warn('Failed to read route overrides file:', error);
+      }
       return [];
     }
+    let list;
+    try {
+      list = JSON.parse(raw)?.overrides;
+    } catch (error) {
+      preserveCorruptFile(error);
+      return [];
+    }
+    return Array.isArray(list) ? list.map(parseOverride).filter(Boolean) : [];
   };
 
   const save = (overrides) => {
     const live = overrides.filter((item) => item.until > now());
     fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(overridesFile, JSON.stringify({ version: 1, overrides: live }, null, 2));
+    preserveCorruptFileIfPresent();
+    const temporaryFile = `${overridesFile}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    try {
+      fs.writeFileSync(temporaryFile, JSON.stringify({ version: 1, overrides: live }, null, 2));
+      renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporaryFile, overridesFile);
+    } catch (error) {
+      try {
+        fs.unlinkSync(temporaryFile);
+      } catch {
+        // The temp file may never have been created; the write error stands.
+      }
+      throw error;
+    }
     return live;
   };
 
