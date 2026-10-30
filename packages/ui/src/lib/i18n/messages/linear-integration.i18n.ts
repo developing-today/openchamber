@@ -45,6 +45,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Adds a comment to the issue when a session starts, finishes, or fails. Comments are only posted when this server has a public address, so the link opens the session for everyone on the issue.',
     'settings.integrations.linear.sessionComments.aria': 'Post session status comments to Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'Could not load Linear comment settings.',
+    'settings.integrations.linear.vault.label': 'API key from 1Password',
+    'settings.integrations.linear.vault.info': 'Adds a workspace from a Linear personal API key kept in 1Password. OpenChamber reads the key each time it uses the account and stores only the reference.',
   },
   nl: {
     'settings.integrations.github.title': 'GitHub',
@@ -91,6 +93,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Voegt een reactie toe aan het issue wanneer een sessie start, eindigt of mislukt. Reacties worden alleen geplaatst als deze server een openbaar adres heeft, zodat de link de sessie voor iedereen op het issue opent.',
     'settings.integrations.linear.sessionComments.aria': 'Sessiestatusreacties naar Linear plaatsen',
     'settings.integrations.linear.sessionComments.loadFailed': 'Kan de reactie-instellingen van Linear niet laden',
+    'settings.integrations.linear.vault.label': 'API-sleutel uit 1Password',
+    'settings.integrations.linear.vault.info': 'Voegt een workspace toe met een persoonlijke Linear API-sleutel uit 1Password. OpenChamber leest de sleutel bij elk gebruik van het account en bewaart alleen de verwijzing.',
   },
   de: {
     'settings.integrations.github.title': 'GitHub',
@@ -137,6 +141,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Kommentiert das Issue, wenn eine Sitzung startet, endet oder fehlschlägt. Kommentare werden nur gepostet, wenn dieser Server eine öffentliche Adresse hat, damit der Link die Sitzung für alle Beteiligten öffnet.',
     'settings.integrations.linear.sessionComments.aria': 'Statuskommentare zu Sitzungen in Linear posten',
     'settings.integrations.linear.sessionComments.loadFailed': 'Linear-Kommentareinstellungen konnten nicht geladen werden.',
+    'settings.integrations.linear.vault.label': 'API-Schlüssel aus 1Password',
+    'settings.integrations.linear.vault.info': 'Fügt einen Workspace mit einem persönlichen Linear-API-Schlüssel aus 1Password hinzu. OpenChamber liest den Schlüssel bei jeder Nutzung des Kontos und speichert nur den Verweis.',
   },
   fr: {
     'settings.integrations.github.title': 'GitHub',
@@ -183,6 +189,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Ajoute un commentaire au ticket quand une session démarre, se termine ou échoue. Les commentaires ne sont publiés que si ce serveur a une adresse publique, afin que le lien ouvre la session pour tout le monde.',
     'settings.integrations.linear.sessionComments.aria': 'Publier les commentaires d’état de session dans Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'Impossible de charger les réglages de commentaires Linear.',
+    'settings.integrations.linear.vault.label': 'Clé API depuis 1Password',
+    'settings.integrations.linear.vault.info': 'Ajoute un espace de travail à partir d’une clé API personnelle Linear conservée dans 1Password. OpenChamber lit la clé à chaque utilisation du compte et ne conserve que la référence.',
   },
   es: {
     'settings.integrations.github.title': 'GitHub',
@@ -229,6 +237,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Añade un comentario a la incidencia cuando una sesión empieza, termina o falla. Los comentarios solo se publican si este servidor tiene una dirección pública, para que el enlace abra la sesión a todos.',
     'settings.integrations.linear.sessionComments.aria': 'Publicar comentarios de estado de sesión en Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'No se pudieron cargar los ajustes de comentarios de Linear.',
+    'settings.integrations.linear.vault.label': 'Clave API desde 1Password',
+    'settings.integrations.linear.vault.info': 'Añade un espacio de trabajo con una clave API personal de Linear guardada en 1Password. OpenChamber lee la clave cada vez que usa la cuenta y solo guarda la referencia.',
   },
   ja: {
     'settings.integrations.github.title': 'GitHub',
@@ -275,6 +285,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'セッションの開始・完了・失敗時にイシューへコメントします。リンクを誰でも開けるよう、このサーバーが公開アドレスを持つ場合のみ投稿します。',
     'settings.integrations.linear.sessionComments.aria': 'セッション状態のコメントを Linear に投稿',
     'settings.integrations.linear.sessionComments.loadFailed': 'Linear のコメント設定を読み込めませんでした。',
+    'settings.integrations.linear.vault.label': '1Password の API キー',
+    'settings.integrations.linear.vault.info': '1Password に保管された Linear の個人 API キーでワークスペースを追加します。OpenChamber はアカウントを使うたびにキーを読み取り、参照だけを保存します。',
   },
   ko: {
     'settings.integrations.github.title': 'GitHub',
@@ -321,6 +333,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': '세션이 시작, 완료, 실패할 때 이슈에 댓글을 남깁니다. 링크를 모두가 열 수 있도록 이 서버에 공개 주소가 있을 때만 게시합니다.',
     'settings.integrations.linear.sessionComments.aria': '세션 상태 댓글을 Linear에 게시',
     'settings.integrations.linear.sessionComments.loadFailed': 'Linear 댓글 설정을 불러오지 못했습니다.',
+    'settings.integrations.linear.vault.label': '1Password의 API 키',
+    'settings.integrations.linear.vault.info': '1Password에 보관된 Linear 개인 API 키로 워크스페이스를 추가합니다. OpenChamber는 계정을 사용할 때마다 키를 읽고 참조만 저장합니다.',
   },
   pl: {
     'settings.integrations.github.title': 'GitHub',
@@ -367,6 +381,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Dodaje komentarz do zgłoszenia, gdy sesja się zaczyna, kończy lub kończy błędem. Komentarze pojawiają się tylko wtedy, gdy ten serwer ma publiczny adres, żeby link otwierał sesję każdemu.',
     'settings.integrations.linear.sessionComments.aria': 'Publikuj komentarze o stanie sesji w Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'Nie udało się wczytać ustawień komentarzy Linear.',
+    'settings.integrations.linear.vault.label': 'Klucz API z 1Password',
+    'settings.integrations.linear.vault.info': 'Dodaje obszar roboczy przy użyciu osobistego klucza API Linear przechowywanego w 1Password. OpenChamber odczytuje klucz przy każdym użyciu konta i zapisuje tylko odwołanie.',
   },
   'pt-BR': {
     'settings.integrations.github.title': 'GitHub',
@@ -413,6 +429,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Comenta na issue quando uma sessão começa, termina ou falha. Os comentários só são publicados se este servidor tiver um endereço público, para que o link abra a sessão para todos.',
     'settings.integrations.linear.sessionComments.aria': 'Publicar comentários de status de sessão no Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'Não foi possível carregar as configurações de comentários do Linear.',
+    'settings.integrations.linear.vault.label': 'Chave de API do 1Password',
+    'settings.integrations.linear.vault.info': 'Adiciona um workspace com uma chave de API pessoal do Linear guardada no 1Password. O OpenChamber lê a chave sempre que usa a conta e armazena apenas a referência.',
   },
   uk: {
     'settings.integrations.github.title': 'GitHub',
@@ -459,6 +477,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Додає коментар до тікета, коли сесія починається, завершується або падає. Коментарі публікуються, лише якщо цей сервер має публічну адресу, щоб посилання відкривало сесію для всіх.',
     'settings.integrations.linear.sessionComments.aria': 'Публікувати коментарі про стан сесії в Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'Не вдалося завантажити налаштування коментарів Linear.',
+    'settings.integrations.linear.vault.label': 'Ключ API з 1Password',
+    'settings.integrations.linear.vault.info': 'Додає робочий простір за особистим ключем API Linear, збереженим у 1Password. OpenChamber зчитує ключ щоразу під час використання облікового запису й зберігає лише посилання.',
   },
   'zh-CN': {
     'settings.integrations.github.title': 'GitHub',
@@ -505,6 +525,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': '会话开始、完成或失败时在议题下留言。仅当此服务器拥有公网地址时才发布，这样链接才能让所有人打开该会话。',
     'settings.integrations.linear.sessionComments.aria': '将会话状态评论发布到 Linear',
     'settings.integrations.linear.sessionComments.loadFailed': '无法加载 Linear 评论设置。',
+    'settings.integrations.linear.vault.label': '来自 1Password 的 API 密钥',
+    'settings.integrations.linear.vault.info': '使用保存在 1Password 中的 Linear 个人 API 密钥添加工作区。OpenChamber 每次使用该帐户时都会读取密钥，并且仅存储引用。',
   },
   'zh-TW': {
     'settings.integrations.github.title': 'GitHub',
@@ -551,6 +573,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': '工作階段開始、完成或失敗時在議題留言。僅在這台伺服器有公開位址時才發布，這樣連結才能讓所有人開啟該工作階段。',
     'settings.integrations.linear.sessionComments.aria': '將工作階段狀態留言發布到 Linear',
     'settings.integrations.linear.sessionComments.loadFailed': '無法載入 Linear 留言設定。',
+    'settings.integrations.linear.vault.label': '來自 1Password 的 API 金鑰',
+    'settings.integrations.linear.vault.info': '使用保存在 1Password 中的 Linear 個人 API 金鑰新增工作區。OpenChamber 每次使用該帳戶時都會讀取金鑰，且僅儲存參照。',
   },
   tr: {
     'settings.integrations.github.title': 'GitHub',
@@ -597,6 +621,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'Bir oturum başladığında, bittiğinde veya başarısız olduğunda göreve yorum ekler. Bağlantının herkeste açılabilmesi için yorumlar yalnızca bu sunucunun genel bir adresi varsa gönderilir.',
     'settings.integrations.linear.sessionComments.aria': 'Oturum durumu yorumlarını Linear’a gönder',
     'settings.integrations.linear.sessionComments.loadFailed': 'Linear yorum ayarları yüklenemedi.',
+    'settings.integrations.linear.vault.label': '1Password’den API anahtarı',
+    'settings.integrations.linear.vault.info': '1Password’de tutulan kişisel bir Linear API anahtarıyla çalışma alanı ekler. OpenChamber, hesabı her kullandığında anahtarı okur ve yalnızca başvuruyu saklar.',
   },
   ar: {
     'settings.integrations.github.title': 'GitHub',
@@ -643,6 +669,8 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'يضيف تعليقًا إلى المشكلة عندما تبدأ جلسة أو تنتهي أو تفشل. لا تُنشر التعليقات إلا إذا كان لهذا الخادم عنوان عام، كي يفتح الرابط الجلسة لكل من في المشكلة.',
     'settings.integrations.linear.sessionComments.aria': 'نشر تعليقات حالة الجلسة في Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'تعذّر تحميل إعدادات تعليقات Linear.',
+    'settings.integrations.linear.vault.label': 'مفتاح API من 1Password',
+    'settings.integrations.linear.vault.info': 'يضيف مساحة عمل باستخدام مفتاح API شخصي لـ Linear محفوظ في 1Password. يقرأ OpenChamber المفتاح في كل مرة يستخدم فيها الحساب ويحفظ المرجع فقط.',
   },
   he: {
     'settings.integrations.github.title': 'GitHub',
@@ -689,5 +717,7 @@ export const linearIntegrationI18n = {
     'settings.integrations.linear.sessionComments.info': 'מוסיף תגובה לבעיה כשהפעלה מתחילה, מסתיימת או נכשלת. תגובות מתפרסמות רק כשלשרת הזה יש כתובת ציבורית, כך שהקישור פותח את ההפעלה לכל מי שמעורב בבעיה.',
     'settings.integrations.linear.sessionComments.aria': 'פרסם תגובות סטטוס הפעלה ב-Linear',
     'settings.integrations.linear.sessionComments.loadFailed': 'לא ניתן היה לטעון את הגדרות התגובות של Linear.',
+    'settings.integrations.linear.vault.label': 'מפתח API מ-1Password',
+    'settings.integrations.linear.vault.info': 'מוסיף סביבת עבודה באמצעות מפתח API אישי של Linear השמור ב-1Password. OpenChamber קורא את המפתח בכל שימוש בחשבון ושומר רק את ההפניה.',
   },
 } as const;

@@ -141,6 +141,7 @@ import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { createVaultResolver } from './lib/environment/vault.js';
 import { configureGitHubVaultReader } from './lib/github/auth.js';
 import { configureGitLabVaultReader } from './lib/gitlab/auth-storage.js';
+import { configureLinearVaultReader } from './lib/linear/auth.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
 import { OPENCODE_CONFIG_DIR, readConfigSources } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
@@ -1396,6 +1397,7 @@ const listConfiguredProjects = async () => {
 const vaultResolver = createVaultResolver({ env: () => ({ ...process.env, PATH: buildAugmentedPath() }) });
 configureGitHubVaultReader(vaultResolver.readSecret);
 configureGitLabVaultReader(vaultResolver.readSecret);
+configureLinearVaultReader(vaultResolver.readSecret);
 const environmentRuntime = createEnvironmentRuntime({
   vault: vaultResolver,
   store: environmentStore,

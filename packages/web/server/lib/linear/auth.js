@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { isVaultReference } from '../environment/vault.js';
 import { isPlainObject, readEnv, readFiniteNumber, readTrimmedString } from './parse.js';
 
 const DEFAULT_LINEAR_CLIENT_ID = '91bbe26a69a2c8568d3683f1e01e776c';
@@ -119,16 +120,23 @@ function normalizeAuthEntry(raw) {
   if (!isPlainObject(raw)) {
     return null;
   }
+  // Two credential kinds (#304): OAuth entries hold an accessToken; vault
+  // (apiKey) entries hold only a tokenReference (op://...) — the key itself
+  // is resolved at call time and never written to this file (#176 pattern).
+  const tokenReference = readTrimmedString(raw.tokenReference);
+  const hasVaultReference = Boolean(tokenReference) && isVaultReference(tokenReference);
   const accessToken = readTrimmedString(raw.accessToken);
-  if (!accessToken) {
+  if (!accessToken && !hasVaultReference) {
     return null;
   }
   const user = normalizeUser(raw.user);
   const organization = normalizeOrganization(raw.organization);
   return {
-    accessToken,
-    refreshToken: readTrimmedString(raw.refreshToken) || null,
-    tokenType: readTrimmedString(raw.tokenType) || 'bearer',
+    accessToken: hasVaultReference ? null : accessToken,
+    tokenReference: hasVaultReference ? tokenReference : null,
+    source: hasVaultReference ? 'vault' : 'oauth',
+    refreshToken: hasVaultReference ? null : (readTrimmedString(raw.refreshToken) || null),
+    tokenType: hasVaultReference ? 'apiKey' : (readTrimmedString(raw.tokenType) || 'bearer'),
     expiresAt: readFiniteNumber(raw.expiresAt),
     scope: readTrimmedString(raw.scope),
     createdAt: readFiniteNumber(raw.createdAt),
@@ -147,14 +155,14 @@ function normalizeAuthEntry(raw) {
 function normalizeAuthList(raw) {
   const source = Array.isArray(raw?.workspaces)
     ? raw.workspaces
-    : (raw?.accessToken ? [raw] : []);
+    : ((raw?.accessToken || raw?.tokenReference) ? [raw] : []);
   const list = source.map((entry) => normalizeAuthEntry(entry)).filter(Boolean);
 
   if (!list.length) {
-    return { list: [], changed: Boolean(raw && (raw.accessToken || Array.isArray(raw.workspaces))) };
+    return { list: [], changed: Boolean(raw && (raw.accessToken || raw.tokenReference || Array.isArray(raw.workspaces))) };
   }
 
-  let changed = Array.isArray(raw?.workspaces) === false && Boolean(raw?.accessToken);
+  let changed = Array.isArray(raw?.workspaces) === false && Boolean(raw?.accessToken || raw?.tokenReference);
   const seen = new Set();
   const deduped = [];
   for (const entry of list) {
@@ -242,14 +250,37 @@ export function getLinearAuthWorkspaces() {
     name: entry.organization?.name || null,
     urlKey: entry.organization?.urlKey || null,
     current: Boolean(entry.current),
+    source: entry.tokenReference ? 'vault' : 'oauth',
     user: entry.user || null,
     authorizedAt: entry.authorizedAt || entry.createdAt || null,
   }));
 }
 
+// Reads a vault reference's secret (`readSecret` of
+// ../environment/vault.js), set once by the server. Without it an account
+// added from a vault cannot be resolved and reads as unusable.
+let readVaultSecret = null;
+
+/** The server's vault reader, for accounts that keep a token reference. */
+export const configureLinearVaultReader = (reader) => {
+  readVaultSecret = reader;
+};
+
+/** A vault reference's key, for checking it before an account keeps the reference. */
+export const readLinearVaultToken = (reference) => (readVaultSecret
+  ? readVaultSecret(reference)
+  : Promise.resolve({ ok: false, reason: 'vault-unavailable' }));
+
 export function setLinearAuth(input, options = {}) {
+  const tokenReference = readTrimmedString(input?.tokenReference);
+  if (tokenReference && !isVaultReference(tokenReference)) {
+    throw new Error('tokenReference must be a valid 1Password reference (op://...)');
+  }
   const accessToken = readTrimmedString(input?.accessToken);
-  if (!accessToken) {
+  if (tokenReference && accessToken) {
+    throw new Error('accessToken and tokenReference are mutually exclusive');
+  }
+  if (!accessToken && !tokenReference) {
     throw new Error('accessToken is required');
   }
   const activate = options.activate !== false;
@@ -278,13 +309,17 @@ export function setLinearAuth(input, options = {}) {
   const wasCurrent = previous?.current === true;
 
   const next = {
-    accessToken,
-    refreshToken: Object.prototype.hasOwnProperty.call(input, 'refreshToken')
-      ? (readTrimmedString(input.refreshToken) || null)
-      : previous?.refreshToken || null,
-    tokenType: readTrimmedString(input?.tokenType) || previous?.tokenType || 'bearer',
-    expiresAt: readFiniteNumber(input?.expiresAt) ?? previous?.expiresAt ?? null,
-    scope: readTrimmedString(input?.scope) || previous?.scope || '',
+    accessToken: tokenReference ? null : accessToken,
+    tokenReference: tokenReference || null,
+    source: tokenReference ? 'vault' : 'oauth',
+    refreshToken: tokenReference
+      ? null
+      : (Object.prototype.hasOwnProperty.call(input, 'refreshToken')
+        ? (readTrimmedString(input.refreshToken) || null)
+        : previous?.refreshToken || null),
+    tokenType: tokenReference ? 'apiKey' : (readTrimmedString(input?.tokenType) || previous?.tokenType || 'bearer'),
+    expiresAt: tokenReference ? null : (readFiniteNumber(input?.expiresAt) ?? previous?.expiresAt ?? null),
+    scope: tokenReference ? '' : (readTrimmedString(input?.scope) || previous?.scope || ''),
     createdAt: previous?.createdAt || Date.now(),
     authorizedAt: Object.prototype.hasOwnProperty.call(input, 'authorizedAt')
       ? (readFiniteNumber(input.authorizedAt) || Date.now())
@@ -365,11 +400,12 @@ export function isLinearAccessTokenStale(expiresAt, now = Date.now()) {
 }
 
 export function toLinearPublicStatus(auth, workspaces = getLinearAuthWorkspaces()) {
-  if (!auth?.accessToken) {
+  if (!auth?.accessToken && !auth?.tokenReference) {
     return { connected: false };
   }
   return {
     connected: true,
+    source: auth.tokenReference ? 'vault' : 'oauth',
     user: auth.user || null,
     organization: auth.organization || null,
     scope: auth.scope || undefined,
