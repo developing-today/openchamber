@@ -80,7 +80,9 @@ describe('managed tunnel config runtime', () => {
     expect(await runtime.resolveManagedRemoteTunnelToken({ presetId: '', hostname: 'b.example.com' })).toBe('token-b');
     const config = await runtime.readManagedRemoteTunnelConfigFromDisk();
     expect(config.tunnels.map((entry) => entry.id)).toEqual(['a', 'b']);
-    expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    }
     expect(fs.readdirSync(dir).filter((name) => name.includes('.tmp-'))).toEqual([]);
   });
 
@@ -172,6 +174,28 @@ describe('managed tunnel config runtime', () => {
     expect(await runtime.readManagedRemoteTunnelConfigFromDisk()).toEqual({ version: 1, tunnels: [] });
     expect(fs.readdirSync(dir)).toEqual([]);
   });
+  it('refuses an update when the existing config cannot be read (non-ENOENT)', async () => {
+    const seeded = await makeRuntime();
+    await seeded.runtime.upsertManagedRemoteTunnelToken({ id: 'a', name: 'Tunnel a', hostname: 'a.example.com', token: 'token-a' });
+    const before = fs.readFileSync(seeded.filePath, 'utf8');
+    const failingFs = {
+      ...fsPromises,
+      readFile: async (...args) => {
+        if (String(args[0]).endsWith('cloudflare-managed-remote-tunnels.json')) {
+          const error = new Error('simulated read failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.readFile(...args);
+      },
+    };
+    const failing = await makeRuntime({ fsPromises: failingFs, dir: seeded.dir });
+    await expect(
+      failing.runtime.upsertManagedRemoteTunnelToken({ id: 'b', name: 'Tunnel b', hostname: 'b.example.com', token: 'token-b' }),
+    ).rejects.toThrow('Refusing to overwrite');
+    expect(fs.readFileSync(seeded.filePath, 'utf8')).toBe(before);
+  });
+
   it('does not let a concurrent ENOENT read migrate legacy data over an in-flight upsert', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     let releaseTempWrite;
