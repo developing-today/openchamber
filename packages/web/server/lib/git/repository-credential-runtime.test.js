@@ -258,6 +258,15 @@ describe('createGitRepositoryCredentialRuntime', () => {
     let alive = true;
     for (let attempt = 0; attempt < 50 && alive; attempt += 1) {
       try { process.kill(stalledPid, 0); } catch { alive = false; }
+      if (alive && process.platform === 'linux') {
+        // In containers whose PID 1 does not reap orphaned children, a
+        // terminated helper lingers as a zombie and kill(pid, 0) still
+        // succeeds; a zombie is terminated, not a surviving helper.
+        try {
+          const status = await fs.readFile(`/proc/${stalledPid}/status`, 'utf8');
+          if (/^State:\s+Z/m.test(status)) alive = false;
+        } catch { alive = false; }
+      }
       if (alive) await new Promise((resolve) => setTimeout(resolve, 100));
     }
     expect(alive).toBe(false);
