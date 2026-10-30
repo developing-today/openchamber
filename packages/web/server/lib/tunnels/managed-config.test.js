@@ -116,6 +116,36 @@ describe('managed tunnel config runtime', () => {
     expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
   });
 
+  it('does not preserve a file another process replaced with valid state after the corrupt read', async () => {
+    const dir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-tunnels-'));
+    temporaryDirectories.push(dir);
+    const filePath = path.join(dir, 'cloudflare-managed-remote-tunnels.json');
+    const corrupt = '{"version":1,"tunnels":[{"id":"a","name":"Tunnel a","hos';
+    await fsPromises.writeFile(filePath, corrupt);
+    const validRaw = JSON.stringify({ version: 1, tunnels: [tunnel('b', 'b.example.com', 'token-b')] }, null, 2);
+    // The other process lands its save in the window between this process
+    // validating the corrupt bytes and preserving them: the preservation
+    // candidate-name check is the last step before the re-read/rename.
+    let swapped = false;
+    const racingFs = {
+      ...fsPromises,
+      stat: async (...args) => {
+        if (!swapped && String(args[0]).includes('.corrupt-')) {
+          swapped = true;
+          await fsPromises.writeFile(filePath, validRaw);
+        }
+        return fsPromises.stat(...args);
+      },
+    };
+    const { runtime } = await makeRuntime({ dir, fsPromises: racingFs });
+    const config = await runtime.readManagedRemoteTunnelConfigFromDisk();
+    expect(swapped).toBe(true);
+    expect(config.tunnels.map((entry) => entry.id)).toEqual(['b']);
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(validRaw);
+    expect(preservedFiles(dir)).toEqual([]);
+    expect(await runtime.resolveManagedRemoteTunnelToken({ presetId: 'b', hostname: '' })).toBe('token-b');
+  });
+
   it('preserves a corrupt config before an upsert overwrites it, without a prior read', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { dir, filePath, runtime } = await makeRuntime();

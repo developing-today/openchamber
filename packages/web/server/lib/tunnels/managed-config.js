@@ -67,7 +67,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
   // them, and name the preserved copy so the loss is recoverable. The suffix
   // is collision-proof (pid + random, existence-checked): rename would
   // silently replace an earlier preserved copy on a bare-timestamp collision.
-  const preserveCorruptFile = async (error) => {
+  const preserveCorruptFile = async (error, expectedRaw) => {
     let preservedPath = null;
     for (let attempt = 0; attempt < 10 && preservedPath === null; attempt += 1) {
       const candidate = `${CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
@@ -80,6 +80,22 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     if (preservedPath === null) {
       console.warn('Failed to read managed remote tunnel config file:', error);
       console.warn('Failed to preserve the unreadable managed remote tunnel config file: every preserved-file name collided');
+      return false;
+    }
+    // Cross-process guard: the persist lock serializes only this process.
+    // Another server sharing the data directory may have preserved the
+    // corrupt file and saved valid state in its place since the bytes that
+    // failed validation were read; renaming the path now would move that
+    // saved state aside. Rename only the exact validated bytes: re-read
+    // last, and leave a changed file in place for the caller to re-read.
+    let currentRaw = null;
+    try {
+      currentRaw = await fsPromises.readFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, 'utf8');
+    } catch {
+      currentRaw = null;
+    }
+    if (currentRaw !== expectedRaw) {
+      console.warn('Managed remote tunnel config file changed since it was read; leaving the current file in place instead of preserving it as corrupt.');
       return false;
     }
     try {
@@ -144,8 +160,18 @@ export const createManagedTunnelConfigRuntime = (deps) => {
       try {
         return configFromRaw(current.raw);
       } catch (parseError) {
-        const preserved = await preserveCorruptFile(parseError);
+        const preserved = await preserveCorruptFile(parseError, current.raw);
         if (!preserved) {
+          // The file may have changed since validation (another process
+          // saved valid state): that state is the answer, not a refusal.
+          const latest = await readRawConfigFile();
+          if (!latest.error) {
+            try {
+              return configFromRaw(latest.raw);
+            } catch {
+              // Still unreadable: fall through to the refusal.
+            }
+          }
           throw new Error(
             `Refusing to overwrite the unreadable managed remote tunnel config file at ${CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH}: it could not be preserved`,
             { cause: parseError },
@@ -223,7 +249,19 @@ export const createManagedTunnelConfigRuntime = (deps) => {
             // Still corrupt under the lock: preserve those bytes below.
           }
         }
-        await preserveCorruptFile(parseError);
+        const preserved = await preserveCorruptFile(parseError, current.raw);
+        if (!preserved) {
+          // Changed since validation: return the current state if it is
+          // readable now instead of reporting an empty store.
+          const latest = await readRawConfigFile();
+          if (!latest.error) {
+            try {
+              return configFromRaw(latest.raw);
+            } catch {
+              // Still unreadable: fall through to the empty config.
+            }
+          }
+        }
         return emptyConfig();
       });
     }
@@ -251,8 +289,18 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     try {
       return configFromRaw(raw);
     } catch (parseError) {
-      const preserved = await preserveCorruptFile(parseError);
+      const preserved = await preserveCorruptFile(parseError, raw);
       if (!preserved) {
+        // Changed since validation: proceed from the current state if it
+        // is readable now; only a still-unreadable file refuses.
+        const latest = await readRawConfigFile();
+        if (!latest.error) {
+          try {
+            return configFromRaw(latest.raw);
+          } catch {
+            // Still unreadable: fall through to the refusal.
+          }
+        }
         throw new Error(
           `Refusing to overwrite the unreadable managed remote tunnel config file at ${CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH}: it could not be preserved`,
           { cause: parseError },
