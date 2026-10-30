@@ -1363,6 +1363,40 @@ describe('getStatus', () => {
 // worktree root resolution
 // ---------------------------------------------------------------------------
 
+describe.runIf(canRunGit())('gpgconf probe timeout (#862)', () => {
+  beforeEach(() => {
+    const home = createTempDir();
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    // No SSH_AUTH_SOCK: buildGitEnv must resolve the socket itself, which
+    // is the path that probes gpgconf.
+    vi.stubEnv('SSH_AUTH_SOCK', '');
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('settles a git operation in bounded time when gpgconf hangs', async () => {
+    if (process.platform === 'win32') return;
+    const { tmpDir } = await createTempRepo();
+    const binDir = createTempDir();
+    const fake = path.join(binDir, 'gpgconf');
+    fs.writeFileSync(fake, '#!/bin/sh\nexec sleep 120\n');
+    fs.chmodSync(fake, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDir}${path.delimiter}${previousPath || ''}`;
+    try {
+      const startedAt = Date.now();
+      await expect(isGitRepository(tmpDir)).resolves.toBe(true);
+      // The probe bound is 5s per resolve; without it this call would
+      // wait out the fake's 120s sleep.
+      expect(Date.now() - startedAt).toBeLessThan(30_000);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  }, 60_000);
+});
+
 describe('worktree root resolution', () => {
   it.each(['repo', 'repo space', 'repo-\u4e2d\u6587'])('uses filesystem paths returned by Git for %s', async (name) => {
     if (!canRunGit()) return;

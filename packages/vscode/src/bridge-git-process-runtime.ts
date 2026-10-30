@@ -7,6 +7,11 @@ import { spawnOwnedProcess } from './owned-process';
 
 const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
+// A gpgconf that never answers (a locked gpg-agent, a smartcard prompt)
+// must not wedge every Git command: buildGitEnv resolves the SSH socket
+// per command, before Git's own probe timeouts can apply (#862).
+const GPGCONF_TIMEOUT_MS = 5_000;
+const GPGCONF_MAX_BUFFER = 1024 * 1024;
 
 const isSocketPath = async (candidate: string): Promise<boolean> => {
   if (!candidate) {
@@ -38,7 +43,7 @@ const resolveSshAuthSock = async (): Promise<string | undefined> => {
   const runGpgconf = async (args: string[]): Promise<string> => {
     for (const candidate of gpgconfCandidates) {
       try {
-        const { stdout } = await execFileAsync(candidate, args);
+        const { stdout } = await execFileAsync(candidate, args, { timeout: GPGCONF_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: GPGCONF_MAX_BUFFER });
         return String(stdout || '');
       } catch {
         continue;
