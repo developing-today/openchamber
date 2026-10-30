@@ -2163,6 +2163,7 @@ export type LinearWorkspaceSummary = {
   current: boolean;
   user?: LinearUserSummary | null;
   authorizedAt?: number | null;
+  source?: 'oauth' | 'vault';
 };
 
 export type LinearAuthStatus = {
@@ -2170,6 +2171,7 @@ export type LinearAuthStatus = {
   user?: LinearUserSummary | null;
   organization?: LinearOrganizationSummary | null;
   scope?: string;
+  source?: 'oauth' | 'vault';
   workspaces?: LinearWorkspaceSummary[];
 };
 
@@ -2351,6 +2353,7 @@ export type LinearPreferences = {
 export interface LinearAPI {
   authStatus(): Promise<LinearAuthStatus>;
   authStart(origin?: LinearAuthOrigin): Promise<LinearAuthStart>;
+  authVault?(tokenReference: string): Promise<LinearAuthStatus>;
   authDisconnect(): Promise<{ removed: boolean }>;
   authActivate(organizationId: string): Promise<LinearAuthStatus>;
   issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
