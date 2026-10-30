@@ -15,6 +15,11 @@ type GitmojiCachePayload = {
 const GITMOJI_CACHE_KEY = 'gitmojiCache';
 const GITMOJI_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const GITMOJI_CACHE_VERSION = '1';
+// One fetch deadline for the whole catalog load, body read included: a
+// stalled upstream must not wedge the module-level in-flight entry (and
+// every later caller) for the rest of the session.
+export const GITMOJI_FETCH_TIMEOUT_MS = 10_000;
+
 const GITMOJI_SOURCE_URL =
   'https://raw.githubusercontent.com/carloscuesta/gitmoji/master/packages/gitmojis/src/gitmojis.json';
 
@@ -68,12 +73,14 @@ const isGitmojiCacheFresh = (payload: GitmojiCachePayload): boolean =>
 let inflightFetch: Promise<GitmojiEntry[]> | null = null;
 const subscribers = new Set<(entries: GitmojiEntry[]) => void>();
 
-const fetchGitmojiList = async (): Promise<GitmojiEntry[]> => {
+export const fetchGitmojiList = async (): Promise<GitmojiEntry[]> => {
   if (inflightFetch) return inflightFetch;
 
   const promise = (async () => {
     try {
-      const response = await fetch(GITMOJI_SOURCE_URL);
+      const response = await fetch(GITMOJI_SOURCE_URL, {
+        signal: AbortSignal.timeout(GITMOJI_FETCH_TIMEOUT_MS),
+      });
       if (!response.ok) {
         throw new Error(`Failed to load gitmojis: ${response.statusText}`);
       }
