@@ -15,6 +15,14 @@ let tmpDirs = [];
 
 const handler = (req, res) => {
   if (req.url === '/stall') return; // never answer
+  if (req.url === '/trickle') {
+    // A chunk every 30 ms, never completing: inside the idle window,
+    // so only an absolute deadline can stop this response.
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const timer = setInterval(() => res.write(' '), 30);
+    res.on('close', () => clearInterval(timer));
+    return;
+  }
   if (req.url === '/big') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.write('x'.repeat(4096));
@@ -122,6 +130,17 @@ describe('mcpx daemon client', () => {
     delete process.env.MCPX_ENDPOINT;
     process.env.MCPX_SOCKET = await startSocketDaemon();
     await expect(callDaemon('/stall', 'GET', null, {}, OPTS)).rejects.toThrow('mcpx daemon timed out');
+  });
+
+  it('socket: trickling response rejects at the absolute deadline, not the idle timeout', async () => {
+    delete process.env.MCPX_DAEMON_ENDPOINT;
+    delete process.env.MCPX_ENDPOINT;
+    process.env.MCPX_SOCKET = await startSocketDaemon();
+    const started = Date.now();
+    await expect(callDaemon('/trickle', 'GET', null, {}, OPTS)).rejects.toThrow('mcpx daemon timed out');
+    // OPTS.timeoutMs is 150; chunks arrive every 30 ms, so the idle
+    // timer never fires — rejection well under 1s proves the deadline.
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 
   it('socket: over-cap body rejects during the read', async () => {
