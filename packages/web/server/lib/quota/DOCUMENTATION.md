@@ -191,6 +191,10 @@ Refreshes are read-only with respect to OpenCode credentials. Neither a guessed
 client nor refreshed tokens are written back. Refresh-token rotation and changes
 to quota endpoint semantics are outside this compatibility fix.
 
+### Why a wrong-client store login reads as not configured
+
+The store's `google` entry is shared: a Gemini CLI OAuth sign-in lives in the same entry shape as the Antigravity plugin's login, and the credential carries no reliable marker of its issuing client, so resolution cannot tell them apart. The first distinguishing evidence is the token exchange itself: a foreign login's refresh is rejected with HTTP 400/401 and the OAuth code `unauthorized_client`, permanently. When every candidate came from the store and every refresh ends in that confirmed wrong-client rejection, `fetchQuota` reports the provider as not configured - there is no Antigravity source, so there is no broken Antigravity account to show. An accounts-file candidate is Antigravity-issued by construction and keeps the refresh-failure state, as does any other store failure (`invalid_grant`, transport, malformed responses).
+
 ### Why the Antigravity provider reads the credential store, not only the accounts file
 
 The plugin's current versions sign in through OpenCode's credential store (the `google` integration's OAuth credential, written by its `antigravity` auth method) and never write the legacy accounts file. The file also lives in the OpenCode config directory, where a config redeploy can remove it without touching the live login. Reading only the file therefore reports a working login as "not configured" — silently, with no error row. The provider resolves both sources (accounts file first, then the credential store, deduplicated by refresh token) and tries each candidate's refresh in order. Regenerating the accounts file from the store was rejected: a copied refresh token rots when the stored login rotates, and two writers for one login invite divergence.

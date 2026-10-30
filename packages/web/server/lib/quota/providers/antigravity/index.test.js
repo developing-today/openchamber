@@ -167,6 +167,43 @@ describe('Antigravity fetchQuota credential resolution', () => {
     expect(result.error).toBe('Failed to refresh Antigravity token');
   });
 
+  it('reports a store login the Antigravity client confirms is not its own as Not configured', async () => {
+    const { configureOpenCodeCredentials, fetchQuota } = await loadProvider();
+    configureOpenCodeCredentials({ list: async () => [googleOAuthEntry] });
+    // A Gemini CLI OAuth login lives in the same google store entry, and
+    // the stored credential carries no reliable marker of its issuing
+    // client. The token endpoint's unauthorized_client answer is the
+    // confirmed wrong-client rejection: that login is not an Antigravity
+    // source at all, so the provider must not sit in a permanent
+    // refresh-failure state for an account the user never configured.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'unauthorized_client' }), { status: 400 })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(false);
+    expect(result.error).toBe('Not configured');
+  });
+
+  it('keeps the refresh-failure state for an accounts-file login rejected as wrong-client', async () => {
+    const { configureOpenCodeCredentials, fetchQuota } = await loadProvider();
+    configureOpenCodeCredentials({ list: async () => [] });
+    // The legacy accounts file is written by the Antigravity plugin
+    // itself, so its token is Antigravity-issued by construction: even a
+    // wrong-client-shaped rejection there is a broken account to surface,
+    // not an unavailable source to hide.
+    const accountsPath = path.join(isolatedHome, '.config', 'opencode', 'antigravity-accounts.json');
+    fs.mkdirSync(path.dirname(accountsPath), { recursive: true });
+    fs.writeFileSync(accountsPath, JSON.stringify({ accounts: [{ refreshToken: 'file-refresh-token' }], activeIndex: 0 }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'unauthorized_client' }), { status: 401 })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Failed to refresh Antigravity token');
+  });
+
   it('does not read the local store for an external OpenCode with no google login', async () => {
     const { configureOpenCodeCredentials, fetchQuota } = await loadProvider();
     // A successful read from an external OpenCode (OPENCODE_HOST) that
