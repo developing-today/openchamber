@@ -168,6 +168,7 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
     assert.equal((request?.headers as Record<string, string> | undefined)?.Authorization, 'Bearer test-token');
     assert.equal((request?.headers as Record<string, string> | undefined)?.['x-opencode-session'], 'openchamber-usage');
     assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+    assert.equal(result.planLabel, undefined);
     assert.throws(() => fs.statSync(legacyPath));
   });
 
@@ -244,6 +245,7 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.monthly!.usedPercent, 50);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$12.34');
     assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
+    assert.equal(result.planLabel, 'go');
   });
 
   test('accepts a wrk_ workspace id from the Console sign-in', async () => {
@@ -301,6 +303,7 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.ok, true);
     assert.deepEqual(Object.keys(result.usage!.windows), ['weekly']);
     assert.equal(result.usage!.windows.weekly!.usedPercent, 25);
+    assert.equal(result.planLabel, 'go-plus');
   });
 
   test('distinguishes an absent subscription from a temporary failure', async () => {
