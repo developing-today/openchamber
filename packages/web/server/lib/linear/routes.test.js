@@ -107,6 +107,7 @@ describe('Linear auth routes', () => {
       name: 'OpenChamber',
       urlKey: 'openchamber',
       current: true,
+      source: 'oauth',
       user: {
         id: 'user-1',
         name: 'Ada',

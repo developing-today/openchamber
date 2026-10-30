@@ -68,6 +68,7 @@ describe('Linear auth storage', () => {
     const publicStatus = toLinearPublicStatus(stored);
     expect(publicStatus).toEqual({
       connected: true,
+      source: 'oauth',
       user: {
         id: 'user-1',
         name: 'Ada',
@@ -82,6 +83,7 @@ describe('Linear auth storage', () => {
         name: 'OpenChamber',
         urlKey: 'openchamber',
         current: true,
+        source: 'oauth',
         user: {
           id: 'user-1',
           name: 'Ada',

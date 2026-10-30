@@ -136,7 +136,7 @@ export async function fetchLinearGraphql(authorization, query, variables) {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        Authorization: <redacted> === 'vault' ? token : `Bearer ${token}`,
+        Authorization: authz.source === 'vault' ? token : `Bearer ${token}`,
         'public-file-urls-expire-in': LINEAR_PUBLIC_FILE_URL_TTL_SECONDS,
       },
       body: JSON.stringify(body),
