@@ -63,6 +63,9 @@ jobs:
       github.repository == 'developing-today/openchamber' &&
       (github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'failure' &&
+      (github.event.workflow_run.event == 'push' ||
+      github.event.workflow_run.event == 'schedule' ||
+      github.event.workflow_run.event == 'workflow_dispatch') &&
       github.event.workflow_run.head_branch == 'main'))
     timeout-minutes: 10
     runs-on: ubuntu-latest
@@ -88,6 +91,7 @@ jobs:
           run_url="$(printf '%s' "$run_json" | jq -r '.html_url')"
           head_sha="$(printf '%s' "$run_json" | jq -r '.head_sha')"
           head_branch="$(printf '%s' "$run_json" | jq -r '.head_branch')"
+          run_event="$(printf '%s' "$run_json" | jq -r '.event')"
           conclusion="$(printf '%s' "$run_json" | jq -r '.conclusion')"
           short_sha="${head_sha:0:7}"
 
@@ -99,6 +103,13 @@ jobs:
             echo "::notice::run ${run_id} is on branch '${head_branch}', not main; nothing to file."
             exit 0
           fi
+          case "$run_event" in
+            push|schedule|workflow_dispatch) ;;
+            *)
+              echo "::notice::run ${run_id} is a '${run_event}' run, not a main push/schedule/dispatch run; nothing to file."
+              exit 0
+              ;;
+          esac
 
           failing_json="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100" --paginate \
             | jq -s '[.[].jobs[] | select(.conclusion == "failure") | .name] | sort | unique')"
