@@ -1545,11 +1545,32 @@ const findBranchInUse = async (primaryWorktree: string, localBranchName: string)
   }) || null;
 };
 
+// Start commands legitimately run installs for minutes, so the bound is
+// generous; without one a hanging command wedges the worktree bootstrap at
+// git-ready forever (#861). The env override exists so tests can run the
+// hang case in seconds.
+const WORKTREE_START_COMMAND_TIMEOUT_MS = 600_000;
+const worktreeStartCommandTimeoutMs = (): number => {
+  const raw = String(process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS || '').trim();
+  if (!/^\d+$/.test(raw)) {
+    return WORKTREE_START_COMMAND_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  return parsed > 0 ? parsed : WORKTREE_START_COMMAND_TIMEOUT_MS;
+};
+
 const runWorktreeStartCommand = async (directory: string, command: string): Promise<{ success: boolean; message?: string; stdout?: string; stderr?: string }> => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
+  const timeoutMs = worktreeStartCommandTimeoutMs();
+  const startedAt = Date.now();
+  const failureMessage = (error: { killed?: boolean; signal?: string; message?: string; stderr?: string; stdout?: string }): string => (
+    error?.killed === true && error?.signal === 'SIGKILL' && Date.now() - startedAt >= timeoutMs
+      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
+      : String(error?.message || error?.stderr || error?.stdout || 'Failed to run start command').trim()
+  );
 
   const env = await buildGitEnv();
   if (process.platform === 'win32') {
@@ -1558,15 +1579,17 @@ const runWorktreeStartCommand = async (directory: string, command: string): Prom
         cwd: directory,
         env,
         maxBuffer: 20 * 1024 * 1024,
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL',
       });
       return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
     } catch (error) {
-      const err = error as { stdout?: string; stderr?: string; message?: string };
+      const err = error as { stdout?: string; stderr?: string; message?: string; killed?: boolean; signal?: string };
       return {
         success: false,
         stdout: err.stdout,
         stderr: err.stderr,
-        message: String(err.message || err.stderr || err.stdout || 'Failed to run start command').trim(),
+        message: failureMessage(err),
       };
     }
   }
@@ -1576,15 +1599,17 @@ const runWorktreeStartCommand = async (directory: string, command: string): Prom
       cwd: directory,
       env,
       maxBuffer: 20 * 1024 * 1024,
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
     });
     return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
   } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; message?: string };
+    const err = error as { stdout?: string; stderr?: string; message?: string; killed?: boolean; signal?: string };
     return {
       success: false,
       stdout: err.stdout,
       stderr: err.stderr,
-      message: String(err.message || err.stderr || err.stdout || 'Failed to run start command').trim(),
+      message: failureMessage(err),
     };
   }
 };
