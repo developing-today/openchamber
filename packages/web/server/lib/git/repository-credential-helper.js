@@ -32,6 +32,7 @@ const terminateDelegateTree = (child) => {
         shell: false, windowsHide: true, stdio: 'ignore',
       });
       killer.once('error', () => { try { child.kill('SIGKILL'); } catch {} });
+      killer.once('close', (code) => { if (code !== 0) { try { child.kill('SIGKILL'); } catch {} } });
       killer.unref?.();
     } catch { try { child.kill('SIGKILL'); } catch {} }
     return;

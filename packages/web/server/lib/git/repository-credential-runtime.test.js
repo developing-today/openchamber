@@ -236,8 +236,8 @@ describe('createGitRepositoryCredentialRuntime', () => {
     await fs.mkdir(homeDir);
     const pidFile = path.join(dataDir, 'stalled-helper.pid');
     const stalledHelper = path.join(dataDir, 'stalled-helper.sh');
-    await fs.writeFile(stalledHelper, `#!/bin/sh\necho $$ > ${pidFile}\nexec sleep 120\n`, { mode: 0o755 });
-    await fs.writeFile(path.join(homeDir, '.gitconfig'), `[credential]\n\thelper = ${stalledHelper}\n`);
+    await fs.writeFile(stalledHelper, `#!/bin/sh\necho $$ > \"${pidFile}\"\nexec sleep 120\n`, { mode: 0o755 });
+    await fs.writeFile(path.join(homeDir, '.gitconfig'), `[credential]\n\thelper = \"${stalledHelper}\"\n`);
     const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
     const startedAt = Date.now();
     const stdout = await new Promise((resolve, reject) => {
