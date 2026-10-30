@@ -2863,7 +2863,18 @@ export async function revertGitFile(
   }
   const repoRoot = await canonicalizePath(repoRootResult.stdout.trim());
   const directoryRoot = await canonicalizePath(directory);
-  const target = await canonicalizePath(path.resolve(directory, filePath));
+  // Containment is checked on the canonicalized parent plus the entry
+  // name, without following a final symlink. A tracked symlink may
+  // legitimately point outside the repository -- its target is data git
+  // restores, not a path this function writes through -- while a parent
+  // directory that resolves outside the repository still fails the
+  // containment check below, and the removal path below deletes the
+  // entry at this path, never whatever a symlink there points at.
+  const resolvedTarget = path.resolve(directory, filePath);
+  const target = path.join(
+    await canonicalizePath(path.dirname(resolvedTarget)),
+    path.basename(resolvedTarget),
+  );
   if (target === repoRoot || target === directoryRoot) {
     throw new Error(`Cannot revert the repository root: ${filePath}`);
   }
