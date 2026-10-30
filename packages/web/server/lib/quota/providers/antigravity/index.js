@@ -7,7 +7,7 @@
  */
 
 import { buildResult } from '../../utils/index.js';
-import { readLocalOpenCodeCredentials, readOpenCodeCredentials } from '../../../opencode/auth.js';
+import { credentialSourceUsesLocalStore, readLocalOpenCodeCredentials, readOpenCodeCredentials } from '../../../opencode/auth.js';
 import { resolveAntigravityAuth, resolveAntigravityStoreAuth, isConfigured, DEFAULT_PROJECT_ID } from './auth.js';
 import {
   refreshAntigravityToken,
@@ -43,13 +43,18 @@ const resolveAuthCandidates = async () => {
     // must surface as its own error, not as "no login exists".
     storeReadFailed = true;
   }
-  if (!candidates.length) {
+  if (!candidates.length && credentialSourceUsesLocalStore()) {
     // The projection the running OpenCode serves can withhold the refresh
     // token this provider must present (the stored-login projection keeps
     // refresh tokens with OpenCode), leaving a signed-in user reading as
     // "Not configured". Read the credential store directly instead — the
-    // fallback the quota CLI already uses. Best-effort: a store that is
-    // absent or unreadable on this machine decides nothing, so a failure
+    // fallback the quota CLI already uses — but only when the connected
+    // OpenCode is known to use this machine's store: an external OpenCode
+    // reached through OPENCODE_HOST can belong to another machine, and its
+    // successful empty read must stand rather than be overridden by an
+    // unrelated local login (Codex review on PR #860). Best-effort: a
+    // store that is absent or unreadable on this machine decides nothing,
+    // so a failure
     // here neither adds a candidate nor manufactures an error state; the
     // accounts file and the served read above have already spoken.
     try {

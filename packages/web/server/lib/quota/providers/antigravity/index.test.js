@@ -139,6 +139,7 @@ describe('Antigravity fetchQuota credential resolution', () => {
         ...googleOAuthEntry,
         value: { type: 'oauth', methodID: 'antigravity', access: 'projected-access-token', expires: 1 },
       }],
+      usesLocalStore: () => true,
     });
     createLocalGoogleStore();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })));
@@ -155,6 +156,7 @@ describe('Antigravity fetchQuota credential resolution', () => {
       list: async () => {
         throw new Error('OpenCode is not connected yet');
       },
+      usesLocalStore: () => true,
     });
     createLocalGoogleStore();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })));
@@ -163,5 +165,27 @@ describe('Antigravity fetchQuota credential resolution', () => {
 
     expect(result.configured).toBe(true);
     expect(result.error).toBe('Failed to refresh Antigravity token');
+  });
+
+  it('does not read the local store for an external OpenCode with no google login', async () => {
+    const { configureOpenCodeCredentials, fetchQuota } = await loadProvider();
+    // A successful read from an external OpenCode (OPENCODE_HOST) that
+    // holds no google login: the credential store on this machine belongs
+    // to a different runtime and must not supply a candidate (Codex
+    // review on PR #860).
+    configureOpenCodeCredentials({
+      list: async () => [],
+      usesLocalStore: () => false,
+    });
+    createLocalGoogleStore();
+    const fetchStub = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchStub);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(false);
+    expect(result.error).toBe('Not configured');
+    expect(fetchStub).not.toHaveBeenCalled();
   });
 });
