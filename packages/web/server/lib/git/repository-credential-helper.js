@@ -4,6 +4,11 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 
 const MAX_BYTES = 64 * 1024;
+// The delegate below asks the person's own credential chain, whose helpers
+// can stall (a GUI prompt, a network store). Bound it in the same 10s class
+// as the server request so a stalled chain cannot hang the Git operation
+// that invoked this helper indefinitely (#867).
+const DELEGATE_TIMEOUT_MS = 10_000;
 
 /**
  * Git's credential helper for a repository OpenChamber gave an account.
@@ -28,6 +33,11 @@ const delegate = (query) => {
     cwd: os.tmpdir(), env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'],
   });
   child.once('error', () => process.exit(0));
+  // On expiry the child is killed; its 'close' below then exits 0 promptly,
+  // preserving the fail-quiet contract (Git warns; nothing is emitted beyond
+  // whatever the chain already answered).
+  const deadline = setTimeout(() => child.kill('SIGKILL'), DELEGATE_TIMEOUT_MS);
+  deadline.unref();
   child.stdout.pipe(process.stdout);
   child.stdin.end(query);
   // Whatever the person's chain answered, or did not, is Git's to act on;
