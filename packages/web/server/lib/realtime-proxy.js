@@ -2,6 +2,12 @@ import { WebSocket, WebSocketServer } from 'ws';
 
 const PROXY_SSE_PATH = '/api/openchamber/realtime-proxy/sse';
 const PROXY_WS_PATH = '/api/openchamber/realtime-proxy/ws';
+/** A handshake that has not completed by now is not going to (dev-tunnel precedent). */
+const HANDSHAKE_TIMEOUT_MS = 15_000;
+/** Bytes one client may queue while its upstream is still connecting (dev-tunnel's pre-open cap). */
+const MAX_PENDING_BYTES = 256 * 1024;
+/** A peer further behind than this after connect is closed as too slow (event-stream precedent). */
+const MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
 
 const isAllowedSsePath = (pathname) => {
   return pathname === '/api/event'
@@ -125,7 +131,7 @@ export const buildRealtimeProxyWsUrl = (localOrigin, targetUrl) => {
   return url.toString();
 };
 
-export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getUiAuthController, isRequestOriginAllowed }) => {
+export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getUiAuthController, isRequestOriginAllowed, handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS, maxPendingBytes = MAX_PENDING_BYTES, maxBufferedBytes = MAX_BUFFERED_BYTES }) => {
   if (!app || !server || typeof getDesktopRuntimeConfig !== 'function') {
     return { stop: () => {} };
   }
@@ -206,22 +212,71 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
       headers: resolved.requestHeaders,
       // ws does not send Origin by default; protected upstreams require it.
       origin: `${resolved.target.protocol === 'wss:' ? 'https:' : 'http:'}//${resolved.target.host}`,
+      // A wedged remote must fail the pair, not hold it open forever.
+      handshakeTimeout: handshakeTimeoutMs,
     });
+
+    // The ws handshake timeout is not honoured on every runtime this
+    // server runs on, so the bound is also kept here (dev-tunnel keeps its
+    // own timer for the same reason): expiry kills the attempt and fails
+    // the client instead of leaving its session open on a dead remote.
+    const handshakeTimer = setTimeout(() => {
+      try { upstream.terminate(); } catch { /* already gone */ }
+      if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+        try { client.close(1011, 'Realtime proxy upstream handshake timed out'); } catch { /* already closing */ }
+      }
+    }, handshakeTimeoutMs);
+    upstream.once('open', () => clearTimeout(handshakeTimer));
+    upstream.once('error', () => clearTimeout(handshakeTimer));
+    upstream.once('close', () => clearTimeout(handshakeTimer));
+    client.once('close', () => clearTimeout(handshakeTimer));
     const pending = [];
+    let pendingBytes = 0;
+
+    const closePair = (code, reason) => {
+      if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+        try { client.close(code, reason); } catch { /* already closing */ }
+      }
+      if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+        try { upstream.close(); } catch { /* already closing */ }
+      }
+    };
+
+    // Forwarding ignores how far behind the receiving peer is falling;
+    // past the bound the pair is closed instead of buffering without limit.
+    const closeIfPeerTooSlow = (peer) => {
+      if (peer.bufferedAmount <= maxBufferedBytes) return;
+      closePair(1013, 'Realtime proxy peer is too slow');
+    };
 
     const flush = () => {
       while (pending.length > 0 && upstream.readyState === WebSocket.OPEN) {
         const [data, isBinary] = pending.shift();
         upstream.send(data, { binary: isBinary });
       }
+      pendingBytes = 0;
     };
 
     client.on('message', (data, isBinary) => {
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(data, { binary: isBinary });
+        closeIfPeerTooSlow(upstream);
         return;
       }
       if (upstream.readyState === WebSocket.CONNECTING) {
+        pendingBytes += data.length;
+        if (pendingBytes > maxPendingBytes) {
+          // The handshake is stalled and the queue is full: drop the pair
+          // rather than hold every byte until the remote recovers, and
+          // never flush what was queued.
+          pending.length = 0;
+          pendingBytes = 0;
+          try { upstream.terminate(); } catch { /* already gone */ }
+          if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+            try { client.close(1013, 'Realtime proxy queue is full'); } catch { /* already closing */ }
+          }
+          return;
+        }
         pending.push([data, isBinary]);
       }
     });
@@ -229,6 +284,7 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
     upstream.on('message', (data, isBinary) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(data, { binary: isBinary });
+        closeIfPeerTooSlow(client);
       }
     });
     upstream.on('close', (code, reason) => {
