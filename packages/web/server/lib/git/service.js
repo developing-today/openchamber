@@ -2141,11 +2141,32 @@ const findBranchInUse = async (primaryWorktree, localBranchName) => {
   }) || null;
 };
 
+// Start commands legitimately run installs for minutes, so the bound is
+// generous; without one a hanging command wedges the worktree bootstrap at
+// git-ready forever (#861). The env override exists so tests can run the
+// hang case in seconds.
+const WORKTREE_START_COMMAND_TIMEOUT_MS = 600_000;
+const worktreeStartCommandTimeoutMs = () => {
+  const raw = String(process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS || '').trim();
+  if (!/^\d+$/.test(raw)) {
+    return WORKTREE_START_COMMAND_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  return parsed > 0 ? parsed : WORKTREE_START_COMMAND_TIMEOUT_MS;
+};
+
 const runWorktreeStartCommand = async (directory, command) => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
+  const timeoutMs = worktreeStartCommandTimeoutMs();
+  const startedAt = Date.now();
+  const failureMessage = (error) => (
+    error?.killed === true && error?.signal === 'SIGKILL' && Date.now() - startedAt >= timeoutMs
+      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
+      : parseGitErrorText(error)
+  );
 
   if (process.platform === 'win32') {
     const result = await execFileAsync('cmd', ['/c', text], {
@@ -2153,11 +2174,13 @@ const runWorktreeStartCommand = async (directory, command) => {
       env: await buildGitEnv(directory),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
     }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
       success: false,
       stdout: error?.stdout,
       stderr: error?.stderr,
-      message: parseGitErrorText(error),
+      message: failureMessage(error),
     }));
     return result;
   }
@@ -2166,11 +2189,13 @@ const runWorktreeStartCommand = async (directory, command) => {
     cwd: directory,
     env: await buildGitEnv(directory),
     maxBuffer: 20 * 1024 * 1024,
+    timeout: timeoutMs,
+    killSignal: 'SIGKILL',
   }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
     success: false,
     stdout: error?.stdout,
     stderr: error?.stderr,
-    message: parseGitErrorText(error),
+    message: failureMessage(error),
   }));
   return result;
 };
