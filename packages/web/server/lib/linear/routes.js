@@ -164,7 +164,10 @@ export function registerLinearRoutes(app) {
       throw new Error('Linear is not connected');
     }
     if (!authorization) {
-      return { connected: false };
+      // Route the disconnected answer through the public-status shape so a
+      // malformed auth file reports MALFORMED instead of looking like a
+      // never-connected account.
+      return toLinearPublicStatus(null);
     }
 
     const auth = getLinearAuth();
@@ -177,7 +180,7 @@ export function registerLinearRoutes(app) {
       // the authorization was being resolved: discard this refresh rather
       // than writing one workspace's identity (or resolved secret) into
       // another workspace's credential.
-      return auth ? toLinearPublicStatus(auth, getLinearAuthWorkspaces()) : { connected: false };
+      return auth ? toLinearPublicStatus(auth, getLinearAuthWorkspaces()) : toLinearPublicStatus(null);
     }
     try {
       const identity = await fetchLinearIdentity(authorization);
@@ -191,7 +194,7 @@ export function registerLinearRoutes(app) {
         // while the identity request was in flight: discard this refresh
         // rather than recreating a deleted credential (or writing this
         // workspace's identity into another workspace's credential).
-        return current ? toLinearPublicStatus(current, getLinearAuthWorkspaces()) : { connected: false };
+        return current ? toLinearPublicStatus(current, getLinearAuthWorkspaces()) : toLinearPublicStatus(null);
       }
       // A vault workspace keeps only its reference: the resolved key is
       // never written back as an accessToken (#304).

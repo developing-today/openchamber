@@ -15,6 +15,10 @@ import {
   getLinearAuthFilePath,
   configureLinearVaultReader,
   readLinearVaultToken,
+  getLinearSessionCommentsEnabled,
+  setLinearSessionCommentsEnabled,
+  getLinearStorageState,
+  LinearAuthError,
   DEFAULT_LINEAR_CLIENT_ID_VALUE,
 } from './auth.js';
 
@@ -214,6 +218,86 @@ describe('Linear auth storage', () => {
     expect(getLinearAuth().workspaceId).toBe('org-a');
     expect(getLinearAuth().accessToken).toBe('access-a');
     expect(getLinearAuthWorkspaces()).toHaveLength(1);
+  });
+
+  it('refuses to build a write on a malformed auth file, leaving its bytes untouched', () => {
+    setLinearAuth({
+      accessToken: 'access-a',
+      organization: { id: 'org-a', name: 'Alpha', urlKey: 'alpha' },
+      user: { id: 'user-a', name: 'Ada' },
+    });
+    setLinearAuth({
+      accessToken: 'access-b',
+      organization: { id: 'org-b', name: 'Beta', urlKey: 'beta' },
+      user: { id: 'user-b', name: 'Ben' },
+    });
+    const filePath = getLinearAuthFilePath();
+    const torn = fs.readFileSync(filePath, 'utf8').slice(0, 40);
+    fs.writeFileSync(filePath, torn);
+
+    // Read-only paths keep answering, but malformed is distinguishable
+    // from never-connected.
+    expect(getLinearAuth()).toBeNull();
+    expect(getLinearAuthWorkspaces()).toEqual([]);
+    expect(getLinearStorageState().authFile).toBe('malformed');
+    expect(toLinearPublicStatus(null)).toMatchObject({ connected: false, code: 'MALFORMED' });
+
+    let thrown = null;
+    try {
+      setLinearAuth({ accessToken: 'access-new', organization: { id: 'org-new', name: 'New' } });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(LinearAuthError);
+    expect(thrown.code).toBe('MALFORMED');
+    expect(() => activateLinearAuth('org-a')).toThrow(/not valid JSON/);
+    // clear turns the refusal into its existing false answer, not a delete.
+    expect(clearLinearAuth('org-a')).toBe(false);
+
+    // Both stored tokens survive: the file is byte-for-byte what it was.
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(torn);
+    expect(fs.readdirSync(dataDir).filter((name) => name.includes('.tmp'))).toEqual([]);
+  });
+
+  it('refuses a write when the auth file holds valid JSON that is not an object', () => {
+    fs.writeFileSync(getLinearAuthFilePath(), '["not-a-store"]', 'utf8');
+    expect(() => setLinearAuth({ accessToken: 'access-1' })).toThrow(/not valid JSON/);
+    expect(fs.readFileSync(getLinearAuthFilePath(), 'utf8')).toBe('["not-a-store"]');
+  });
+
+  it('refuses a write when the auth file cannot be read at all', () => {
+    fs.mkdirSync(getLinearAuthFilePath());
+    expect(() => setLinearAuth({ accessToken: 'access-1' })).toThrow();
+    expect(fs.statSync(getLinearAuthFilePath()).isDirectory()).toBe(true);
+  });
+
+  it('refuses a session-comments toggle on a malformed settings file, leaving it untouched', () => {
+    const settingsPath = path.join(dataDir, 'settings.json');
+    const torn = '{"theme":"dark","linearClientId":"x';
+    fs.writeFileSync(settingsPath, torn);
+    expect(getLinearSessionCommentsEnabled()).toBe(false);
+    expect(getLinearStorageState().settingsFile).toBe('malformed');
+    expect(() => setLinearSessionCommentsEnabled(true)).toThrow(/not valid JSON/);
+    expect(fs.readFileSync(settingsPath, 'utf8')).toBe(torn);
+  });
+
+  it('changes only its own key when toggling session comments on a healthy settings file', () => {
+    const settingsPath = path.join(dataDir, 'settings.json');
+    fs.writeFileSync(settingsPath, JSON.stringify({ theme: 'dark', linearClientId: 'x' }), 'utf8');
+    expect(setLinearSessionCommentsEnabled(true)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({
+      theme: 'dark',
+      linearClientId: 'x',
+      linearSessionComments: true,
+    });
+    expect(getLinearSessionCommentsEnabled()).toBe(true);
+  });
+
+  it('still toggles session comments when no settings file exists yet', () => {
+    expect(setLinearSessionCommentsEnabled(true)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'))).toEqual({
+      linearSessionComments: true,
+    });
   });
 
   it('does not bump authorizedAt when a later write opts out of activate', () => {

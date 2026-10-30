@@ -35,23 +35,89 @@ function ensureStorageDir() {
   }
 }
 
-function readJsonFile(filePath) {
-  if (!fs.existsSync(filePath)) {
+export class LinearAuthError extends Error {
+  constructor(message, code) {
+    super(message);
+    this.name = 'LinearAuthError';
+    this.code = code;
+  }
+}
+
+function malformedFileError(filePath) {
+  // No parse error is attached or logged: a JSON.parse error can quote the
+  // file, and these files hold tokens and user settings.
+  return new LinearAuthError(
+    `${filePath} is not valid JSON. Fix or move it before saving; refusing to overwrite it.`,
+    'MALFORMED',
+  );
+}
+
+// Strict read: missing and empty files read as null (the first-run case),
+// malformed files throw MALFORMED, and any other read failure (permissions,
+// I/O) propagates - a caller that cannot see the current contents must not
+// replace them. Used by every write path, via the *ForUpdate readers below.
+function readJsonFileStrict(filePath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
     return null;
   }
+  let parsed;
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      return null;
-    }
-    const parsed = JSON.parse(trimmed);
-    if (!isPlainObject(parsed)) {
-      return null;
-    }
-    return parsed;
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw malformedFileError(filePath);
+  }
+  if (!isPlainObject(parsed)) {
+    throw malformedFileError(filePath);
+  }
+  return parsed;
+}
+
+function jsonFileState(filePath) {
+  try {
+    return readJsonFileStrict(filePath) === null ? 'missing' : 'valid';
   } catch (error) {
-    console.error('Failed to read Linear auth file:', error);
+    if (error instanceof LinearAuthError && error.code === 'MALFORMED') {
+      return 'malformed';
+    }
+    return 'unreadable';
+  }
+}
+
+// Whether the on-disk Linear files are usable, for status/diagnostic
+// callers: a malformed file reads as not-connected through the lenient
+// readers below, and this is how that case stays distinguishable from a
+// file that was never written.
+export function getLinearStorageState() {
+  return {
+    authFile: jsonFileState(storageFile()),
+    settingsFile: jsonFileState(settingsFile()),
+  };
+}
+
+// Lenient read for read-only paths: they keep answering on a malformed
+// file (as empty / not connected) instead of throwing, exactly as before.
+// The destructive conflation was only ever on the write side: writers
+// built a replacement on this empty base and erased what the file held.
+// Writers therefore never use this reader - see readJsonFileStrict.
+function readJsonFile(filePath) {
+  try {
+    return readJsonFileStrict(filePath);
+  } catch (error) {
+    if (error instanceof LinearAuthError) {
+      console.error('Failed to read Linear auth file:', error.message);
+    } else if (error?.code !== 'ENOENT') {
+      console.error('Failed to read Linear auth file:', error);
+    }
     return null;
   }
 }
@@ -204,6 +270,17 @@ function readAuthList() {
   return list;
 }
 
+// The base for a write must be read strictly: a malformed auth file is
+// never an empty base, so set/activate/clear refuse (MALFORMED) with the
+// original bytes untouched instead of erasing every stored token.
+function readAuthListForUpdate() {
+  const data = readJsonFileStrict(storageFile());
+  if (!data) {
+    return [];
+  }
+  return normalizeAuthList(data).list;
+}
+
 function writeAuthList(list) {
   if (!list.length) {
     const filePath = storageFile();
@@ -217,6 +294,12 @@ function writeAuthList(list) {
 
 function readSettings() {
   return readJsonFile(settingsFile()) || {};
+}
+
+// Same rule for the shared settings.json: a write built on a malformed
+// file would rewrite the whole file from an empty base.
+function readSettingsForUpdate() {
+  return readJsonFileStrict(settingsFile()) || {};
 }
 
 function writeSettings(settings) {
@@ -284,7 +367,7 @@ export function setLinearAuth(input, options = {}) {
     throw new Error('accessToken is required');
   }
   const activate = options.activate !== false;
-  const list = readAuthList();
+  const list = readAuthListForUpdate();
   const current = list.find((entry) => entry.current) || list[0] || null;
 
   const nextUser = Object.prototype.hasOwnProperty.call(input, 'user')
@@ -354,7 +437,7 @@ export function activateLinearAuth(workspaceId) {
   if (!id) {
     return false;
   }
-  const list = readAuthList();
+  const list = readAuthListForUpdate();
   const index = list.findIndex((entry) => entry.workspaceId === id);
   if (index === -1) {
     return false;
@@ -368,7 +451,7 @@ export function activateLinearAuth(workspaceId) {
 
 export function clearLinearAuth(workspaceId) {
   try {
-    const list = readAuthList();
+    const list = readAuthListForUpdate();
     if (!list.length) {
       return true;
     }
@@ -401,6 +484,9 @@ export function isLinearAccessTokenStale(expiresAt, now = Date.now()) {
 
 export function toLinearPublicStatus(auth, workspaces = getLinearAuthWorkspaces()) {
   if (!auth?.accessToken && !auth?.tokenReference) {
+    if (getLinearStorageState().authFile === 'malformed') {
+      return { connected: false, code: 'MALFORMED', error: malformedFileError(storageFile()).message };
+    }
     return { connected: false };
   }
   return {
@@ -461,7 +547,7 @@ export function getLinearSessionCommentsEnabled() {
 
 export function setLinearSessionCommentsEnabled(enabled) {
   const next = enabled === true;
-  const settings = readSettings();
+  const settings = readSettingsForUpdate();
   settings[SESSION_COMMENTS_SETTING_KEY] = next;
   writeSettings(settings);
   return next;
