@@ -237,7 +237,10 @@ const registry = {
     aliases: opencodeGo.aliases,
     isConfigured: opencodeGo.isConfigured,
     fetchQuota: opencodeGo.fetchQuota,
-    credentialAliases: ['opencode-go', 'opencode'],
+    // Console first: fetchPerCredential walks these aliases in order and the
+    // combined fetch prefers a Console sign-in over the API key, so the
+    // per-credential rows keep that precedence (first active = primary).
+    credentialAliases: ['opencode', 'opencode-go'],
     fetchQuotaForCredential: opencodeGo.fetchQuotaForCredential
   },
   neuralwatt: {

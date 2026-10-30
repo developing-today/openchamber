@@ -73,6 +73,9 @@ const fakeFetch = async (url, init = {}) => {
       }),
     };
   }
+  if (String(url).includes('opencode.ai/zen/go/v1/usage')) {
+    return { ok: true, status: 200, json: async () => ({ usage: { rolling: { percent: 42, resetsAt: '2026-08-12T12:00:00.000Z' } } }) };
+  }
   return { ok: true, status: 200, json: async () => ({ data: {} }) };
 };
 
@@ -308,6 +311,27 @@ describe('per-credential quota — OpenCode Go workspaces', () => {
     expect(results[0].ok).toBe(true);
     expect(results[0].credentialId).toBeUndefined();
     expect(results[0].usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('puts the Console row before the API-key row when both credential types are stored', async () => {
+    authState.rows = [
+      { id: 'cred_key', integrationID: 'opencode-go', label: 'API Key', active: true, value: { type: 'api', key: 'go-key' } },
+      consoleRow('cred_ws1', 'Workspace One', true, 'org_FIRST123'),
+    ];
+    const results = await fetchQuotaForProviderInstances('opencode-go');
+    expect(results).toHaveLength(2);
+
+    const [primary, keyRow] = results;
+    expect(primary.credentialId).toBe('cred_ws1');
+    expect(primary.credentialActive).toBe(true);
+    expect(primary.accountLabel).toBe('org_FIRST123');
+    expect(primary.ok).toBe(true);
+
+    expect(keyRow.credentialId).toBe('cred_key');
+    expect(keyRow.credentialLabel).toBe('API Key');
+    expect(keyRow.credentialActive).toBe(true);
+    expect(keyRow.ok).toBe(true);
+    expect(keyRow.usage.windows['5h'].usedPercent).toBe(42);
   });
 
   it('catalogues opencode-go with the shared opencode credential alias', () => {
