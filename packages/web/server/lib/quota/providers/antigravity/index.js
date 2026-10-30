@@ -28,20 +28,33 @@ const resolveAuthCandidates = async () => {
   if (fileAuth) {
     candidates.push(fileAuth);
   }
+  let storeReadFailed = false;
   try {
     const storeAuth = resolveAntigravityStoreAuth(await readOpenCodeCredentials());
     if (storeAuth && !candidates.some((candidate) => candidate.refreshToken === storeAuth.refreshToken)) {
       candidates.push(storeAuth);
     }
   } catch {
-    // Credential store unwired or unreachable: the accounts file alone decides.
+    // Credential store unwired or unreachable: the accounts file alone
+    // decides, but the failure is kept — when it leaves no candidates it
+    // must surface as its own error, not as "no login exists".
+    storeReadFailed = true;
   }
-  return candidates;
+  return { candidates, storeReadFailed };
 };
 
 export const fetchQuota = async () => {
-  const candidates = await resolveAuthCandidates();
+  const { candidates, storeReadFailed } = await resolveAuthCandidates();
   if (!candidates.length) {
+    if (storeReadFailed) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: 'Failed to read OpenCode credential store'
+      });
+    }
     return buildResult({
       providerId,
       providerName,
