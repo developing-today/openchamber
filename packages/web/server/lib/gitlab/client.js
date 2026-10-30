@@ -1,4 +1,5 @@
 import { Gitlab } from '@gitbeaker/rest';
+import { readBoundedResponseText } from '../shared/response-body.js';
 import { isPlainObject, isString } from './validation.js';
 
 // GitBeaker's bundled requester follows redirects with the credential header
@@ -15,6 +16,11 @@ const MAX_READ_ATTEMPTS = 3;
 // GitBeaker's five-minute default, and the downloader without any bound.
 // The module's other fetches use the same 10s bound (network.js).
 const GITLAB_REQUEST_TIMEOUT_MS = 10_000;
+// The error surface only ever shows a short excerpt, so the error body
+// read is capped well above the excerpt instead of buffering the whole
+// answer from a user-configured, possibly self-managed instance.
+const ERROR_DETAIL_MAX_BYTES = 1_024;
+const ERROR_DETAIL_EXCERPT_CHARS = 200;
 
 const decamelize = (key) => key.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase();
 
@@ -53,7 +59,9 @@ async function parseBody(response, asStream) {
 }
 
 async function requestError(request, response) {
-  const content = await response.text().catch(() => '');
+  const read = await readBoundedResponseText(response, ERROR_DETAIL_MAX_BYTES)
+    .catch(() => ({ tooLarge: true }));
+  const content = read.tooLarge ? '' : read.text;
   let description = content;
   if ((response.headers.get('content-type') || '').includes('application/json')) {
     try {
@@ -64,6 +72,7 @@ async function requestError(request, response) {
       description = content;
     }
   }
+  description = (description || '').slice(0, ERROR_DETAIL_EXCERPT_CHARS);
   return new Error(description || `GitLab request failed with status ${response.status}`, {
     cause: { description, request, response },
   });
