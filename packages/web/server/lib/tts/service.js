@@ -17,6 +17,14 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 // the UI; a stall retry only multiplies the wait.
 const SPEECH_REQUEST_TIMEOUT_MS = 60_000;
 
+// One speech response is a few minutes of mp3 (the service always requests
+// response_format 'mp3'): even 320 kbps audio for the longest, slowest
+// response the API can produce stays under ~50 MB. The cap is sized
+// generously above that; past it the response is not speech, it is a
+// wedged or hostile server streaming forever, and buffering it would grow
+// the process until it dies.
+const SPEECH_BODY_MAX_BYTES = 64 * 1024 * 1024;
+
 // The SDK deadline covers the wait for the response. The speech body is
 // read after the create call settles, so that read is bounded by the same
 // budget: a server that answers and then stalls the body fails the request
@@ -25,18 +33,49 @@ const SPEECH_REQUEST_TIMEOUT_MS = 60_000;
 // has locked the stream (e.g. from arrayBuffer()), which would leave the
 // upstream connection open (Codex P2 on PR #839).
 const readSpeechBody = async (response, timeoutMs) => {
-  if (!response.body || typeof response.body.getReader !== 'function') {
-    return response.arrayBuffer();
-  }
-  const reader = response.body.getReader();
-  const readAll = (async () => {
+  let cancelReader = null;
+  let timer = null;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      // Reject first so the timeout error wins the race, then cancel
+      // through the reader that owns the locked stream: this terminates
+      // the pending read and closes the upstream connection.
+      reject(new Error(`Speech request timed out after ${timeoutMs} ms`));
+      cancelReader?.();
+    }, timeoutMs);
+    timer.unref?.();
+  });
+
+  const readBounded = (async () => {
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      // No reader to stream or cancel through. The SDK's fetch responses
+      // always expose one, so this is non-standard response shapes only;
+      // the read still races the deadline above and its result is
+      // rejected over the cap, so this path is never an uncapped,
+      // undeadlined arrayBuffer().
+      const body = await response.arrayBuffer();
+      if (body.byteLength > SPEECH_BODY_MAX_BYTES) {
+        throw new Error(`Speech response exceeded the ${SPEECH_BODY_MAX_BYTES}-byte limit`);
+      }
+      return body;
+    }
+    const reader = response.body.getReader();
+    cancelReader = () => {
+      reader.cancel().catch(() => {});
+    };
     const chunks = [];
     let total = 0;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(value);
       total += value.byteLength;
+      if (total > SPEECH_BODY_MAX_BYTES) {
+        // Fail as soon as the cap is crossed: cancel the stream instead
+        // of buffering a body that is already known to be rejected.
+        cancelReader();
+        throw new Error(`Speech response exceeded the ${SPEECH_BODY_MAX_BYTES}-byte limit`);
+      }
+      chunks.push(value);
     }
     const body = new Uint8Array(total);
     let offset = 0;
@@ -46,19 +85,9 @@ const readSpeechBody = async (response, timeoutMs) => {
     }
     return body.buffer;
   })();
-  let timer = null;
-  const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      // Reject first so the timeout error wins the race, then cancel
-      // through the reader that owns the locked stream: this terminates
-      // the pending read and closes the upstream connection.
-      reject(new Error(`Speech request timed out after ${timeoutMs} ms`));
-      reader.cancel().catch(() => {});
-    }, timeoutMs);
-    timer.unref?.();
-  });
+
   try {
-    return await Promise.race([readAll, deadline]);
+    return await Promise.race([readBounded, deadline]);
   } finally {
     if (timer) clearTimeout(timer);
   }
