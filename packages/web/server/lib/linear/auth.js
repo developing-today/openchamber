@@ -484,7 +484,7 @@ export function isLinearAccessTokenStale(expiresAt, now = Date.now()) {
 
 export function toLinearPublicStatus(auth, workspaces = getLinearAuthWorkspaces()) {
   if (!auth?.accessToken && !auth?.tokenReference) {
-    if (jsonFileState(storageFile()) === 'malformed') {
+    if (getLinearStorageState().authFile === 'malformed') {
       return { connected: false, code: 'MALFORMED', error: malformedFileError(storageFile()).message };
     }
     return { connected: false };

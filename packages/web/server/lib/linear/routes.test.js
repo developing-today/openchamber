@@ -5,7 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { registerLinearRoutes } from './routes.js';
-import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth, getLinearAuthByWorkspaceId, clearLinearAuth } from './auth.js';
+import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth, getLinearAuthByWorkspaceId, clearLinearAuth, getLinearAuthFilePath } from './auth.js';
 import { toGuestAuthResponse } from '../guests/host-session.js';
 import { fetchLinearGraphql } from './client.js';
 
@@ -202,6 +202,28 @@ describe('Linear auth routes', () => {
 
     const status = await request(app).get('/api/linear/auth/status').expect(200);
     expect(status.body).toEqual({ connected: false });
+  });
+
+  it('reports malformed storage from the status operation instead of a plain disconnect', async () => {
+    const app = createApp();
+    setLinearAuth({
+      accessToken: 'access-1',
+      refreshToken: 'refresh-1',
+      organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+      user: { id: 'user-1', name: 'Ada' },
+    });
+    const filePath = getLinearAuthFilePath();
+    const torn = fs.readFileSync(filePath, 'utf8').slice(0, 40);
+    fs.writeFileSync(filePath, torn);
+
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+
+    expect(status.body.connected).toBe(false);
+    expect(status.body.code).toBe('MALFORMED');
+    expect(status.body.error).toContain('not valid JSON');
+    // The malformed file's contents (stored tokens) never leak into the answer.
+    expect(JSON.stringify(status.body)).not.toContain('access-1');
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(torn);
   });
 
   it('stores a second workspace, switches current, and disconnects only that one', async () => {
