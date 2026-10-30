@@ -99,6 +99,23 @@ describe('VS Code Antigravity quota from the credential store', () => {
     assert.equal(result.error, 'Failed to read OpenCode credentials');
   });
 
+  it('reports a store login the Antigravity client confirms is not its own as Not configured', async () => {
+    configureStoreOAuth('gemini-refresh|gemini-project');
+
+    globalThis.fetch = async (url) => {
+      if (String(url) === 'https://oauth2.googleapis.com/token') {
+        return Response.json({ error: 'unauthorized_client' }, { status: 400 });
+      }
+      throw new Error('no quota call expected for a foreign login');
+    };
+
+    const result = await fetchQuotaForProvider('antigravity');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, false);
+    assert.equal(result.error, 'Not configured');
+  });
+
   it('does not treat a google API-key entry as an Antigravity login', async () => {
     configureStoreApiKey('api-key-value');
 

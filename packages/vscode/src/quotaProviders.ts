@@ -1465,10 +1465,12 @@ const fetchAntigravityQuotaSummary = async (accessToken: string, projectId?: str
 
 const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
   let auth = resolveAntigravityAuth();
+  let authFromStore = false;
   if (!auth) {
     let storeReadFailed = false;
     try {
       auth = resolveAntigravityStoreAuth(await readOpenCodeCredentials());
+      authFromStore = auth !== null;
     } catch {
       storeReadFailed = true;
     }
@@ -1498,6 +1500,23 @@ const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
   }
 
   const result = await refreshGoogleAccessToken(auth.refreshToken, 'antigravity');
+  // Mirror of the web provider's wrong-client handling: a store login
+  // carries no reliable marker of its issuing client, so when the token
+  // endpoint confirms the refresh token was not issued to the
+  // Antigravity client (HTTP 400/401, `unauthorized_client`) the login
+  // is another client's (a Gemini CLI OAuth sign-in) - there is no
+  // Antigravity source, so report not configured instead of a permanent
+  // refresh failure. An accounts-file login is Antigravity-issued by
+  // construction and keeps the failure state.
+  if (!result.ok && authFromStore && result.error === 'unauthorized_client' && (result.status === 400 || result.status === 401)) {
+    return buildResult({
+      providerId: 'antigravity',
+      providerName: 'Antigravity',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
   const accessToken = result.ok ? result.accessToken : null;
   if (!accessToken) {
     return buildResult({

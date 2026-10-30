@@ -10,7 +10,8 @@ import { buildResult } from '../../utils/index.js';
 import { credentialSourceUsesLocalStore, readLocalOpenCodeCredentials, readOpenCodeCredentials } from '../../../opencode/auth.js';
 import { resolveAntigravityAuth, resolveAntigravityStoreAuth, isConfigured, DEFAULT_PROJECT_ID } from './auth.js';
 import {
-  refreshAntigravityToken,
+  refreshAntigravityTokenResult,
+  isWrongClientRejection,
   fetchAntigravityModels,
   fetchAntigravityQuotaSummary
 } from './api.js';
@@ -26,13 +27,13 @@ const resolveAuthCandidates = async () => {
   const candidates = [];
   const fileAuth = resolveAntigravityAuth();
   if (fileAuth) {
-    candidates.push(fileAuth);
+    candidates.push({ ...fileAuth, origin: 'file' });
   }
   let storeReadFailed = false;
   const pushStoreAuth = (auth) => {
     const storeAuth = resolveAntigravityStoreAuth(auth);
     if (storeAuth && !candidates.some((candidate) => candidate.refreshToken === storeAuth.refreshToken)) {
-      candidates.push(storeAuth);
+      candidates.push({ ...storeAuth, origin: 'store' });
     }
   };
   try {
@@ -89,14 +90,33 @@ export const fetchQuota = async () => {
 
   let accessToken = null;
   let auth = null;
+  const refreshFailures = [];
   for (const candidate of candidates) {
-    accessToken = await refreshAntigravityToken(candidate.refreshToken);
-    if (accessToken) {
+    const result = await refreshAntigravityTokenResult(candidate.refreshToken);
+    if (result.ok) {
+      accessToken = result.accessToken;
       auth = candidate;
       break;
     }
+    refreshFailures.push({ candidate, result });
   }
   if (!accessToken) {
+    // Every candidate came from the credential store and every refresh
+    // was a confirmed wrong-client rejection: the store's google login
+    // was issued by another client (a Gemini CLI OAuth sign-in), so
+    // there is no Antigravity source to be broken - report the provider
+    // as not configured instead of a permanent refresh failure. The
+    // accounts file is Antigravity-issued by construction, so a file
+    // candidate's rejection keeps the failure state below.
+    if (refreshFailures.every(({ candidate, result }) => candidate.origin === 'store' && isWrongClientRejection(result))) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: false,
+        error: 'Not configured'
+      });
+    }
     return buildResult({
       providerId,
       providerName,
