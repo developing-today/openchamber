@@ -1633,6 +1633,12 @@ const runWorktreeStartCommand = async (directory: string, command: string): Prom
       }
     }
   }
+  if (!exit) {
+    // Unreachable in practice: the race above resolves null only once the
+    // timeout has fired, and the timeout branch then synthesises an exit.
+    // Stated explicitly so the invariant is visible (and type-checks).
+    exit = { code: null, signal: null, error: null };
+  }
   clearTimeout(timeoutTimer);
   const { code, error } = exit;
   const stdout = Buffer.concat(stdoutChunks).toString('utf8');
