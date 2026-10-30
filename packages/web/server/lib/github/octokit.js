@@ -30,16 +30,34 @@ const timeoutFetch = (url, options = {}) => {
 // limit, so polling unchanged PRs/checks becomes rate-limit-free. Keyed by a
 // credential digest plus URL so raw tokens do not become cache keys.
 const ETAG_CACHE_MAX_ENTRIES = 300;
+// Byte bounds for the cache (triage on #848): a per-entry cap so one
+// oversized GitHub answer is never retained, and a total budget so the
+// cache's worst-case retained bytes are bounded regardless of how many
+// entries accumulate. Only body bytes are counted.
+const ETAG_CACHE_MAX_ENTRY_BYTES = 2 * 1024 * 1024;
+const ETAG_CACHE_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const etagCache = new Map();
+let etagCacheTotalBytes = 0;
 
 const rememberEtag = (key, etag, body, headers) => {
-  etagCache.delete(key);
+  const size = body?.byteLength ?? 0;
+  if (size > ETAG_CACHE_MAX_ENTRY_BYTES) {
+    return;
+  }
+  const existing = etagCache.get(key);
+  if (existing) {
+    etagCacheTotalBytes -= existing.body?.byteLength ?? 0;
+    etagCache.delete(key);
+  }
   etagCache.set(key, { etag, body, headers });
-  if (etagCache.size > ETAG_CACHE_MAX_ENTRIES) {
+  etagCacheTotalBytes += size;
+  while (etagCache.size > ETAG_CACHE_MAX_ENTRIES || etagCacheTotalBytes > ETAG_CACHE_MAX_TOTAL_BYTES) {
     const oldest = etagCache.keys().next().value;
-    if (oldest !== undefined) {
-      etagCache.delete(oldest);
+    if (oldest === undefined) {
+      break;
     }
+    etagCacheTotalBytes -= etagCache.get(oldest)?.body?.byteLength ?? 0;
+    etagCache.delete(oldest);
   }
 };
 
@@ -67,8 +85,17 @@ const createConditionalFetch = (cacheIdentity) => async (url, options = {}) => {
   if (response.ok) {
     const etag = response.headers.get('etag');
     if (etag) {
+      // Oversized answers are returned whole but never retained: with a
+      // declared length over the per-entry cap, pass the response through
+      // unbuffered; otherwise buffer and skip caching if it crosses the cap.
+      const declaredLength = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declaredLength) && declaredLength > ETAG_CACHE_MAX_ENTRY_BYTES) {
+        return response;
+      }
       const body = await response.arrayBuffer();
-      rememberEtag(cacheKey, etag, body, response.headers);
+      if (body.byteLength <= ETAG_CACHE_MAX_ENTRY_BYTES) {
+        rememberEtag(cacheKey, etag, body, response.headers);
+      }
       return new Response(body, { status: response.status, headers: response.headers });
     }
   }
