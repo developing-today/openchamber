@@ -16,10 +16,25 @@ import { parsePositiveIntWithDefault } from '../shared/parse-int.js';
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
 
+// The longest session lifetime any spelling may mint: 400 days. A longer value
+// is a configuration mistake, and honouring it would be a session that
+// effectively never expires, so it falls back like an invalid spelling.
+const MAX_SESSION_TTL_MS = 400 * 24 * HOUR_MS;
+
 // A positive number of hours or days from the environment, else the default.
+// Only a plain decimal spelling counts: surrounding whitespace trimmed, ASCII
+// digits with at most one decimal point. A bare Number(...) would also honour
+// '1e3' (1000 hours), '0x10' (16 hours) and '+12', silently lengthening a
+// session lifetime, which is the unsafe direction for a security control.
+// Fractional lifetimes are intentional and stay valid ('0.5').
 export const readSessionTtlMs = (raw, unitMs, fallbackMs) => {
-  const value = Number(String(raw ?? '').trim());
-  return Number.isFinite(value) && value > 0 ? Math.round(value * unitMs) : fallbackMs;
+  const text = String(raw ?? '').trim();
+  if (!/^\d+(?:\.\d+)?$/.test(text)) {
+    return fallbackMs;
+  }
+  const value = Number(text);
+  const ms = Math.round(value * unitMs);
+  return value > 0 && ms <= MAX_SESSION_TTL_MS ? ms : fallbackMs;
 };
 
 const SESSION_TTL_MS = readSessionTtlMs(process.env.OPENCHAMBER_UI_SESSION_TTL_HOURS, HOUR_MS, 12 * HOUR_MS);
