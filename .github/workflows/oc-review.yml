@@ -122,3 +122,21 @@ jobs:
         run: bun run --cwd packages/vscode build
       - name: Prepare mobile web assets
         run: bun run --cwd packages/mobile build:assets
+
+  # On failure of any main job above, hand the failure to the central
+  # pm-dispatch ci-fix task (developing-today/code#2672). The wrapper is
+  # best-effort only: continue-on-error keeps a dispatch problem from
+  # masking the real CI result.
+  ci-fix:
+    needs: [type-check, lint, tests, build]
+    if: failure()
+    permissions:
+      id-token: write
+      issues: read
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: developing-today/code/.github/actions/pm-dispatch-ci-fix@main
+        continue-on-error: true
+        env:
+          GH_TOKEN: "${{ github.token }}"
