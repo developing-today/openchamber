@@ -172,4 +172,53 @@ describe('managed tunnel config runtime', () => {
     expect(await runtime.readManagedRemoteTunnelConfigFromDisk()).toEqual({ version: 1, tunnels: [] });
     expect(fs.readdirSync(dir)).toEqual([]);
   });
+  it('does not let a concurrent ENOENT read migrate legacy data over an in-flight upsert', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let releaseTempWrite;
+    let markTempWriteStarted;
+    const tempWriteGate = new Promise((resolve) => { releaseTempWrite = resolve; });
+    const tempWriteStarted = new Promise((resolve) => { markTempWriteStarted = resolve; });
+    let releaseLegacyRead;
+    const legacyReadGate = new Promise((resolve) => { releaseLegacyRead = resolve; });
+    let tempGateUsed = false;
+    const gatedFs = {
+      ...fsPromises,
+      writeFile: async (...args) => {
+        if (!tempGateUsed && String(args[0]).includes('.tmp-')) {
+          tempGateUsed = true;
+          markTempWriteStarted();
+          await tempWriteGate;
+        }
+        return fsPromises.writeFile(...args);
+      },
+      readFile: async (...args) => {
+        if (String(args[0]).endsWith('cloudflare-named-tunnels.json')) {
+          await legacyReadGate;
+        }
+        return fsPromises.readFile(...args);
+      },
+    };
+    const { filePath, legacyPath, runtime } = await makeRuntime({ fsPromises: gatedFs });
+    await fsPromises.writeFile(legacyPath, JSON.stringify({ tunnels: [tunnel('legacy', 'legacy.example.com', 'token-legacy')] }));
+    await fsPromises.writeFile(filePath, '{"version":1,"tunnels":[{"id":"a","name":"Tunnel a","hos');
+
+    const upsertPromise = runtime.upsertManagedRemoteTunnelToken({ id: 'c', name: 'Tunnel c', hostname: 'c.example.com', token: 'token-c' });
+    // The upsert now holds the persist lock in the window after the corrupt
+    // file was preserved aside and before its temp write lands: the managed
+    // path is absent, so a concurrent read observes ENOENT here.
+    await tempWriteStarted;
+    const readPromise = runtime.readManagedRemoteTunnelConfigFromDisk();
+    // Let the read's continuation run: on the broken code it entered the
+    // unlocked legacy migration (its legacy read is gated above); with the
+    // fix it queues behind the persist lock instead.
+    for (let i = 0; i < 50; i += 1) {
+      await Promise.resolve();
+    }
+    releaseTempWrite();
+    await upsertPromise;
+    releaseLegacyRead();
+    const config = await readPromise;
+    expect(config.tunnels.map((entry) => entry.id)).toEqual(['c']);
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8')).tunnels.map((entry) => entry.id)).toEqual(['c']);
+  });
 });

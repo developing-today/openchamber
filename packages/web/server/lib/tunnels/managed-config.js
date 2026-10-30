@@ -129,7 +129,33 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     }
   };
 
-  const migrateManagedRemoteTunnelConfigFromLegacyFile = async () => {
+  // Legacy migration, with the persist lock already held. Migration writes
+  // the managed file, so it must be serialized with config updates exactly
+  // like any other persist: a bare read that finds the managed file absent
+  // (for example in the window after a corrupt file was preserved aside)
+  // must not migrate outside the lock, or its stale legacy write can land
+  // after an in-flight upsert and overwrite the newly saved token. The
+  // managed file is therefore re-checked before anything is written: if an
+  // update landed while this migration waited for the lock, that state is
+  // the answer and no migration write happens at all.
+  const migrateManagedRemoteTunnelConfigFromLegacyFileLocked = async () => {
+    const current = await readRawConfigFile();
+    if (!current.error) {
+      try {
+        return configFromRaw(current.raw);
+      } catch (parseError) {
+        const preserved = await preserveCorruptFile(parseError);
+        if (!preserved) {
+          throw new Error(
+            `Refusing to overwrite the unreadable managed remote tunnel config file at ${CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH}: it could not be preserved`,
+            { cause: parseError },
+          );
+        }
+      }
+    } else if (!isEnoent(current.error)) {
+      console.warn('Failed to read managed remote tunnel config file:', current.error);
+      return emptyConfig();
+    }
     try {
       const legacyRaw = await fsPromises.readFile(CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH, 'utf8');
       const parsed = JSON.parse(legacyRaw);
@@ -148,6 +174,21 @@ export const createManagedTunnelConfigRuntime = (deps) => {
       return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
     }
   };
+
+  // Locked migration on the read paths degrades to an empty config when the
+  // fail-closed migration refuses (an unpreservable corrupt file): a read
+  // never writes over it anyway. The update path calls the Locked variant
+  // directly so the refusal propagates and the update does not overwrite.
+  const migrateLockedOrEmpty = async () => {
+    try {
+      return await migrateManagedRemoteTunnelConfigFromLegacyFileLocked();
+    } catch {
+      return emptyConfig();
+    }
+  };
+
+  const migrateManagedRemoteTunnelConfigFromLegacyFile = async () =>
+    enqueuePersistLock(migrateLockedOrEmpty);
 
   const readManagedRemoteTunnelConfigFromDisk = async () => {
     const { raw, error } = await readRawConfigFile();
@@ -170,7 +211,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
         const current = await readRawConfigFile();
         if (current.error) {
           if (isEnoent(current.error)) {
-            return migrateManagedRemoteTunnelConfigFromLegacyFile();
+            return migrateLockedOrEmpty();
           }
           console.warn('Failed to read managed remote tunnel config file:', current.error);
           return emptyConfig();
@@ -195,7 +236,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     const { raw, error } = await readRawConfigFile();
     if (error) {
       if (isEnoent(error)) {
-        return migrateManagedRemoteTunnelConfigFromLegacyFile();
+        return migrateManagedRemoteTunnelConfigFromLegacyFileLocked();
       }
       console.warn('Failed to read managed remote tunnel config file:', error);
       return emptyConfig();
