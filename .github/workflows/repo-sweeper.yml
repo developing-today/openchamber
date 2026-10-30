@@ -529,7 +529,20 @@ jobs:
           # A pending duplicate leg for this issue can start after
           # the original leg already posted its comment. Re-check
           # the marker against the live comments before posting.
-          if gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --paginate --jq '.[].body // ""' | grep -qF '**For the maintainer:**'; then
+          # Fetch every comment first and test the fetched file: a
+          # pipeline into grep cannot tell a failed fetch from an
+          # absent marker (the condition just reads false), and
+          # grep -q closing the pipe early can SIGPIPE a paginated
+          # fetch into the same false negative - either way the leg
+          # would post the duplicate this re-check exists to stop.
+          # A failed fetch therefore aborts the step with no post.
+          existing_comments="$RUNNER_TEMP/intake-existing-comments.txt"
+          if ! gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --paginate --jq '.[].body // ""' > "$existing_comments"; then
+            echo "::error::could not fetch the existing comments for #${ISSUE_NUMBER}; refusing to post without the duplicate re-check"
+            exit 1
+          fi
+
+          if grep -qF '**For the maintainer:**' "$existing_comments"; then
             echo "::notice::an intake comment already exists for #${ISSUE_NUMBER}; skipping the duplicate post and label sync"
             exit 0
           fi
