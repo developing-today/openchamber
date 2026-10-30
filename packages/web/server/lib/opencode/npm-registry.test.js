@@ -206,4 +206,34 @@ describe('npm registry client', () => {
 
     expect(fetchMock.mock.calls[0][1].headers['User-Agent']).toMatch(/^openchamber-server\//);
   });
+
+  test('expired entries for other names are swept on access', async () => {
+    let now = 1_000;
+    Date.now = mock(() => now);
+    fetchMock.mockImplementation(() => jsonResponse({ versions: {} }));
+
+    await npm.getNpmInfo('stale-foo');
+    now += 3_600_001;
+    await npm.getNpmInfo('fresh-bar');
+    now = 2_000;
+
+    await npm.getNpmInfo('stale-foo');
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('cache is capped, evicting the oldest entries', async () => {
+    fetchMock.mockImplementation(() => jsonResponse({ versions: {} }));
+
+    for (let i = 0; i <= 500; i += 1) {
+      await npm.getNpmInfo(`cap-${i}`);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(501);
+
+    await npm.getNpmInfo('cap-500');
+    expect(fetchMock).toHaveBeenCalledTimes(501);
+
+    await npm.getNpmInfo('cap-0');
+    expect(fetchMock).toHaveBeenCalledTimes(502);
+  });
 });

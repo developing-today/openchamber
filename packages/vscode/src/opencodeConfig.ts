@@ -1477,6 +1477,25 @@ type NpmLookupResult =
 const npmInfoCache = new Map<string, { fetchedAt: number; payload: NpmLookupResult }>();
 const npmInfoInFlight = new Map<string, Promise<NpmLookupResult>>();
 const NPM_CACHE_TTL_MS = 3_600_000;
+const NPM_CACHE_MAX_ENTRIES = 500;
+
+const pruneNpmInfoCache = (now = Date.now()): void => {
+  for (const [name, entry] of npmInfoCache) {
+    if (now - entry.fetchedAt >= NPM_CACHE_TTL_MS) {
+      npmInfoCache.delete(name);
+    }
+  }
+  while (npmInfoCache.size > NPM_CACHE_MAX_ENTRIES) {
+    const oldest = npmInfoCache.keys().next().value;
+    if (oldest === undefined) break;
+    npmInfoCache.delete(oldest);
+  }
+};
+
+export const clearNpmInfoCacheForTests = (): void => {
+  npmInfoCache.clear();
+  npmInfoInFlight.clear();
+};
 
 const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
   try {
@@ -1501,6 +1520,7 @@ const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
 };
 
 const getNpmInfo = async (name: string, forceRefresh = false): Promise<NpmLookupResult> => {
+  pruneNpmInfoCache();
   const cached = npmInfoCache.get(name);
   if (cached && !forceRefresh && Date.now() - cached.fetchedAt < NPM_CACHE_TTL_MS) {
     return cached.payload;
@@ -1512,7 +1532,9 @@ const getNpmInfo = async (name: string, forceRefresh = false): Promise<NpmLookup
   try {
     const result = await lookup;
     if (result.ok || result.status === 404) {
+      npmInfoCache.delete(name);
       npmInfoCache.set(name, { fetchedAt: Date.now(), payload: result });
+      pruneNpmInfoCache();
     }
     return result;
   } finally {
