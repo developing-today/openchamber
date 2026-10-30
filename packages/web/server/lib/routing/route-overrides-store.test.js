@@ -76,7 +76,11 @@ describe('override store', () => {
       expect(preservedName).toBeTruthy();
       const preservedFile = path.join(dir, preservedName);
       expect(fs.readFileSync(preservedFile, 'utf8')).toBe(corrupt);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining(preservedFile), expect.anything());
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(preservedFile));
+      // No warning may quote the corrupt file's content: JSON.parse errors
+      // embed an excerpt, and override text is the user's own sentence.
+      const warned = warn.mock.calls.flat().map(String).join(' ');
+      expect(warned).not.toContain('avoid');
       // A later save lands in the real file; the corrupt bytes stay preserved.
       store.add([override({ id: 'fresh' })]);
       expect(store.list().map((item) => item.id)).toEqual(['fresh']);

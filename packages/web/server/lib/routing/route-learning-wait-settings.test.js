@@ -105,7 +105,9 @@ describe('route settings', () => {
       const preserved = fs.readdirSync(dir).filter((name) => name.startsWith('route-settings.json.corrupt-'));
       expect(preserved).toHaveLength(1);
       expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining(preserved[0]), expect.anything());
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(preserved[0]));
+      const warned = warn.mock.calls.flat().map(String).join(' ');
+      expect(warned).not.toContain('learnAfter');
     } finally {
       warn.mockRestore();
     }

@@ -46,7 +46,9 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
   // A torn or otherwise unparseable settings file is user data, not the
   // defaults: move its bytes aside before any later write can overwrite
   // them, and name the preserved copy so the loss is recoverable.
-  const preserveCorruptFile = (error) => {
+  // The parse/normalize error itself is never logged: JSON.parse messages
+  // quote the file content, which is user data.
+  const preserveCorruptFile = () => {
     // The suffix must be collision-proof: a timestamp alone can repeat, and
     // rename would silently replace an earlier preserved copy.
     let preservedFile = null;
@@ -55,17 +57,17 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
       if (!fs.existsSync(candidate)) preservedFile = candidate;
     }
     if (preservedFile === null) {
-      console.warn('Failed to read route settings file:', error);
+      console.warn('Failed to read route settings file: the file could not be parsed');
       console.warn('Failed to preserve the unreadable route settings file: every preserved-file name collided');
       return false;
     }
     try {
       renameSyncWithRetry((from, to) => fs.renameSync(from, to), file, preservedFile);
-      console.warn(`Failed to read route settings file: preserved the unreadable file at ${preservedFile}:`, error);
+      console.warn(`Failed to read route settings file: preserved the unreadable file at ${preservedFile}`);
       return true;
-    } catch (preserveError) {
-      console.warn('Failed to read route settings file:', error);
-      console.warn(`Failed to preserve the unreadable route settings file at ${preservedFile}:`, preserveError);
+    } catch {
+      console.warn('Failed to read route settings file: the file could not be parsed');
+      console.warn(`Failed to preserve the unreadable route settings file at ${preservedFile}`);
       return false;
     }
   };
@@ -85,8 +87,8 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
     try {
       normalizeSettings(JSON.parse(raw));
       return 'none';
-    } catch (error) {
-      return preserveCorruptFile(error) ? 'preserved' : 'failed';
+    } catch {
+      return preserveCorruptFile() ? 'preserved' : 'failed';
     }
   };
 
@@ -102,8 +104,8 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
     }
     try {
       return normalizeSettings(JSON.parse(raw));
-    } catch (error) {
-      preserveCorruptFile(error);
+    } catch {
+      preserveCorruptFile();
       return normalizeSettings({});
     }
   };

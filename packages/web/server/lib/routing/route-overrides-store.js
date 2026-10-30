@@ -54,7 +54,9 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
   // A torn or otherwise unparseable overrides file is user data, not an
   // empty store: move its bytes aside before any later save can overwrite
   // them, and name the preserved copy so the loss is recoverable.
-  const preserveCorruptFile = (error) => {
+  // The parse error itself is never logged: Node's JSON.parse messages
+  // quote the file content, and override text is the user's own sentence.
+  const preserveCorruptFile = () => {
     // The suffix must be collision-proof: a timestamp alone can repeat, and
     // rename would silently replace an earlier preserved copy.
     let preservedFile = null;
@@ -63,17 +65,17 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
       if (!fs.existsSync(candidate)) preservedFile = candidate;
     }
     if (preservedFile === null) {
-      console.warn('Failed to read route overrides file:', error);
+      console.warn('Failed to read route overrides file: the file could not be parsed');
       console.warn('Failed to preserve the unreadable route overrides file: every preserved-file name collided');
       return false;
     }
     try {
       renameSyncWithRetry((from, to) => fs.renameSync(from, to), overridesFile, preservedFile);
-      console.warn(`Failed to read route overrides file: preserved the unreadable file at ${preservedFile}:`, error);
+      console.warn(`Failed to read route overrides file: preserved the unreadable file at ${preservedFile}`);
       return true;
-    } catch (preserveError) {
-      console.warn('Failed to read route overrides file:', error);
-      console.warn(`Failed to preserve the unreadable route overrides file at ${preservedFile}:`, preserveError);
+    } catch {
+      console.warn('Failed to read route overrides file: the file could not be parsed');
+      console.warn(`Failed to preserve the unreadable route overrides file at ${preservedFile}`);
       return false;
     }
   };
@@ -91,8 +93,8 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
     try {
       JSON.parse(raw);
       return 'none';
-    } catch (error) {
-      return preserveCorruptFile(error) ? 'preserved' : 'failed';
+    } catch {
+      return preserveCorruptFile() ? 'preserved' : 'failed';
     }
   };
 
@@ -109,8 +111,8 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
     let list;
     try {
       list = JSON.parse(raw)?.overrides;
-    } catch (error) {
-      preserveCorruptFile(error);
+    } catch {
+      preserveCorruptFile();
       return [];
     }
     return Array.isArray(list) ? list.map(parseOverride).filter(Boolean) : [];
