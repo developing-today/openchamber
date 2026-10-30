@@ -237,3 +237,50 @@ describe('notification template session info for a chat of an isolated space', (
     expect(again.session_name).toBe('Host chat');
   });
 });
+describe('notification template session caches stay bounded', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const sessionEvent = (id, title) => ({ type: 'session.updated', properties: { info: { id, title } } });
+
+  it('evicts the oldest session titles past the cache limit and keeps recent ones', async () => {
+    // Nothing is fetchable, so a session name can only come from the title cache.
+    globalThis.fetch = vi.fn(async () => new Response('{}', { status: 404 }));
+    const runtime = createRuntime();
+    // The caches are capped at 500 entries (SESSION_CACHE_LIMIT): feed well
+    // past it, then the first sessions must be gone and the last must remain.
+    for (let index = 0; index < 600; index += 1) {
+      runtime.maybeCacheSessionInfoFromEvent(sessionEvent(`ses_${index}`, `Title ${index}`));
+    }
+
+    const oldest = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_0');
+    const newest = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_599');
+
+    expect(oldest.session_name).not.toBe('Title 0');
+    expect(newest.session_name).toBe('Title 599');
+  });
+
+  it('evicts the oldest fetched session infos past the cache limit and keeps recent ones cached', async () => {
+    const fetches = new Map();
+    globalThis.fetch = vi.fn(async (url) => {
+      const id = decodeURIComponent(String(url).split('/api/session/')[1] ?? '');
+      fetches.set(id, (fetches.get(id) ?? 0) + 1);
+      return Response.json({ data: { id, title: `Fetched ${id}` } });
+    });
+    const runtime = createRuntime();
+    for (let index = 0; index < 600; index += 1) {
+      await runtime.buildTemplateVariables({ properties: { info: {} } }, `ses_${index}`);
+    }
+    expect(fetches.get('ses_0')).toBe(1);
+    expect(fetches.get('ses_599')).toBe(1);
+
+    // A recent session is still served from the info cache: no new fetch.
+    await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_599');
+    expect(fetches.get('ses_599')).toBe(1);
+
+    // The oldest session was evicted from both caches: it is fetched again.
+    await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_0');
+    expect(fetches.get('ses_0')).toBe(2);
+  });
+});
