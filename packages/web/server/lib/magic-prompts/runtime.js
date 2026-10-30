@@ -54,11 +54,13 @@ export const createMagicPromptRuntime = (dependencies) => {
   const preserveCorruptFile = async (error) => {
     const preservedPath = `${filePath}.corrupt-${Date.now()}`;
     try {
-      await fsPromises.rename(filePath, preservedPath);
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), filePath, preservedPath);
       console.warn(`Failed to read magic prompts file: preserved the unreadable file at ${preservedPath}:`, error);
+      return true;
     } catch (preserveError) {
       console.warn('Failed to read magic prompts file:', error);
       console.warn(`Failed to preserve the unreadable magic prompts file at ${preservedPath}:`, preserveError);
+      return false;
     }
   };
 
@@ -84,7 +86,13 @@ export const createMagicPromptRuntime = (dependencies) => {
     try {
       return stateFromParsed(JSON.parse(raw));
     } catch (error) {
-      await preserveCorruptFile(error);
+      // A mutation must never overwrite bytes whose preservation just
+      // failed: they are the only copy of the user's overrides. Abort
+      // instead; the caller can retry once the file is movable.
+      const preserved = await preserveCorruptFile(error);
+      if (!preserved) {
+        throw new Error('Failed to preserve the unreadable magic prompts file; refusing to overwrite it', { cause: error });
+      }
       return emptyState();
     }
   };

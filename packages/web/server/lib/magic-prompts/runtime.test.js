@@ -162,4 +162,24 @@ describe('magic prompts runtime', () => {
     expect(renameCalls.filter(([, to]) => String(to).includes('.corrupt-'))).toEqual([]);
     await expect(fsPromises.readFile(filePath, 'utf8')).resolves.toBe(JSON.stringify(validState));
   });
+
+  it('aborts a mutation when preserving the corrupt file fails, leaving its bytes untouched', async () => {
+    const corrupt = '{"version":1,"overrides":{"alpha.visible":"Alp';
+    await fsPromises.writeFile(filePath, corrupt, 'utf8');
+    const runtime = createRuntime({
+      rename: async (from, to) => {
+        if (String(to).includes('.corrupt-')) {
+          const error = new Error('resource busy or locked');
+          error.code = 'EBUSY';
+          throw error;
+        }
+        return fsPromises.rename(from, to);
+      },
+    });
+
+    await expect(runtime.setOverride('gamma.visible', 'Gamma prompt')).rejects.toThrow('refusing to overwrite');
+    // The only copy of the user's overrides is still exactly where it was.
+    await expect(fsPromises.readFile(filePath, 'utf8')).resolves.toBe(corrupt);
+    await expect(fsPromises.readdir(dataDir)).resolves.toEqual(['magic-prompts.json']);
+  });
 });
