@@ -165,3 +165,87 @@ describe('ui-passkeys rename', () => {
     expect(thrown?.statusCode).toBe(400);
   });
 });
+
+describe('ui-passkeys store durability', () => {
+  const siblingsMatching = (storeFile, needle) => fs.readdirSync(path.dirname(storeFile))
+    .filter((name) => name.includes(needle));
+
+  it('creates a fresh store with mode 0600 and no corrupt backup', () => {
+    const dir = fs.mkdtempSync(path.join(dataDir, 'fresh-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    const controller = createController(storeFile);
+
+    expect(controller.listPasskeys(requestFor())).toEqual([]);
+    expect(fs.existsSync(storeFile)).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(storeFile).mode & 0o777).toBe(0o600);
+    }
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
+    expect(siblingsMatching(storeFile, '.tmp-')).toEqual([]);
+  });
+
+  it('preserves a corrupt store before overwriting it instead of silently discarding passkeys', () => {
+    const storeFile = createStoreFile([passkey(), passkey({ id: 'credential-2' })]);
+    const valid = fs.readFileSync(storeFile, 'utf8');
+    const torn = valid.slice(0, Math.floor(valid.length / 2));
+    fs.writeFileSync(storeFile, torn);
+    const controller = createController(storeFile);
+
+    expect(controller.listPasskeys(requestFor())).toEqual([]);
+
+    const preserved = siblingsMatching(storeFile, '.corrupt-');
+    expect(preserved.length).toBe(1);
+    expect(fs.readFileSync(path.join(path.dirname(storeFile), preserved[0]), 'utf8')).toBe(torn);
+    // The replacement store is valid JSON with no passkeys: the original
+    // bytes survive only in the preserved copy, never silently lost.
+    expect(JSON.parse(fs.readFileSync(storeFile, 'utf8')).passkeys).toEqual([]);
+  });
+
+  it('treats a non-object store as corrupt and preserves it', () => {
+    const dir = fs.mkdtempSync(path.join(dataDir, 'scalar-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    fs.writeFileSync(storeFile, '123');
+    const controller = createController(storeFile);
+
+    expect(controller.listPasskeys(requestFor())).toEqual([]);
+    expect(siblingsMatching(storeFile, '.corrupt-').length).toBe(1);
+  });
+
+  it('propagates a filesystem read error without moving or replacing the active store', () => {
+    // A directory in place of the store file makes readFileSync fail
+    // with a non-ENOENT filesystem error (EISDIR on Linux) regardless
+    // of the test process's privileges, unlike a mode-000 file under root.
+    const dir = fs.mkdtempSync(path.join(dataDir, 'read-error-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    fs.mkdirSync(storeFile);
+    const controller = createController(storeFile);
+
+    let thrown = null;
+    try {
+      controller.listPasskeys(requestFor());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).not.toBeNull();
+    expect(thrown?.code).not.toBe('ENOENT');
+    // The active store is untouched and nothing was preserved/created.
+    expect(fs.statSync(storeFile).isDirectory()).toBe(true);
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
+  });
+
+  it('rewrites an existing store atomically with mode 0600 and no temp leftovers', () => {
+    const storeFile = createStoreFile([passkey()]);
+    const controller = createController(storeFile);
+
+    const result = controller.renamePasskey(requestFor(), 'credential-1', 'Office laptop');
+
+    expect(result.renamed).toBe(true);
+    expect(readStoredPasskey(storeFile).customLabel).toBe('Office laptop');
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(storeFile).mode & 0o777).toBe(0o600);
+    }
+    expect(siblingsMatching(storeFile, '.tmp-')).toEqual([]);
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
+  });
+});
