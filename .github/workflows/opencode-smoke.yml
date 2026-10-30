@@ -39,7 +39,7 @@ on:
 # run. Key by the distinguishing inputs and queue every run.
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.model }}-${{ inputs.opencode_version }}
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: max
 
 jobs:

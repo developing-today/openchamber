@@ -10,7 +10,7 @@ on:
 # pending second one. Key by issue and queue every run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.issue.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
   queue: max
 
 jobs:
