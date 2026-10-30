@@ -113,6 +113,29 @@ describe('VS Code git service revertGitFile deletion guard (#734)', () => {
     expect(fs.existsSync(path.join(dir, 'tracked.txt'))).toBe(true);
   });
 
+  it('reverts a modified tracked symlink that points outside the repository', async () => {
+    if (!canRunGit()) return;
+
+    const dir = makeRepo();
+    const outside = makeTempDir();
+    const firstTarget = path.join(outside, 'first.txt');
+    const secondTarget = path.join(outside, 'second.txt');
+    fs.writeFileSync(firstTarget, 'first\n');
+    fs.writeFileSync(secondTarget, 'second\n');
+    fs.symlinkSync(firstTarget, path.join(dir, 'link.txt'));
+    runGit(dir, ['add', 'link.txt']);
+    runGit(dir, ['commit', '-m', 'add outward symlink']);
+
+    // The working-tree modification is the re-pointed link itself.
+    fs.unlinkSync(path.join(dir, 'link.txt'));
+    fs.symlinkSync(secondTarget, path.join(dir, 'link.txt'));
+
+    await expect(revertGitFile(dir, 'link.txt')).resolves.toBeUndefined();
+    expect(fs.readlinkSync(path.join(dir, 'link.txt'))).toBe(firstTarget);
+    expect(fs.readFileSync(firstTarget, 'utf8')).toBe('first\n');
+    expect(fs.readFileSync(secondTarget, 'utf8')).toBe('second\n');
+  });
+
   it('restores a tracked file with working-tree changes', async () => {
     if (!canRunGit()) return;
 
