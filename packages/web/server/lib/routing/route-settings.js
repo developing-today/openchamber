@@ -81,8 +81,12 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
     let raw;
     try {
       raw = fs.readFileSync(file, 'utf8');
-    } catch {
-      return 'none';
+    } catch (error) {
+      // Only a missing file is 'none'. Any other read failure (EACCES,
+      // EISDIR, ...) leaves an existing file whose bytes were neither
+      // parsed nor preserved: report 'failed' so the write refuses rather
+      // than renaming a new file over them.
+      return error?.code === 'ENOENT' ? 'none' : 'failed';
     }
     try {
       normalizeSettings(JSON.parse(raw));

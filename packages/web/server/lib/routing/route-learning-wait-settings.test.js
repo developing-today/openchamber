@@ -147,6 +147,19 @@ describe('route settings', () => {
     }
   });
 
+  it('refuses to overwrite an existing settings file it cannot read', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
+    const file = path.join(dir, 'route-settings.json');
+    // A directory at the settings path makes the guard's read fail with
+    // EISDIR: an existing file whose bytes can be neither parsed nor
+    // preserved, so the write must refuse rather than rename over it.
+    fs.mkdirSync(file);
+    const store = createSettingsStore({ file });
+    expect(() => store.write({ learnAfter: 5 })).toThrow(/Refusing to overwrite the unreadable route settings file/);
+    expect(fs.statSync(file).isDirectory()).toBe(true);
+    expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('defaults a missing or unreadable file and round-trips a saved one', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
     const store = createSettingsStore({ file: path.join(dir, 'route-settings.json') });

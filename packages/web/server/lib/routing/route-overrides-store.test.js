@@ -90,6 +90,20 @@ describe('override store', () => {
     }
   });
 
+  it('refuses to overwrite an existing overrides file it cannot read', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-overrides-'));
+    const store = createOverrideStore({ dataDir: dir, now: () => 5_000 });
+    // A directory at the store path makes the guard's read fail with EISDIR:
+    // an existing file whose bytes can be neither parsed nor preserved, so
+    // the save must refuse rather than rename a new file over it.
+    fs.mkdirSync(store.overridesFile);
+    expect(() => store.add([override({ id: 'fresh' })])).toThrow(
+      /Refusing to overwrite the unreadable route overrides file/,
+    );
+    expect(fs.statSync(store.overridesFile).isDirectory()).toBe(true);
+    expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('leaves no temp file behind after a save', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-overrides-'));
     const store = createOverrideStore({ dataDir: dir, now: () => 5_000 });
