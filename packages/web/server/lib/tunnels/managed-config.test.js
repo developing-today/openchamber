@@ -1,0 +1,175 @@
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createManagedTunnelConfigRuntime } from './managed-config.js';
+
+const temporaryDirectories = [];
+
+// Test doubles for the two normalizers this runtime consumes (the real
+// implementations live in lib/opencode/settings-normalization-runtime.js
+// and have their own suite): hostname -> trimmed lowercase string or
+// undefined; presets -> deduped { id, name, hostname } list or undefined.
+const normalizeManagedRemoteTunnelHostname = (value) => {
+  const trimmed = String(value ?? '').trim().toLowerCase();
+  return trimmed || undefined;
+};
+
+const normalizeManagedRemoteTunnelPresets = (value) => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const result = [];
+  const seenIds = new Set();
+  const seenHostnames = new Set();
+  for (const entry of value) {
+    if (!entry || Object(entry) !== entry) continue;
+    const id = String(entry.id ?? '').trim();
+    const name = String(entry.name ?? '').trim();
+    const hostname = normalizeManagedRemoteTunnelHostname(entry.hostname);
+    if (!id || !name || !hostname) continue;
+    if (seenIds.has(id) || seenHostnames.has(hostname)) continue;
+    seenIds.add(id);
+    seenHostnames.add(hostname);
+    result.push({ id, name, hostname });
+  }
+  return result;
+};
+
+const makeRuntime = async (overrides = {}) => {
+  const dir = overrides.dir ?? (await fsPromises.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-tunnels-')));
+  if (!overrides.dir) {
+    temporaryDirectories.push(dir);
+  }
+  const filePath = path.join(dir, 'cloudflare-managed-remote-tunnels.json');
+  const legacyPath = path.join(dir, 'cloudflare-named-tunnels.json');
+  const runtime = createManagedTunnelConfigRuntime({
+    fsPromises: overrides.fsPromises ?? fsPromises,
+    path,
+    normalizeManagedRemoteTunnelHostname,
+    normalizeManagedRemoteTunnelPresets,
+    constants: {
+      CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH: filePath,
+      CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH: legacyPath,
+      CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION: 1,
+    },
+  });
+  return { dir, filePath, legacyPath, runtime };
+};
+
+const tunnel = (id, hostname, token) => ({ id, name: `Tunnel ${id}`, hostname, token, updatedAt: 1000 });
+
+const preservedFiles = (dir) => fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const dir of temporaryDirectories.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe('managed tunnel config runtime', () => {
+  it('upserts and resolves tokens, writing a 0600 file with no temp left behind', async () => {
+    const { dir, filePath, runtime } = await makeRuntime();
+    await runtime.upsertManagedRemoteTunnelToken({ id: 'a', name: 'Tunnel a', hostname: 'a.example.com', token: 'token-a' });
+    await runtime.upsertManagedRemoteTunnelToken({ id: 'b', name: 'Tunnel b', hostname: 'b.example.com', token: 'token-b' });
+
+    expect(await runtime.resolveManagedRemoteTunnelToken({ presetId: 'a', hostname: '' })).toBe('token-a');
+    expect(await runtime.resolveManagedRemoteTunnelToken({ presetId: '', hostname: 'b.example.com' })).toBe('token-b');
+    const config = await runtime.readManagedRemoteTunnelConfigFromDisk();
+    expect(config.tunnels.map((entry) => entry.id)).toEqual(['a', 'b']);
+    expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    expect(fs.readdirSync(dir).filter((name) => name.includes('.tmp-'))).toEqual([]);
+  });
+
+  it('keeps preset-sync semantics: renames known tunnels, drops unknown presets', async () => {
+    const { runtime } = await makeRuntime();
+    await runtime.upsertManagedRemoteTunnelToken({ id: 'a', name: 'Old name', hostname: 'a.example.com', token: 'token-a' });
+    await runtime.syncManagedRemoteTunnelConfigWithPresets([
+      { id: 'a', name: 'New name', hostname: 'a.example.com' },
+      { id: 'ghost', name: 'Ghost', hostname: 'ghost.example.com' },
+    ]);
+    const config = await runtime.readManagedRemoteTunnelConfigFromDisk();
+    expect(config.tunnels).toHaveLength(1);
+    expect(config.tunnels[0]).toMatchObject({ id: 'a', name: 'New name', token: 'token-a' });
+  });
+
+  it('preserves a corrupt config instead of silently discarding every tunnel token', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { dir, filePath, runtime } = await makeRuntime();
+    const corrupt = JSON.stringify({ version: 1, tunnels: [tunnel('a', 'a.example.com', 'token-a'), tunnel('b', 'b.example.com', 'token-b')] }).slice(0, 40);
+    await fsPromises.writeFile(filePath, corrupt);
+
+    expect((await runtime.readManagedRemoteTunnelConfigFromDisk()).tunnels).toEqual([]);
+    const preserved = preservedFiles(dir);
+    expect(preserved).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(preserved[0]), expect.anything());
+
+    // The next upsert lands in a fresh file; the corrupt bytes stay preserved.
+    await runtime.upsertManagedRemoteTunnelToken({ id: 'c', name: 'Tunnel c', hostname: 'c.example.com', token: 'token-c' });
+    expect((await runtime.readManagedRemoteTunnelConfigFromDisk()).tunnels.map((entry) => entry.id)).toEqual(['c']);
+    expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
+  });
+
+  it('preserves a corrupt config before an upsert overwrites it, without a prior read', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { dir, filePath, runtime } = await makeRuntime();
+    const corrupt = '{"version":1,"tunnels":[{"id":"a","name":"Tunnel a","hos';
+    await fsPromises.writeFile(filePath, corrupt);
+
+    await runtime.upsertManagedRemoteTunnelToken({ id: 'c', name: 'Tunnel c', hostname: 'c.example.com', token: 'token-c' });
+    const preserved = preservedFiles(dir);
+    expect(preserved).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
+    expect((await runtime.readManagedRemoteTunnelConfigFromDisk()).tunnels.map((entry) => entry.id)).toEqual(['c']);
+  });
+
+  it('preserves a config file that parses but is not a config object', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { dir, filePath, runtime } = await makeRuntime();
+    await fsPromises.writeFile(filePath, 'null');
+    expect((await runtime.readManagedRemoteTunnelConfigFromDisk()).tunnels).toEqual([]);
+    expect(preservedFiles(dir)).toHaveLength(1);
+  });
+
+  it('leaves the previous valid file intact when the atomic rename fails', async () => {
+    const seeded = await makeRuntime();
+    await seeded.runtime.upsertManagedRemoteTunnelToken({ id: 'a', name: 'Tunnel a', hostname: 'a.example.com', token: 'token-a' });
+    const before = fs.readFileSync(seeded.filePath, 'utf8');
+
+    const failingFs = {
+      ...fsPromises,
+      rename: async () => {
+        const error = new Error('simulated rename failure');
+        error.code = 'EIO';
+        throw error;
+      },
+    };
+    const failing = await makeRuntime({ fsPromises: failingFs, dir: seeded.dir });
+    await expect(
+      failing.runtime.upsertManagedRemoteTunnelToken({ id: 'b', name: 'Tunnel b', hostname: 'b.example.com', token: 'token-b' }),
+    ).rejects.toThrow('simulated rename failure');
+    expect(fs.readFileSync(seeded.filePath, 'utf8')).toBe(before);
+    expect(fs.readdirSync(seeded.dir).filter((name) => name.includes('.tmp-'))).toEqual([]);
+  });
+
+  it('migrates a legacy named-tunnels file when the managed file is missing', async () => {
+    const { filePath, legacyPath, runtime } = await makeRuntime();
+    await fsPromises.writeFile(
+      legacyPath,
+      JSON.stringify({ tunnels: [tunnel('legacy', 'legacy.example.com', 'token-legacy')] }),
+    );
+    const config = await runtime.readManagedRemoteTunnelConfigFromDisk();
+    expect(config.tunnels.map((entry) => entry.id)).toEqual(['legacy']);
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8')).tunnels.map((entry) => entry.id)).toEqual(['legacy']);
+  });
+
+  it('returns an empty config for a missing file with no legacy file and writes nothing', async () => {
+    const { dir, runtime } = await makeRuntime();
+    expect(await runtime.readManagedRemoteTunnelConfigFromDisk()).toEqual({ version: 1, tunnels: [] });
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+});
