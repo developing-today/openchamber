@@ -222,3 +222,94 @@ describe('ensureLocalSttModel cached archive', () => {
     expect(fs.readFileSync(path.join(modelDir, 'model.onnx'), 'utf8')).toBe('fake weights');
   });
 });
+
+describe.skipIf(process.platform === 'win32')('ensureLocalSttModel hung tar', () => {
+  const HUNG_SPEC = {
+    archiveUrl: 'https://example.test/fake-model.tar.bz2',
+    extractedDir: 'fake-model',
+    requiredFiles: ['model.onnx'],
+    ...PINS,
+  };
+
+  function setupWithCachedArchive() {
+    const modelsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'model-downloader-hung-'));
+    const downloadsDir = path.join(modelsDir, '.downloads');
+    fs.mkdirSync(downloadsDir, { recursive: true });
+    fs.writeFileSync(path.join(downloadsDir, 'fake-model.tar.bz2'), CONTENT);
+    return modelsDir;
+  }
+
+  function installFakeTar(scriptBody) {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-tar-bin-'));
+    fs.writeFileSync(path.join(binDir, 'tar'), `#!/bin/sh\n${scriptBody}\n`, { mode: 0o755 });
+    return binDir;
+  }
+
+  async function withFakeTar(binDir, extraEnv, run) {
+    const prevPath = process.env.PATH;
+    const prevEnv = {};
+    for (const key of Object.keys(extraEnv)) {
+      prevEnv[key] = process.env[key];
+      process.env[key] = extraEnv[key];
+    }
+    process.env.PATH = `${binDir}:${prevPath}`;
+    try {
+      await run();
+    } finally {
+      process.env.PATH = prevPath;
+      for (const [key, value] of Object.entries(prevEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  }
+
+  it('kills a tar that never exits and rejects within the bound', async () => {
+    const modelsDir = setupWithCachedArchive();
+    const pidFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fake-tar-pid-')), 'tar.pid');
+    const binDir = installFakeTar('echo $$ > "$FAKE_TAR_PIDFILE"\nexec sleep 60');
+    await withFakeTar(binDir, { FAKE_TAR_PIDFILE: pidFile }, async () => {
+      const started = Date.now();
+      await expect(
+        ensureLocalSttModel({ modelsDir, modelId: 'fake-model', spec: HUNG_SPEC, extractTimeoutMs: 100 }),
+      ).rejects.toThrow(/timed out/);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    });
+    const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  it('recovers after a hung-tar rejection: a retry re-downloads and installs', async () => {
+    const modelsDir = setupWithCachedArchive();
+    const binDir = installFakeTar('exec sleep 60');
+    await withFakeTar(binDir, {}, async () => {
+      await expect(
+        ensureLocalSttModel({ modelsDir, modelId: 'fake-model', spec: HUNG_SPEC, extractTimeoutMs: 100 }),
+      ).rejects.toThrow(/timed out/);
+    });
+    // The timed-out extraction discarded the cached archive, so the retry
+    // (the dictation service clears its download state on rejection) goes
+    // back to the download and can succeed with a working extraction.
+    let fetched = false;
+    const modelDir = await ensureLocalSttModel({
+      modelsDir,
+      modelId: 'fake-model',
+      spec: HUNG_SPEC,
+      extractImpl: async (_archivePath, destDir) => {
+        const dir = path.join(destDir, HUNG_SPEC.extractedDir);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'model.onnx'), 'fake weights');
+      },
+      fetchImpl: async () => {
+        fetched = true;
+        return new Response(CONTENT, { status: 200 });
+      },
+    });
+    expect(fetched).toBe(true);
+    expect(fs.readFileSync(path.join(modelDir, 'model.onnx'), 'utf8')).toBe('fake weights');
+  });
+});

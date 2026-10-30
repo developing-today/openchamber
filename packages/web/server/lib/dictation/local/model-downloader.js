@@ -19,6 +19,17 @@ import { getLocalSttModelSpec } from './model-catalog.js';
 // a slow connection that keeps delivering bytes is never cut off.
 const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
 
+// Extraction gets a total bound, not a stall bound: unlike the download,
+// it produces no progress signal this process can watch (tar writes files
+// directly and stays silent on success), so silence cannot tell a hung
+// tar from a slow one. The bound is set far above any real extraction -
+// the largest catalog archives unpack in well under a minute on slow
+// hardware - so only a genuinely wedged tar (or its bzip2 child) ever
+// reaches it. Without it a hung tar never settles ensureLocalSttModel,
+// and the dictation service keeps the model in "downloading" state until
+// the server restarts.
+const TAR_EXTRACT_TIMEOUT_MS = 600_000;
+
 async function hasRequiredFiles(modelDir, requiredFiles) {
   const results = await Promise.all(
     requiredFiles.map(async (rel) => {
@@ -174,22 +185,50 @@ export function describeTarFailure(code, stderr) {
   return lastLine ? `tar exited with code ${code}: ${lastLine}` : `tar exited with code ${code}`;
 }
 
-async function extractTarArchive(archivePath, destDir) {
+async function extractTarArchive(archivePath, destDir, timeoutMs = TAR_EXTRACT_TIMEOUT_MS) {
   await mkdir(destDir, { recursive: true });
 
   await new Promise((resolve, reject) => {
     const child = spawn('tar', ['xf', archivePath, '-C', destDir], {
       stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
+      // Own process group (where the platform has them) so the timeout
+      // kill takes tar's decompressor child with it instead of leaving
+      // an orphaned bzip2 behind.
+      detached: process.platform !== 'win32',
     });
     let stderr = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Already gone; the close handler settles the promise.
+        }
+      }
+    }, timeoutMs);
+    timer.unref?.();
     child.stderr.on('data', (chunk) => {
       // Only the tail matters for the message; keep memory bounded.
       stderr = (stderr + chunk.toString()).slice(-4096);
     });
-    child.on('error', reject);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on('close', (code) => {
-      if (code === 0) {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(
+            `Extracting ${path.basename(archivePath)} timed out after ${Math.round(timeoutMs / 1000)} seconds and was killed; try again`,
+          ),
+        );
+      } else if (code === 0) {
         resolve();
       } else {
         reject(new Error(describeTarFailure(code, stderr)));
@@ -221,13 +260,14 @@ export async function isLocalSttModelInstalled(modelsDir, modelId) {
  * @param {{ modelsDir: string, modelId: string,
  *           onProgress?: (downloadedBytes: number, totalBytes: number | null) => void,
  *           fetchImpl?: typeof fetch, spec?: object,
- *           extractImpl?: (archivePath: string, destDir: string) => Promise<void> }} options
- *        `fetchImpl`, `spec` and `extractImpl` are test seams: production
- *        callers omit them and get the global fetch, the catalog spec and
- *        the system tar extraction.
+ *           extractImpl?: (archivePath: string, destDir: string, extractTimeoutMs?: number) => Promise<void>,
+ *           extractTimeoutMs?: number }} options
+ *        `fetchImpl`, `spec`, `extractImpl` and `extractTimeoutMs` are
+ *        test seams: production callers omit them and get the global
+ *        fetch, the catalog spec and the system tar extraction.
  * @returns {Promise<string>}
  */
-export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetchImpl, spec: specOverride, extractImpl = extractTarArchive }) {
+export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetchImpl, spec: specOverride, extractImpl = extractTarArchive, extractTimeoutMs = TAR_EXTRACT_TIMEOUT_MS }) {
   const spec = specOverride ?? getLocalSttModelSpec(modelId);
   const modelDir = path.join(modelsDir, spec.extractedDir);
   if (await hasRequiredFiles(modelDir, spec.requiredFiles)) {
@@ -249,7 +289,7 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetc
 
   const stagingDir = path.join(modelsDir, `.staging-${spec.extractedDir}-${Date.now()}`);
   try {
-    await extractImpl(archivePath, stagingDir);
+    await extractImpl(archivePath, stagingDir, extractTimeoutMs);
 
     const stagedModelDir = path.join(stagingDir, spec.extractedDir);
     if (!(await hasRequiredFiles(stagedModelDir, spec.requiredFiles))) {
