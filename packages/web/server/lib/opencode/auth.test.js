@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { configureOpenCodeCredentials, credentialSourceUsesLocalStore, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -326,6 +326,37 @@ describe('renewStoredLogin', () => {
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('not connected');
     configureOpenCodeCredentials({ list: async () => rows });
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('cannot write');
+  });
+});
+
+describe('credentialSourceUsesLocalStore', () => {
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+  });
+
+  it('is false when no source is wired or the source does not say', () => {
+    configureOpenCodeCredentials(null);
+    expect(credentialSourceUsesLocalStore()).toBe(false);
+    configureOpenCodeCredentials({ list: async () => [] });
+    expect(credentialSourceUsesLocalStore()).toBe(false);
+  });
+
+  it('follows the wired source declaration', () => {
+    configureOpenCodeCredentials({ list: async () => [], usesLocalStore: () => true });
+    expect(credentialSourceUsesLocalStore()).toBe(true);
+    configureOpenCodeCredentials({ list: async () => [], usesLocalStore: () => false });
+    expect(credentialSourceUsesLocalStore()).toBe(false);
+  });
+
+  it('treats a managed or loopback connection as local and a remote host as not', () => {
+    const sourceFor = (url, launchEnvironment = null) => openCodeCredentialSource({
+      buildOpenCodeUrl: () => url,
+      getOpenCodeAuthHeaders: () => ({}),
+      getLaunchEnvironment: () => launchEnvironment,
+    });
+    expect(sourceFor('http://127.0.0.1:4096').usesLocalStore()).toBe(true);
+    expect(sourceFor('https://opencode.example.com:4096').usesLocalStore()).toBe(false);
+    expect(sourceFor('https://opencode.example.com:4096', { OPENCODE_DB: 'opencode.db' }).usesLocalStore()).toBe(true);
   });
 });
 

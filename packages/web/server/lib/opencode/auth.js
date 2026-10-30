@@ -50,6 +50,30 @@ export function configureOpenCodeCredentials(next) {
   source = next ?? null;
 }
 
+const isLoopbackOpenCodeUrl = (raw) => {
+  try {
+    const hostname = new URL(raw).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Whether the wired credential source is known to read the credential
+ * store on this machine (see `openCodeCredentialSource`). A source that
+ * does not say — a test fixture, the quota CLI's combined source — is
+ * treated as not known, so a direct local-store read is never enabled
+ * by default.
+ */
+export function credentialSourceUsesLocalStore() {
+  try {
+    return Boolean(source?.usesLocalStore?.());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The value of each variable OpenCode reports as a connection, keyed by
  * integration id, taken from the environment OpenCode was launched with.
@@ -91,6 +115,19 @@ export const openCodeCredentialSource = ({
     list: () => client().credential.list(),
     create: (input) => client().credential.create(input),
     remove: (credentialID) => client().credential.remove({ credentialID }),
+    usesLocalStore: () => {
+      // A managed OpenCode is one OpenChamber launched on this machine,
+      // and a loopback connection can only reach an OpenCode on this
+      // machine: both are known to read this machine's credential store.
+      // Any other connection (OPENCODE_HOST naming another host) is not,
+      // and a reader must not substitute this machine's store for it.
+      if (getLaunchEnvironment()) return true;
+      try {
+        return isLoopbackOpenCodeUrl(buildOpenCodeUrl('', ''));
+      } catch {
+        return false;
+      }
+    },
     listEnvironmentKeys: async () => {
       const environment = getLaunchEnvironment();
       if (!environment) return {};
@@ -291,6 +328,19 @@ const selectedLogin = (entries, integrationID) => entries.find((entry) => entry.
  */
 export function readOpenCodeCredentials() {
   return sharedRead(readWithEnvironment);
+}
+
+/**
+ * The same projected credentials, read straight from OpenCode's credential
+ * store on this machine with no server in between. The served projection
+ * can withhold a secret a consumer must present itself (the stored-login
+ * projection keeps refresh tokens with OpenCode), so a reader that needs
+ * the stored value itself falls back to the store — the seam the quota CLI
+ * already uses when no server is listening. Throws when the store cannot
+ * be read; each caller decides what that means for it.
+ */
+export async function readLocalOpenCodeCredentials() {
+  return projectCredentialEntries(await openCodeLocalCredentialSource().list());
 }
 
 /**

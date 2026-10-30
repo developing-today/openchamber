@@ -13,6 +13,8 @@ export type CredentialSource = {
   remove?: (credentialID: string) => Promise<void>;
   /** Variable keys by integration id; absent when the environment is unknown. */
   listEnvironmentKeys?: () => Promise<Record<string, string>>;
+  /** Whether this source is known to read the credential store on this machine; absent means not known. */
+  usesLocalStore?: () => boolean;
 };
 
 export function configureOpenCodeCredentials(next: CredentialSource | null): void;
@@ -29,6 +31,9 @@ export function openCodeLocalCredentialSource(options?: {
 export function projectEnvironmentKeys(integrations: IntegrationInfo[], environment: Record<string, string | undefined>): Record<string, string>;
 export function projectCredentialEntries(entries: CredentialEntry[]): LegacyAuthFile;
 export function readOpenCodeCredentials(): Promise<LegacyAuthFile>;
+export function credentialSourceUsesLocalStore(): boolean;
+/** The same projected credentials, read straight from OpenCode's credential store on this machine. */
+export function readLocalOpenCodeCredentials(): Promise<LegacyAuthFile>;
 export function getProviderAuth(providerId: string): Promise<LegacyAuthEntry | null>;
 
 /** A browser login as OpenCode stores it, read for an isolated space's gatekeeper. */
