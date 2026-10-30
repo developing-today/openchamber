@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
 
 const NPM_CACHE_TTL_MS = 3_600_000;
+const NPM_CACHE_MAX_ENTRIES = 500;
 const NPM_FETCH_TIMEOUT_MS = 5_000;
 
 /**
@@ -70,9 +71,24 @@ function parseVersions(value) {
   return Object.keys(value);
 }
 
+function pruneCache(now = Date.now()) {
+  for (const [name, entry] of _cache) {
+    if (now - entry.fetchedAt >= NPM_CACHE_TTL_MS) {
+      _cache.delete(name);
+    }
+  }
+  while (_cache.size > NPM_CACHE_MAX_ENTRIES) {
+    const oldest = _cache.keys().next().value;
+    if (oldest === undefined) break;
+    _cache.delete(oldest);
+  }
+}
+
 function cacheResult(name, payload) {
   if (payload.ok || payload.status === 404) {
+    _cache.delete(name);
     _cache.set(name, { fetchedAt: Date.now(), payload });
+    pruneCache();
   }
 }
 
@@ -124,6 +140,7 @@ export async function lookupNpmPackage(name) {
  */
 export async function getNpmInfo(name, options = {}) {
   const { forceRefresh = false } = options;
+  pruneCache();
   const cached = _cache.get(name);
   if (cached && !forceRefresh && Date.now() - cached.fetchedAt < NPM_CACHE_TTL_MS) {
     return cached.payload;
