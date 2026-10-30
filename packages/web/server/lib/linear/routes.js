@@ -131,6 +131,7 @@ export function registerLinearRoutes(app) {
       fetchLinearIdentity,
       setLinearAuth,
       clearLinearAuth,
+      activateLinearAuth,
       toLinearPublicStatus,
       pollAuthorizationBroker,
       completeAuthorizationBroker,
@@ -204,7 +205,18 @@ export function registerLinearRoutes(app) {
       if (error?.status === 401) {
         if (auth?.tokenReference) {
           // A rejected vault key may be a stale cached read of a rotated
-          // key: keep the reference so a later read can recover.
+          // key: keep the reference so a later read can recover. When
+          // another workspace is saved, make it current instead of
+          // reporting disconnected: { connected: false } would hide every
+          // workspace from Settings, including the controls to switch
+          // away from or remove the rejected one.
+          const fallback = getLinearAuthWorkspaces().find((workspace) => !workspace.current);
+          if (fallback && activateLinearAuth(fallback.id)) {
+            const remaining = getLinearAuth();
+            if (remaining) {
+              return toLinearPublicStatus(remaining, getLinearAuthWorkspaces());
+            }
+          }
           return { connected: false };
         }
         clearLinearAuth(auth?.workspaceId);

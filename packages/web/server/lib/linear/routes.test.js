@@ -5,7 +5,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { registerLinearRoutes } from './routes.js';
-import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth } from './auth.js';
+import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth, getLinearAuthByWorkspaceId } from './auth.js';
+import { toGuestAuthResponse } from '../guests/host-session.js';
 import { fetchLinearGraphql } from './client.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-linear-routes-'));
@@ -741,6 +742,53 @@ describe('Linear vault account route (#304)', () => {
     expect(getLinearAuth().tokenReference).toBe(REFERENCE);
     expect(getLinearAuth().accessToken).toBeNull();
     expect(seen).toEqual([SECRET, SECRET]);
+  });
+
+  it('reports a vault account as connected to guest extensions', async () => {
+    configureLinearVaultReader(async () => ({ ok: true, value: SECRET }));
+    setLinearAuth({
+      tokenReference: REFERENCE,
+      user: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace' },
+      organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+      workspaceId: 'org-1',
+    });
+    const guest = await toGuestAuthResponse(
+      { name: 'Linear', description: 'Issues', host: { provider: 'linear' } },
+      null,
+    );
+    expect(guest.connected).toBe(true);
+    expect(guest.account).toBe('Ada Lovelace');
+  });
+
+  it('keeps other workspaces reachable when a vault key is rejected', async () => {
+    configureLinearVaultReader(async () => ({ ok: true, value: SECRET }));
+    setLinearAuth({
+      accessToken: 'oauth-token',
+      refreshToken: 'refresh-1',
+      tokenType: 'Bearer',
+      expiresAt: Date.now() + 86_400_000,
+      user: { id: 'user-2', name: 'Grace', displayName: 'Grace Hopper' },
+      organization: { id: 'org-oauth', name: 'OAuth Org', urlKey: 'oauth-org' },
+      workspaceId: 'org-oauth',
+    });
+    setLinearAuth({
+      tokenReference: REFERENCE,
+      user: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace' },
+      organization: { id: 'org-vault', name: 'Vault Org', urlKey: 'vault-org' },
+      workspaceId: 'org-vault',
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ errors: [{ message: 'Unauthorized' }] }, 401)));
+    const app = createApp();
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+    expect(status.body.connected).toBe(true);
+    expect(status.body.organization.id).toBe('org-oauth');
+    expect(status.body.workspaces).toHaveLength(2);
+    const vaultWorkspace = status.body.workspaces.find((workspace) => workspace.id === 'org-vault');
+    expect(vaultWorkspace.source).toBe('vault');
+    expect(vaultWorkspace.current).toBe(false);
+    // The rejected reference is preserved for a later recovery read.
+    expect(getLinearAuthByWorkspaceId('org-vault')?.tokenReference).toBe(REFERENCE);
+    expect(JSON.stringify(status.body)).not.toContain(SECRET);
   });
 
   it('sends OAuth tokens as Bearer and vault keys bare', async () => {

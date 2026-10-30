@@ -23,7 +23,7 @@ export const toGuestAuthResponse = async (integration, stored) => {
   const auth = getLinearAuth();
   return {
     ...published,
-    connected: Boolean(auth?.accessToken),
+    connected: Boolean(auth?.accessToken || auth?.tokenReference),
     account: linearAccountLabel(auth),
     hasClient: true,
   };
