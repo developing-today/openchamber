@@ -2056,6 +2056,70 @@ describe('createWorktree', () => {
     }
   }, 30_000);
 
+  it('bounds cleanup when a detached descendant keeps the output pipes open (#868)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '1000';
+
+    const descendantScript = path.join(dataHome, 'pipe-descendant.cjs');
+    // The descendant is detached (its own process group, so the tree kill
+    // cannot reach it) and inherits the spawner's stdout/stderr — the
+    // executor's pipes — so the shell's 'close' stays pending after the
+    // escalation finishes (Codex repro on PR #880). Only the bounded
+    // cleanup path can return the timeout result.
+    fs.writeFileSync(descendantScript, "setTimeout(() => {}, 120_000);\n");
+    const pidFile = path.join(dataHome, 'pipe-descendant.pid');
+    const spawnerScript = path.join(dataHome, 'pipe-spawner.cjs');
+    fs.writeFileSync(
+      spawnerScript,
+      `const { spawn } = require('node:child_process');\n`
+      + `const child = spawn(process.execPath, [${JSON.stringify(descendantScript)}], { detached: true, stdio: 'inherit' });\n`
+      + `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));\n`
+      + `setTimeout(() => {}, 120_000);\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-pipe-timeout',
+        worktreeName: 'start-command-pipe-timeout',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(spawnerScript)}`,
+      });
+
+      // Pre-fix this poll never succeeds: bootstrap wedges at git-ready
+      // until the detached descendant exits on its own (~120s).
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 15_000 },
+      ).toBe('setup-ready');
+    } finally {
+      try {
+        const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
+        if (Number.isInteger(descendantPid)) {
+          try { process.kill(descendantPid, 'SIGKILL'); } catch {}
+        }
+      } catch {}
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
   it('runs the start command OpenCode keeps for the project in the new worktree', async () => {
     if (!canRunGit()) return;
 

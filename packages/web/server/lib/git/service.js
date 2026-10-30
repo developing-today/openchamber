@@ -2166,7 +2166,8 @@ const START_COMMAND_MAX_BUFFER = 20 * 1024 * 1024;
 // end the whole tree: killing only the shell left the command's descendants
 // running after the bootstrap moved on (#868). Resolves on the child's
 // 'close', which on the timeout path happens only after the tree kill has
-// been issued and the shell is gone.
+// been issued and the shell is gone — or, if a pipe-holding descendant
+// keeps 'close' pending past the escalation, on the bounded cleanup below.
 const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new Promise((resolve) => {
   const child = spawn(binary, args, {
     cwd,
@@ -2219,16 +2220,16 @@ const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new 
       escalationTimer.unref?.();
     });
   };
-  const timeoutTimer = setTimeout(() => {
-    timedOut = true;
-    killTree();
-  }, timeoutMs);
-  timeoutTimer.unref?.();
-
-  child.once('error', (error) => { spawnError = error; });
-  child.once('close', (code, signal) => {
+  let settled = false;
+  let exitResult = null;
+  let cleanupTimer = null;
+  const finish = (code, signal) => {
+    if (settled) return;
+    settled = true;
     clearTimeout(timeoutTimer);
-    const finish = () => resolve({
+    if (escalationTimer) clearTimeout(escalationTimer);
+    if (cleanupTimer) clearTimeout(cleanupTimer);
+    resolve({
       stdout: Buffer.concat(stdoutChunks).toString('utf8'),
       stderr: Buffer.concat(stderrChunks).toString('utf8'),
       code,
@@ -2236,15 +2237,40 @@ const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new 
       timedOut,
       error: spawnError,
     });
+  };
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    killTree();
+    // Bounded cleanup: a detached descendant that inherited the output
+    // pipes escapes the process group and keeps the shell's 'close'
+    // pending even after the escalation has finished (#868, Codex on
+    // PR #880). Once escalation is done, give 'close' a short grace,
+    // then destroy the streams and return the timeout result regardless
+    // — as the VS Code twin does — so bootstrap never wedges at
+    // git-ready waiting on a descendant it cannot kill.
+    void (escalationDone ?? Promise.resolve()).then(() => {
+      if (settled) return;
+      cleanupTimer = setTimeout(() => {
+        try { child.stdout?.destroy(); } catch {}
+        try { child.stderr?.destroy(); } catch {}
+        finish(exitResult?.code ?? null, exitResult?.signal ?? null);
+      }, 1000);
+      cleanupTimer.unref?.();
+    });
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+
+  child.once('error', (error) => { spawnError = error; });
+  child.once('exit', (code, signal) => { exitResult = { code, signal }; });
+  child.once('close', (code, signal) => {
     if (timedOut && escalationDone) {
       // Timed out: resolve only once the group SIGKILL above has been
       // issued, so bootstrap never advances while a SIGTERM-ignoring
       // descendant may still write into the worktree or hold its ports.
-      void escalationDone.then(finish);
+      void escalationDone.then(() => finish(code, signal));
       return;
     }
-    if (escalationTimer) clearTimeout(escalationTimer);
-    finish();
+    finish(code, signal);
   });
 });
 
