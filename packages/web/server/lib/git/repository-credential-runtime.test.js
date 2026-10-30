@@ -198,4 +198,28 @@ describe('createGitRepositoryCredentialRuntime', () => {
     }
     void runtime;
   });
+
+  it.skipIf(process.platform === 'win32')("bounds the delegate when the person's credential chain stalls", async () => {
+    const { dataDir } = await setup();
+    // No server is listening, so the helper falls through to the delegate;
+    // the stub git stands in for a credential chain that never answers.
+    const endpointFile = path.join(dataDir, 'git-credential-endpoint.json');
+    await fs.writeFile(endpointFile, JSON.stringify({ version: 1, url: 'http://127.0.0.1:1/api/git/repository-credential', secret: 's' }));
+    const hangBin = path.join(dataDir, 'hang-bin');
+    await fs.mkdir(hangBin);
+    await fs.writeFile(path.join(hangBin, 'git'), '#!/bin/sh\ncat > /dev/null\nexec sleep 120\n', { mode: 0o755 });
+    const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
+    const startedAt = Date.now();
+    const stdout = await new Promise((resolve, reject) => {
+      const child = execFile(process.execPath, [helper, endpointFile, 'get'], {
+        env: { ...process.env, PATH: hangBin + path.delimiter + process.env.PATH },
+        timeout: 45_000,
+      }, (error, out) => (error ? reject(error) : resolve(out)));
+      child.stdin.end('protocol=https\nhost=github.com\n');
+    });
+    expect(stdout).toBe('');
+    // The delegate deadline is 10s; without it the helper would wait out
+    // the stub's 120s sleep.
+    expect(Date.now() - startedAt).toBeLessThan(30_000);
+  }, 60_000);
 });
