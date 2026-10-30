@@ -411,11 +411,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
       result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
     }
-    const sessionRowDisplay = sessionRowDisplaySchema.safeParse(candidate.sidebarSessionRowDisplay);
+    const sessionRowDisplay = sessionRowDisplaySchema.safeParse(candidate.sidebarSessionRowDisplay ?? {});
     if (sessionRowDisplay.success) {
       const display = {};
       for (const [key, value] of Object.entries(sessionRowDisplay.data)) {
         if (value !== undefined) display[key] = value;
+      }
+      // Profiles persisted before the Sidebar rows control carry the Detailed
+      // rows toggle as sidebarDetailedZoneRows; fold it into zoneLines the way
+      // the local store's v11->v12 migration does. A zoneLines value in the
+      // new key wins when both are present.
+      if (display.zoneLines === undefined && (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false)) {
+        display.zoneLines = candidate.sidebarDetailedZoneRows ? 'two' : 'one';
       }
       if (Object.keys(display).length > 0) result.sidebarSessionRowDisplay = display;
     }
