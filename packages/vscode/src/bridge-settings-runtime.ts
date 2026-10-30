@@ -340,25 +340,69 @@ const sanitizeMagicPromptOverrides = (input: unknown): Record<string, string> =>
   return next;
 };
 
-const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
+const emptyMagicPromptState = (): { version: number; overrides: Record<string, string> } => ({
+  version: MAGIC_PROMPTS_FILE_VERSION,
+  overrides: {},
+});
+
+// A torn or otherwise unparseable magic-prompts file is user data, not an
+// empty store: move its bytes aside before any later write can overwrite
+// them, and name the preserved copy so the loss is recoverable. Returns the
+// preserved path, or null when the rename failed.
+const preserveCorruptMagicPromptFile = (error: unknown): string | null => {
+  const preservedPath = `${OPENCHAMBER_MAGIC_PROMPTS_PATH}.corrupt-${Date.now()}`;
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, 'utf8');
+    renameSyncWithRetry(OPENCHAMBER_MAGIC_PROMPTS_PATH, preservedPath, (from, to) => fs.renameSync(from, to));
+    console.warn(
+      `[OpenChamber] ${OPENCHAMBER_MAGIC_PROMPTS_PATH} could not be parsed (${error instanceof Error ? error.message : String(error)}); preserved the unreadable file at ${preservedPath}.`,
+    );
+    return preservedPath;
+  } catch (preserveError) {
+    console.warn(
+      `[OpenChamber] Failed to preserve the unreadable magic prompts file at ${preservedPath}:`,
+      preserveError instanceof Error ? preserveError.message : String(preserveError),
+    );
+    return null;
+  }
+};
+
+const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, 'utf8');
+  } catch (error) {
+    // ENOENT is the normal first-run case: an empty store, silently.
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (code !== 'ENOENT') {
+      console.warn(
+        `[OpenChamber] ${OPENCHAMBER_MAGIC_PROMPTS_PATH} could not be read (${error instanceof Error ? error.message : String(error)}); treating it as an empty store.`,
+      );
+    }
+    return emptyMagicPromptState();
+  }
+  try {
     const parsed = JSON.parse(raw) as { overrides?: unknown };
     return {
       version: MAGIC_PROMPTS_FILE_VERSION,
       overrides: sanitizeMagicPromptOverrides(parsed?.overrides),
     };
-  } catch {
-    return {
-      version: MAGIC_PROMPTS_FILE_VERSION,
-      overrides: {},
-    };
+  } catch (error) {
+    // A mutation must never overwrite bytes whose preservation just
+    // failed: they are the only copy of the user's overrides. Abort
+    // instead; the caller can retry once the file is movable.
+    const preservedPath = preserveCorruptMagicPromptFile(error);
+    if (!preservedPath) {
+      throw new Error(
+        `Failed to preserve the unreadable magic prompts file at ${OPENCHAMBER_MAGIC_PROMPTS_PATH}; refusing to overwrite it`,
+        { cause: error },
+      );
+    }
+    return emptyMagicPromptState();
   }
 };
 
 const writeMagicPromptFile = async (state: { version: number; overrides: Record<string, string> }): Promise<void> => {
-  await fs.promises.mkdir(path.dirname(OPENCHAMBER_MAGIC_PROMPTS_PATH), { recursive: true });
-  await fs.promises.writeFile(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2), 'utf8');
+  await writeJsonAtomic(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2));
 };
 
 const stripDerived = (source: Record<string, unknown>): Record<string, unknown> => {
@@ -551,6 +595,10 @@ export const resetMagicPromptOverride = async (id: string): Promise<{ version: n
 };
 
 export const resetAllMagicPromptOverrides = async (): Promise<{ version: number; overrides: Record<string, string> }> => {
+  // Read first (discarding the result) so a corrupt existing file is
+  // preserved — or the reset aborts — instead of being silently
+  // overwritten by the empty state below.
+  readMagicPromptFile();
   const next = {
     version: MAGIC_PROMPTS_FILE_VERSION,
     overrides: {},
