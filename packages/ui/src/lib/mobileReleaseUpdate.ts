@@ -16,6 +16,11 @@ import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
 const LATEST_RELEASE_URL = 'https://api.github.com/repos/developing-today/openchamber/releases/latest';
 
+// One deadline for the whole release fetch, body read included: a stalled
+// GitHub answer must settle as null within the bound so the caller can run
+// its server fallback instead of wedging in the checking state.
+export const MOBILE_RELEASE_FETCH_TIMEOUT_MS = 10_000;
+
 const githubReleaseResponse = z.object({
   tag_name: z.string(),
   html_url: z.string(),
@@ -29,7 +34,10 @@ const githubReleaseResponse = z.object({
     .optional(),
 });
 
-type ReleaseFetch = (url: string, init: { headers: { Accept: string } }) => Promise<Response>;
+type ReleaseFetch = (
+  url: string,
+  init: { headers: { Accept: string }; signal: AbortSignal },
+) => Promise<Response>;
 
 /** Numeric parts of a version string: "v2.3.3" -> [2, 3, 3]. Null when any part is not a number. */
 function versionParts(version: string): number[] | null {
@@ -71,6 +79,7 @@ export async function fetchLatestMobileRelease(
   try {
     const response = await fetchImpl(LATEST_RELEASE_URL, {
       headers: { Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(MOBILE_RELEASE_FETCH_TIMEOUT_MS),
     });
     if (!response.ok) return null;
     const parsed = githubReleaseResponse.safeParse(await response.json().catch(() => null));

@@ -1,6 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 
-import { compareReleaseVersions, fetchLatestMobileRelease } from '@/lib/mobileReleaseUpdate';
+import {
+  compareReleaseVersions,
+  fetchLatestMobileRelease,
+  MOBILE_RELEASE_FETCH_TIMEOUT_MS,
+} from '@/lib/mobileReleaseUpdate';
 
 describe('compareReleaseVersions', () => {
   test('orders plain numeric versions', () => {
@@ -86,5 +90,49 @@ describe('fetchLatestMobileRelease', () => {
       throw new Error('offline');
     };
     expect(await fetchLatestMobileRelease('2.3.3', throwingFetch)).toBeNull();
+  });
+
+  test('passes an abort signal to the release fetch', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const capturingFetch = async (
+      _url: string,
+      init: { headers: { Accept: string }; signal: AbortSignal },
+    ): Promise<Response> => {
+      seenSignal = init.signal;
+      return new Response(JSON.stringify(releaseJson()), { status: 200 });
+    };
+    const info = await fetchLatestMobileRelease('2.3.3', capturingFetch);
+    expect(info?.version).toBe('2.4.0');
+    expect(seenSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  describe('with fake timers', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    test('a stalled release fetch resolves null at the deadline', async () => {
+      const stalledFetch = (
+        _url: string,
+        init: { headers: { Accept: string }; signal: AbortSignal },
+      ): Promise<Response> =>
+        // A request that never answers, but like a real fetch it rejects
+        // when its signal aborts.
+        new Promise<Response>((_resolve, reject) => {
+          const { signal } = init;
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason));
+        });
+      const pending = fetchLatestMobileRelease('2.3.3', stalledFetch);
+      jest.advanceTimersByTime(MOBILE_RELEASE_FETCH_TIMEOUT_MS);
+      expect(await pending).toBeNull();
+    });
   });
 });
