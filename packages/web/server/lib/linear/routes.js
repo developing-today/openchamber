@@ -148,9 +148,10 @@ export function registerLinearRoutes(app) {
       console.error('Failed to complete Linear authorization through broker:', error);
     }
 
+    const savedBefore = getLinearAuth();
     let authorization = null;
     try {
-      authorization = await getValidLinearAuthorization();
+      authorization = await getValidLinearAuthorization(savedBefore?.workspaceId);
     } catch {
       // A vault credential that cannot be resolved right now is a connect
       // error, not a disconnect: keep the stored reference and report the
@@ -166,6 +167,17 @@ export function registerLinearRoutes(app) {
     }
 
     const auth = getLinearAuth();
+    if (
+      !auth
+      || auth.workspaceId !== authorization.workspaceId
+      || (auth.tokenReference ?? null) !== (savedBefore?.tokenReference ?? null)
+    ) {
+      // The saved credential was switched, replaced, or disconnected while
+      // the authorization was being resolved: discard this refresh rather
+      // than writing one workspace's identity (or resolved secret) into
+      // another workspace's credential.
+      return auth ? toLinearPublicStatus(auth, getLinearAuthWorkspaces()) : { connected: false };
+    }
     try {
       const identity = await fetchLinearIdentity(authorization);
       // A vault workspace keeps only its reference: the resolved key is
@@ -190,6 +202,11 @@ export function registerLinearRoutes(app) {
       return toLinearPublicStatus(next, getLinearAuthWorkspaces());
     } catch (error) {
       if (error?.status === 401) {
+        if (auth?.tokenReference) {
+          // A rejected vault key may be a stale cached read of a rotated
+          // key: keep the reference so a later read can recover.
+          return { connected: false };
+        }
         clearLinearAuth(auth?.workspaceId);
         const remaining = getLinearAuth();
         if (!remaining) {
@@ -255,10 +272,16 @@ export function registerLinearRoutes(app) {
       let identity;
       try {
         identity = await fetchLinearIdentity({ token: read.value, source: 'vault' });
-      } catch {
-        return res.status(400).json({
-          error: 'Linear refused the API key from 1Password',
-          code: 'INVALID_TOKEN',
+      } catch (error) {
+        if (error?.status === 401) {
+          return res.status(400).json({
+            error: 'Linear refused the API key from 1Password',
+            code: 'INVALID_TOKEN',
+          });
+        }
+        return res.status(502).json({
+          error: 'Linear could not be reached to verify the API key from 1Password',
+          code: 'LINEAR_UNREACHABLE',
         });
       }
       // Only a key Linear accepted is saved, and only as its reference.

@@ -64,7 +64,10 @@ export async function listLinearTeams() {
     return { connected: true, teams };
   } catch (error) {
     if (error?.status === 401) {
-      clearLinearAuth(getLinearAuth()?.workspaceId);
+      const failed = getLinearAuth();
+      if (!failed?.tokenReference) {
+        clearLinearAuth(failed?.workspaceId);
+      }
       return { connected: false };
     }
     throw error;

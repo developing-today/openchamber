@@ -408,7 +408,9 @@ async function withLinearToken(run, workspaceId) {
       const failed = workspaceId
         ? getLinearAuthByWorkspaceId(workspaceId)
         : getLinearAuth();
-      clearLinearAuth(failed?.workspaceId || workspaceId);
+      if (!failed?.tokenReference) {
+        clearLinearAuth(failed?.workspaceId || workspaceId);
+      }
       return { connected: false };
     }
     throw error;
