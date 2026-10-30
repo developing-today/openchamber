@@ -1990,6 +1990,69 @@ describe('createWorktree', () => {
     }
   }, 30_000);
 
+  it('kills the whole start-command tree on timeout, descendants included (#868)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '1000';
+
+    const descendantScript = path.join(dataHome, 'descendant.cjs');
+    fs.writeFileSync(descendantScript, 'setTimeout(() => {}, 120_000);\n');
+    const pidFile = path.join(dataHome, 'descendant.pid');
+    const spawnerScript = path.join(dataHome, 'spawner.cjs');
+    fs.writeFileSync(
+      spawnerScript,
+      `const { spawn } = require('node:child_process');\n`
+      + `const child = spawn(process.execPath, [${JSON.stringify(descendantScript)}], { stdio: 'ignore' });\n`
+      + `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));\n`
+      + `setTimeout(() => {}, 120_000);\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-tree-timeout',
+        worktreeName: 'start-command-tree-timeout',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(spawnerScript)}`,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 15_000 },
+      ).toBe('setup-ready');
+
+      const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
+      expect(Number.isInteger(descendantPid)).toBe(true);
+      const isAlive = (pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      await expect.poll(() => isAlive(descendantPid), { timeout: 5_000 }).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
   it('runs the start command OpenCode keeps for the project in the new worktree', async () => {
     if (!canRunGit()) return;
 

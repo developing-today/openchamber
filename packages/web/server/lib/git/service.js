@@ -2160,49 +2160,100 @@ const worktreeStartCommandTimeoutMs = () => {
   return parsed > 0 ? parsed : WORKTREE_START_COMMAND_TIMEOUT_MS;
 };
 
+const START_COMMAND_MAX_BUFFER = 20 * 1024 * 1024;
+
+// Runs one start command in its own process group (POSIX) so a timeout can
+// end the whole tree: killing only the shell left the command's descendants
+// running after the bootstrap moved on (#868). Resolves on the child's
+// 'close', which on the timeout path happens only after the tree kill has
+// been issued and the shell is gone.
+const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new Promise((resolve) => {
+  const child = spawn(binary, args, {
+    cwd,
+    env,
+    windowsHide: true,
+    detached: process.platform !== 'win32',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const stdoutChunks = [];
+  const stderrChunks = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  child.stdout?.on('data', (chunk) => {
+    if (stdoutBytes < START_COMMAND_MAX_BUFFER) {
+      stdoutChunks.push(chunk);
+      stdoutBytes += chunk.length;
+    }
+  });
+  child.stderr?.on('data', (chunk) => {
+    if (stderrBytes < START_COMMAND_MAX_BUFFER) {
+      stderrChunks.push(chunk);
+      stderrBytes += chunk.length;
+    }
+  });
+
+  let timedOut = false;
+  let spawnError = null;
+  let escalationTimer = null;
+  const killTree = () => {
+    if (!child.pid) return;
+    if (process.platform === 'win32') {
+      try {
+        spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+      } catch {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+      return;
+    }
+    try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+    escalationTimer = setTimeout(() => {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+    }, 1000);
+    escalationTimer.unref?.();
+  };
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    killTree();
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+
+  child.once('error', (error) => { spawnError = error; });
+  child.once('close', (code, signal) => {
+    clearTimeout(timeoutTimer);
+    if (escalationTimer) clearTimeout(escalationTimer);
+    resolve({
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+      code,
+      signal,
+      timedOut,
+      error: spawnError,
+    });
+  });
+});
+
 const runWorktreeStartCommand = async (directory, command) => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
   const timeoutMs = worktreeStartCommandTimeoutMs();
-  const startedAt = Date.now();
-  const failureMessage = (error) => (
-    error?.killed === true && error?.signal === 'SIGKILL' && Date.now() - startedAt >= timeoutMs
-      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
-      : parseGitErrorText(error)
-  );
+  const env = await buildGitEnv(directory);
+  const { stdout, stderr, code, timedOut, error } = process.platform === 'win32'
+    ? await execWorktreeStartCommand('cmd', ['/c', text], { cwd: directory, env, timeoutMs })
+    : await execWorktreeStartCommand('bash', ['-lc', text], { cwd: directory, env, timeoutMs });
 
-  if (process.platform === 'win32') {
-    const result = await execFileAsync('cmd', ['/c', text], {
-      cwd: directory,
-      env: await buildGitEnv(directory),
-      windowsHide: true,
-      maxBuffer: 20 * 1024 * 1024,
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-    }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
-      success: false,
-      stdout: error?.stdout,
-      stderr: error?.stderr,
-      message: failureMessage(error),
-    }));
-    return result;
+  if (!timedOut && !error && code === 0) {
+    return { success: true, stdout, stderr };
   }
-
-  const result = await execFileAsync('bash', ['-lc', text], {
-    cwd: directory,
-    env: await buildGitEnv(directory),
-    maxBuffer: 20 * 1024 * 1024,
-    timeout: timeoutMs,
-    killSignal: 'SIGKILL',
-  }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
+  return {
     success: false,
-    stdout: error?.stdout,
-    stderr: error?.stderr,
-    message: failureMessage(error),
-  }));
-  return result;
+    stdout,
+    stderr,
+    message: timedOut
+      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
+      : parseGitErrorText({ stdout, stderr, message: error?.message || `Command failed: ${text}` }),
+  };
 };
 
 // OpenCode owns its own project/sandbox registry. It records a worktree as a

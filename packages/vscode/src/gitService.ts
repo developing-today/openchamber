@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
+import { spawnOwnedProcess } from './owned-process';
 import { readConfig } from './opencodeConfig';
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
 import { resolveWorktreeDirectory } from './worktree-directory';
@@ -1565,53 +1566,56 @@ const runWorktreeStartCommand = async (directory: string, command: string): Prom
     return { success: true };
   }
   const timeoutMs = worktreeStartCommandTimeoutMs();
-  const startedAt = Date.now();
-  const failureMessage = (error: { killed?: boolean; signal?: string; message?: string; stderr?: string; stdout?: string }): string => (
-    error?.killed === true && error?.signal === 'SIGKILL' && Date.now() - startedAt >= timeoutMs
-      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
-      : String(error?.message || error?.stderr || error?.stdout || 'Failed to run start command').trim()
-  );
-
   const env = await buildGitEnv();
-  if (process.platform === 'win32') {
-    try {
-      const { stdout, stderr } = await execFileAsync('cmd', ['/c', text], {
-        cwd: directory,
-        env,
-        maxBuffer: 20 * 1024 * 1024,
-        timeout: timeoutMs,
-        killSignal: 'SIGKILL',
-      });
-      return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
-    } catch (error) {
-      const err = error as { stdout?: string; stderr?: string; message?: string; killed?: boolean; signal?: string };
-      return {
-        success: false,
-        stdout: err.stdout,
-        stderr: err.stderr,
-        message: failureMessage(err),
-      };
-    }
-  }
 
-  try {
-    const { stdout, stderr } = await execFileAsync('bash', ['-lc', text], {
-      cwd: directory,
-      env,
-      maxBuffer: 20 * 1024 * 1024,
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-    });
-    return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
-  } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; message?: string; killed?: boolean; signal?: string };
-    return {
-      success: false,
-      stdout: err.stdout,
-      stderr: err.stderr,
-      message: failureMessage(err),
-    };
+  // The command runs as an owned process (its own POSIX group, taskkill tree
+  // on Windows) so a timeout ends the whole tree: killing only the shell left
+  // the command's descendants running after the bootstrap moved on (#868).
+  // Termination is awaited, so the failure result returns only once the tree
+  // is gone.
+  const { child, closed, terminate } = process.platform === 'win32'
+    ? spawnOwnedProcess('cmd', ['/c', text], { cwd: directory, env })
+    : spawnOwnedProcess('bash', ['-lc', text], { cwd: directory, env });
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  const MAX_BUFFER = 20 * 1024 * 1024;
+  child.stdout?.on('data', (chunk: Buffer) => {
+    if (stdoutBytes < MAX_BUFFER) {
+      stdoutChunks.push(chunk);
+      stdoutBytes += chunk.length;
+    }
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    if (stderrBytes < MAX_BUFFER) {
+      stderrChunks.push(chunk);
+      stderrBytes += chunk.length;
+    }
+  });
+
+  let timedOut = false;
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    void terminate().catch(() => {});
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+  const { code, error } = await closed;
+  clearTimeout(timeoutTimer);
+  const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+  const stderr = Buffer.concat(stderrChunks).toString('utf8');
+
+  if (!timedOut && !error && code === 0) {
+    return { success: true, stdout, stderr };
   }
+  return {
+    success: false,
+    stdout,
+    stderr,
+    message: timedOut
+      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
+      : String(error?.message || stderr || stdout || 'Failed to run start command').trim(),
+  };
 };
 
 // OpenCode owns its own project/sandbox registry and records a worktree as a
