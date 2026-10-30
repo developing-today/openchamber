@@ -72,7 +72,9 @@ describe('override store', () => {
       const corrupt = '{"version":1,"overrides":[{"id":"a","action":"avoid"';
       fs.writeFileSync(store.overridesFile, corrupt);
       expect(store.list()).toEqual([]);
-      const preservedFile = `${store.overridesFile}.corrupt-5000`;
+      const preservedName = fs.readdirSync(dir).find((name) => name.startsWith('route-overrides.json.corrupt-5000-'));
+      expect(preservedName).toBeTruthy();
+      const preservedFile = path.join(dir, preservedName);
       expect(fs.readFileSync(preservedFile, 'utf8')).toBe(corrupt);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(preservedFile), expect.anything());
       // A later save lands in the real file; the corrupt bytes stay preserved.

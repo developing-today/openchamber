@@ -47,7 +47,18 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
   // defaults: move its bytes aside before any later write can overwrite
   // them, and name the preserved copy so the loss is recoverable.
   const preserveCorruptFile = (error) => {
-    const preservedFile = `${file}.corrupt-${Date.now()}`;
+    // The suffix must be collision-proof: a timestamp alone can repeat, and
+    // rename would silently replace an earlier preserved copy.
+    let preservedFile = null;
+    for (let attempt = 0; attempt < 10 && preservedFile === null; attempt += 1) {
+      const candidate = `${file}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+      if (!fs.existsSync(candidate)) preservedFile = candidate;
+    }
+    if (preservedFile === null) {
+      console.warn('Failed to read route settings file:', error);
+      console.warn('Failed to preserve the unreadable route settings file: every preserved-file name collided');
+      return false;
+    }
     try {
       renameSyncWithRetry((from, to) => fs.renameSync(from, to), file, preservedFile);
       console.warn(`Failed to read route settings file: preserved the unreadable file at ${preservedFile}:`, error);
@@ -59,17 +70,23 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
     }
   };
 
+  // 'none' when no corrupt file is in the way, 'preserved' when one was moved
+  // aside, 'failed' when one is present but could not be preserved — a write
+  // must not overwrite an unpreserved corrupt file. Validity is the read
+  // path's validity: JSON that parses but cannot be normalized (e.g. `null`)
+  // is just as corrupt here as unparseable JSON.
   const preserveCorruptFileIfPresent = () => {
     let raw;
     try {
       raw = fs.readFileSync(file, 'utf8');
     } catch {
-      return;
+      return 'none';
     }
     try {
-      JSON.parse(raw);
+      normalizeSettings(JSON.parse(raw));
+      return 'none';
     } catch (error) {
-      preserveCorruptFile(error);
+      return preserveCorruptFile(error) ? 'preserved' : 'failed';
     }
   };
 
@@ -94,7 +111,9 @@ export const createSettingsStore = ({ file = resolveSettingsFile() } = {}) => {
   const write = (input) => {
     const next = normalizeSettings(input);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    preserveCorruptFileIfPresent();
+    if (preserveCorruptFileIfPresent() === 'failed') {
+      throw new Error(`Refusing to overwrite the unreadable route settings file at ${file}: it could not be preserved`);
+    }
     const temporaryFile = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
     try {
       fs.writeFileSync(temporaryFile, JSON.stringify(next, null, 2));

@@ -128,6 +128,23 @@ describe('route settings', () => {
     }
   });
 
+  it('preserves a settings file that parses but cannot be normalized before a write overwrites it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
+      const file = path.join(dir, 'route-settings.json');
+      fs.writeFileSync(file, 'null');
+      const store = createSettingsStore({ file });
+      const saved = store.write({ learnAfter: 5 });
+      expect(store.read()).toEqual(saved);
+      const preserved = fs.readdirSync(dir).filter((name) => name.startsWith('route-settings.json.corrupt-'));
+      expect(preserved).toHaveLength(1);
+      expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe('null');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('defaults a missing or unreadable file and round-trips a saved one', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
     const store = createSettingsStore({ file: path.join(dir, 'route-settings.json') });

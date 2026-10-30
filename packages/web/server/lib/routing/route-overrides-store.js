@@ -55,7 +55,18 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
   // empty store: move its bytes aside before any later save can overwrite
   // them, and name the preserved copy so the loss is recoverable.
   const preserveCorruptFile = (error) => {
-    const preservedFile = `${overridesFile}.corrupt-${now()}`;
+    // The suffix must be collision-proof: a timestamp alone can repeat, and
+    // rename would silently replace an earlier preserved copy.
+    let preservedFile = null;
+    for (let attempt = 0; attempt < 10 && preservedFile === null; attempt += 1) {
+      const candidate = `${overridesFile}.corrupt-${now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+      if (!fs.existsSync(candidate)) preservedFile = candidate;
+    }
+    if (preservedFile === null) {
+      console.warn('Failed to read route overrides file:', error);
+      console.warn('Failed to preserve the unreadable route overrides file: every preserved-file name collided');
+      return false;
+    }
     try {
       renameSyncWithRetry((from, to) => fs.renameSync(from, to), overridesFile, preservedFile);
       console.warn(`Failed to read route overrides file: preserved the unreadable file at ${preservedFile}:`, error);
@@ -67,17 +78,21 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
     }
   };
 
+  // 'none' when no corrupt file is in the way, 'preserved' when one was moved
+  // aside, 'failed' when one is present but could not be preserved — a save
+  // must not overwrite an unpreserved corrupt file.
   const preserveCorruptFileIfPresent = () => {
     let raw;
     try {
       raw = fs.readFileSync(overridesFile, 'utf8');
     } catch {
-      return;
+      return 'none';
     }
     try {
       JSON.parse(raw);
+      return 'none';
     } catch (error) {
-      preserveCorruptFile(error);
+      return preserveCorruptFile(error) ? 'preserved' : 'failed';
     }
   };
 
@@ -104,7 +119,9 @@ export const createOverrideStore = ({ dataDir = resolveOpenCodeDataDir(), now = 
   const save = (overrides) => {
     const live = overrides.filter((item) => item.until > now());
     fs.mkdirSync(dataDir, { recursive: true });
-    preserveCorruptFileIfPresent();
+    if (preserveCorruptFileIfPresent() === 'failed') {
+      throw new Error(`Refusing to overwrite the unreadable route overrides file at ${overridesFile}: it could not be preserved`);
+    }
     const temporaryFile = `${overridesFile}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
     try {
       fs.writeFileSync(temporaryFile, JSON.stringify({ version: 1, overrides: live }, null, 2));
