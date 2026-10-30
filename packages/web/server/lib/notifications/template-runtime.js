@@ -22,11 +22,25 @@ export const createNotificationTemplateRuntime = (deps) => {
   // OpenCode inside a space for a session of that space (`runtime.js` builds that source).
   const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (...args) => fetch(...args) };
   const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
+  // Bounded like the step-meta caches in runtime.js: without a cap these
+  // maps keep one entry for every host session ever seen, for the life of
+  // the process.
+  const SESSION_CACHE_LIMIT = 500;
 
   const cachedZenModels = { models: [] };
 
   const sessionTitleCache = new Map();
   const sessionInfoCache = new Map();
+
+  // Insert (or refresh) an entry, then evict oldest-first past the limit:
+  // a Map iterates in insertion order, so the first key is the stalest.
+  const setBoundedCacheEntry = (cache, key, value) => {
+    cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > SESSION_CACHE_LIMIT) {
+      cache.delete(cache.keys().next().value);
+    }
+  };
 
   const createTimeoutSignal = (timeoutMs) => {
     const controller = new AbortController();
@@ -184,7 +198,7 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const cacheSessionTitle = (sessionId, title) => {
     if (typeof sessionId === 'string' && sessionId.length > 0 && typeof title === 'string' && title.length > 0) {
-      sessionTitleCache.set(sessionId, title);
+      setBoundedCacheEntry(sessionTitleCache, sessionId, title);
     }
   };
 
@@ -208,8 +222,13 @@ export const createNotificationTemplateRuntime = (deps) => {
 
     const isHost = source === hostSource;
     const cached = isHost ? sessionInfoCache.get(sessionId) : undefined;
-    if (cached && Date.now() - cached.at < SESSION_INFO_CACHE_TTL_MS) {
-      return cached.data;
+    if (cached) {
+      if (Date.now() - cached.at < SESSION_INFO_CACHE_TTL_MS) {
+        return cached.data;
+      }
+      // Expired entries are removed, not merely ignored: left in place they
+      // would still count as retained sessions for the life of the process.
+      sessionInfoCache.delete(sessionId);
     }
 
     try {
@@ -228,7 +247,7 @@ export const createNotificationTemplateRuntime = (deps) => {
       }
       const data = unwrapOpenCodeResponse(await response.json().catch(() => null));
       if (data && typeof data === 'object') {
-        if (isHost) sessionInfoCache.set(sessionId, { data, at: Date.now() });
+        if (isHost) setBoundedCacheEntry(sessionInfoCache, sessionId, { data, at: Date.now() });
         return data;
       }
       return null;
