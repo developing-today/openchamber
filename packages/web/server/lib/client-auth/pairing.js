@@ -1,3 +1,5 @@
+import { renameWithRetry } from '../shared/atomic-rename.js';
+
 const STORE_VERSION = 1;
 const PAIRING_ID_PREFIX = 'pair_';
 const SECRET_BYTES = 32;
@@ -42,14 +44,6 @@ const normalizeAllowedClientKinds = (value) => {
   if (!Array.isArray(value)) return ['mobile', 'desktop'];
   const kinds = value.map(normalizeClientKind).filter(Boolean);
   return kinds.length > 0 ? Array.from(new Set(kinds)) : ['mobile', 'desktop'];
-};
-
-const safeJsonParse = (raw) => {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 };
 
 const constantTimeEqual = (left, right, crypto) => {
@@ -143,19 +137,65 @@ export const createClientPairingRuntime = ({
       : [],
   });
 
-  const readStore = async () => {
+  // A torn or otherwise unparseable file is pairing state, not an empty
+  // store: move its bytes aside before any later write can overwrite them,
+  // and name the preserved copy so the loss is recoverable. Every
+  // readStore caller runs serialized under withStoreMutation, so the
+  // rename here cannot race an in-process write of this store.
+  const preserveCorruptStore = async (error) => {
+    const preservedPath = `${storePath}.corrupt-${Date.now()}`;
     try {
-      const raw = await fsPromises.readFile(storePath, 'utf8');
-      return normalizeStore(safeJsonParse(raw));
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), storePath, preservedPath);
+      console.warn(`Failed to read pairing store: preserved the unreadable file at ${preservedPath}:`, error);
+      return true;
+    } catch (preserveError) {
+      console.warn('Failed to read pairing store:', error);
+      console.warn(`Failed to preserve the unreadable pairing store at ${preservedPath}:`, preserveError);
+      return false;
+    }
+  };
+
+  const readStore = async () => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(storePath, 'utf8');
     } catch (error) {
       if (error?.code === 'ENOENT') return normalizeStore(null);
       throw error;
+    }
+    try {
+      return normalizeStore(JSON.parse(raw));
+    } catch (error) {
+      // A mutation must never overwrite bytes whose preservation just
+      // failed: they are the only copy of the pairing sessions. Abort
+      // instead; the caller can retry once the file is movable.
+      const preserved = await preserveCorruptStore(error);
+      if (!preserved) {
+        throw new Error('Failed to preserve the unreadable pairing store; refusing to overwrite it', { cause: error });
+      }
+      return normalizeStore(null);
     }
   };
 
   const writeStore = async (store) => {
     await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
+    const tempPath = `${storePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      await fsPromises.writeFile(tempPath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
+      await renameWithRetry((from, to) => fsPromises.rename(from, to), tempPath, storePath);
+    } catch (error) {
+      try {
+        if (typeof fsPromises.rm === 'function') {
+          await fsPromises.rm(tempPath, { force: true });
+        } else if (typeof fsPromises.unlink === 'function') {
+          await fsPromises.unlink(tempPath);
+        }
+      } catch {
+        // The write/rename error is the one the caller needs; a failed
+        // temp cleanup must not mask it.
+      }
+      throw error;
+    }
     if (typeof fsPromises.chmod === 'function') {
       await fsPromises.chmod(storePath, 0o600).catch(() => {});
     }

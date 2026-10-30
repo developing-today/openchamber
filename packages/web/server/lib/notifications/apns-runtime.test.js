@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import fsReal from 'node:fs/promises';
+import os from 'node:os';
+import pathReal from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApnsRuntime } from './apns-runtime.js';
@@ -12,6 +15,7 @@ const APNS_CONFIG = { keyId: 'KEY123', teamId: 'TEAM123', p8: P8, bundleId: 'com
 // In-memory fs so add-then-read reflects within a test.
 const createMemoryFs = () => {
   let content = null;
+  const files = new Map();
   return {
     mkdir: vi.fn(async () => {}),
     readFile: vi.fn(async () => {
@@ -22,8 +26,22 @@ const createMemoryFs = () => {
       }
       return content;
     }),
-    writeFile: vi.fn(async (_path, data) => {
+    writeFile: vi.fn(async (target, data) => {
+      files.set(target, data);
       content = data;
+    }),
+    rename: vi.fn(async (from, to) => {
+      if (files.has(from)) {
+        files.set(to, files.get(from));
+        files.delete(from);
+        content = files.get(to);
+      }
+    }),
+    rm: vi.fn(async (target) => {
+      files.delete(target);
+    }),
+    unlink: vi.fn(async (target) => {
+      files.delete(target);
     }),
   };
 };
@@ -452,5 +470,91 @@ describe('apns runtime deadlines (#798)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('apns runtime store durability', () => {
+  const temporaryDirectories = [];
+
+  const makeRealRuntime = async (filePath, fsOverrides = {}) => createApnsRuntime(makeDeps({
+    fsPromises: { ...fsReal, ...fsOverrides },
+    path: pathReal,
+    APNS_TOKENS_FILE_PATH: filePath,
+  }));
+
+  const makeTempStore = async () => {
+    const dir = await fsReal.mkdtemp(pathReal.join(os.tmpdir(), 'openchamber-apns-store-'));
+    temporaryDirectories.push(dir);
+    return { dir, filePath: pathReal.join(dir, 'apns-tokens.json') };
+  };
+
+  afterEach(async () => {
+    await Promise.all(temporaryDirectories.splice(0).map((dir) => fsReal.rm(dir, { recursive: true, force: true })));
+  });
+
+  it('preserves a corrupt tokens file before a later write overwrites it', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { dir, filePath } = await makeTempStore();
+      const corrupt = '{"version":1,"tokensBySession":{"s1":[{"deviceToken":"tok';
+      await fsReal.writeFile(filePath, corrupt, 'utf8');
+      const runtime = await makeRealRuntime(filePath);
+
+      await runtime.addOrUpdateApnsToken('session-1', 'tokenA');
+
+      const preserved = (await fsReal.readdir(dir)).filter((name) => name.includes('.corrupt-'));
+      expect(preserved).toHaveLength(1);
+      expect(await fsReal.readFile(pathReal.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
+      const warnText = warnSpy.mock.calls.map((call) => call.map(String).join(' ')).join('\n');
+      expect(warnText).toContain(preserved[0]);
+      const stored = JSON.parse(await fsReal.readFile(filePath, 'utf8'));
+      expect(stored.version).toBe(1);
+      expect(Object.values(stored.tokensBySession).flat().map((entry) => entry.deviceToken)).toEqual(['tokenA']);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('writes via a temp file renamed into place, never directly to the tokens path', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const { dir, filePath } = await makeTempStore();
+    const writeTargets = [];
+    const renameCalls = [];
+    const runtime = await makeRealRuntime(filePath, {
+      writeFile: async (target, ...rest) => {
+        writeTargets.push(String(target));
+        return fsReal.writeFile(target, ...rest);
+      },
+      rename: async (from, to) => {
+        renameCalls.push([String(from), String(to)]);
+        return fsReal.rename(from, to);
+      },
+    });
+
+    await runtime.addOrUpdateApnsToken('session-1', 'tokenA');
+
+    expect(writeTargets.length).toBeGreaterThan(0);
+    expect(writeTargets).not.toContain(filePath);
+    expect(writeTargets.every((target) => target.startsWith(`${filePath}.tmp-`))).toBe(true);
+    expect(renameCalls).toEqual(writeTargets.map((target) => [target, filePath]));
+    expect(await fsReal.readdir(dir)).toEqual(['apns-tokens.json']);
+  });
+
+  it('leaves the previous valid tokens file intact and no temp behind when the rename fails', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const { dir, filePath } = await makeTempStore();
+    const runtime = await makeRealRuntime(filePath);
+    await runtime.addOrUpdateApnsToken('session-1', 'tokenA');
+    const before = await fsReal.readFile(filePath, 'utf8');
+
+    const failing = await makeRealRuntime(filePath, {
+      rename: async () => {
+        throw new Error('rename failed');
+      },
+    });
+    await expect(failing.addOrUpdateApnsToken('session-2', 'tokenB')).rejects.toThrow('rename failed');
+    expect(await fsReal.readFile(filePath, 'utf8')).toBe(before);
+    expect(await fsReal.readdir(dir)).toEqual(['apns-tokens.json']);
   });
 });
