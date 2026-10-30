@@ -193,6 +193,25 @@ export const createNotificationTriggerRuntime = (deps) => {
   const lastReadyNotificationAt = new Map();
   const lastErrorNotificationAt = new Map();
 
+  // Bounded like the assistant-step caches below: the runtime lives for the
+  // whole process, and a permission key only has to outlive a plausible
+  // re-delivery of the same request, so the oldest entries go first.
+  const NOTIFIED_PERMISSION_REQUEST_LIMIT = 500;
+  const SESSION_NOTIFICATION_COOLDOWN_LIMIT = 500;
+  const rememberNotifiedPermissionRequest = (requestKey) => {
+    notifiedPermissionRequests.add(requestKey);
+    while (notifiedPermissionRequests.size > NOTIFIED_PERMISSION_REQUEST_LIMIT) {
+      notifiedPermissionRequests.delete(notifiedPermissionRequests.values().next().value);
+    }
+  };
+  const rememberSessionNotificationAt = (map, sessionId, now) => {
+    map.delete(sessionId);
+    map.set(sessionId, now);
+    while (map.size > SESSION_NOTIFICATION_COOLDOWN_LIMIT) {
+      map.delete(map.keys().next().value);
+    }
+  };
+
   const sessionParentIdCache = new Map();
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
 
@@ -581,7 +600,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         if (now - lastAt < PUSH_READY_COOLDOWN_MS) {
           return;
         }
-        lastReadyNotificationAt.set(sessionId, now);
+        rememberSessionNotificationAt(lastReadyNotificationAt, sessionId, now);
 
         let title = `${formatMode(info?.mode)} agent is ready`;
         let body = `${formatModelId(info?.modelID)} completed the task`;
@@ -656,7 +675,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         const now = Date.now();
         const lastAt = lastErrorNotificationAt.get(sessionId) ?? 0;
         if (now - lastAt < PUSH_READY_COOLDOWN_MS) return;
-        lastErrorNotificationAt.set(sessionId, now);
+        rememberSessionNotificationAt(lastErrorNotificationAt, sessionId, now);
 
         if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
           return;
@@ -862,7 +881,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       const isAutoAnswered = async () => !spaceId && await (getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
         ?? isSessionAutoAccepting(sessionId, notificationDirectory));
       if (await isAutoAnswered()) {
-        if (requestKey) notifiedPermissionRequests.add(requestKey);
+        if (requestKey) rememberNotifiedPermissionRequest(requestKey);
         return;
       }
 
@@ -875,7 +894,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         pushPermissionDebounceTimers.delete(sessionId);
 
         if (await isAutoAnswered()) {
-          if (requestKey) notifiedPermissionRequests.add(requestKey);
+          if (requestKey) rememberNotifiedPermissionRequest(requestKey);
           return;
         }
 
@@ -932,7 +951,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (requestKey) {
-          notifiedPermissionRequests.add(requestKey);
+          rememberNotifiedPermissionRequest(requestKey);
         }
 
         void fanoutPush(
