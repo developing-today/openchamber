@@ -173,6 +173,70 @@ variant that answers differently stays with its owner.
 - Domain-shaped readers and fetchers (quota, gitlab, proxy): they compose
   these primitives in phase 2 instead of moving here.
 
+## Durable JSON store (design #976 phase 1, #977)
+
+`durable-json-store.js` holds the one read/write contract for the web
+server's JSON state files — the stores whose contents are user data,
+credentials, or provenance. It composes `atomic-rename.js` and adds the
+three pieces the per-store fixes of 2026-10-30 each hand-wrote: a strict
+reader, a preserve-aside helper, and a mode-explicit atomic writer, each
+in async and sync spellings, each taking the caller's fs surface by
+injection. The contract rules:
+
+1. **Three read states, never two.** `readDurableJsonFile` /
+   `readDurableJsonFileSync` answer `missing | valid | malformed`, with
+   the caller's value judgement (`isJsonObject` for an object-shaped
+   store; a parsed value the predicate rejects is `malformed`). A
+   read-only consumer may degrade `malformed` to its empty answer and
+   says so at the call site; a read-modify-write cycle may never seed
+   from a degraded read. An absent or empty file is `missing`; a read
+   failure other than absence throws.
+2. **Malformed is preserved before it is replaced — or the write
+   refuses.** `preserveMalformedJsonFile` /
+   `preserveMalformedJsonFileSync` rename the malformed file to
+   `${file}.corrupt-${Date.now()}-${process.pid}-${random}` — the
+   collision-proof spelling, so two preservations in the same
+   millisecond both survive. The preserve step re-reads and re-judges
+   the on-disk bytes first, re-judges them again after the
+   preserve-name check, and verifies the preserved bytes after the
+   rename — a valid replacement caught in any of those windows is
+   restored to the live path atomically (hard link, never an
+   overwriting rename) and answers `replaced`, and one that cannot be
+   restored safely answers `failed`, so a concurrent writer's valid
+   replacement is never renamed away; the result names the outcome (`preserved`,
+   `replaced`, `missing`, `failed`), and `failed` is fail-closed: the
+   caller must refuse its write. Raw parse errors are never logged or
+   attached to a result — they can quote file contents.
+3. **Writes are atomic and permission-explicit.**
+   `writeDurableJsonFile` / `writeDurableJsonFileSync` require a stated
+   integer `mode` (0o600 for secret-bearing stores) and write a unique
+   temp file (pid + time + random) in the same directory, renamed over
+   the destination via `renameWithRetry` / `renameSyncWithRetry`.
+4. **Both clock styles, fs injection preserved.** Async stores that
+   receive `fsPromises` and sync stores both use the same contract by
+   passing their fs surface in `options.fs`; no store loses its test
+   seam, and the module imports nothing beyond platform APIs and
+   `atomic-rename.js`.
+5. **Divergent policies stay local and are named** (see below). The
+   contract governs stores whose loss is the failure; policies that
+   answer differently for real inputs are recorded, not redefined.
+
+### What stays out
+
+- `relay/key-store.js` — throw-and-stop: an identity file a human must
+  repair ("fix or remove it, then retry"). Not migrated, not redefined.
+- `agent-memory/runtime.js` — malformed is a failure and throws.
+- `walkthrough/store.js` and the other caches (including
+  `guests/service-registry.js`'s per-record drop) — corrupt is a cache
+  miss and never throws; losing a cache is free.
+- `opencode/settings-runtime.js` — the multi-writer shared
+  `settings.json` with migration semantics of its own; folding it in is
+  a settings-file decision, not a spelling migration. It is excluded
+  from the phase-2 migration (#978) by name.
+- Store shapes, defaults, serialization formatting, and domain error
+  surfaces: the primitive knows paths, bytes, JSON and modes only, and
+  callers keep the rest.
+
 ## Notes for contributors
 
 - Add a predicate here only when two or more feature modules need the exact
