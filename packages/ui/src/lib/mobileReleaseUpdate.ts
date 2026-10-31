@@ -39,14 +39,17 @@ type ReleaseFetch = (
   init: { headers: { Accept: string }; signal: AbortSignal },
 ) => Promise<Response>;
 
-/** Numeric parts of a version string: "v2.3.3" -> [2, 3, 3]. Null when any part is not a number. */
-function versionParts(version: string): number[] | null {
-  const core = version.trim().replace(/^v/, '').split('-')[0];
+/** Parsed release version: numeric parts plus whether a prerelease suffix is present ("v2.3.3-beta.1" -> parts [2, 3, 3], prerelease true; a "+build" suffix is ignored). Null when any numeric part is not a plain number. */
+function versionParts(version: string): { parts: number[]; prerelease: boolean } | null {
+  // Build metadata never affects ordering: "2.3.3+45" is "2.3.3".
+  const withoutBuild = version.trim().replace(/^v/, '').split('+')[0];
+  const prereleaseIndex = withoutBuild.indexOf('-');
+  const core = prereleaseIndex >= 0 ? withoutBuild.slice(0, prereleaseIndex) : withoutBuild;
   if (!core) return null;
   const rawParts = core.split('.');
   // Number() alone is too lenient: '' parses as 0, '0x10' as 16, '1e3' as 1000.
   if (rawParts.some((part) => !/^\d+$/.test(part))) return null;
-  return rawParts.map((part) => Number(part));
+  return { parts: rawParts.map((part) => Number(part)), prerelease: prereleaseIndex >= 0 };
 }
 
 /**
@@ -55,14 +58,17 @@ function versionParts(version: string): number[] | null {
  * unparseable version never claims an update).
  */
 export function compareReleaseVersions(left: string, right: string): number {
-  const leftParts = versionParts(left);
-  const rightParts = versionParts(right);
-  if (!leftParts || !rightParts) return 0;
-  const length = Math.max(leftParts.length, rightParts.length);
+  const leftVersion = versionParts(left);
+  const rightVersion = versionParts(right);
+  if (!leftVersion || !rightVersion) return 0;
+  const length = Math.max(leftVersion.parts.length, rightVersion.parts.length);
   for (let index = 0; index < length; index += 1) {
-    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    const diff = (leftVersion.parts[index] ?? 0) - (rightVersion.parts[index] ?? 0);
     if (diff !== 0) return diff > 0 ? 1 : -1;
   }
+  // Same numeric release: a prerelease is older than the release itself,
+  // matching the server copy's pinned semantics.
+  if (leftVersion.prerelease !== rightVersion.prerelease) return leftVersion.prerelease ? -1 : 1;
   return 0;
 }
 
