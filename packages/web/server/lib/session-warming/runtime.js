@@ -15,6 +15,7 @@ const WARMING_DURATION_STEPS = [30, 60, 120, 180];
 /** How long after a session's last turn it is kept warm, until Settings picks another step. */
 export const DEFAULT_WARMING_MINUTES = 60;
 const MINUTE_MS = 60 * 1000;
+export const ACTIVITY_LIMIT = 500;
 /**
  * How long to wait before asking OpenCode again when it could not tell whether
  * a session is running: right after a server start OpenCode is still coming up.
@@ -96,6 +97,18 @@ export const createSessionWarmingRuntime = ({
    * its turn ended. Cleared when the stream reconnects: a gap may hide changes.
    */
   const activity = new Map(); // sessionId → { busy, idleAt }
+
+  const rememberActivity = (sessionId, state) => {
+    activity.delete(sessionId);
+    activity.set(sessionId, state);
+    if (activity.size <= ACTIVITY_LIMIT) return;
+    for (const key of activity.keys()) {
+      if (!sessions.has(key)) {
+        activity.delete(key);
+        if (activity.size <= ACTIVITY_LIMIT) break;
+      }
+    }
+  };
 
   const snapshot = () => ({
     revision,
@@ -239,7 +252,7 @@ export const createSessionWarmingRuntime = ({
       armTimer(sessionId, entry, now() + STATUS_RETRY_MS, (next) => settle(sessionId, entry, next));
       return;
     }
-    activity.set(sessionId, { busy, idleAt: null });
+    rememberActivity(sessionId, { busy, idleAt: null });
     if (busy) {
       cancelTimer(entry);
       if (entry.warmUntil !== null) {
@@ -324,7 +337,7 @@ export const createSessionWarmingRuntime = ({
     const busy = parsed.data.properties.status.type !== 'idle';
     const previous = activity.get(sessionId);
     if (previous?.busy === busy) return;
-    activity.set(sessionId, { busy, idleAt: busy ? previous?.idleAt ?? null : now() });
+    rememberActivity(sessionId, { busy, idleAt: busy ? previous?.idleAt ?? null : now() });
 
     const entry = sessions.get(sessionId);
     if (!entry) return;
@@ -416,5 +429,6 @@ export const createSessionWarmingRuntime = ({
     setSessionWarm,
     isSessionWarm,
     stop,
+    activity,
   };
 };

@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSessionWarmingRuntime, DEFAULT_WARMING_MINUTES, WARMING_INTERVAL_MS } from './runtime.js';
+import { ACTIVITY_LIMIT, createSessionWarmingRuntime, DEFAULT_WARMING_MINUTES, WARMING_INTERVAL_MS } from './runtime.js';
 
 const SESSION = 'ses_warm_1';
 const DIRECTORY = '/repo';
@@ -297,5 +297,79 @@ describe('session warming runtime', () => {
     runtime.start();
     expect(runtime.snapshot()).toMatchObject({ enabled: false, sessions: [] });
     expect(fs.readdirSync(dataDir).some((name) => name.startsWith('session-warming.json.corrupt-'))).toBe(true);
+  });
+
+  it('bounds the activity map at 500 entries with oldest-first eviction and preserves warmed sessions', async () => {
+    const { runtime, fetchImpl } = makeRuntime();
+    runtime.setEnabled(true);
+
+    // Warm one session so it lives in sessions and activity.
+    runtime.processPayload(status('idle', SESSION));
+    runtime.setSessionWarm(SESSION, DIRECTORY, true);
+    expect(runtime.activity.has(SESSION)).toBe(true);
+
+    // Drive status payloads for more than 500 distinct non-warmed sessions.
+    for (let i = 0; i < 550; i += 1) {
+      runtime.processPayload(status('idle', `ses_unwarmed_${i}`));
+    }
+
+    // Map is bounded at ACTIVITY_LIMIT (500).
+    expect(runtime.activity.size).toBe(ACTIVITY_LIMIT);
+
+    // Warmed session's entry survives.
+    expect(runtime.activity.has(SESSION)).toBe(true);
+
+    // Oldest non-warmed entries were evicted (551 total seen - 500 cap = 51 evicted: 0..50).
+    for (let i = 0; i < 51; i += 1) {
+      expect(runtime.activity.has(`ses_unwarmed_${i}`)).toBe(false);
+    }
+    for (let i = 51; i < 550; i += 1) {
+      expect(runtime.activity.has(`ses_unwarmed_${i}`)).toBe(true);
+    }
+
+    // Behaviour for the warmed session is unchanged: pings fire on interval.
+    await vi.advanceTimersByTimeAsync(WARMING_INTERVAL_MS);
+    expect(pings(fetchImpl)).toHaveLength(1);
+  });
+
+  it('never evicts entries for warmed sessions even if every entry is warmed and exceeds the cap', () => {
+    const { runtime } = makeRuntime();
+    runtime.setEnabled(true);
+
+    for (let i = 0; i < ACTIVITY_LIMIT + 5; i += 1) {
+      const id = `ses_warm_pool_${i}`;
+      runtime.setSessionWarm(id, DIRECTORY, true);
+      runtime.processPayload(status('busy', id));
+    }
+
+    expect(runtime.activity.size).toBe(ACTIVITY_LIMIT + 5);
+    for (let i = 0; i < ACTIVITY_LIMIT + 5; i += 1) {
+      expect(runtime.activity.has(`ses_warm_pool_${i}`)).toBe(true);
+    }
+
+    // An unwarmed session does not evict any warmed session.
+    runtime.processPayload(status('busy', 'ses_unwarmed_x'));
+    expect(runtime.activity.size).toBe(ACTIVITY_LIMIT + 5);
+    expect(runtime.activity.has('ses_unwarmed_x')).toBe(false);
+    expect(runtime.activity.has('ses_warm_pool_0')).toBe(true);
+  });
+
+  it('applies oldest-first eviction on the settle write path', async () => {
+    const { runtime } = makeRuntime({ active: { ses_settle_target: { type: 'idle' } } });
+    runtime.setEnabled(true);
+
+    for (let i = 0; i < ACTIVITY_LIMIT; i += 1) {
+      runtime.processPayload(status('idle', `ses_fill_${i}`));
+    }
+    expect(runtime.activity.size).toBe(ACTIVITY_LIMIT);
+
+    // Settle target session state was never seen in the stream; warming triggers settle.
+    runtime.setSessionWarm('ses_settle_target', DIRECTORY, true);
+    await runDue();
+
+    expect(runtime.activity.size).toBe(ACTIVITY_LIMIT);
+    expect(runtime.activity.has('ses_settle_target')).toBe(true);
+    expect(runtime.activity.has('ses_fill_0')).toBe(false);
+    expect(runtime.activity.has('ses_fill_1')).toBe(true);
   });
 });
