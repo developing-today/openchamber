@@ -107,7 +107,7 @@ afterEach(() => {
 describe('quota provider registry', () => {
   it('exposes google provider configuration helpers through the provider module', () => {
     expect(google.providerId).toBe('google');
-    expect(google.providerName).toBe('Google');
+    expect(google.providerName).toBe('Google (Code Assist, per-model)');
     expect(typeof google.isConfigured).toBe('function');
     expect(typeof google.resolveGoogleAuthSources).toBe('function');
   });

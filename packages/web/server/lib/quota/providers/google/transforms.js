@@ -12,7 +12,6 @@ import {
   toUsageWindow
 } from '../../utils/index.js';
 
-const GOOGLE_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
 
 export const parseGoogleRefreshToken = (rawRefreshToken) => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
@@ -28,7 +27,14 @@ export const parseGoogleRefreshToken = (rawRefreshToken) => {
   };
 };
 
-const resolveGoogleWindow = () => ({ label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS });
+// This endpoint is the per-model projection of the Code Assist
+// subscription the Antigravity provider reads (same cloudcode-pa
+// backend, #1042): its buckets are not a separate daily pool, and the
+// payload carries no window duration - only each bucket's real
+// resetTime. The window therefore claims no duration; presenting a
+// fabricated 'daily'/86400 window here double-counted the one
+// subscription as independent headroom.
+const resolveGoogleWindow = () => ({ label: 'per-model', seconds: null });
 
 export const transformQuotaBucket = (bucket, sourceId) => {
   const modelId = asNonEmptyString(bucket?.modelId);
