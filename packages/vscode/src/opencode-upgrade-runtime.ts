@@ -81,7 +81,9 @@ const fetchLatestVersion = async (): Promise<string> => {
   }
   // SAFETY: the registry answers a packument; only `version` is read, and it
   // is checked to be a string before use.
-  const payload = JSON.parse(bounded.text) as { version?: unknown };
+  // The bounded read is raw text, so strip a leading BOM first: the
+  // response.json() this replaced dropped it in its UTF-8 decode.
+  const payload = JSON.parse(bounded.text.replace(/^\uFEFF/, '')) as { version?: unknown };
   const version = typeof payload.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
   if (!version) throw new Error('Failed to resolve latest OpenCode version');
   return version;

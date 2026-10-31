@@ -220,4 +220,17 @@ describe('VS Code OpenCode upgrade status registry body cap (#1051)', () => {
     assert.equal(status.latestVersion, '2.0.23');
     assert.equal(status.available, true);
   });
+
+  test('accepts a registry body with a leading UTF-8 BOM, as response.json() did', async () => {
+    const body = '\uFEFF' + JSON.stringify({ version: '2.0.23' });
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/api/info')) return Response.json({ version: '2.0.1', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+      return new Response(body, { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+    assert.equal(status.latestVersion, '2.0.23');
+    assert.equal(status.available, true);
+  });
 });
