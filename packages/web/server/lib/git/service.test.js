@@ -68,6 +68,8 @@ import {
   getUntrackedDiffs,
   listUntrackedPaths,
   getFileDiff,
+  MAX_FILE_DIFF_WORKING_TREE_BYTES,
+  readFileDiffWorkingTreeFile,
   hasLocalIdentity,
   validateWorktreeCreate,
   parseBranchCreationSource,
@@ -6638,5 +6640,97 @@ describe.runIf(canRunGit())('ensureOpenCodeProjectId', () => {
     const id = await ensureOpenCodeProjectId(worktree, separateGitDir);
     expect(fs.readFileSync(path.join(separateGitDir, 'opencode'), 'utf8')).toBe(id);
     await expect(ensureOpenCodeProjectId(worktree, separateGitDir)).resolves.toBe(id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File-diff working-tree size cap (#1054)
+// ---------------------------------------------------------------------------
+
+describe('file-diff working-tree size cap', () => {
+  const CAP = MAX_FILE_DIFF_WORKING_TREE_BYTES;
+
+  // A sparse file with a text prefix past both binary sniffs (the 8 KiB
+  // prefix sniff in service.js and git's own first-bytes check), extended
+  // with zero bytes to the requested size without writing it all out.
+  const makeSizedFile = (tmpDir, name, size) => {
+    const filePath = path.join(tmpDir, name);
+    fs.writeFileSync(filePath, 'a'.repeat(9000));
+    fs.truncateSync(filePath, size);
+    return filePath;
+  };
+
+  const commitSmallThenResize = async (name, size) => {
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, name), 'small\n');
+    await git.add(name);
+    await git.commit('Initial');
+    makeSizedFile(tmpDir, name, size);
+    return tmpDir;
+  };
+
+  it('rejects an over-cap working-tree text file with file_too_large', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP + 1);
+    await expect(getFileDiff(tmpDir, { path: 'big.txt' })).rejects.toMatchObject({ code: 'file_too_large' });
+    await expect(getFileDiff(tmpDir, { path: 'big.txt' })).rejects.toThrow('50 MiB');
+  });
+
+  it('rejects an over-cap working-tree image file with file_too_large', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.png', CAP + 1);
+    await expect(getFileDiff(tmpDir, { path: 'big.png' })).rejects.toMatchObject({ code: 'file_too_large' });
+  });
+
+  it('answers 413 with the file_too_large code from the file-diff route', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP + 1);
+    const routes = new Map();
+    registerGitRoutes({ get: (url, handler) => routes.set(url, handler), post() {}, put() {}, delete() {} });
+    let status = 200;
+    let body;
+    await routes.get('/api/git/file-diff')({ query: { directory: tmpDir, path: 'big.txt' } }, {
+      status(value) { status = value; return this; },
+      json(value) { body = value; },
+    });
+    expect(status).toBe(413);
+    expect(body.code).toBe('file_too_large');
+    expect(body.error).toContain('50 MiB');
+  });
+
+  it('diffs a working-tree text file at exactly the cap', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP);
+    const result = await getFileDiff(tmpDir, { path: 'big.txt' });
+    expect(result.original).toBe('small\n');
+    expect(result.modified).toHaveLength(CAP);
+    expect(result.isBinary).toBe(false);
+  });
+
+  it('bounds the read itself, so a file past the limit is rejected on read', async () => {
+    const tmpDir = createTempDir();
+    const filePath = path.join(tmpDir, 'growing.txt');
+    fs.writeFileSync(filePath, 'x'.repeat(128));
+    await expect(readFileDiffWorkingTreeFile(filePath, 'growing.txt', 128)).resolves.toHaveLength(128);
+    await expect(readFileDiffWorkingTreeFile(filePath, 'growing.txt', 64)).rejects.toMatchObject({ code: 'file_too_large' });
+  });
+
+  it('keeps normal small-file diffs unchanged', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'before\n');
+    await git.add('file.txt');
+    await git.commit('Initial');
+    fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'after\n');
+    const result = await getFileDiff(tmpDir, { path: 'file.txt' });
+    expect(result).toMatchObject({ original: 'before\n', modified: 'after\n', isBinary: false });
+  });
+
+  it('keeps the staged path outside the working-tree cap', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP + 1);
+    runGit(tmpDir, ['add', 'big.txt']);
+    const result = await getFileDiff(tmpDir, { path: 'big.txt', staged: true });
+    expect(result.modified).toHaveLength(CAP + 1);
   });
 });

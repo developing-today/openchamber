@@ -3956,6 +3956,45 @@ const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bm
 
 const BINARY_SNIFF_BYTES = 8192;
 
+// Working-tree reads for a file diff are capped at 50 MiB, the same limit
+// the image `git show` reads in getFileDiff already carry. The route maps
+// this code to HTTP 413 and the client shows the message as the diff error.
+export const MAX_FILE_DIFF_WORKING_TREE_BYTES = 50 * 1024 * 1024;
+const FILE_DIFF_TOO_LARGE_CODE = 'file_too_large';
+
+const createFileDiffTooLargeError = (filePath) => Object.assign(
+  new Error(`File is too large to diff: ${filePath} exceeds the 50 MiB working-tree limit for file diffs`),
+  { code: FILE_DIFF_TOO_LARGE_CODE },
+);
+
+// Bounded read for the working-tree side of a file diff. The caller stats
+// first, but a file can grow between that stat and the read, so this read
+// itself stops at maxBytes and rejects instead of buffering past the cap.
+export async function readFileDiffWorkingTreeFile(absolutePath, filePath, maxBytes = MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+  const handle = await fsp.open(absolutePath, 'r');
+  try {
+    const chunks = [];
+    let total = 0;
+    let position = 0;
+    for (;;) {
+      const chunk = Buffer.alloc(64 * 1024);
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
+      if (bytesRead <= 0) {
+        break;
+      }
+      total += bytesRead;
+      if (total > maxBytes) {
+        throw createFileDiffTooLargeError(filePath);
+      }
+      position += bytesRead;
+      chunks.push(chunk.subarray(0, bytesRead));
+    }
+    return Buffer.concat(chunks, total);
+  } finally {
+    await handle.close();
+  }
+}
+
 function isImageFile(filePath) {
   const ext = filePath.split('.').pop()?.toLowerCase();
   return IMAGE_EXTENSIONS.includes(ext || '');
@@ -4063,6 +4102,22 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     };
   }
 
+  // Cap check before the HEAD read and before any working-tree read, so an
+  // over-cap file costs one stat. A missing file keeps the deleted-file
+  // flow below (original from HEAD, empty modified).
+  let workingTreeStat = null;
+  if (!staged && !isSymbolicLink) {
+    workingTreeStat = await fsp.stat(absolutePath).catch((error) => {
+      if (error?.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    });
+    if (workingTreeStat && workingTreeStat.isFile() && workingTreeStat.size > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+      throw createFileDiffTooLargeError(filePath);
+    }
+  }
+
   if (!isImage && !isSymbolicLink) {
     const isBinaryBySniff = await looksBinaryBySniff(absolutePath);
     const isBinary = isBinaryBySniff || (await isBinaryDiff(repoRoot, repoPath, staged));
@@ -4120,7 +4175,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
       if (isSymbolicLink) {
         modified = await fsp.readlink(absolutePath);
       } else {
-        const stat = await fsp.stat(absolutePath);
+        const stat = workingTreeStat ?? await fsp.stat(absolutePath);
         if (!stat.isFile()) {
           return {
             original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
@@ -4129,16 +4184,19 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
             isBinary: false,
           };
         }
+        const buffer = await readFileDiffWorkingTreeFile(absolutePath, filePath);
         if (isImage) {
           // For images, read as binary and convert to data URL
-          const buffer = await fsp.readFile(absolutePath);
           modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
         } else {
-          modified = await fsp.readFile(absolutePath, 'utf8');
+          modified = buffer.toString('utf8');
         }
       }
     }
   } catch (error) {
+    if (error?.code === FILE_DIFF_TOO_LARGE_CODE) {
+      throw error;
+    }
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
       modified = '';
     } else {
