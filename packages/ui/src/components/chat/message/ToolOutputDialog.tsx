@@ -30,7 +30,7 @@ import { getToolIcon } from './parts/toolPresentation';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
+import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, getMermaidRemoteSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
 
 interface ToolOutputDialogProps {
@@ -606,7 +606,21 @@ const MermaidPreviewDialog: React.FC<{
     const [diagramAspectRatio, setDiagramAspectRatio] = React.useState<number | null>(null);
     const viewport = usePreviewViewport(popup.open);
     const requestIdRef = React.useRef(0);
+    const remoteLoadAbortRef = React.useRef<AbortController | null>(null);
     const mermaidPreviewRef = React.useRef<HTMLDivElement | null>(null);
+
+    // A remote Mermaid load must not outlive the dialog or a newer load: the
+    // request-id guard only discards stale results, it never cancels (#931).
+    React.useEffect(() => {
+        if (!popup.open) {
+            remoteLoadAbortRef.current?.abort();
+            remoteLoadAbortRef.current = null;
+        }
+        return () => {
+            remoteLoadAbortRef.current?.abort();
+            remoteLoadAbortRef.current = null;
+        };
+    }, [popup.open]);
 
     const normalizeFilePath = React.useCallback((rawPath: string): string | null => {
         const input = rawPath.trim();
@@ -660,6 +674,8 @@ const MermaidPreviewDialog: React.FC<{
         const target = popup.mermaid;
         const requestId = nextMermaidLoadRequestId(requestIdRef.current);
         requestIdRef.current = requestId;
+        remoteLoadAbortRef.current?.abort();
+        remoteLoadAbortRef.current = null;
 
         if (!target?.url) {
             setStatus('error');
@@ -702,13 +718,9 @@ const MermaidPreviewDialog: React.FC<{
             if (!resolvedUrl || (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:')) {
                 sourcePromise = Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.unsupportedUrlProtocol'));
             } else {
-                sourcePromise = fetch(resolvedUrl.toString())
-                    .then((response) => {
-                        if (!response.ok) {
-                            return Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.loadFailedWithStatus', { status: response.status }));
-                        }
-                        return response.text();
-                    });
+                const abortController = new AbortController();
+                remoteLoadAbortRef.current = abortController;
+                sourcePromise = getMermaidRemoteSourcePromise(resolvedUrl.toString(), { signal: abortController.signal });
             }
         }
 
