@@ -1,5 +1,5 @@
 import { Gitlab } from '@gitbeaker/rest';
-import { readBoundedResponseText } from '../shared/response-body.js';
+import { readBoundedResponseBytes, readBoundedResponseText } from '../shared/response-body.js';
 import { isPlainObject, isString } from './validation.js';
 
 // GitBeaker's bundled requester follows redirects with the credential header
@@ -21,6 +21,14 @@ const GITLAB_REQUEST_TIMEOUT_MS = 10_000;
 // answer from a user-configured, possibly self-managed instance.
 const ERROR_DETAIL_MAX_BYTES = 1_024;
 const ERROR_DETAIL_EXCERPT_CHARS = 200;
+// Success answers are read whole and parsed, so that read is capped
+// while it streams in instead of buffering an unbounded answer from a
+// user-configured, possibly self-managed instance. The callers are
+// paginated (perPage <= 100) list and detail answers plus
+// RepositoryFiles.showRaw raw files, which fit comfortably under
+// 16 MiB, and the cap matches the 16 MiB bound the models.dev and npm
+// success reads set under #1006.
+const SUCCESS_BODY_MAX_BYTES = 16 * 1024 * 1024;
 
 const decamelize = (key) => key.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase();
 
@@ -49,13 +57,28 @@ function formatQuery(searchParams) {
   return params.join('&');
 }
 
+const successBodyTooLarge = () => Object.assign(
+  new Error(`GitLab response exceeded ${SUCCESS_BODY_MAX_BYTES} bytes`),
+  { code: 'response_too_large' },
+);
+
 async function parseBody(response, asStream) {
   if (asStream) return response.body;
   if (response.status === 204) return null;
   const contentType = (response.headers.get('content-type') || '').split(';')[0].trim();
-  if (contentType === 'application/json') return (await response.json()) || {};
-  if (contentType.startsWith('text/')) return (await response.text()) || '';
-  return response.blob();
+  if (contentType === 'application/json' || contentType.startsWith('text/')) {
+    const read = await readBoundedResponseText(response, SUCCESS_BODY_MAX_BYTES);
+    if (read.tooLarge) throw successBodyTooLarge();
+    // Response.json()/text() strip a leading UTF-8 BOM; the bounded
+    // reader does not, so strip it here to keep the values callers
+    // see unchanged.
+    const text = read.text.replace(/^\uFEFF/, '');
+    if (contentType === 'application/json') return JSON.parse(text) || {};
+    return text || '';
+  }
+  const read = await readBoundedResponseBytes(response, SUCCESS_BODY_MAX_BYTES);
+  if (read.tooLarge) throw successBodyTooLarge();
+  return new Blob([read.bytes], { type: response.headers.get('content-type') || '' });
 }
 
 async function requestError(request, response) {

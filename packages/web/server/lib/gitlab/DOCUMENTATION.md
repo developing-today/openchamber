@@ -48,6 +48,7 @@ This module owns GitLab instance validation, authentication, remote resolution, 
 - Shared picker and sidebar consumers select GitLab only from a matching repository remote. Self-managed hosts must already appear in source-control instance discovery; unknown hosts are never inferred as GitLab.
 
 - Every request through `client.js` has a deadline: the requester applies the 10s `GITLAB_REQUEST_TIMEOUT_MS` per attempt, combined with the signal GitBeaker supplies, and the downloader applies the same bound per fetch, combined with the route caller's disconnect signal. A deadline abort classifies as `unreachable` through `classifyGitLabFailure`. Read retries apply to a timed-out attempt as they do to 429/502; a mutation that times out is sent once. The downloader bound covers each fetch up to the response headers, and the body it returns streams on without it.
+- Success answers through the requester are read whole under a 16 MiB cap (`SUCCESS_BODY_MAX_BYTES` in `client.js`), enforced while streaming through `../shared/response-body.js`; an over-cap answer fails with `response_too_large` instead of being parsed or returned. The `asStream` path and the downloader keep streaming without the cap.
 
 ## Structure
 
