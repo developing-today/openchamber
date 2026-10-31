@@ -6,7 +6,7 @@ import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries, commandIdentifiesOurServer } from './managed-process-registry.js';
-import { parsePositiveIntWithDefault } from '../shared/parse-int.js';
+import { parseBoundedIntWithDefault, parsePositiveIntWithDefault } from '../shared/parse-int.js';
 import {
   clearManagedOpenCodeState,
   createLaunchFingerprint,
@@ -54,12 +54,24 @@ const execFileAsync = (file, args, options) =>
 // name is kept for its importers.
 export const parsePositiveInt = parsePositiveIntWithDefault;
 
-const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000);
+// The two timer-feeding health readers are bounded at the 2^31-1 ms timer
+// maximum (PR #836's pattern): an oversized value handed to setTimeout /
+// setInterval / AbortSignal.timeout overflows and collapses to ~1 ms, so
+// above-max falls back to the default instead. The timeout reader keeps
+// positive-only semantics (min 1: '0' still means 'use the default', never
+// an instantly-aborting 0 ms); the interval override keeps min 0, where an
+// explicit '0' already lands today.
+export const resolveHealthCheckTimeoutMs = (env = process.env) =>
+  parseBoundedIntWithDefault(env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000, 1, 2_147_483_647);
+export const resolveHealthCheckIntervalOverrideMs = (env = process.env) =>
+  parseBoundedIntWithDefault(env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0, 0, 2_147_483_647);
+
+const HEALTH_CHECK_TIMEOUT_MS = resolveHealthCheckTimeoutMs();
 const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
   process.env.OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES,
   20
 );
-const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
+const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = resolveHealthCheckIntervalOverrideMs();
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const OPENCODE_HEALTH_PATH = '/api/info';
 const OPENCODE_REQUIRED_MAJOR_VERSION = 2;
