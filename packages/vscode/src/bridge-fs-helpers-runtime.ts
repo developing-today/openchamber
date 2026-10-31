@@ -523,6 +523,46 @@ export const searchDirectory = async (
   return searchFilesystemFiles(rootPath, sanitizedQuery, limit, includeHidden, respectGitignore, 1500);
 };
 
+// The models.dev catalog is several megabytes; the cap is generous on purpose
+// (16 MiB), matching the web copy's MODELS_DEV_CATALOG_MAX_BYTES
+// (`packages/web/server/lib/opencode/models-metadata.js`): the 8 s deadline
+// bounds time, the cap bounds memory, and an over-cap body throws like a fetch
+// failure so the api:models/metadata error shape applies.
+export const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
+
+// The bounded read the web copy gets from readBoundedResponseText
+// (`packages/web/server/lib/shared/response-body.js`), mirrored here: a
+// declared length past the cap is rejected up front, and the stream is
+// cancelled as soon as it crosses the limit, so a body with no declared
+// length is never buffered whole in the extension host.
+const readBoundedResponseText = async (
+  response: Response,
+  maxBytes: number,
+): Promise<{ tooLarge: false; text: string } | { tooLarge: true }> => {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    return { tooLarge: true };
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { tooLarge: false, text: '' };
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { tooLarge: true };
+    }
+    chunks.push(value);
+  }
+  return { tooLarge: false, text: Buffer.concat(chunks, size).toString('utf8') };
+};
+
 export const fetchModelsMetadata = async () => {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
   const timeout = controller ? setTimeout(() => controller.abort(), 8000) : undefined;
@@ -534,7 +574,11 @@ export const fetchModelsMetadata = async () => {
     if (!response.ok) {
       throw new Error(`models.dev responded with ${response.status}`);
     }
-    return await response.json();
+    const bounded = await readBoundedResponseText(response, MODELS_DEV_CATALOG_MAX_BYTES);
+    if (bounded.tooLarge) {
+      throw new Error('models.dev response exceeded size limit');
+    }
+    return JSON.parse(bounded.text);
   } finally {
     if (timeout) {
       clearTimeout(timeout);
