@@ -936,6 +936,34 @@ describe('fs read', () => {
     expect(fsPromises.readFile).toHaveBeenCalledWith('/shared/target.txt', 'utf8');
   });
 
+  it('rejects a file over MAX_READ_BYTES with 413 before calling readFile', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 })),
+      readFile: vi.fn(async () => 'too large'),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/big.log' });
+
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toEqual({ error: 'File too large to read' });
+    expect(fsPromises.readFile).not.toHaveBeenCalled();
+  });
+
+  it('reads a file at exactly MAX_READ_BYTES', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 })),
+      readFile: vi.fn(async () => 'at cap'),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/big.txt' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('at cap');
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/big.txt', 'utf8');
+  });
+
   it('reads outside workspace files without a grant', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
