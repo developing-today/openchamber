@@ -1,5 +1,6 @@
 import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
+import { readBoundedResponseText } from '../../web/server/lib/shared/response-body.js';
 
 type UpgradeCapability = {
   supported: boolean;
@@ -60,6 +61,11 @@ const getApiUrl = (manager?: OpenCodeUpgradeManager): string | null => {
   return apiUrl ? `${apiUrl.replace(/\/+$/, '')}/` : null;
 };
 
+// Same 1 MiB cap as the web copy of this read (OPENCODE_LATEST_VERSION_MAX_BYTES
+// in web routes.js): the registry is user-configured, so an oversized
+// packument must not buffer whole in the extension host.
+const OPENCODE_LATEST_VERSION_MAX_BYTES = 1024 * 1024;
+
 // OpenCode 2.x publishes as `@opencode/cli` on npm and has no GitHub release
 // assets, so the registry is the one source of "latest".
 const fetchLatestVersion = async (): Promise<string> => {
@@ -69,9 +75,15 @@ const fetchLatestVersion = async (): Promise<string> => {
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`OpenCode npm registry responded with ${response.status}`);
+  const bounded = await readBoundedResponseText(response, OPENCODE_LATEST_VERSION_MAX_BYTES);
+  if (bounded.tooLarge) {
+    throw new Error(`OpenCode npm registry latest document exceeds ${OPENCODE_LATEST_VERSION_MAX_BYTES} bytes`);
+  }
   // SAFETY: the registry answers a packument; only `version` is read, and it
   // is checked to be a string before use.
-  const payload = await response.json() as { version?: unknown };
+  // The bounded read is raw text, so strip a leading BOM first: the
+  // response.json() this replaced dropped it in its UTF-8 decode.
+  const payload = JSON.parse(bounded.text.replace(/^\uFEFF/, '')) as { version?: unknown };
   const version = typeof payload.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
   if (!version) throw new Error('Failed to resolve latest OpenCode version');
   return version;
