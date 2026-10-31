@@ -3,13 +3,13 @@ name: pr checks
 # CI policy: .github/ci-policy.md (fleet design developing-today/code#1779
 # sec.3.3/sec.3.4; Phase 2, developing-today/code#1781). This workflow is
 # openchamber's designated main-gate for the Phase 3 remediation chain.
-# PR tier = lint + type-check only (sub-minute execution). The full suite
-# (tests + build) runs on push to main and on the nightly backstop below.
-# Dedup: push is restricted to branches: [main], so a PR branch push fires
-# pull_request only -- a commit never runs the same suite twice.
-# MERGE REQUIREMENT (Drew, 2026-10-29): the basic tier only -- the jobs
-# named "basic: lint" and "basic: type-check" below. tests/build are the
-# full main tier; they are NOT a merge gate. The workflow name stays
+# Main-only triggers (4478502bb, Drew 2026-10-30): push to main, the
+# nightly schedule below, and workflow_dispatch. There is no PR tier:
+# this workflow does not run on pull_request, so nothing here gates a
+# merge. All four jobs (lint, type-check, tests, build) run on every
+# trigger. Dedup: push is restricted to branches: [main] and there is
+# no pull_request trigger, so a commit never runs the same suite twice.
+# The workflow name stays
 # "pr checks" because the Phase 3 watcher (main-broken.yml) references
 # it by that name.
 on:
@@ -24,12 +24,11 @@ on:
     - cron: '37 5 * * *'
   workflow_dispatch:
 
-# A new push to the same PR makes the older run pointless. Push runs have
-# no pull_request payload, so they fall back to the unique run_id (the
-# label-merge-conflict pattern): every merge keeps its own run instead of
+# Every trigger is main-scoped, scheduled, or manual, so each run is
+# keyed by its unique run_id: every merge keeps its own run instead of
 # sharing one group that a newer merge would cancel.
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number || github.run_id }}
+  group: pr-checks-${{ github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -74,11 +73,10 @@ jobs:
       - name: Changelog outputs match their sources
         run: bun run changelog:check
 
-  # Main tier only (Phase 2): skipped on pull_request events; runs on
-  # push to main, on the nightly schedule, and on manual dispatch.
+  # Runs on push to main, on the nightly schedule, and on manual
+  # dispatch -- the workflow's only triggers.
   tests:
     name: "full (main tier): tests"
-    if: github.event_name != 'pull_request'
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
@@ -98,14 +96,13 @@ jobs:
           bun run test:updater
           bun run test:linux-desktop
 
-  # Main tier only (Phase 2): skipped on pull_request events; runs on
-  # push to main, on the nightly schedule, and on manual dispatch.
+  # Runs on push to main, on the nightly schedule, and on manual
+  # dispatch -- the workflow's only triggers.
   # Catches what type-check cannot: bundling, Vite-only syntax, the web
   # build's memory ceiling. The packages whose `build` is only a type-check (`tsc -b`)
   # (ui) or a no-op (electron) are covered by the type-check job.
   build:
     name: "full (main tier): build"
-    if: github.event_name != 'pull_request'
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
