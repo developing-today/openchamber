@@ -186,6 +186,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
     getManagedOpenCodeEnv = async () => ({}),
+    // One start only: this server was launched to rotate the managed
+    // credentials, so its first start must not reuse the saved pair. Later
+    // starts in the same process adopt what that start wrote, as usual.
+    rotateManagedCredentials = false,
     // The folder holding the managed config OpenCode reads (instance-dir.js), saved with the
     // managed state so a server that adopts this OpenCode takes the same folder over.
     getInstanceDir = () => null,
@@ -224,6 +228,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     checkOpenCodeBinary = requireOpenCodeV2,
     diagnosticJournal = serverDiagnosticJournal,
   } = deps;
+
+  let credentialRotationPending = rotateManagedCredentials === true;
 
   let managedPreflight = null;
   // The version the managed OpenCode last reported in its health payload,
@@ -1036,7 +1042,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       totalDurationMs: performance.now() - attemptStartedAt,
     });
     phaseStartedAt = performance.now();
-    const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true, reusePassword: savedState?.password ?? null });
+    // A rotation start discards the saved pair: with no reuse values the
+    // password falls to the rotateManaged branch and the agent tool token
+    // to the random path, and the changed launch fingerprint makes a
+    // still-running predecessor hand off, so it is never adopted with the
+    // old pair. A user-provided OPENCODE_SERVER_PASSWORD still wins inside
+    // ensureLocalOpenCodeServerPassword; rotation never overrides it.
+    const rotateCredentials = credentialRotationPending;
+    if (rotateCredentials) {
+      console.log('[OpenCode] Rotating managed credentials for this start; the saved password and agent tool token will not be reused');
+    }
+    const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true, reusePassword: rotateCredentials ? null : (savedState?.password ?? null) });
     let envPath = process.env.PATH;
     if (typeof buildManagedOpenCodePath === 'function') {
       envPath = buildManagedOpenCodePath();
@@ -1046,7 +1062,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
-    const managedOpenCodeEnv = await getManagedOpenCodeEnv({ agentToolToken: savedState?.agentToolToken ?? null });
+    const managedOpenCodeEnv = await getManagedOpenCodeEnv({ agentToolToken: rotateCredentials ? null : (savedState?.agentToolToken ?? null) });
     recordStartupPerformance('opencode.environment.ready', {
       attempt,
       durationMs: performance.now() - phaseStartedAt,
@@ -1192,6 +1208,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const ready = await waitForReady(serverInstance.url, 10000);
       if (state.isShuttingDown) throw new Error('OpenCode startup cancelled during shutdown');
       if (ready) {
+        credentialRotationPending = false;
         setOpenCodePort(port);
         if (lastReadyOwnServer?.pid !== serverInstance.pid) {
           // The cached version was reported by the predecessor process.

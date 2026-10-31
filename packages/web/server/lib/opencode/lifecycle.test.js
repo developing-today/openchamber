@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
@@ -1856,5 +1857,153 @@ describe('parsePositiveInt health env parsing (#689)', () => {
       expect(parsePositiveInt(invalid, 5000)).toBe(5000);
       expect(parsePositiveInt(invalid, 20)).toBe(20);
     }
+  });
+});
+
+
+describe('managed credential rotation', () => {
+  const READY_LINE = 'opencode server listening on http://127.0.0.1:45678\n';
+  const OWNED_PS_OUTPUT = 'opencode serve --hostname 127.0.0.1 --port 45678\n';
+  // Never a live pid, so a replace path cannot signal an unrelated process.
+  const DEAD_PID = 2147483646;
+  // Fixture values only. Assertions compare SHA-256 hashes, never the
+  // values themselves, matching how a real rotation is verified.
+  const OLD_PASSWORD = 'old-fixture-password';
+  const NEW_PASSWORD = 'new-fixture-password';
+  const OLD_TOKEN = 'old-fixture-token';
+  const NEW_TOKEN = 'new-fixture-token';
+  const sha256 = (value) => createHash('sha256').update(String(value)).digest('hex');
+  const readState = (dataDir) => JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
+  const readyLineFor = (command, args) => {
+    const launched = unwrapLaunch(command, args).args;
+    const port = launched[launched.indexOf('--port') + 1];
+    return `opencode server listening on http://127.0.0.1:${port}\n`;
+  };
+  const spawnOnceWithReadyLine = () => {
+    spawnMock.mockImplementationOnce((command, args) => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
+      return child;
+    });
+  };
+  // Credential doubles with the real contract: a reuse value wins when one
+  // is passed; with none, a fresh value is generated.
+  const credentialDoubles = () => ({
+    ensureLocalOpenCodeServerPassword: vi.fn(async ({ reusePassword }) => reusePassword ?? NEW_PASSWORD),
+    getManagedOpenCodeEnv: vi.fn(async ({ agentToolToken }) => ({
+      OPENCHAMBER_AGENT_TOOL_TOKEN: agentToolToken ?? NEW_TOKEN,
+    })),
+  });
+
+  const startFirstRuntime = async () => {
+    const dataDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'opencode-rotate-test-'));
+    tempDataDirs.push(dataDir);
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      child.pid = DEAD_PID;
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    await createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      ensureLocalOpenCodeServerPassword: vi.fn(async () => OLD_PASSWORD),
+      getManagedOpenCodeEnv: vi.fn(async () => ({ OPENCHAMBER_AGENT_TOOL_TOKEN: OLD_TOKEN })),
+    }).startOpenCode();
+    spawnMock.mockClear();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    return { dataDir };
+  };
+
+  it('rotation start discards the saved pair and writes a fresh one', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const before = readState(dataDir);
+    expect(sha256(before.password)).toBe(sha256(OLD_PASSWORD));
+    expect(sha256(before.agentToolToken)).toBe(sha256(OLD_TOKEN));
+    spawnOnceWithReadyLine();
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      rotateManagedCredentials: true,
+      ...doubles,
+    });
+    await second.startOpenCode();
+
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenCalledWith({ rotateManaged: true, reusePassword: null });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenCalledWith({ agentToolToken: null });
+    // The changed launch fingerprint hands off from the recorded process;
+    // it is never adopted with the old credentials.
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const after = readState(dataDir);
+    expect(sha256(after.password)).not.toBe(sha256(before.password));
+    expect(sha256(after.agentToolToken)).not.toBe(sha256(before.agentToolToken));
+    expect(sha256(after.password)).toBe(sha256(NEW_PASSWORD));
+    expect(sha256(after.agentToolToken)).toBe(sha256(NEW_TOKEN));
+  });
+
+  it('rotation is one start only: the next start in the same process reuses the rotated pair', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnOnceWithReadyLine();
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      rotateManagedCredentials: true,
+      ...doubles,
+    });
+    await second.startOpenCode();
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenLastCalledWith({ rotateManaged: true, reusePassword: null });
+
+    spawnOnceWithReadyLine();
+    await second.startOpenCode();
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenLastCalledWith({ rotateManaged: true, reusePassword: NEW_PASSWORD });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenLastCalledWith({ agentToolToken: NEW_TOKEN });
+  });
+
+  it('a normal start reuses the saved pair and adopts the running OpenCode', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const before = readState(dataDir);
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      ...doubles,
+    });
+    const adopted = await second.startOpenCode();
+
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenCalledWith({ rotateManaged: true, reusePassword: OLD_PASSWORD });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenCalledWith({ agentToolToken: OLD_TOKEN });
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(adopted.pid).toBe(before.pid);
+  });
+
+  it('a handoff start still reuses the saved pair', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnOnceWithReadyLine();
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => '/opt/other/opencode'),
+      ...doubles,
+    });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenCalledWith({ rotateManaged: true, reusePassword: OLD_PASSWORD });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenCalledWith({ agentToolToken: OLD_TOKEN });
+    const after = readState(dataDir);
+    expect(sha256(after.password)).toBe(sha256(OLD_PASSWORD));
+    expect(sha256(after.agentToolToken)).toBe(sha256(OLD_TOKEN));
   });
 });
