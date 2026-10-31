@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchQuota } from './nanogpt.js';
+import { fetchQuota, REQUEST_TIMEOUT_MS } from './nanogpt.js';
 
 const run = (payload) => fetchQuota({
   readAuth: () => ({ 'nano-gpt': { key: 'test-token' } }),
@@ -111,9 +111,14 @@ describe('NanoGPT quota provider', () => {
     expect(captured.signal.aborted).toBe(false);
   });
 
-  it('reports a stalled request as an error when its own 15s signal aborts it', async () => {
+  it('pins the quota request deadline at exactly 15s', () => {
+    expect(REQUEST_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it('reports a stalled request as an error when its signal aborts it', async () => {
     const result = await fetchQuota({
       readAuth: () => ({ 'nano-gpt': { key: 'test-token' } }),
+      timeoutMs: 50,
       fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
         options.signal.addEventListener('abort', () => {
           reject(new DOMException('The operation was aborted.', 'AbortError'));
@@ -122,5 +127,5 @@ describe('NanoGPT quota provider', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
-  }, 25_000);
+  });
 });

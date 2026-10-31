@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fetchQuota, isConfigured } from './kimi.js';
+import { fetchQuota, isConfigured, REQUEST_TIMEOUT_MS } from './kimi.js';
 
 const readAuth = () => ({ 'kimi-for-coding': { key: 'test-token' } });
 
@@ -87,18 +87,22 @@ describe('Kimi for Coding quota provider', () => {
     expect(captured.signal.aborted).toBe(false);
   });
 
-  it('reports a stalled primary fetch as an error when its own 15s signal aborts it', async () => {
+  it('pins the quota request deadline at exactly 15s', () => {
+    expect(REQUEST_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it('reports a stalled primary fetch as an error when its signal aborts it', async () => {
     const fetchImpl = (_url, init) => new Promise((_resolve, reject) => {
       init.signal.addEventListener('abort', () => {
         reject(new DOMException('The operation was aborted.', 'AbortError'));
       });
     });
 
-    const result = await fetchQuota({ readAuth, fetchImpl });
+    const result = await fetchQuota({ readAuth, fetchImpl, timeoutMs: 50 });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
-  }, 25_000);
+  });
 
   it('reports not configured when no credentials are stored', async () => {
     const result = await fetchQuota({ readAuth: () => ({}), fetchImpl: async () => { throw new Error('Unexpected fetch'); } });
