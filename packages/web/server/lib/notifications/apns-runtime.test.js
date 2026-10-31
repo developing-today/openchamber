@@ -530,6 +530,47 @@ describe('apns runtime deadlines (#798)', () => {
       vi.useRealTimers();
     }
   });
+
+  it('settles a direct APNs send when APNs closes the stream without end or error (#992)', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+      const close = vi.fn();
+      const destroyCalls = [];
+      const http2 = {
+        connect: () => ({
+          on: () => {},
+          close,
+          request: () => {
+            const listeners = {};
+            const req = {
+              on: (event, cb) => { listeners[event] = cb; return req; },
+              setEncoding: () => req,
+              // APNs cancels the stream (RST_STREAM): it closes with neither
+              // 'end' nor 'error', like a real http2 stream.
+              end: () => { queueMicrotask(() => listeners.close?.()); },
+              // On an already-closed stream destroy() is a no-op: it emits
+              // nothing, so the 30s deadline cannot settle this send either.
+              destroy: (error) => { destroyCalls.push(error); },
+            };
+            return req;
+          },
+        }),
+      };
+      const runtime = createApnsRuntime(
+        makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
+      );
+      await runtime.addOrUpdateApnsToken('s', 'tokenDirect');
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'cancel-x' });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(sending).resolves.toBeUndefined();
+
+      expect(close).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('apns runtime store durability', () => {

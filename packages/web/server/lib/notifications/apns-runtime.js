@@ -468,7 +468,10 @@ export const createApnsRuntime = (deps) => {
       // Bound the request with an own wall-clock timer armed at creation: a
       // stream inactivity timeout may never start behind a session whose
       // connect stalled, so only this settles every case. Destroying the
-      // request routes into the error handler below (warn + resolve).
+      // request routes into the error handler below (warn + resolve) — but
+      // only when the stream is still live: on a stream APNs already closed
+      // (e.g. RST_STREAM CANCEL) destroy() is a no-op and neither 'end' nor
+      // 'error' fires, so the 'close' handler below is what settles that case.
       const timeout = setTimeout(() => {
         req.destroy(new Error(`APNs request timed out after ${APNS_DIRECT_REQUEST_TIMEOUT_MS}ms`));
       }, APNS_DIRECT_REQUEST_TIMEOUT_MS);
@@ -482,7 +485,9 @@ export const createApnsRuntime = (deps) => {
       req.on('data', (chunk) => {
         responseBody += chunk;
       });
+      let terminal = false;
       req.on('end', async () => {
+        terminal = true;
         clearTimeout(timeout);
         if (status === 200) {
           resolve();
@@ -502,8 +507,16 @@ export const createApnsRuntime = (deps) => {
         resolve();
       });
       req.on('error', (error) => {
+        terminal = true;
         clearTimeout(timeout);
         console.warn('[APNs] request error:', error?.message ?? error);
+        resolve();
+      });
+      req.on('close', () => {
+        if (terminal) return;
+        terminal = true;
+        clearTimeout(timeout);
+        console.warn('[APNs] request closed before completing');
         resolve();
       });
       req.end(body);
