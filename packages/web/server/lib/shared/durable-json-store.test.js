@@ -267,6 +267,54 @@ describe('preserveMalformedJsonFile / preserveMalformedJsonFileSync', () => {
     expect(fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
   });
 
+  it('fails closed when no atomic no-clobber restoration is available (Codex P2, PR #981 round 2)', async () => {
+    const dir = makeTempDir();
+    const filePath = path.join(dir, 'store.json');
+    fs.writeFileSync(filePath, '{torn');
+    // Same race as the restore test above - the rename moves valid
+    // bytes - but the injected fs omits link/linkSync, so there is no
+    // atomic no-clobber way to put them back. The old fallback checked
+    // the live path was absent and then renamed over it, which could
+    // silently replace a newer concurrent file installed in between.
+    // The answer must be 'failed', never an overwriting rename, and
+    // the valid bytes stay intact under the preserve name.
+    const noLinkAsyncFs = {
+      readFile: (target, encoding) => fs.promises.readFile(target, encoding),
+      access: (target) => fs.promises.access(target),
+      rename: async (from, to) => {
+        fs.writeFileSync(from, '{"fresh":true}');
+        return fs.promises.rename(from, to);
+      },
+    };
+    await expect(
+      preserveMalformedJsonFile(filePath, { validateValue: isJsonObject, fs: noLinkAsyncFs }),
+    ).resolves.toEqual({ preserved: false, outcome: 'failed' });
+    expect(fs.existsSync(filePath)).toBe(false);
+    const asyncPreserved = fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'));
+    expect(asyncPreserved).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, asyncPreserved[0]), 'utf8')).toBe('{"fresh":true}');
+
+    fs.writeFileSync(filePath, '{torn');
+    const noLinkSyncFs = {
+      readFileSync: (target, encoding) => fs.readFileSync(target, encoding),
+      existsSync: (target) => fs.existsSync(target),
+      renameSync: (from, to) => {
+        fs.writeFileSync(from, '{"fresh":true}');
+        fs.renameSync(from, to);
+      },
+    };
+    expect(preserveMalformedJsonFileSync(filePath, { validateValue: isJsonObject, fs: noLinkSyncFs })).toEqual({
+      preserved: false,
+      outcome: 'failed',
+    });
+    expect(fs.existsSync(filePath)).toBe(false);
+    const syncPreserved = fs
+      .readdirSync(dir)
+      .filter((name) => name.includes('.corrupt-') && name !== asyncPreserved[0]);
+    expect(syncPreserved).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, syncPreserved[0]), 'utf8')).toBe('{"fresh":true}');
+  });
+
   it('answers the fail-closed result when the caller value judgement throws (CodeRabbit, PR #981)', async () => {
     const dir = makeTempDir();
     const filePath = path.join(dir, 'store.json');

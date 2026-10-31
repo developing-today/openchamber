@@ -193,21 +193,14 @@ export const preserveMalformedJsonFile = async (filePath, options = {}) => {
     if (judgedMoved.state !== 'valid') {
       return { preserved: true, outcome: 'preserved', preservedPath: candidate };
     }
+    // Restoration requires an atomic no-clobber operation (Codex
+    // review, PR #981, second round): without fs.link there is no way
+    // to put the valid bytes back without risking an overwriting
+    // rename over a newer concurrent file, so fail closed - the
+    // valid bytes stay intact under the preserve name.
+    if (!fs.link) return { preserved: false, outcome: 'failed' };
     try {
-      if (fs.link) {
-        await fs.link(candidate, filePath);
-      } else {
-        let liveTaken = true;
-        try {
-          await fs.access(filePath);
-        } catch (error) {
-          if (isMissingError(error)) liveTaken = false;
-          else return { preserved: false, outcome: 'failed' };
-        }
-        if (liveTaken) return { preserved: false, outcome: 'failed' };
-        await renameWithRetry((from, to) => fs.rename(from, to), candidate, filePath);
-        return { preserved: false, outcome: 'replaced' };
-      }
+      await fs.link(candidate, filePath);
     } catch {
       return { preserved: false, outcome: 'failed' };
     }
@@ -269,14 +262,10 @@ export const preserveMalformedJsonFileSync = (filePath, options = {}) => {
     if (judgedMoved.state !== 'valid') {
       return { preserved: true, outcome: 'preserved', preservedPath: candidate };
     }
+    // Sync mirror: no linkSync, no restoration - fail closed.
+    if (!fs.linkSync) return { preserved: false, outcome: 'failed' };
     try {
-      if (fs.linkSync) {
-        fs.linkSync(candidate, filePath);
-      } else {
-        if (fs.existsSync && fs.existsSync(filePath)) return { preserved: false, outcome: 'failed' };
-        renameSyncWithRetry((from, to) => fs.renameSync(from, to), candidate, filePath);
-        return { preserved: false, outcome: 'replaced' };
-      }
+      fs.linkSync(candidate, filePath);
     } catch {
       return { preserved: false, outcome: 'failed' };
     }
