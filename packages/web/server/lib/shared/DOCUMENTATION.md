@@ -197,8 +197,13 @@ injection. The contract rules:
    `${file}.corrupt-${Date.now()}-${process.pid}-${random}` — the
    collision-proof spelling, so two preservations in the same
    millisecond both survive. The preserve step re-reads and re-judges
-   the on-disk bytes first, so a concurrent writer's valid replacement
-   is never renamed away; the result names the outcome (`preserved`,
+   the on-disk bytes first, re-judges them again after the
+   preserve-name check, and verifies the preserved bytes after the
+   rename — a valid replacement caught in any of those windows is
+   restored to the live path atomically (hard link, never an
+   overwriting rename) and answers `replaced`, and one that cannot be
+   restored safely answers `failed`, so a concurrent writer's valid
+   replacement is never renamed away; the result names the outcome (`preserved`,
    `replaced`, `missing`, `failed`), and `failed` is fail-closed: the
    caller must refuse its write. Raw parse errors are never logged or
    attached to a result — they can quote file contents.

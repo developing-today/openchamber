@@ -181,6 +181,110 @@ describe('preserveMalformedJsonFile / preserveMalformedJsonFileSync', () => {
     expect(fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
   });
 
+  it('never renames away a valid replacement installed during the preserve-name check (Codex P2, PR #981)', async () => {
+    const dir = makeTempDir();
+    const filePath = path.join(dir, 'store.json');
+    fs.writeFileSync(filePath, '{torn');
+    // The Codex reproduction: a concurrent writer installs valid JSON
+    // while the helper awaits fs.access on the preserve candidate —
+    // after its first re-read, before its rename.
+    const racingAsyncFs = {
+      readFile: (target, encoding) => fs.promises.readFile(target, encoding),
+      access: async (target) => {
+        fs.writeFileSync(filePath, '{"fresh":true}');
+        return fs.promises.access(target);
+      },
+      rename: (from, to) => fs.promises.rename(from, to),
+      link: (from, to) => fs.promises.link(from, to),
+      unlink: (target) => fs.promises.unlink(target),
+    };
+    await expect(
+      preserveMalformedJsonFile(filePath, { validateValue: isJsonObject, fs: racingAsyncFs }),
+    ).resolves.toEqual({ preserved: false, outcome: 'replaced' });
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{"fresh":true}');
+    expect(fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+
+    // Sync spelling: the candidate check is existsSync.
+    fs.writeFileSync(filePath, '{torn');
+    let checked = false;
+    const racingSyncFs = {
+      readFileSync: (target, encoding) => fs.readFileSync(target, encoding),
+      existsSync: (target) => {
+        if (!checked) {
+          checked = true;
+          fs.writeFileSync(filePath, '{"fresh":true}');
+        }
+        return fs.existsSync(target);
+      },
+      renameSync: (from, to) => fs.renameSync(from, to),
+      linkSync: (from, to) => fs.linkSync(from, to),
+      unlinkSync: (target) => fs.unlinkSync(target),
+    };
+    expect(preserveMalformedJsonFileSync(filePath, { validateValue: isJsonObject, fs: racingSyncFs })).toEqual({
+      preserved: false,
+      outcome: 'replaced',
+    });
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{"fresh":true}');
+    expect(fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+  });
+
+  it('restores a valid replacement that lands between the final re-read and the rename', async () => {
+    const dir = makeTempDir();
+    const filePath = path.join(dir, 'store.json');
+    fs.writeFileSync(filePath, '{torn');
+    const racingAsyncFs = {
+      readFile: (target, encoding) => fs.promises.readFile(target, encoding),
+      access: (target) => fs.promises.access(target),
+      rename: async (from, to) => {
+        fs.writeFileSync(from, '{"fresh":true}');
+        return fs.promises.rename(from, to);
+      },
+      link: (from, to) => fs.promises.link(from, to),
+      unlink: (target) => fs.promises.unlink(target),
+    };
+    await expect(
+      preserveMalformedJsonFile(filePath, { validateValue: isJsonObject, fs: racingAsyncFs }),
+    ).resolves.toEqual({ preserved: false, outcome: 'replaced' });
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{"fresh":true}');
+    expect(fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+
+    fs.writeFileSync(filePath, '{torn');
+    const racingSyncFs = {
+      readFileSync: (target, encoding) => fs.readFileSync(target, encoding),
+      existsSync: (target) => fs.existsSync(target),
+      renameSync: (from, to) => {
+        fs.writeFileSync(from, '{"fresh":true}');
+        fs.renameSync(from, to);
+      },
+      linkSync: (from, to) => fs.linkSync(from, to),
+      unlinkSync: (target) => fs.unlinkSync(target),
+    };
+    expect(preserveMalformedJsonFileSync(filePath, { validateValue: isJsonObject, fs: racingSyncFs })).toEqual({
+      preserved: false,
+      outcome: 'replaced',
+    });
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{"fresh":true}');
+    expect(fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+  });
+
+  it('answers the fail-closed result when the caller value judgement throws (CodeRabbit, PR #981)', async () => {
+    const dir = makeTempDir();
+    const filePath = path.join(dir, 'store.json');
+    fs.writeFileSync(filePath, '{"a":1}');
+    const throwing = () => {
+      throw new Error('predicate exploded');
+    };
+    await expect(preserveMalformedJsonFile(filePath, { validateValue: throwing })).resolves.toEqual({
+      preserved: false,
+      outcome: 'failed',
+    });
+    expect(preserveMalformedJsonFileSync(filePath, { validateValue: throwing })).toEqual({
+      preserved: false,
+      outcome: 'failed',
+    });
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{"a":1}');
+  });
+
   it('answers missing for an absent file in both spellings', async () => {
     const dir = makeTempDir();
     const filePath = path.join(dir, 'store.json');
@@ -195,14 +299,21 @@ describe('writeDurableJsonFile / writeDurableJsonFileSync', () => {
     const asyncPath = path.join(dir, 'async.json');
     await writeDurableJsonFile(asyncPath, '{"a":1}', { mode: 0o600 });
     expect(fs.readFileSync(asyncPath, 'utf8')).toBe('{"a":1}');
-    // eslint-disable-next-line no-bitwise
-    expect(fs.statSync(asyncPath).mode & 0o777).toBe(0o600);
+    // Windows reports writable files as 0o666 regardless of the mode
+    // passed to writeFile (CodeRabbit review, PR #981); the stated-mode
+    // assertions are POSIX-only, the contents assertions are not.
+    if (process.platform !== 'win32') {
+      // eslint-disable-next-line no-bitwise
+      expect(fs.statSync(asyncPath).mode & 0o777).toBe(0o600);
+    }
 
     const syncPath = path.join(dir, 'sync.json');
     writeDurableJsonFileSync(syncPath, '{"b":2}', { mode: 0o644 });
     expect(fs.readFileSync(syncPath, 'utf8')).toBe('{"b":2}');
-    // eslint-disable-next-line no-bitwise
-    expect(fs.statSync(syncPath).mode & 0o777).toBe(0o644);
+    if (process.platform !== 'win32') {
+      // eslint-disable-next-line no-bitwise
+      expect(fs.statSync(syncPath).mode & 0o777).toBe(0o644);
+    }
 
     expect(fs.readdirSync(dir).filter((name) => name.includes('.tmp-'))).toEqual([]);
   });
