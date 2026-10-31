@@ -13,6 +13,7 @@ import {
   readLogTail,
   readManagedOpenCodeState,
   resolveManagedOpenCodePaths,
+  rotateManagedLogIfOversized,
   writeDrainingOpenCodeRecords,
   writeManagedOpenCodeState,
 } from './managed-opencode-state.js';
@@ -216,5 +217,53 @@ describe('managed OpenCode log cursor', () => {
 
   it('returns an empty tail for a missing log', () => {
     expect(readLogTail(logPath, 0, 16)).toBe('');
+  });
+});
+
+describe('rotateManagedLogIfOversized', () => {
+  let root;
+  let logPath;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'managed-opencode-rotate-'));
+    logPath = path.join(root, 'opencode.log');
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('renames an oversized log to the single retained generation', () => {
+    fs.writeFileSync(logPath, 'old log contents');
+    expect(rotateManagedLogIfOversized(logPath, 4)).toBe(true);
+    expect(fs.existsSync(logPath)).toBe(false);
+    expect(fs.readFileSync(`${logPath}.1`, 'utf8')).toBe('old log contents');
+  });
+
+  it('replaces the previous generation on the next rotation', () => {
+    fs.writeFileSync(logPath, 'first generation');
+    expect(rotateManagedLogIfOversized(logPath, 4)).toBe(true);
+    fs.writeFileSync(logPath, 'second generation');
+    expect(rotateManagedLogIfOversized(logPath, 4)).toBe(true);
+    expect(fs.readFileSync(`${logPath}.1`, 'utf8')).toBe('second generation');
+  });
+
+  it('leaves a log at or under the cap untouched', () => {
+    fs.writeFileSync(logPath, 'tiny');
+    expect(rotateManagedLogIfOversized(logPath, 4)).toBe(false);
+    expect(fs.readFileSync(logPath, 'utf8')).toBe('tiny');
+    expect(fs.existsSync(`${logPath}.1`)).toBe(false);
+  });
+
+  it('keeps the tail readable after rotation and new writes', () => {
+    fs.writeFileSync(logPath, 'abcdefghij');
+    expect(rotateManagedLogIfOversized(logPath, 4)).toBe(true);
+    fs.writeFileSync(logPath, 'new tail');
+    expect(readLogTail(logPath, 0, 4)).toBe('tail');
+    expect(fs.readFileSync(`${logPath}.1`, 'utf8')).toBe('abcdefghij');
+  });
+
+  it('is a no-op for a missing log instead of throwing', () => {
+    expect(rotateManagedLogIfOversized(logPath, 4)).toBe(false);
   });
 });

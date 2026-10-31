@@ -201,6 +201,27 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('readiness follows the child when another server rotates the log mid-startup', async () => {
+    spawnMock.mockImplementation(() => createMockChild());
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime();
+    const started = runtime.startOpenCode();
+    await vi.waitFor(() => {
+      expect(fsSync.existsSync(activeLogPath)).toBe(true);
+    });
+    // A second server sharing the data dir crosses the cap and rotates the
+    // log; the starting child keeps writing to the renamed file via its fd.
+    fsSync.renameSync(activeLogPath, `${activeLogPath}.1`);
+    fsSync.appendFileSync(`${activeLogPath}.1`, 'opencode server listening on http://127.0.0.1:45678\n');
+    const server = await started;
+    runtime.testState.openCodeProcess = server;
+    try {
+      expect(server).toBeTruthy();
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
   it('does not pair a replacement process with its predecessor version in the managed-servers read', async () => {
     const pids = [process.pid, process.ppid];
     spawnMock.mockImplementation(() => {
