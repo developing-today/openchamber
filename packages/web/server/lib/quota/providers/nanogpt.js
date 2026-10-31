@@ -36,6 +36,8 @@ const nanoGptUsageSchema = z.object({
 
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
+export const REQUEST_TIMEOUT_MS = 15_000;
+
 export const providerId = 'nano-gpt';
 export const providerName = 'NanoGPT';
 export const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
@@ -45,7 +47,7 @@ export const isConfigured = (auth) => {
   return Boolean(entry?.key || entry?.token);
 };
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch, timeoutMs = REQUEST_TIMEOUT_MS } = {}) => {
   const auth = await readAuth();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const apiKey = entry?.key ?? entry?.token;
@@ -67,7 +69,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
-      signal: AbortSignal.timeout(15_000)
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {

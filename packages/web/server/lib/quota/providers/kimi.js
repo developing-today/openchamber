@@ -15,16 +15,18 @@ import {
 
 const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
 
+export const REQUEST_TIMEOUT_MS = 15_000;
+
 // A pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code
 // subscription) is refused by the Kimi Code usage address. Its balance is read
 // from the platform instead: USD, what remains, with no spent figure.
 // Resolves to the credits_balance windows, or null when they cannot be read.
-const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl) => {
+const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, timeoutMs = REQUEST_TIMEOUT_MS) => {
   try {
     const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(15_000)
+      signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) return null;
     const balance = asObject(asObject(await response.json())?.data)?.available_balance;
@@ -135,7 +137,7 @@ const getApiKey = (auth) => {
 
 export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch, timeoutMs = REQUEST_TIMEOUT_MS } = {}) => {
   const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
@@ -155,12 +157,12 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
-      signal: AbortSignal.timeout(15_000)
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl, timeoutMs);
         if (balanceWindows) {
           return buildResult({
             providerId,
