@@ -313,6 +313,40 @@ function readSettingsFile() {
   return {};
 }
 
+// No parse error is attached: a JSON.parse error can quote the file, and
+// settings.json holds user settings and secrets.
+const invalidSettings = () => Object.assign(
+  new Error(`${SETTINGS_FILE} is not valid JSON. Fix or move it before saving; refusing to overwrite it.`),
+  { code: 'MALFORMED_SETTINGS' },
+);
+
+// Strict read for write paths (the linear/auth.js readSettingsForUpdate rule,
+// #907): a write built on a malformed settings.json would rewrite the whole
+// shared file from an empty base and erase every other setting. Missing and
+// empty files read as {} (the first-run case); malformed files and non-object
+// documents throw, and any other read failure propagates — a writer that
+// cannot see the current contents must not replace them. Read-only callers
+// keep the lenient readSettingsFile above.
+function readSettingsFileForUpdate() {
+  let raw;
+  try {
+    raw = fsSync.readFileSync(SETTINGS_FILE, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return {};
+    throw error;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw invalidSettings();
+  }
+  if (!isPlainObject(parsed)) throw invalidSettings();
+  return parsed;
+}
+
 function writeSettingsFile(settings) {
   fsSync.mkdirSync(STORAGE_DIR, { recursive: true });
   const tmpFile = `${SETTINGS_FILE}.${process.pid}.${Date.now()}.tmp`;
@@ -392,7 +426,7 @@ export function isGhCliDisabled() {
 }
 
 export function setGhCliDisabled(disabled) {
-  const settings = readSettingsFile();
+  const settings = readSettingsFileForUpdate();
   settings.ghCliDisabled = Boolean(disabled);
   if (settings.ghCliDisabled) settings.ghCliActive = false;
   writeSettingsFile(settings);
@@ -404,7 +438,7 @@ export function isGhCliActive() {
 }
 
 export function setGhCliActive(active) {
-  const settings = readSettingsFile();
+  const settings = readSettingsFileForUpdate();
   settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
   writeSettingsFile(settings);
 }
