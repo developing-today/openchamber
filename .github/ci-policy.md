@@ -1,4 +1,4 @@
-# CI policy — fast PR tier, full main tier
+# CI policy — main-only CI (full suite on main)
 
 This file is the in-repo, adjustable policy surface for this repo's CI
 tiers. Source design: developing-today/code#1779 ("CI: fast PR tier,
@@ -14,39 +14,42 @@ the pipeline to match a new dividing line.
 
 ## Merge requirement
 
-**Merge requirement: the basic-validation (PR) tier only. The full
-suite runs on main and is NOT a merge gate.**
+**Merge requirement: none from CI. No workflow in this repo runs on
+`pull_request` (main-only triggers, 4478502bb, Drew 2026-10-30), so
+no CI tier gates a merge.**
 
-In this repo the basic tier is named **basic**: the `pr checks` jobs
-display-named `basic: lint` and `basic: type-check` in
-oc-review.yml. The main-tier jobs are display-named
-`full (main tier): tests` and `full (main tier): build`. Only the
-basic tier may be required to merge. (This file documents the
-requirement; branch-protection settings themselves are a maintainer
-action and are not changed by the CI redesign.)
+The `pr checks` jobs in oc-review.yml are display-named
+`basic: lint`, `basic: type-check`, `full (main tier): tests`, and
+`full (main tier): build` — those names are historical. All four run
+only after merge, on push to `main`, on the nightly schedule, and on
+`workflow_dispatch`; their results feed the remediation chain below
+instead of blocking PRs. (This file documents the policy;
+branch-protection settings themselves are a maintainer action and
+are not changed by the CI redesign.)
 
-## Two tiers
+## Main-only model
 
-- **PR tier — "mostly valid" gate.** A PR is mergeable when the PR
-  tier is green and the normal review protocol is satisfied. PRs run
-  only basic validation (below, by change class).
+- **No PR tier.** No workflow runs on `pull_request`, so a PR gets
+  no CI validation before merge; mergeability is a matter of the
+  normal review protocol only.
 - **Main tier — everything, once per merge.** On push to `main` each
   workflow runs its full suite; a nightly schedule re-runs the full
-  set as a backstop. Main-tier results feed the remediation chain
-  (the `main-broken` watcher workflow) instead of blocking PRs.
-- **Dedup rule.** A commit must not run the same suite twice via
-  `push` + `pull_request`. Shape: `pull_request` for PRs; `push`
-  restricted to `branches: [main]`.
+  set as a backstop, and `workflow_dispatch` allows manual runs.
+  Main-tier results feed the remediation chain (the `main-broken`
+  watcher workflow) instead of blocking PRs.
+- **Dedup rule.** A commit must not run the same suite twice. Shape:
+  `push` restricted to `branches: [main]`, plus `schedule` and
+  `workflow_dispatch`; no `pull_request` trigger.
 
 ## Change-class policy (design §3.3)
 
-| class | trigger paths (examples) | PR tier |
+| class | trigger paths (examples) | validation (runs on main / dispatch, not on PRs) |
 |---|---|---|
 | 0 — prose | `**.md`, `docs/`, comments-only changes | nothing, or markdown lint only |
 | 1 — config/data | `**.json/yaml/toml` non-build, `.github/**` (non-workflow) | syntax parse + lint of changed files |
 | 2 — package source (default) | one package's src + tests | lint/format + typecheck/syntax of affected packages + affected unit tests |
 | 3 — elevated | lockfiles, `go.mod`/`go.sum` roots, `flake.nix`/`flake.lock`, build definitions, `.github/workflows/**`, shared/core libraries | class 2 + compile check of affected packages |
-| 4 — nix expressions | `**.nix` | class 1 + parse/eval of the changed files only (never full flake check on a PR) |
+| 4 — nix expressions | `**.nix` | class 1 + parse/eval of the changed files only |
 
 Default when a change spans classes: the highest class wins. The
 policy ships conservative (more class 3) and loosens as the
@@ -55,20 +58,24 @@ issues is the tuning signal.
 
 ## This repo's tier map (oc-review.yml, workflow name `pr checks`)
 
-| job | PR (`pull_request`) | main (`push` to main) | nightly (`schedule`) | dispatch |
-|---|---|---|---|---|
-| `lint` | ✅ runs | ✅ runs | ✅ runs | ✅ runs |
-| `type-check` | ✅ runs | ✅ runs | ✅ runs | ✅ runs |
-| `tests` | — skipped (`if: github.event_name != 'pull_request'`) | ✅ runs | ✅ runs | ✅ runs |
-| `build` | — skipped (`if: github.event_name != 'pull_request'`) | ✅ runs | ✅ runs | ✅ runs |
+| job | main (`push` to main) | nightly (`schedule`) | dispatch |
+|---|---|---|---|
+| `lint` | ✅ runs | ✅ runs | ✅ runs |
+| `type-check` | ✅ runs | ✅ runs | ✅ runs |
+| `tests` | ✅ runs | ✅ runs | ✅ runs |
+| `build` | ✅ runs | ✅ runs | ✅ runs |
+
+No job in this workflow runs on `pull_request`; there is no PR column
+because there is no PR trigger.
 
 `pr checks` is this repo's designated **main-gate**: the Phase 3
 watcher (`main-broken.yml`) watches only this workflow's completions
 on `main`, so a red main produces exactly one owned breakage issue
 per distinct failure signature (Breakage-ID), not workflow fan-out.
 
-`nix-eval.yml` stays paths-gated on PRs to `flake.nix`, `flake.lock`,
-and `nix/**` (class 4: eval of the flake's outputs only, no build).
+`nix-eval.yml` runs only on `workflow_dispatch` (manual dispatch):
+it has no `push`, `schedule`, or `pull_request` trigger and is not
+paths-gated (class 4: eval of the flake's outputs only, no build).
 
 ## Concurrency rules (design §4, Phase 1)
 
