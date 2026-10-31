@@ -665,6 +665,38 @@ describe('pr-status cache bounds (#972)', () => {
     nowSpy.mockRestore();
   });
 
+  test('cap eviction preserves in-flight repoPulls entries', async () => {
+    let releaseHeld;
+    let markHeldStarted;
+    const held = new Promise((resolve) => { releaseHeld = resolve; });
+    const heldStarted = new Promise((resolve) => { markHeldStarted = resolve; });
+    listMock.mockImplementation(async ({ owner }) => {
+      if (owner === 'held-repo') {
+        markHeldStarted();
+        await held;
+      }
+      return { data: [] };
+    });
+
+    const pending = callRepo('held-repo', 'app');
+    await heldStarted;
+
+    // Fill the cache well past the cap while held-repo's request is in
+    // flight: settled entries are capped, the in-flight entry is not evicted.
+    for (let i = 0; i < PR_STATUS_CACHE_MAX_ENTRIES + 5; i += 1) {
+      await callRepo(`flood-${i}`, 'app');
+    }
+    expect(getPrStatusCacheSizes().repoPulls).toBe(PR_STATUS_CACHE_MAX_ENTRIES);
+
+    // A second lookup for held-repo shares the in-flight promise instead of
+    // starting a duplicate GitHub request.
+    const shared = callRepo('held-repo', 'app');
+    releaseHeld();
+    await pending;
+    await shared;
+    expect(listMock.mock.calls.filter((entry) => entry[0]?.owner === 'held-repo')).toHaveLength(1);
+  });
+
   test('caps repoPulls at PR_STATUS_CACHE_MAX_ENTRIES with oldest-first eviction', async () => {
     listMock.mockResolvedValue({ data: [] });
     const total = PR_STATUS_CACHE_MAX_ENTRIES + 5;

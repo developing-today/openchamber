@@ -561,13 +561,27 @@ export function pruneExpiredPrStatusCaches(now = Date.now()) {
   return getPrStatusCacheSizes();
 }
 
+const isInFlightPullsEntry = (entry) => Boolean(
+  entry && typeof entry === 'object' && entry.promise && entry.token,
+);
+
 const capCacheEntries = (cache) => {
   while (cache.size > PR_STATUS_CACHE_MAX_ENTRIES) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) {
+    // Evict the oldest evictable entry. In-flight repoPulls entries are
+    // skipped: evicting one would orphan its token, so the pending response
+    // could never populate the cache and a duplicate request would start.
+    let evicted = false;
+    for (const [key, entry] of cache) {
+      if (isInFlightPullsEntry(entry)) {
+        continue;
+      }
+      cache.delete(key);
+      evicted = true;
       break;
     }
-    cache.delete(oldest);
+    if (!evicted) {
+      break;
+    }
   }
 };
 
