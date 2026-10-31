@@ -803,3 +803,144 @@ describe('notification retention bounds', () => {
     }
   }, 120_000);
 });
+
+describe('session parent cache bounds (#974)', () => {
+  // With subagent notifications off, the turn-end path answers from the
+  // cache: a cached parent (a string) suppresses the announcement, a
+  // cached no-parent answer (null, from a full session.created record)
+  // announces, and an unknown parent — the lineage fetch is stubbed
+  // down, so a cache miss answers undefined — suppresses. Eviction is
+  // therefore observable: a session cached as parentless announces
+  // while its entry lives and goes silent once the entry is evicted.
+  const makeBoundedRuntime = () => {
+    const emitDesktopNotification = vi.fn(() => true);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true, notifyOnSubtasks: false }),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: async () => ({}),
+      extractLastMessageText: () => 'done',
+      fetchLastAssistantMessageText: async () => 'done',
+      resolveNotificationTemplate: () => '',
+      shouldApplyResolvedTemplateMessage: () => false,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => true,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      readSessionMetadata: async () => ({}),
+    });
+    return { runtime, emitDesktopNotification };
+  };
+
+  // A full session.created record with no parentID caches the
+  // no-parent answer for the session.
+  const cacheParentless = async (runtime, sessionID) => {
+    await runtime.maybeSendPushForTrigger({
+      type: 'session.created',
+      properties: { sessionID, info: { id: sessionID } },
+    });
+  };
+
+  const finishTurn = async (runtime, sessionID) => {
+    await runtime.maybeSendPushForTrigger(stepStarted(sessionID, `msg_${sessionID}`));
+    await runtime.maybeSendPushForTrigger(turnEnded(sessionID));
+  };
+
+  const stubFetchDown = () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+  };
+
+  it('a live cached entry still answers: a cached parentless session announces', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    await cacheParentless(runtime, 'ses_other_1');
+    await cacheParentless(runtime, 'ses_other_2');
+    await finishTurn(runtime, 'ses_child');
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('evicts the oldest entry under cap pressure from never-re-read sessions', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    for (let index = 0; index < 500; index += 1) {
+      await cacheParentless(runtime, `ses_filler_${index}`);
+    }
+
+    // The newest entry still lives: it announces from the cache.
+    await finishTurn(runtime, 'ses_filler_499');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+
+    // ses_child was the oldest entry and was evicted: its parent is
+    // now unknown, so its finish is suppressed instead of announced.
+    await finishTurn(runtime, 'ses_child');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('re-caching a session refreshes its position, so the cap evicts an older neighbour instead', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    for (let index = 0; index < 499; index += 1) {
+      await cacheParentless(runtime, `ses_filler_${index}`);
+    }
+    await cacheParentless(runtime, 'ses_child');
+    await cacheParentless(runtime, 'ses_newest');
+
+    await finishTurn(runtime, 'ses_child');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+
+    await finishTurn(runtime, 'ses_filler_0');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('sweeps an expired entry on a later set, without the entry ever being re-read', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    let now = 1700000000000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    now += 61 * 1000;
+    // This set sweeps ses_child's expired entry.
+    await cacheParentless(runtime, 'ses_other');
+    // Back inside ses_child's original TTL window: if the entry had
+    // survived the sweep, this finish would still hit the cache and
+    // announce (the control case below proves that it does).
+    now -= 60 * 1000;
+    await finishTurn(runtime, 'ses_child');
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('control: an expired entry that no later set swept is still answered after the clock returns inside its TTL', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    let now = 1700000000000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    now += 61 * 1000;
+    now -= 60 * 1000;
+    await finishTurn(runtime, 'ses_child');
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+});

@@ -214,6 +214,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   const sessionParentIdCache = new Map();
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
+  const SESSION_PARENT_CACHE_LIMIT = 500;
 
   // Sessions where the client has enabled Permission Auto-Accept. Mirrored
   // from the client-side permissionStore via POST /api/notifications/auto-accept
@@ -251,7 +252,24 @@ export const createNotificationTriggerRuntime = (deps) => {
   };
 
   const setCachedSessionParentId = (sessionId, directory, spaceId, parentID) => {
-    sessionParentIdCache.set(getSessionParentCacheKey(sessionId, directory, spaceId), { parentID: parentID ?? null, at: Date.now() });
+    const cacheKey = getSessionParentCacheKey(sessionId, directory, spaceId);
+    const now = Date.now();
+    // The TTL alone never bounded this cache: it was evaluated only when
+    // the same session was read again, so a session that is never
+    // re-read kept its entry for the life of the process. Sweep expired
+    // entries on every set, refresh the written entry's position the
+    // way rememberSessionNotificationAt does, and cap the cache at the
+    // sibling stores' limit, oldest first.
+    for (const [key, entry] of sessionParentIdCache) {
+      if (now - entry.at > SESSION_PARENT_CACHE_TTL_MS) {
+        sessionParentIdCache.delete(key);
+      }
+    }
+    sessionParentIdCache.delete(cacheKey);
+    sessionParentIdCache.set(cacheKey, { parentID: parentID ?? null, at: now });
+    while (sessionParentIdCache.size > SESSION_PARENT_CACHE_LIMIT) {
+      sessionParentIdCache.delete(sessionParentIdCache.keys().next().value);
+    }
   };
 
   const getParentIdFromPayload = (payload) => {
