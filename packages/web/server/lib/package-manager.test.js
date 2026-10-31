@@ -147,6 +147,48 @@ describe('checkForUpdates', () => {
     expect(result.available).toBe(false);
   });
 
+  // --- Response body caps (the update answers are read through the bounded reader) ---
+
+  const streamedBody = (chunks) => {
+    const state = { cancelled: false };
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        // Never closed: only the reader cancelling can end this body.
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    return { response: new Response(stream), state };
+  };
+  const oversizedJson = (value) => {
+    const json = JSON.stringify(value);
+    const half = Math.ceil(json.length / 2);
+    return [json.slice(0, half), json.slice(half), 'x'.repeat(1024 * 1024)];
+  };
+
+  it('reports no update when the update API streams an over-cap body, and cancels the stream', async () => {
+    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
+    const { response, state } = streamedBody(oversizedJson({ latestVersion: '9.9.9', updateAvailable: true }));
+    fetchMock.when('api.openchamber.dev', { ok: true, body: response.body, headers: response.headers });
+
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
+
+    expect(result.available).toBe(false);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it('reports no update when the fork feed streams an over-cap body, and cancels the stream', async () => {
+    const { response, state } = streamedBody(oversizedJson([release('v9.9.9')]));
+    fetchMock.when('developing-today/openchamber/releases?per_page=30', { ok: true, body: response.body, headers: response.headers });
+
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
+
+    expect(result.available).toBe(false);
+    expect(state.cancelled).toBe(true);
+  });
+
   it('reports no update when the installed version is malformed', async () => {
     process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
     fetchMock.when('api.openchamber.dev', {
