@@ -183,3 +183,56 @@ describe('VS Code worktree bootstrap phases', () => {
     }
   }, 30_000);
 });
+
+describe('VS Code worktree start-command timeout reader bound (#1064)', () => {
+  it('pins the clamp on the source text, mirroring the web reader', () => {
+    const source = fs.readFileSync(new URL('./gitService.ts', import.meta.url), 'utf8');
+    expect(source).toContain('Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647');
+  });
+
+  it('falls back to the default for oversize values instead of overflowing the timer to ~1 ms', async () => {
+    if (process.platform === 'win32') return;
+    for (const oversize of ['3000000000', '9007199254740993']) {
+      const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-start-oversize-'));
+      const previousXdgDataHome = process.env.XDG_DATA_HOME;
+      const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      process.env.XDG_DATA_HOME = path.join(scratch, 'data');
+      process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = oversize;
+      const repository = path.join(scratch, 'repo');
+      fs.mkdirSync(repository, { recursive: true });
+      runGit(repository, ['init', '-b', 'main']);
+      runGit(repository, ['config', 'user.email', 'test@example.com']);
+      runGit(repository, ['config', 'user.name', 'Test']);
+      fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+      runGit(repository, ['add', 'README.md']);
+      runGit(repository, ['commit', '-m', 'init']);
+      const slowScript = path.join(scratch, 'slow.cjs');
+      fs.writeFileSync(slowScript, "setTimeout(() => { require('node:fs').writeFileSync('DONE_RAN', process.cwd()); }, 1500);\n");
+
+      try {
+        const created = await createWorktree(repository, {
+          mode: 'new',
+          branchName: `feature/start-command-oversize-${oversize}`,
+          worktreeName: `start-command-oversize-${oversize}`,
+          returnAfterDirectoryCreated: true,
+          startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(slowScript)}`,
+        });
+
+        const deadline = Date.now() + 15_000;
+        while ((await getWorktreeBootstrapStatus(created.path)).phase !== 'setup-ready' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        expect((await getWorktreeBootstrapStatus(created.path)).phase).toBe('setup-ready');
+        // With the pre-fix reader the oversize value overflowed the timer
+        // to ~1 ms and the command was killed before it could finish.
+        expect(fs.existsSync(path.join(created.path, 'DONE_RAN'))).toBe(true);
+      } finally {
+        if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+        else process.env.XDG_DATA_HOME = previousXdgDataHome;
+        if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+        else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+        fs.rmSync(scratch, { recursive: true, force: true });
+      }
+    }
+  }, 60_000);
+});
