@@ -211,3 +211,51 @@ describe('GitLab client error body bound', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('GitLab client success body cap', () => {
+  const CAP = 16 * 1024 * 1024;
+
+  it('refuses an over-cap JSON success body instead of parsing it', async () => {
+    const body = `{"data":"${'x'.repeat(CAP)}"}`;
+    const fetch = vi.fn(async () => new Response(body, { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+    const error = await client.Users.showCurrentUser().catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.code).toBe('response_too_large');
+    expect(error.message).toBe(`GitLab response exceeded ${CAP} bytes`);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an over-cap text success body instead of returning it', async () => {
+    const fetch = vi.fn(async () => new Response('x'.repeat(CAP + 1), { headers: { 'content-type': 'text/plain' } }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+    const error = await client.Users.showCurrentUser().catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.code).toBe('response_too_large');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an over-cap blob success body instead of returning it', async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array(CAP + 1), { headers: { 'content-type': 'application/octet-stream' } }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+    const error = await client.Users.showCurrentUser().catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.code).toBe('response_too_large');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('still parses a success body at exactly the cap', async () => {
+    const overhead = '{"data":""}'.length;
+    const body = `{"data":"${'x'.repeat(CAP - overhead)}"}`;
+    expect(body.length).toBe(CAP);
+    const fetch = vi.fn(async () => new Response(body, { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createGitLabClient({ origin: 'https://gitlab.example.com', token: 'pat-token' });
+    const result = await client.Users.showCurrentUser();
+    expect(result.data.length).toBe(CAP - overhead);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
