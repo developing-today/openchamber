@@ -159,8 +159,21 @@ export const createClientPairingRuntime = ({
   // sessions, so the read fails closed instead.
   const readStore = async (replacements = 0) => {
     const result = await readDurableJsonFile(storePath, { fs: fsPromises });
-    if (result.state === 'missing') return normalizeStore(null);
     if (result.state === 'valid') return normalizeStore(result.value);
+    // The primitive collapses an absent file and an EXISTING empty or
+    // whitespace-only file into the same 'missing' answer. Only the
+    // absent file is the first-run case: empty bytes are unparseable,
+    // and the pre-migration reader revalidated them before treating the
+    // store as empty - another process sharing this file can replace
+    // the empty bytes with valid state while this read is in flight,
+    // and returning an empty store here would let a mutation overwrite
+    // that replacement and drop its sessions (Codex, PR #1019). So a
+    // 'missing' verdict goes through the preserve helper too: it
+    // re-reads and re-judges the on-disk bytes, answers 'replaced' for
+    // a valid replacement (re-read below), 'missing' for a truly
+    // absent file (the first-run return) or for still-empty bytes
+    // (which hold no sessions, so there is nothing to preserve), and
+    // 'preserved' if the re-read bytes are malformed.
     const preservation = await preserveMalformedJsonFile(storePath, { fs: fsPromises });
     if (preservation.preserved) {
       console.warn(`Failed to read pairing store: preserved the unreadable file at ${preservation.preservedPath}`);

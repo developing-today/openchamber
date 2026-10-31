@@ -209,6 +209,40 @@ describe('client auth pairing store durability', () => {
     }
   });
 
+  it('revalidates an empty snapshot before treating the store as missing (Codex, PR #1019)', async () => {
+    const { dir, runtime } = await makeRuntime();
+    const storePath = path.join(dir, 'pairing.json');
+    await runtime.createPairingSession({ label: 'Phone' });
+
+    // First read returns empty bytes (a torn/empty snapshot) while the
+    // file on disk already holds the valid store written above: treating
+    // that snapshot as a missing store would let the next mutation
+    // overwrite the live session.
+    let emptyPending = true;
+    const emptyReadRuntime = createClientPairingRuntime({
+      fsPromises: {
+        ...fs,
+        readFile: async (target, ...rest) => {
+          if (emptyPending && String(target) === storePath) {
+            emptyPending = false;
+            return '';
+          }
+          return fs.readFile(target, ...rest);
+        },
+      },
+      path,
+      crypto,
+      storePath,
+      remoteClientAuthRuntime: { createClient: vi.fn(async () => { throw new Error('not used'); }) },
+      ttlMs: 10 * 60 * 1000,
+    });
+
+    await emptyReadRuntime.createPairingSession({ label: 'Tablet' });
+    expect(JSON.parse(await fs.readFile(storePath, 'utf8')).sessions).toHaveLength(2);
+    expect((await fs.readdir(dir)).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('writes via a temp file renamed into place, and a failed rename leaves the previous store intact', async () => {
     const writeTargets = [];
     const renameCalls = [];
