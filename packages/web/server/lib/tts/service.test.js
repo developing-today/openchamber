@@ -138,6 +138,30 @@ describe('OpenAI audio SDK compatibility', () => {
     expect(serverSawClose).toBe(true);
   });
 
+  it('fails at one whole deadline when the server answers near it and then stalls the body', async () => {
+    let serverSawClose = false;
+    const baseURL = await listen(async (request, response) => {
+      response.on('close', () => { serverSawClose = true; });
+      // Answer at ~200 ms of the 250 ms budget, then stall the body: a
+      // body phase armed with its own fresh budget would not fail the
+      // request until ~450 ms from the start of the call.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      response.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      response.write('partial-audio');
+    });
+
+    const startedAt = Date.now();
+    await expect(new TTSService().generateSpeechStream({
+      text: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1, baseURL, timeoutMs: 250,
+    })).rejects.toThrow('Speech request timed out after 250 ms');
+    expect(Date.now() - startedAt).toBeLessThan(400);
+
+    for (let attempt = 0; attempt < 80 && !serverSawClose; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(serverSawClose).toBe(true);
+  });
+
   it('fails a speech body that streams past the byte cap, without buffering it all', async () => {
     let serverSawClose = false;
     let chunksWritten = 0;
