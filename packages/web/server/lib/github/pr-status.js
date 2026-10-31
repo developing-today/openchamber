@@ -185,7 +185,7 @@ const getRepoDefaultBranch = async (octokit, repo) => {
   const metaCached = repoKey ? repoMetadataCache.get(repoKey) : null;
   if (metaCached && Date.now() - metaCached.fetchedAt < REPO_DEFAULT_BRANCH_TTL_MS) {
     const defaultBranch = normalizeText(metaCached.data?.default_branch) || null;
-    if (repoKey) defaultBranchCache.set(repoKey, { defaultBranch, fetchedAt: Date.now() });
+    if (repoKey) setBoundedCacheEntry(defaultBranchCache, repoKey, { defaultBranch, fetchedAt: Date.now() });
     return defaultBranch;
   }
 
@@ -196,7 +196,7 @@ const getRepoDefaultBranch = async (octokit, repo) => {
     });
     const defaultBranch = normalizeText(response?.data?.default_branch) || null;
     if (repoKey) {
-      defaultBranchCache.set(repoKey, {
+      setBoundedCacheEntry(defaultBranchCache, repoKey, {
         defaultBranch,
         fetchedAt: Date.now(),
       });
@@ -227,7 +227,7 @@ const getRepoMetadata = async (octokit, repo) => {
     });
     const data = response?.data ?? null;
     if (repoKey) {
-      repoMetadataCache.set(repoKey, {
+      setBoundedCacheEntry(repoMetadataCache, repoKey, {
         data,
         fetchedAt: Date.now(),
       });
@@ -237,7 +237,7 @@ const getRepoMetadata = async (octokit, repo) => {
     noteIfGitHubRateLimit(error);
     if (error?.status === 404) {
       if (repoKey) {
-        repoMetadataCache.set(repoKey, {
+        setBoundedCacheEntry(repoMetadataCache, repoKey, {
           data: null,
           fetchedAt: Date.now(),
         });
@@ -460,14 +460,14 @@ const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
     // authoritative: this repo has no PR in this state for any branch.
     const entry = { fetchedAt: Date.now(), prs, complete: prs.length < 100 };
     if (!token.invalidated && repoPullsCache.get(key)?.token === token) {
-      repoPullsCache.set(key, entry);
+      setBoundedCacheEntry(repoPullsCache, key, entry);
     }
     return entry;
   }).catch((error) => {
     if (repoPullsCache.get(key)?.token === token) repoPullsCache.delete(key);
     throw error;
   });
-  repoPullsCache.set(key, { promise, token });
+  setBoundedCacheEntry(repoPullsCache, key, { promise, token });
   return promise;
 };
 
@@ -516,6 +516,80 @@ const rememberSearchMiss = (key) => {
   }
 };
 
+// The four repo-keyed caches in this module (default branch, repo metadata,
+// repo pulls, search-disabled) used to keep one entry per distinct repo for
+// the life of the process: their TTLs were only checked when the same key
+// was read again, and nothing capped or swept them. Bound them the way the
+// sibling caches were bound in #969/#970 and the in-file _historicalPrCache /
+// _searchMissCache precedent: writes sweep expired entries from all four
+// caches, and each cache is capped with oldest-first eviction.
+export const PR_STATUS_CACHE_MAX_ENTRIES = 500;
+
+export function getPrStatusCacheSizes() {
+  return {
+    defaultBranch: defaultBranchCache.size,
+    repoMetadata: repoMetadataCache.size,
+    repoPulls: repoPullsCache.size,
+    searchApiDisabled: _searchApiDisabledRepos.size,
+  };
+}
+
+/** Remove expired entries so they do not accumulate until the same key is re-read. */
+export function pruneExpiredPrStatusCaches(now = Date.now()) {
+  for (const [key, entry] of defaultBranchCache) {
+    if (!entry || !Number.isFinite(entry.fetchedAt) || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
+      defaultBranchCache.delete(key);
+    }
+  }
+  for (const [key, entry] of repoMetadataCache) {
+    if (!entry || !Number.isFinite(entry.fetchedAt) || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
+      repoMetadataCache.delete(key);
+    }
+  }
+  for (const [key, entry] of repoPullsCache) {
+    // In-flight entries ({ promise, token }) carry no fetchedAt and are not
+    // expired; the token guard in getRepoPulls owns their lifecycle.
+    if (entry && Number.isFinite(entry.fetchedAt) && now - entry.fetchedAt >= REPO_PULLS_CACHE_TTL_MS) {
+      repoPullsCache.delete(key);
+    }
+  }
+  for (const [key, disabledAt] of _searchApiDisabledRepos) {
+    if (!Number.isFinite(disabledAt) || now - disabledAt >= SEARCH_API_RETRY_MS) {
+      _searchApiDisabledRepos.delete(key);
+    }
+  }
+  return getPrStatusCacheSizes();
+}
+
+const isInFlightPullsEntry = (entry) => Boolean(entry && entry.promise && entry.token);
+
+const capCacheEntries = (cache) => {
+  while (cache.size > PR_STATUS_CACHE_MAX_ENTRIES) {
+    // Evict the oldest evictable entry. In-flight repoPulls entries are
+    // skipped: evicting one would orphan its token, so the pending response
+    // could never populate the cache and a duplicate request would start.
+    let evicted = false;
+    for (const [key, entry] of cache) {
+      if (isInFlightPullsEntry(entry)) {
+        continue;
+      }
+      cache.delete(key);
+      evicted = true;
+      break;
+    }
+    if (!evicted) {
+      break;
+    }
+  }
+};
+
+const setBoundedCacheEntry = (cache, key, value) => {
+  pruneExpiredPrStatusCaches();
+  cache.delete(key);
+  cache.set(key, value);
+  capCacheEntries(cache);
+};
+
 const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
   // Build a repo key to check/store 403 status per-repo
   const repoKey = scopedCacheKey(octokit, [...repoNames].sort().join(',').toLowerCase());
@@ -551,7 +625,7 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
     } catch (error) {
       noteIfGitHubRateLimit(error);
       if (error?.status === 403) {
-        if (repoKey) _searchApiDisabledRepos.set(repoKey, Date.now());
+        if (repoKey) setBoundedCacheEntry(_searchApiDisabledRepos, repoKey, Date.now());
         return null;
       }
       if (error?.status === 404) {
