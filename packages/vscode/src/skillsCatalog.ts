@@ -589,8 +589,31 @@ export async function installSkillsFromRepository(options: {
   }
 }
 
-const catalogCache = new Map<string, { expiresAt: number; items: SkillsCatalogItem[] }>();
+export const catalogCache = new Map<string, { expiresAt: number; items: SkillsCatalogItem[] }>();
 const CATALOG_TTL_MS = 30 * 60 * 1000;
+export const CATALOG_CACHE_MAX_ENTRIES = 500;
+
+// The TTL bounds freshness, not retention: without a sweep, an entry for a
+// source that is never requested again stays for the life of the extension
+// host, items array and all. Mirror pruneNpmInfoCache in opencodeConfig.ts:
+// expired entries are swept and the cache is capped oldest-first whenever
+// the catalog is read or a fresh entry lands.
+export const pruneCatalogCache = (now = Date.now()): void => {
+  for (const [cacheKey, entry] of catalogCache) {
+    if (now >= entry.expiresAt) {
+      catalogCache.delete(cacheKey);
+    }
+  }
+  while (catalogCache.size > CATALOG_CACHE_MAX_ENTRIES) {
+    const oldest = catalogCache.keys().next().value;
+    if (oldest === undefined) break;
+    catalogCache.delete(oldest);
+  }
+};
+
+export const clearCatalogCacheForTests = (): void => {
+  catalogCache.clear();
+};
 
 export async function getSkillsCatalog(
   workingDirectory?: string,
@@ -598,6 +621,7 @@ export async function getSkillsCatalog(
   additionalSources?: SkillsCatalogSourceConfig[],
   installedSkills?: Array<{ name: string; scope: SkillScope; source?: 'opencode' | 'agents' | 'claude' }>
 ) {
+  pruneCatalogCache();
   // The machine policy can hide the built-in catalogs (see enterprise-mode.js).
   const curated = readEnterprisePolicy().hideBuiltinSkillCatalogs ? [] : CURATED_SOURCES;
   const sources = [...curated, ...(Array.isArray(additionalSources) ? additionalSources : [])];
@@ -635,6 +659,7 @@ export async function getSkillsCatalog(
       }
       items = scanned.items || [];
       catalogCache.set(cacheKey, { expiresAt: Date.now() + CATALOG_TTL_MS, items });
+      pruneCatalogCache();
     }
 
     itemsBySource[src.id] = items.map((item) => {
