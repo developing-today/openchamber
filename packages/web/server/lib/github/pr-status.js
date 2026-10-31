@@ -537,33 +537,31 @@ export function getPrStatusCacheSizes() {
 /** Remove expired entries so they do not accumulate until the same key is re-read. */
 export function pruneExpiredPrStatusCaches(now = Date.now()) {
   for (const [key, entry] of defaultBranchCache) {
-    if (!entry || typeof entry.fetchedAt !== 'number' || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
+    if (!entry || !Number.isFinite(entry.fetchedAt) || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
       defaultBranchCache.delete(key);
     }
   }
   for (const [key, entry] of repoMetadataCache) {
-    if (!entry || typeof entry.fetchedAt !== 'number' || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
+    if (!entry || !Number.isFinite(entry.fetchedAt) || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
       repoMetadataCache.delete(key);
     }
   }
   for (const [key, entry] of repoPullsCache) {
     // In-flight entries ({ promise, token }) carry no fetchedAt and are not
     // expired; the token guard in getRepoPulls owns their lifecycle.
-    if (entry && typeof entry.fetchedAt === 'number' && now - entry.fetchedAt >= REPO_PULLS_CACHE_TTL_MS) {
+    if (entry && Number.isFinite(entry.fetchedAt) && now - entry.fetchedAt >= REPO_PULLS_CACHE_TTL_MS) {
       repoPullsCache.delete(key);
     }
   }
   for (const [key, disabledAt] of _searchApiDisabledRepos) {
-    if (typeof disabledAt !== 'number' || now - disabledAt >= SEARCH_API_RETRY_MS) {
+    if (!Number.isFinite(disabledAt) || now - disabledAt >= SEARCH_API_RETRY_MS) {
       _searchApiDisabledRepos.delete(key);
     }
   }
   return getPrStatusCacheSizes();
 }
 
-const isInFlightPullsEntry = (entry) => Boolean(
-  entry && typeof entry === 'object' && entry.promise && entry.token,
-);
+const isInFlightPullsEntry = (entry) => Boolean(entry && entry.promise && entry.token);
 
 const capCacheEntries = (cache) => {
   while (cache.size > PR_STATUS_CACHE_MAX_ENTRIES) {
