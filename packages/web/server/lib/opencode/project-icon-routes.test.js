@@ -112,6 +112,7 @@ describe('project icon routes', () => {
     const { app, getRoute } = createRouteRegistry();
     const svgBytes = Buffer.from('svg-bytes');
     const fsPromises = {
+      stat: vi.fn(async () => ({ size: svgBytes.length })),
       readFile: vi.fn(async () => svgBytes),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -156,6 +157,7 @@ describe('project icon routes', () => {
     const { app, getRoute } = createRouteRegistry();
     const icoBytes = Buffer.from('ico-bytes');
     const fsPromises = {
+      stat: vi.fn(async () => ({ size: icoBytes.length })),
       readFile: vi.fn(async () => icoBytes),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -222,6 +224,7 @@ describe('project icon routes', () => {
     const { app, getRoute } = createRouteRegistry();
     const svgBytes = Buffer.from('svg-bytes');
     const fsPromises = {
+      stat: vi.fn(async () => ({ size: svgBytes.length })),
       readFile: vi.fn(async () => svgBytes),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -266,5 +269,140 @@ describe('project icon routes', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.discoveredPath).toBe('/repo/public/favicon.svg');
+  });
+
+  it('rejects an over-limit favicon from its stat size without reading it (#1053)', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const readFile = vi.fn(async () => Buffer.from('never-read'));
+    const fsPromises = {
+      stat: vi.fn(async () => ({ size: 5 * 1024 * 1024 + 1 })),
+      readFile,
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+
+    registerProjectIconRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir: '/tmp/openchamber-test',
+      sanitizeProjects: (projects) => projects,
+      readSettingsFromDiskMigrated: async () => ({
+        projects: [{ id: 'proj-1', path: '/repo' }],
+      }),
+      persistSettings: async () => ({ projects: [] }),
+      createFsSearchRuntime: () => ({
+        searchFilesystemFiles: async () => [
+          {
+            name: 'favicon.png',
+            path: '/repo/favicon.png',
+            relativePath: 'favicon.png',
+            extension: 'png',
+          },
+        ],
+      }),
+      spawn: vi.fn(),
+      resolveGitBinaryForSpawn: vi.fn(),
+    });
+
+    const res = createMockResponse();
+    await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+      params: { projectId: 'proj-1' },
+      body: {},
+    }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Discovered icon exceeds size limit (5 MB)' });
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('still rejects a zero-byte favicon as empty (#1053)', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const fsPromises = {
+      stat: vi.fn(async () => ({ size: 0 })),
+      readFile: vi.fn(async () => Buffer.alloc(0)),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+
+    registerProjectIconRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir: '/tmp/openchamber-test',
+      sanitizeProjects: (projects) => projects,
+      readSettingsFromDiskMigrated: async () => ({
+        projects: [{ id: 'proj-1', path: '/repo' }],
+      }),
+      persistSettings: async () => ({ projects: [] }),
+      createFsSearchRuntime: () => ({
+        searchFilesystemFiles: async () => [
+          {
+            name: 'favicon.png',
+            path: '/repo/favicon.png',
+            relativePath: 'favicon.png',
+            extension: 'png',
+          },
+        ],
+      }),
+      spawn: vi.fn(),
+      resolveGitBinaryForSpawn: vi.fn(),
+    });
+
+    const res = createMockResponse();
+    await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+      params: { projectId: 'proj-1' },
+      body: {},
+    }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Discovered icon is empty' });
+  });
+
+  it('discovers a favicon at exactly the size limit (#1053)', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const atCapBytes = Buffer.alloc(5 * 1024 * 1024);
+    const fsPromises = {
+      stat: vi.fn(async () => ({ size: atCapBytes.length })),
+      readFile: vi.fn(async () => atCapBytes),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+
+    registerProjectIconRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir: '/tmp/openchamber-test',
+      sanitizeProjects: (projects) => projects,
+      readSettingsFromDiskMigrated: async () => ({
+        projects: [{ id: 'proj-1', path: '/repo' }],
+      }),
+      persistSettings: async () => ({ projects: [] }),
+      createFsSearchRuntime: () => ({
+        searchFilesystemFiles: async () => [
+          {
+            name: 'favicon.png',
+            path: '/repo/favicon.png',
+            relativePath: 'favicon.png',
+            extension: 'png',
+          },
+        ],
+      }),
+      spawn: vi.fn(),
+      resolveGitBinaryForSpawn: vi.fn(),
+    });
+
+    const res = createMockResponse();
+    await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+      params: { projectId: 'proj-1' },
+      body: {},
+    }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.discoveredPath).toBe('/repo/favicon.png');
   });
 });

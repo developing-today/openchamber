@@ -412,6 +412,14 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         return res.status(415).json({ error: 'Unsupported favicon format' });
       }
 
+      // Gate on the stat size before reading: the selected file lives in
+      // the user's project tree, so an over-limit favicon must not be
+      // buffered whole just to be rejected by the length check below.
+      const selectedStat = await fsPromises.stat(selected.path);
+      if (selectedStat.size > projectIconMaxBytes) {
+        return res.status(400).json({ error: 'Discovered icon exceeds size limit (5 MB)' });
+      }
+
       const bytes = await fsPromises.readFile(selected.path);
       if (bytes.length === 0) {
         return res.status(400).json({ error: 'Discovered icon is empty' });
