@@ -32,6 +32,27 @@ const remoteExistenceCache = new Map();
 const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
+// Both remote caches below are bounded at this many entries, the
+// fs/routes gitReadCache precedent: keys embed directory paths, so
+// without a bound every worktree directory ever listed leaves a
+// permanent entry in a long-lived process (#979).
+export const GIT_REMOTE_CACHE_MAX_ENTRIES = 500;
+
+const boundRemoteCacheSize = (cache) => {
+  while (cache.size > GIT_REMOTE_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+};
+
+const pruneExpiredRemoteExistenceCache = (now) => {
+  for (const [key, entry] of remoteExistenceCache) {
+    if (now - entry.checkedAt >= REMOTE_EXISTENCE_CACHE_TTL_MS) {
+      remoteExistenceCache.delete(key);
+    }
+  }
+};
 // Patches this service reads, compares and applies use the a/ and b/ prefixes.
 // The user's diff.mnemonicPrefix (i/, w/, c/, 1/, 2/), diff.noprefix or
 // diff.srcPrefix/dstPrefix would otherwise change them, and a hunk would no
@@ -1099,9 +1120,20 @@ const hasRemote = async (git, directory, remoteName) => {
     .then((value) => String(value || '').trim().length > 0)
     .catch(() => false);
 
-  remoteExistenceCache.set(key, { exists, checkedAt: Date.now() });
+  // Inserting sweeps the expired entries first: the TTL was only ever
+  // evaluated for the key being read, so a directory that is never
+  // listed again kept its entry forever (#979).
+  const now = Date.now();
+  pruneExpiredRemoteExistenceCache(now);
+  remoteExistenceCache.delete(key);
+  remoteExistenceCache.set(key, { exists, checkedAt: now });
+  boundRemoteCacheSize(remoteExistenceCache);
   return exists;
 };
+
+// Exported for tests: the cache is module-private, and its eviction is
+// observable only through this reader and getGitRemoteCacheSizes.
+export const hasRemoteForTests = hasRemote;
 
 const buildRawGitOptions = (raw) => {
   if (Array.isArray(raw)) {
@@ -4710,6 +4742,34 @@ async function getRemoteDefaultBranches(git) {
 const REMOTE_HEADS_TTL_MS = 30_000;
 const remoteHeadsCache = new Map();
 
+const pruneExpiredRemoteHeadsCache = (now) => {
+  for (const [key, entry] of remoteHeadsCache) {
+    if (now - entry.at >= REMOTE_HEADS_TTL_MS) {
+      remoteHeadsCache.delete(key);
+    }
+  }
+};
+
+/** Entry counts of the two git remote caches, for tests and diagnostics. */
+export const getGitRemoteCacheSizes = () => ({
+  remoteExistence: remoteExistenceCache.size,
+  remoteHeads: remoteHeadsCache.size,
+});
+
+/**
+ * Remove every expired entry from both remote caches and enforce the
+ * entry bound on each; returns the resulting sizes. Inserting into
+ * either cache already prunes that cache, so this is the explicit
+ * form for tests and any future periodic caller.
+ */
+export const pruneExpiredGitRemoteCaches = (now = Date.now()) => {
+  pruneExpiredRemoteExistenceCache(now);
+  boundRemoteCacheSize(remoteExistenceCache);
+  pruneExpiredRemoteHeadsCache(now);
+  boundRemoteCacheSize(remoteHeadsCache);
+  return getGitRemoteCacheSizes();
+};
+
 const readRemoteHeads = (git, directory, remote, localRefs) => {
   const key = `${directory}\0${remote.name}\0${remote.refs?.fetch ?? ''}`;
   const localKey = localRefs.join('\n');
@@ -4722,12 +4782,19 @@ const readRemoteHeads = (git, directory, remote, localRefs) => {
     }
     return names;
   });
-  const entry = { at: Date.now(), localKey, heads };
+  const now = Date.now();
+  pruneExpiredRemoteHeadsCache(now);
+  const entry = { at: now, localKey, heads };
+  remoteHeadsCache.delete(key);
   remoteHeadsCache.set(key, entry);
+  boundRemoteCacheSize(remoteHeadsCache);
   // A remote that did not answer is asked again next time.
   heads.catch(() => { if (remoteHeadsCache.get(key) === entry) remoteHeadsCache.delete(key); });
   return heads;
 };
+
+// Exported for tests, like hasRemoteForTests above.
+export const readRemoteHeadsForTests = readRemoteHeads;
 
 async function filterActiveRemoteBranches(git, directory, remoteBranches) {
   try {
