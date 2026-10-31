@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { registerOpenCodeRoutes, setOpenCodeInfoDeadlineForTest } from './routes.js';
+import { OPENCODE_LATEST_VERSION_MAX_BYTES, registerOpenCodeRoutes, setOpenCodeInfoDeadlineForTest } from './routes.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -56,6 +56,40 @@ describe('OpenCode upgrade routes', () => {
       if (previousUserConfig === undefined) delete process.env.npm_config_userconfig;
       else process.env.npm_config_userconfig = previousUserConfig;
     }
+  });
+
+  it('pins the registry /latest byte cap at 1 MiB', () => {
+    expect(OPENCODE_LATEST_VERSION_MAX_BYTES).toBe(1024 * 1024);
+  });
+
+  it('rejects an over-cap chunked registry /latest body without parsing it', async () => {
+    let cancelled = false;
+    let pulledBytes = 0;
+    const chunk = new Uint8Array(64 * 1024).fill(120);
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulledBytes += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    globalThis.fetch = vi.fn(async (input) => (String(input).endsWith('/api/info')
+      ? jsonResponse({ version: '2.0.21' })
+      : new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(500);
+
+    expect(response.body).toEqual({
+      available: null,
+      error: `OpenCode npm registry latest document exceeds ${OPENCODE_LATEST_VERSION_MAX_BYTES} bytes`,
+    });
+    expect(cancelled).toBe(true);
+    // The reader may pull ahead of the cancelling read by a chunk or two;
+    // what matters is that consumption stops near the cap, not at 32 MiB.
+    expect(pulledBytes).toBeLessThanOrEqual(OPENCODE_LATEST_VERSION_MAX_BYTES + 2 * chunk.byteLength);
   });
 
   it('fails closed without contacting the bundled OpenCode updater', async () => {
