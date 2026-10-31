@@ -6,6 +6,7 @@ import { buildGoalIntroText, createSessionGoal as createSessionGoalDefault } fro
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { createExistingSessionTasks } from './existing-session.js';
+import { combineAbortSignals } from '../shared/bounded-fetch.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -16,26 +17,6 @@ const TASK_DUE_SLACK_MS = 5_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const buildTaskKey = (projectID, taskID) => `${projectID}:${taskID}`;
-
-// Compose abort signals so any one of them aborts the result, mirroring
-// AbortSignal.any where the runtime has it and composing manually where
-// it does not (the oldest supported hosts lack AbortSignal.any). A single
-// present signal passes through unchanged.
-const composeAbortSignals = (signals) => {
-  const present = signals.filter(Boolean);
-  if (present.length === 0) return null;
-  if (present.length === 1) return present[0];
-  if (AbortSignal.any) return AbortSignal.any(present);
-  const controller = new AbortController();
-  for (const signal of present) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      break;
-    }
-    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
-  }
-  return controller.signal;
-};
 
 const parseTimeParts = (time) => {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof time === 'string' ? time : '');
@@ -312,7 +293,14 @@ export const createScheduledTasksRuntime = (deps) => {
     // whatever call is in flight.
     fetch: async (input, init) => {
       const requestSignal = init?.signal ?? ('signal' in Object(input) ? input.signal : null);
-      const signal = composeAbortSignals([runSignal, requestSignal]);
+      // Shared composition helper (#995): this call site keeps its old
+      // bare-signal semantics — no present signal means no signal, a
+      // single present signal passes through unchanged, and detach is
+      // deliberately not called (the old variant never removed its
+      // forwarding listeners, and the SDK may still be reading the
+      // response body after this fetch call returns).
+      const presentSignals = [runSignal, requestSignal].filter(Boolean);
+      const signal = presentSignals.length > 1 ? combineAbortSignals(presentSignals).signal : (presentSignals[0] ?? null);
       const requestInit = { ...init };
       if (signal) requestInit.signal = signal;
       const response = await fetch(input, requestInit);

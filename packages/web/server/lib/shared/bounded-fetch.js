@@ -13,7 +13,7 @@
 // AbortSignal.any where the runtime has it and composing manually where
 // it does not (the oldest supported hosts lack AbortSignal.any). The
 // returned detach removes the forwarding listeners once settled.
-const combineAbortSignals = (signals) => {
+export const combineAbortSignals = (signals) => {
   const anyImpl = AbortSignal.any;
   if (anyImpl) {
     return { signal: anyImpl(signals), detach: () => {} };

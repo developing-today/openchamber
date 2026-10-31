@@ -95,6 +95,12 @@ const apiProxyDeadlineSignal = (deps: ProxyRuntimeDeps): AbortSignal =>
 // Node 18.17+), so compose the signals manually when it is unavailable,
 // mirroring packages/ui's client fetch. Dropping either source here would
 // lose caller cancellation or the proxy deadline on those hosts.
+// Intentionally separate from the web server's shared helper
+// (packages/web/server/lib/shared/bounded-fetch.js, exported for #995):
+// the extension is a separate package/bundle and cannot import the web
+// server's lib/shared, and this call site needs the bare-signal shape
+// rather than { signal, detach }. Keep the composition semantics
+// (any-source abort, already-aborted source) in step with that helper.
 const combineAbortSignals = (signals: AbortSignal[]): AbortSignal => {
   // SAFETY: feature-detecting an optional static the oldest supported
   // runtime lacks; the cast only reads the optional member.
