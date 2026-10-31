@@ -1,4 +1,8 @@
-import { renameWithRetry } from '../shared/atomic-rename.js';
+import {
+  preserveMalformedJsonFile,
+  readDurableJsonFile,
+  writeDurableJsonFile,
+} from '../shared/durable-json-store.js';
 
 const STORE_VERSION = 1;
 const PAIRING_ID_PREFIX = 'pair_';
@@ -137,85 +141,60 @@ export const createClientPairingRuntime = ({
       : [],
   });
 
-  // A torn or otherwise unparseable file is pairing state, not an empty
-  // store: move its bytes aside before any later write can overwrite them,
-  // and name the preserved copy so the loss is recoverable. Every
-  // readStore caller runs serialized under withStoreMutation, but that
-  // queue is per-process and the CLI opens the same file: readStore
-  // re-validates the on-disk bytes before this rename runs.
-  const preserveCorruptStore = async (error) => {
-    const preservedPath = `${storePath}.corrupt-${Date.now()}`;
-    try {
-      await renameWithRetry((from, to) => fsPromises.rename(from, to), storePath, preservedPath);
-      console.warn(`Failed to read pairing store: preserved the unreadable file at ${preservedPath}:`, error);
-      return true;
-    } catch (preserveError) {
-      console.warn('Failed to read pairing store:', error);
-      console.warn(`Failed to preserve the unreadable pairing store at ${preservedPath}:`, preserveError);
-      return false;
-    }
-  };
-
-  const readStore = async () => {
-    let raw;
-    try {
-      raw = await fsPromises.readFile(storePath, 'utf8');
-    } catch (error) {
-      if (error?.code === 'ENOENT') return normalizeStore(null);
-      throw error;
-    }
-    try {
-      return normalizeStore(JSON.parse(raw));
-    } catch (error) {
-      // Another process can share this file, and withStoreMutation
-      // serializes only this process: the bytes above may already have
-      // been preserved and replaced with valid state by the time this
-      // runs. Re-read and compare before renaming anything, so a stale
-      // parse failure can never move a live replacement aside (Codex,
-      // PR #890).
-      let currentRaw;
-      try {
-        currentRaw = await fsPromises.readFile(storePath, 'utf8');
-      } catch {
-        // Already preserved or removed by the other process.
-        return normalizeStore(null);
-      }
-      if (currentRaw !== raw) {
-        try {
-          return normalizeStore(JSON.parse(currentRaw));
-        } catch {
-          // The replacement is corrupt too; fall through and preserve
-          // the bytes that are actually on disk now.
-        }
-      }
-      // A mutation must never overwrite bytes whose preservation just
-      // failed: they are the only copy of the pairing sessions. Abort
-      // instead; the caller can retry once the file is movable.
-      const preserved = await preserveCorruptStore(error);
-      if (!preserved) {
-        throw new Error('Failed to preserve the unreadable pairing store; refusing to overwrite it', { cause: error });
-      }
+  // This store rides the shared durable-store primitive (design #976):
+  // the strict reader judges the file, the preserve helper moves a
+  // malformed file aside under the collision-proof preserve name, and
+  // the writer is mode-explicit. A torn or otherwise unparseable file is
+  // pairing state, not an empty store: its bytes are preserved before
+  // any later write can overwrite them, and the loss stays recoverable.
+  // The value judgement stays the one this store always made - any
+  // parsed JSON reaches normalizeStore, which tolerates every shape -
+  // so only unparseable bytes are malformed here. The preserve helper
+  // re-reads and re-judges the on-disk bytes before renaming anything,
+  // so a valid replacement that landed in the meantime is never moved
+  // aside (Codex, PR #890); a 'replaced' outcome re-reads that valid
+  // file instead (bounded - repeated replacement is a race no read
+  // should chase). A mutation must never overwrite bytes whose
+  // preservation failed: they are the only copy of the pairing
+  // sessions, so the read fails closed instead.
+  const readStore = async (replacements = 0) => {
+    const result = await readDurableJsonFile(storePath, { fs: fsPromises });
+    if (result.state === 'valid') return normalizeStore(result.value);
+    // The primitive collapses an absent file and an EXISTING empty or
+    // whitespace-only file into the same 'missing' answer. Only the
+    // absent file is the first-run case: empty bytes are unparseable,
+    // and the pre-migration reader revalidated them before treating the
+    // store as empty - another process sharing this file can replace
+    // the empty bytes with valid state while this read is in flight,
+    // and returning an empty store here would let a mutation overwrite
+    // that replacement and drop its sessions (Codex, PR #1019). So a
+    // 'missing' verdict goes through the preserve helper too: it
+    // re-reads and re-judges the on-disk bytes, answers 'replaced' for
+    // a valid replacement (re-read below), 'missing' for a truly
+    // absent file (the first-run return) or for still-empty bytes
+    // (which hold no sessions, so there is nothing to preserve), and
+    // 'preserved' if the re-read bytes are malformed.
+    const preservation = await preserveMalformedJsonFile(storePath, { fs: fsPromises });
+    if (preservation.preserved) {
+      console.warn(`Failed to read pairing store: preserved the unreadable file at ${preservation.preservedPath}`);
       return normalizeStore(null);
     }
+    if (preservation.outcome === 'missing') return normalizeStore(null);
+    if (preservation.outcome === 'replaced' && replacements < 3) {
+      return readStore(replacements + 1);
+    }
+    throw new Error('Failed to preserve the unreadable pairing store; refusing to overwrite it');
   };
 
   const writeStore = async (store) => {
+    // The directory mode stays stated here: the primitive's writer
+    // creates the directory without a mode, and this store has always
+    // made its directory 0o700. The file itself is written by the
+    // primitive with its mode stated (0o600 - the store holds session
+    // secret hashes), and the chmod keeps the mode true even when the
+    // rename landed over an existing file with wider permissions.
     await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
-    const tempPath = `${storePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    try {
-      await fsPromises.writeFile(tempPath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
-      await renameWithRetry((from, to) => fsPromises.rename(from, to), tempPath, storePath);
-    } catch (error) {
-      try {
-        // rm is the current removal call; fall back to unlink for fs
-        // shims that only implement the older surface.
-        await (fsPromises.rm?.(tempPath, { force: true }) ?? fsPromises.unlink(tempPath));
-      } catch {
-        // The write/rename error is the one the caller needs; a failed
-        // temp cleanup must not mask it.
-      }
-      throw error;
-    }
+    await writeDurableJsonFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { fs: fsPromises, mode: 0o600 });
     if (typeof fsPromises.chmod === 'function') {
       await fsPromises.chmod(storePath, 0o600).catch(() => {});
     }
