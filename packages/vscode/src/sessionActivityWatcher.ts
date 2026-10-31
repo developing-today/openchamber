@@ -76,6 +76,30 @@ export const pruneStaleSessionActivityEntries = (
   return removed;
 };
 
+// How often the running watcher re-runs the TTL prune while its event
+// stream stays connected (#999, Codex review on PR #1010). The reconcile
+// pass only runs before each (re)subscription, so without a periodic
+// prune a session deleted during a disconnect and marked idle on
+// reconnect would linger in the snapshot for as long as the healthy
+// connection lasted — potentially indefinitely.
+export const SESSION_ACTIVITY_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+export const pruneStaleSessionActivity = (
+  phases: Map<string, { phase: ActivityPhase; updatedAt: number }>,
+  cooldowns: Map<string, NodeJS.Timeout>,
+  now: number,
+): string[] => {
+  const removed = pruneStaleSessionActivityEntries(phases, now);
+  for (const sessionId of removed) {
+    const timer = cooldowns.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      cooldowns.delete(sessionId);
+    }
+  }
+  return removed;
+};
+
 const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
 const sessionActivityCooldowns = new Map<string, NodeJS.Timeout>();
 const SESSION_COOLDOWN_DURATION_MS = 2000;
@@ -84,7 +108,26 @@ let globalEventWatcherAbortController: AbortController | null = null;
 let sessionActivityWatcherReady = false;
 let chatViewProvider: { postMessage: (message: unknown) => void } | null = null;
 let globalEventWatcherRetryTimer: NodeJS.Timeout | null = null;
+let sessionActivityPruneTimer: NodeJS.Timeout | null = null;
 let globalEventWatcherStartToken = 0;
+
+const startSessionActivityPruneTimer = (): void => {
+  if (sessionActivityPruneTimer) {
+    return;
+  }
+  sessionActivityPruneTimer = setInterval(() => {
+    pruneStaleSessionActivity(sessionActivityPhases, sessionActivityCooldowns, Date.now());
+  }, SESSION_ACTIVITY_PRUNE_INTERVAL_MS);
+  sessionActivityPruneTimer.unref?.();
+};
+
+const clearSessionActivityPruneTimer = (): void => {
+  if (!sessionActivityPruneTimer) {
+    return;
+  }
+  clearInterval(sessionActivityPruneTimer);
+  sessionActivityPruneTimer = null;
+};
 
 const clearGlobalEventWatcherRetry = (): void => {
   if (!globalEventWatcherRetryTimer) {
@@ -124,13 +167,7 @@ const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promi
   // Absent-from-active only proves a session is not running, not that it is
   // gone, so reconcile never deletes on absence alone. The TTL prune is the
   // bound for sessions deleted while this host was not watching (#999).
-  for (const sessionId of pruneStaleSessionActivityEntries(sessionActivityPhases, Date.now())) {
-    const timer = sessionActivityCooldowns.get(sessionId);
-    if (timer) {
-      clearTimeout(timer);
-      sessionActivityCooldowns.delete(sessionId);
-    }
-  }
+  pruneStaleSessionActivity(sessionActivityPhases, sessionActivityCooldowns, Date.now());
 };
 
 const removeSessionActivity = (sessionId: string): void => {
@@ -277,6 +314,7 @@ export const startGlobalEventWatcher = async (
 
   globalEventWatcherAbortController = new AbortController();
   const signal = globalEventWatcherAbortController.signal;
+  startSessionActivityPruneTimer();
 
   let attempt = 0;
 
@@ -344,6 +382,7 @@ export const startGlobalEventWatcher = async (
 export const stopGlobalEventWatcher = (): void => {
   globalEventWatcherStartToken += 1;
   clearGlobalEventWatcherRetry();
+  clearSessionActivityPruneTimer();
 
   if (globalEventWatcherAbortController) {
     try {

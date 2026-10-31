@@ -4,8 +4,10 @@ import {
   buildSessionActivityV1Snapshot,
   deleteSessionActivityEntry,
   getSessionActivitySnapshot,
+  pruneStaleSessionActivity,
   pruneStaleSessionActivityEntries,
   SESSION_ACTIVITY_IDLE_TTL_MS,
+  SESSION_ACTIVITY_PRUNE_INTERVAL_MS,
 } from './sessionActivityWatcher';
 
 describe('session-activity v1 envelope (design #612, #621)', () => {
@@ -54,6 +56,27 @@ describe('session-activity v1 envelope (design #612, #621)', () => {
     const snapshot = buildSessionActivityV1Snapshot(phases, true, 5678);
     assert.deepEqual(Object.keys(snapshot.sessions), ['live-session']);
     assert.equal(snapshot.sessions['live-session'].type, 'idle');
+  });
+
+  test('the periodic prune removes a stale idle entry and clears its cooldown while the stream stays connected (#999)', () => {
+    // Regression for the Codex finding on PR #1010: the TTL prune must not
+    // depend on a reconnect. pruneStaleSessionActivity is the exact helper
+    // the watcher's interval timer runs, so an entry that crosses the TTL
+    // mid-connection is removed (with its cooldown timer) on the next tick.
+    assert.equal(SESSION_ACTIVITY_PRUNE_INTERVAL_MS > 0, true);
+    assert.equal(SESSION_ACTIVITY_PRUNE_INTERVAL_MS < SESSION_ACTIVITY_IDLE_TTL_MS, true);
+    const now = SESSION_ACTIVITY_IDLE_TTL_MS * 4;
+    const phases = new Map([
+      ['stale-idle', { phase: 'idle' as const, updatedAt: 0 }],
+      ['fresh-idle', { phase: 'idle' as const, updatedAt: now }],
+    ]);
+    const staleTimer = setTimeout(() => {}, 60_000);
+    const cooldowns = new Map<string, NodeJS.Timeout>([['stale-idle', staleTimer]]);
+    assert.deepEqual(pruneStaleSessionActivity(phases, cooldowns, now), ['stale-idle']);
+    assert.deepEqual(Array.from(phases.keys()), ['fresh-idle']);
+    // The pruned entry's cooldown timer is dropped from the map (and cleared
+    // by the helper), so it cannot resurrect the entry later.
+    assert.equal(cooldowns.size, 0);
   });
 
   test('the stale prune removes only entries idle past the TTL (#999)', () => {
