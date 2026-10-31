@@ -1557,7 +1557,14 @@ const worktreeStartCommandTimeoutMs = (): number => {
     return WORKTREE_START_COMMAND_TIMEOUT_MS;
   }
   const parsed = Number(raw);
-  return parsed > 0 ? parsed : WORKTREE_START_COMMAND_TIMEOUT_MS;
+  // The value feeds a raw setTimeout in runWorktreeStartCommand, which
+  // cannot honour more than 2^31-1 ms: a larger delay overflows Node's
+  // timer to ~1 ms and kills every start command instantly, so fall back
+  // to the default instead (the web reader in
+  // packages/web/server/lib/git/service.js is bounded the same way, #884).
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : WORKTREE_START_COMMAND_TIMEOUT_MS;
 };
 
 const runWorktreeStartCommand = async (directory: string, command: string): Promise<{ success: boolean; message?: string; stdout?: string; stderr?: string }> => {
