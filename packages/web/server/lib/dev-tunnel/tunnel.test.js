@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 
 import { createDevTunnelClient } from './client.js';
 import { createDevTunnelRuntime, isDevTunnelPath } from './runtime.js';
@@ -389,7 +389,7 @@ describe('dev tunnel backpressure', () => {
 
   test('client pauses the WebSocket when the local consumer stalls, then delivers everything', async () => {
     const TOTAL = 48 * 1024 * 1024;
-    const wss = new WebSocket.WebSocketServer({ port: 0, host: '127.0.0.1' });
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
     await new Promise((resolve) => wss.on('listening', resolve));
     started.push(async () => { await new Promise((resolve) => wss.close(resolve)); });
     let serverSocket = null;
