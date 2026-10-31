@@ -317,7 +317,11 @@ const GOOGLE_HEADERS = {
 
 const resolveGoogleWindow = (sourceId: GoogleAuthSource['sourceId'], resetAt: number | null) => {
   if (sourceId === 'gemini') {
-    return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS } as const;
+    // The per-model projection of the Code Assist subscription the
+    // Antigravity provider reads (#1042): not a separate daily pool,
+    // and the payload carries no window duration - only each bucket's
+    // real resetTime - so the window claims no duration.
+    return { label: 'per-model', seconds: null } as const;
   }
 
   if (sourceId === 'antigravity') {
@@ -336,7 +340,7 @@ const resolveGoogleWindow = (sourceId: GoogleAuthSource['sourceId'], resetAt: nu
     return { label: '5h', seconds: GOOGLE_FIVE_HOUR_WINDOW_SECONDS } as const;
   }
 
-  return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS } as const;
+  return { label: 'per-model', seconds: null } as const;
 };
 
 const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = {
@@ -1293,7 +1297,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   if (!authSources.length) {
     return buildResult({
       providerId: 'google',
-      providerName: 'Google',
+      providerName: 'Google (Code Assist, per-model)',
       ok: false,
       configured: false,
       error: 'Not configured',
@@ -1394,7 +1398,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   if (!Object.keys(models).length) {
     return buildResult({
       providerId: 'google',
-      providerName: 'Google',
+      providerName: 'Google (Code Assist, per-model)',
       ok: false,
       configured: true,
       error: sourceErrors[0] ?? 'Failed to fetch models',
@@ -1403,7 +1407,7 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
 
   return buildResult({
     providerId: 'google',
-    providerName: 'Google',
+    providerName: 'Google (Code Assist, per-model)',
     ok: true,
     configured: true,
     usage: {

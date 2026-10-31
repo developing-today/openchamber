@@ -13,7 +13,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.usedPercent).toBe(expectedUsedPercent);
+    expect(result['google/gemini-2.5-pro'].windows['per-model'].usedPercent).toBe(expectedUsedPercent);
   });
 
   it.each([
@@ -28,7 +28,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.usedPercent).toBe(expectedUsedPercent);
+    expect(result['google/gemini-2.5-pro'].windows['per-model'].usedPercent).toBe(expectedUsedPercent);
   });
 
   it('transformModelData returns the parsed resetAt for a valid resetTime', () => {
@@ -38,7 +38,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBe(Date.parse('2026-10-08T14:29:35Z'));
+    expect(result['google/gemini-2.5-pro'].windows['per-model'].resetAt).toBe(Date.parse('2026-10-08T14:29:35Z'));
   });
 
   it('transformModelData returns resetAt null for an unparseable resetTime', () => {
@@ -48,7 +48,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBeNull();
+    expect(result['google/gemini-2.5-pro'].windows['per-model'].resetAt).toBeNull();
   });
 
   it.each([
@@ -58,7 +58,7 @@ describe('Google transforms', () => {
   ])('transformModelData returns resetAt null for %s', (_label, modelData) => {
     const result = transformModelData('gemini-2.5-pro', modelData, 'google');
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBeNull();
+    expect(result['google/gemini-2.5-pro'].windows['per-model'].resetAt).toBeNull();
   });
 
   it('transformModelData does not double-prefix an already scoped model name', () => {
@@ -81,6 +81,23 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBe(expectedResetAt);
+    expect(result['google/gemini-2.5-pro'].windows['per-model'].resetAt).toBe(expectedResetAt);
+  });
+
+  it('stamps no fabricated daily window: the per-model window claims no duration (#1042)', () => {
+    const bucket = transformQuotaBucket(
+      { modelId: 'gemini-2.5-pro', remainingFraction: 0.5, resetTime: '2026-10-08T14:29:35Z' },
+      'gemini'
+    );
+    expect(Object.keys(bucket['gemini/gemini-2.5-pro'].windows)).toEqual(['per-model']);
+    expect(bucket['gemini/gemini-2.5-pro'].windows['per-model'].windowSeconds).toBeNull();
+
+    const model = transformModelData(
+      'gemini-2.5-pro',
+      { quotaInfo: { remainingFraction: 0.5, resetTime: '2026-10-08T14:29:35Z' } },
+      'gemini'
+    );
+    expect(Object.keys(model['gemini/gemini-2.5-pro'].windows)).toEqual(['per-model']);
+    expect(model['gemini/gemini-2.5-pro'].windows['per-model'].windowSeconds).toBeNull();
   });
 });
