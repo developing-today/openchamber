@@ -31,6 +31,22 @@ describe('compareReleaseVersions', () => {
     expect(compareReleaseVersions('1e3.0', '2.3.3')).toBe(0);
     expect(compareReleaseVersions('2.4.0', '2..3')).toBe(0);
   });
+
+  test('orders a prerelease below the same numeric release', () => {
+    expect(compareReleaseVersions('2.3.3', '2.3.3-beta.1')).toBe(1);
+    expect(compareReleaseVersions('2.3.3-beta.1', '2.3.3')).toBe(-1);
+    expect(compareReleaseVersions('2.3.3-beta.1', '2.3.3-beta.2')).toBe(0);
+    expect(compareReleaseVersions('2.3.4-beta.1', '2.3.3')).toBe(1);
+    expect(compareReleaseVersions('2.3.3-beta.1', '2.3.4')).toBe(-1);
+  });
+
+  test('ignores a +build suffix instead of treating the version as unparseable', () => {
+    expect(compareReleaseVersions('2.3.4', '2.3.3+45')).toBe(1);
+    expect(compareReleaseVersions('2.3.3+45', '2.3.3')).toBe(0);
+    expect(compareReleaseVersions('2.3.3', '2.3.3+45')).toBe(0);
+    expect(compareReleaseVersions('2.3.3+45', '2.3.4')).toBe(-1);
+    expect(compareReleaseVersions('2.3.3-beta.1+45', '2.3.3')).toBe(-1);
+  });
 });
 
 const releaseJson = () => ({
@@ -76,6 +92,19 @@ describe('fetchLatestMobileRelease', () => {
   test('returns null for a malformed tag that would parse as newer', async () => {
     const body = { ...releaseJson(), tag_name: 'v3.' };
     expect(await fetchLatestMobileRelease('2.3.3', fetchReturning(JSON.stringify(body)))).toBeNull();
+  });
+
+  test('offers the matching stable release to an installed prerelease', async () => {
+    const body = { ...releaseJson(), tag_name: 'v2.3.3' };
+    const info = await fetchLatestMobileRelease('2.3.3-beta.1', fetchReturning(JSON.stringify(body)));
+    expect(info?.available).toBe(true);
+    expect(info?.version).toBe('2.3.3');
+  });
+
+  test('offers a newer release to an installed +build version', async () => {
+    const info = await fetchLatestMobileRelease('2.3.3+45', fetchRelease());
+    expect(info?.available).toBe(true);
+    expect(info?.version).toBe('2.4.0');
   });
 
   test('returns null when the installed version is current or newer', async () => {
