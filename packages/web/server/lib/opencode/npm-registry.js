@@ -3,10 +3,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 const NPM_CACHE_TTL_MS = 3_600_000;
 const NPM_CACHE_MAX_ENTRIES = 500;
 const NPM_FETCH_TIMEOUT_MS = 5_000;
+
+// Full packuments for prolific packages run to megabytes; only dist-tags and
+// version keys are read, so ask for the abbreviated install-v1 shape and cap
+// the read at a generous 16 MiB. Mirrors that ignore the Accept value return
+// the full packument and the cap still applies.
+export const NPM_PACKUMENT_MAX_BYTES = 16 * 1024 * 1024;
+const NPM_ACCEPT = 'application/vnd.npm.install-v1+json';
 
 /**
  * @typedef {Object} NpmPackagePayload
@@ -104,14 +112,23 @@ export async function lookupNpmPackage(name) {
     const response = await fetch(request.url, {
       headers: {
         'User-Agent': _getUserAgent(),
-        Accept: 'application/json',
+        Accept: NPM_ACCEPT,
         ...request.headers,
       },
       signal: AbortSignal.timeout(NPM_FETCH_TIMEOUT_MS),
     });
 
     if (response.ok) {
-      const data = await response.json();
+      const bounded = await readBoundedResponseText(response, NPM_PACKUMENT_MAX_BYTES);
+      if (bounded.tooLarge) {
+        return { ok: false, status: 'network', error: 'Registry response exceeded size limit' };
+      }
+      let data;
+      try {
+        data = JSON.parse(bounded.text);
+      } catch {
+        return { ok: false, status: 'network', error: 'Registry returned invalid JSON' };
+      }
       const distTags = parseDistTags(data?.['dist-tags']);
       return {
         ok: true,

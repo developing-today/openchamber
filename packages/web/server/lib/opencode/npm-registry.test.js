@@ -112,6 +112,39 @@ describe('npm registry client', () => {
     expect(result.error).toContain('aborted');
   });
 
+  test('requests the abbreviated install-v1 packument', async () => {
+    fetchMock.mockImplementation(() => jsonResponse({
+      'dist-tags': { latest: '1.2.0' },
+      versions: { '1.0.0': {}, '1.2.0': {} },
+    }));
+
+    await npm.lookupNpmPackage('foo');
+
+    expect(fetchMock.mock.calls[0][1].headers.Accept).toBe('application/vnd.npm.install-v1+json');
+  });
+
+  test('over-cap packument returns network status and caches nothing', async () => {
+    const overCap = () => Promise.resolve(new Response(JSON.stringify({
+      'dist-tags': { latest: '1.2.0' },
+      versions: { '1.2.0': {} },
+    }), {
+      status: 200,
+      headers: { 'content-length': String(npm.NPM_PACKUMENT_MAX_BYTES + 1) },
+    }));
+    fetchMock.mockImplementation(overCap);
+
+    const result = await npm.lookupNpmPackage('foo');
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('network');
+    expect(result.error).toMatch(/size limit/);
+
+    fetchMock.mockImplementation(() => jsonResponse({ 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {} } }));
+    const second = await npm.getNpmInfo('foo');
+    expect(second.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   test('cache hit reuses definitive success', async () => {
     fetchMock.mockImplementation(() => jsonResponse({ 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {} } }));
 
