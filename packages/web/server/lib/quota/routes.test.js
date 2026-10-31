@@ -64,3 +64,28 @@ describe('GET /api/quota/:providerId', () => {
     expect(response.body).toMatchObject({ providerId: 'codex', providerName: 'Fallback' });
   });
 });
+
+describe('prototype provider ids on the credential routes', () => {
+  const app = createApp({ fetchQuotaForProvider: async () => result() });
+
+  it.each(['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__'])(
+    'answers 404 UNSUPPORTED_PROVIDER for %s on every credential route',
+    async (providerId) => {
+      const read = await request(app).get(`/api/quota/credentials/${providerId}`);
+      expect(read.status).toBe(404);
+      expect(read.body).toMatchObject({ code: 'UNSUPPORTED_PROVIDER' });
+
+      const write = await request(app).put(`/api/quota/credentials/${providerId}`).send({ usageToken: 'x' });
+      expect(write.status).toBe(404);
+      expect(write.body).toMatchObject({ code: 'UNSUPPORTED_PROVIDER' });
+
+      const validate = await request(app).post(`/api/quota/credentials/${providerId}/validate`);
+      expect(validate.status).toBe(404);
+      expect(validate.body).toMatchObject({ code: 'UNSUPPORTED_PROVIDER' });
+
+      const remove = await request(app).delete(`/api/quota/credentials/${providerId}`);
+      expect(remove.status).toBe(404);
+      expect(remove.body).toMatchObject({ code: 'UNSUPPORTED_PROVIDER' });
+    },
+  );
+});
