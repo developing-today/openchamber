@@ -213,6 +213,13 @@ const FILE_MIME_MAP = Object.freeze({
 
 const MAX_SERVE_BYTES = 100 * 1024 * 1024;
 
+// Whole-file text read cap for /api/fs/read: the handler buffers the file as a
+// UTF-8 string (plus the response copy), so unlike streamed /api/fs/raw it must
+// refuse large files up front. 16 MiB is generous for text (the UI guard is
+// 20,000 lines) while bounding per-request server memory; bulk or binary
+// content belongs on /api/fs/raw or the preview path (MAX_SERVE_BYTES).
+const MAX_READ_BYTES = 16 * 1024 * 1024;
+
 const streamUploadBody = async (req, handle, maxBytes) => {
   let received = 0;
   for await (const chunk of req) {
@@ -1310,6 +1317,9 @@ export const registerFsRoutes = (app, dependencies) => {
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+      if (stats.size > MAX_READ_BYTES) {
+        return res.status(413).json({ error: 'File too large to read' });
       }
 
       let content = await fsPromises.readFile(canonicalPath, 'utf8');
