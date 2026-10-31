@@ -1860,6 +1860,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '此仓库没有变更',
   'diffView.unavailable.untrackedDirectoryTitle': '新文件文件夹',
   'diffView.unavailable.untrackedDirectoryDescription': '此文件夹中的新文件太多，无法逐个列出。请暂存该文件夹，或者如果它不属于仓库，将其添加到 .gitignore。',
+  'diffView.unavailable.tooLargeTitle': '文件太大，无法显示差异',
+  'diffView.unavailable.tooLargeDescription': '它超过了文件差异 20 MiB 的上限。',
   'diffView.submodule.title': '子模块',
   'diffView.submodule.commitChanged': '提交 {from} → {to}',
   'diffView.submodule.commitUnchanged': '仍在提交 {commit}',

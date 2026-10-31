@@ -2782,6 +2782,19 @@ export async function getGitRangeFiles(
     .filter(Boolean);
 }
 
+// Working-tree reads for a file diff are capped at 20 MiB, the same limit
+// the git-show sides of this function already carry through the bridge git
+// exec runtime (GIT_EXEC_DEFAULT_MAX_OUTPUT_BYTES). An over-cap file answers
+// with the unavailable shape below; the webview turns it into a
+// GitPathUnavailableError and DiffView shows the too-large message.
+export const MAX_FILE_DIFF_WORKING_TREE_BYTES = 20 * 1024 * 1024;
+
+const fileDiffTooLarge = (filePath: string): GitPathUnavailable => ({
+  kind: 'unavailable',
+  reason: 'file_too_large',
+  message: `File is too large to diff: ${filePath} exceeds the 20 MiB working-tree limit for file diffs`,
+});
+
 /**
  * Get file diff with original and modified content
  */
@@ -2830,7 +2843,16 @@ export async function getGitFileDiff(
         modified = stagedResult.exitCode === 0 ? stagedResult.stdout : '';
       } else {
         const fileUri = vscode.Uri.file(path.join(directory, filePath));
+        const fileStat = await vscode.workspace.fs.stat(fileUri);
+        if (fileStat.size > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+          return fileDiffTooLarge(filePath);
+        }
         const modifiedBytes = await vscode.workspace.fs.readFile(fileUri);
+        // The file can grow between the stat and the read; never hand back
+        // more than the cap even when the stat said it fit.
+        if (modifiedBytes.byteLength > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+          return fileDiffTooLarge(filePath);
+        }
         modified = Buffer.from(modifiedBytes).toString('utf8');
       }
       

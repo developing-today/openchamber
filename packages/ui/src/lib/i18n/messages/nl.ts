@@ -1886,6 +1886,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'Geen wijzigingen in deze repository',
   'diffView.unavailable.untrackedDirectoryTitle': 'Map met nieuwe bestanden',
   'diffView.unavailable.untrackedDirectoryDescription': 'Deze map bevat te veel nieuwe bestanden om ze één voor één te tonen. Stage de map, of voeg hem toe aan .gitignore als hij niet in de repository thuishoort.',
+  'diffView.unavailable.tooLargeTitle': 'Bestand is te groot voor een diff',
+  'diffView.unavailable.tooLargeDescription': 'Het overschrijdt de limiet van 20 MiB voor bestandsdiffs.',
   'diffView.submodule.title': 'Submodule',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Nog steeds op commit {commit}',

@@ -1848,6 +1848,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.nestedRepository.noChanges": "Nenhuma alteração neste repositório",
   "diffView.unavailable.untrackedDirectoryTitle": "Pasta com arquivos novos",
   "diffView.unavailable.untrackedDirectoryDescription": "Esta pasta tem arquivos novos demais para listá-los um a um. Faça o stage dela ou adicione-a ao .gitignore se ela não pertence ao repositório.",
+  "diffView.unavailable.tooLargeTitle": "O arquivo é grande demais para exibir o diff",
+  "diffView.unavailable.tooLargeDescription": "Ele excede o limite de 20 MiB para diffs de arquivos.",
   "diffView.submodule.title": "Submódulo",
   "diffView.submodule.commitChanged": "Commit {from} → {to}",
   "diffView.submodule.commitUnchanged": "Ainda no commit {commit}",
