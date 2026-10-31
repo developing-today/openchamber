@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { configureOpenCodeCredentials, credentialSourceUsesLocalStore, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { configureOpenCodeCredentials, credentialSourceUsesLocalStore, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readLocalOpenCodeCredentials, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -383,6 +383,72 @@ describe('credentialSourceUsesLocalStore', () => {
     expect(sourceFor('http://127.0.0.1:4096').usesLocalStore()).toBe(true);
     expect(sourceFor('https://opencode.example.com:4096').usesLocalStore()).toBe(false);
     expect(sourceFor('https://opencode.example.com:4096', { OPENCODE_DB: 'opencode.db' }).usesLocalStore()).toBe(true);
+  });
+});
+
+describe('readLocalOpenCodeCredentials', () => {
+  let root;
+  let savedXdg;
+  let savedDb;
+
+  const createStoreAt = (dbPath, key) => {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSync(dbPath);
+    db.exec(`create table credential (
+      id text primary key,
+      integration_id text,
+      label text not null,
+      value text not null,
+      connector_id text,
+      method_id text,
+      active integer,
+      time_created integer not null,
+      time_updated integer not null
+    )`);
+    db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)')
+      .run('cred_google', 'google', 'default', JSON.stringify({ type: 'key', key }), 1, 100, 100);
+    db.close();
+  };
+
+  const storeEnv = (dataHome) => ({ XDG_DATA_HOME: dataHome, HOME: root });
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-auth-local-test-'));
+    savedXdg = process.env.XDG_DATA_HOME;
+    savedDb = process.env.OPENCODE_DB;
+    delete process.env.OPENCODE_DB;
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+    if (savedXdg === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = savedXdg;
+    if (savedDb === undefined) delete process.env.OPENCODE_DB; else process.env.OPENCODE_DB = savedDb;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('resolves the store from the launch environment, not process.env', async () => {
+    const launchData = path.join(root, 'launch-data');
+    const processData = path.join(root, 'process-data');
+    createStoreAt(path.join(launchData, 'opencode', 'opencode.db'), 'launch-key');
+    createStoreAt(path.join(processData, 'opencode', 'opencode.db'), 'process-key');
+    process.env.XDG_DATA_HOME = processData;
+    configureOpenCodeCredentials(openCodeCredentialSource({
+      buildOpenCodeUrl: () => 'http://127.0.0.1:4096',
+      getOpenCodeAuthHeaders: () => ({}),
+      getLaunchEnvironment: () => storeEnv(launchData),
+    }));
+    await expect(readLocalOpenCodeCredentials()).resolves.toEqual({
+      google: { type: 'api', key: 'launch-key' },
+    });
+  });
+
+  it('refuses when the connected OpenCode has no launch environment', async () => {
+    configureOpenCodeCredentials(openCodeCredentialSource({
+      buildOpenCodeUrl: () => 'http://127.0.0.1:4096',
+      getOpenCodeAuthHeaders: () => ({}),
+      getLaunchEnvironment: () => null,
+    }));
+    await expect(readLocalOpenCodeCredentials()).rejects.toThrow('location is unknown');
   });
 });
 
