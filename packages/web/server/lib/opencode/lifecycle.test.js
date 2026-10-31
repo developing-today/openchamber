@@ -29,8 +29,40 @@ vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
-const { createOpenCodeLifecycleRuntime, parsePositiveInt } = await import('./lifecycle.js');
+const { createOpenCodeLifecycleRuntime, parsePositiveInt, resolveHealthCheckIntervalOverrideMs, resolveHealthCheckTimeoutMs } =
+  await import('./lifecycle.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
+
+describe('health-check timer readers', () => {
+  it('accepts the timer maximum and ordinary values for the timeout reader', () => {
+    expect(resolveHealthCheckTimeoutMs({})).toBe(5000);
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '250' })).toBe(250);
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '2147483647' })).toBe(2_147_483_647);
+  });
+
+  it('falls back to the default above the timer maximum and for unsafe integers (timeout reader)', () => {
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '3000000000' })).toBe(5000);
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '9007199254740993' })).toBe(5000);
+  });
+
+  it("keeps positive-only semantics for the timeout reader: '0' falls back to the default", () => {
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '0' })).toBe(5000);
+  });
+
+  it('accepts the timer maximum and an explicit zero for the interval override reader', () => {
+    expect(resolveHealthCheckIntervalOverrideMs({})).toBe(0);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '0' })).toBe(0);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '1000' })).toBe(1000);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '2147483647' })).toBe(
+      2_147_483_647
+    );
+  });
+
+  it('falls back to zero above the timer maximum and for unsafe integers (interval override reader)', () => {
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '3000000000' })).toBe(0);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '9007199254740993' })).toBe(0);
+  });
+});
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
