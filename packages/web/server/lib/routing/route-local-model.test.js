@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
 import { LOCAL_MODEL, downloadModel } from './route-local-model.js';
@@ -140,6 +141,31 @@ describe('downloadModel', () => {
       status: 502,
       message: expect.stringMatching(/timed out .* without receiving data/),
     });
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(`${file}.part`)).toBe(false);
+  });
+
+  it.each(['drain', 'end'])('times out a stalled write %s and discards the partial file', async (phase) => {
+    const file = tempFile();
+    const fetchImpl = serve(CONTENT);
+    let out;
+    const createWriteStreamImpl = (partial) => {
+      fs.writeFileSync(partial, CONTENT.subarray(0, 1));
+      out = new Writable({
+        highWaterMark: phase === 'drain' ? 1 : 1024,
+        write(_chunk, _encoding, callback) {
+          if (phase !== 'drain') callback();
+        },
+        final(_callback) {},
+      });
+      return out;
+    };
+    await expect(downloadModel({ file, model: modelFor(), fetchImpl, createWriteStreamImpl, stallTimeoutMs: 100 })).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringMatching(/timed out .* without receiving data/),
+    });
+    expect(fetchImpl.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(out.destroyed).toBe(true);
     expect(fs.existsSync(file)).toBe(false);
     expect(fs.existsSync(`${file}.part`)).toBe(false);
   });
