@@ -46,7 +46,7 @@
 // package); it carries a parity implementation that reads/writes the SAME dir.
 
 import fsp from 'node:fs/promises';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { renameWithRetry } from '../shared/atomic-rename.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -88,6 +88,14 @@ export const readManagedProcessOwner = (pid) => {
  */
 export const claimManagedProcess = (pid, fromOwner, claimant = process.pid) => {
   const claimPath = path.join(resolveRegistryDir(), `${pid}.claim-from-${fromOwner}`);
+  const readHolder = () => {
+    try {
+      const holder = Number.parseInt(readFileSync(claimPath, 'utf8').trim(), 10);
+      return Number.isInteger(holder) ? holder : null;
+    } catch {
+      return null;
+    }
+  };
   try {
     mkdirSync(resolveRegistryDir(), { recursive: true });
     writeFileSync(claimPath, String(claimant), { flag: 'wx' });
@@ -95,11 +103,52 @@ export const claimManagedProcess = (pid, fromOwner, claimant = process.pid) => {
   } catch (error) {
     if (error?.code !== 'EEXIST') return null;
   }
+  const holder = readHolder();
+  if (holder === null || holder === claimant || isPidAlive(holder)) return holder;
+  // The recorded holder is gone: its claim has no end of life of its own, so
+  // it must not answer ownership questions (or block adoption) forever.
+  // Supersede it — but never by blindly removing the file: two servers can
+  // read the same dead holder, and the loser's remove would delete the
+  // winner's freshly created live claim, letting both adopt the process.
+  // Move the file aside instead (rename is atomic, so only one superseder
+  // moves it), verify the moved file still names the dead holder, and only
+  // then drop it and re-run the exclusive create. A moved file naming
+  // anyone else is a live claim caught in the race: put it back untouched
+  // and report its holder.
+  const asidePath = `${claimPath}.superseding-${claimant}`;
   try {
-    const holder = Number.parseInt(readFileSync(claimPath, 'utf8').trim(), 10);
-    return Number.isInteger(holder) ? holder : null;
+    renameSync(claimPath, asidePath);
   } catch {
-    return null;
+    return readHolder();
+  }
+  let movedHolder = null;
+  try {
+    const moved = Number.parseInt(readFileSync(asidePath, 'utf8').trim(), 10);
+    movedHolder = Number.isInteger(moved) ? moved : null;
+  } catch {
+    movedHolder = null;
+  }
+  if (movedHolder !== holder) {
+    try {
+      renameSync(asidePath, claimPath);
+    } catch {
+      // The slot was taken while restoring: recreate the displaced claim if
+      // it is still the best record available, otherwise leave the winner's.
+      try {
+        writeFileSync(claimPath, String(movedHolder), { flag: 'wx' });
+      } catch {
+        // A newer claim owns the slot now; it wins.
+      }
+    }
+    return movedHolder ?? readHolder();
+  }
+  rmSync(asidePath, { force: true });
+  try {
+    writeFileSync(claimPath, String(claimant), { flag: 'wx' });
+    return claimant;
+  } catch (error) {
+    if (error?.code !== 'EEXIST') return null;
+    return readHolder();
   }
 };
 
@@ -140,6 +189,75 @@ export const commandIdentifiesOurServer = (command, entry) => {
  * tests pass their own `fs`/`execFileAsync` instead of mocking node builtins.
  */
 export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = defaultExecFileAsync } = {}) => {
+  // Claim files (`<pid>.claim-from-<owner>`, written by claimManagedProcess)
+  // are the handover record between servers. They get an end of life here:
+  // unregister drops the claimed pid's files, and the reaper sweeps files
+  // whose recorded holder is dead.
+  const claimFilePattern = /^(\d+)\.claim-from-(\d+)$/;
+  const listClaimFiles = async () => {
+    const dir = resolveRegistryDir();
+    let names = [];
+    try {
+      const listed = await fs.readdir(dir);
+      names = Array.isArray(listed) ? listed : [];
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const name of names) {
+      const match = claimFilePattern.exec(name);
+      if (match) {
+        out.push({ pid: Number.parseInt(match[1], 10), filePath: path.join(dir, name) });
+      }
+    }
+    return out;
+  };
+
+  const removeClaimFilesForPid = async (pid) => {
+    for (const claim of await listClaimFiles()) {
+      if (claim.pid !== pid) continue;
+      try {
+        await fs.rm(claim.filePath, { force: true });
+      } catch {
+        // Best-effort: a stuck claim file is swept by the reaper later.
+      }
+    }
+  };
+
+  const sweepDeadHolderClaims = async () => {
+    for (const claim of await listClaimFiles()) {
+      try {
+        const holder = Number.parseInt((await fs.readFile(claim.filePath, 'utf8')).trim(), 10);
+        if (!Number.isInteger(holder) || isPidAlive(holder)) continue;
+        // Same race as claim supersession: a claimant may have replaced the
+        // stale file with a live claim since the read above. Move the file
+        // aside (atomic), verify the moved file still names the dead
+        // holder, and restore it untouched when it does not.
+        const asidePath = `${claim.filePath}.sweeping-${process.pid}`;
+        await fs.rename(claim.filePath, asidePath);
+        let movedHolder = null;
+        try {
+          const moved = Number.parseInt((await fs.readFile(asidePath, 'utf8')).trim(), 10);
+          movedHolder = Number.isInteger(moved) ? moved : null;
+        } catch {
+          movedHolder = null;
+        }
+        if (movedHolder !== holder) {
+          try {
+            await fs.rename(asidePath, claim.filePath);
+          } catch {
+            // Slot taken while restoring; the newer claim wins.
+            await fs.rm(asidePath, { force: true }).catch(() => {});
+          }
+          continue;
+        }
+        await fs.rm(asidePath, { force: true });
+      } catch {
+        // Unreadable claim files are left for a later sweep, never guessed at.
+      }
+    }
+  };
+
   const writeEntryFile = async (entry) => {
     const dir = resolveRegistryDir();
     try {
@@ -211,6 +329,10 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     } catch {
       // Best-effort: dropping a missing file is not an error.
     }
+    // The pid is gone from the registry, so its handover claims are over:
+    // leaving them would leak a file per handover and let a dead holder
+    // keep answering ownership questions for this pid.
+    await removeClaimFilesForPid(pid);
   };
 
   // Returns { ppid, command } for a live pid on Unix, or null if it can't be read.
@@ -321,6 +443,7 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
    * server. Returns { inspected, reaped }.
    */
   const reapOrphanedProcesses = async ({ log, keepPids = [] } = {}) => {
+    await sweepDeadHolderClaims();
     const records = await readAllEntries();
     if (records.length === 0) return { inspected: 0, reaped: 0 };
 

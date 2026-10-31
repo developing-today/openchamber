@@ -271,6 +271,7 @@ describe('registerManagedProcess', () => {
 describe('unregisterManagedProcess', () => {
   it('removes the entry file', async () => {
     rmMock.mockResolvedValue();
+    readdirMock.mockResolvedValue([]);
 
     await unregisterManagedProcess(4242);
 
