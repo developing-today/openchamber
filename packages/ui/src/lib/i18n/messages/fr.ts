@@ -1637,6 +1637,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'Aucune modification dans ce dépôt',
   'diffView.unavailable.untrackedDirectoryTitle': 'Dossier de nouveaux fichiers',
   'diffView.unavailable.untrackedDirectoryDescription': 'Ce dossier contient trop de nouveaux fichiers pour les lister un par un. Indexez-le ou ajoutez-le à .gitignore s’il n’a pas sa place dans le dépôt.',
+  'diffView.unavailable.tooLargeTitle': 'Fichier trop volumineux pour un diff',
+  'diffView.unavailable.tooLargeDescription': 'Il dépasse la limite de 20 Mio pour les diffs de fichiers.',
   'diffView.submodule.title': 'Sous-module',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Toujours sur le commit {commit}',

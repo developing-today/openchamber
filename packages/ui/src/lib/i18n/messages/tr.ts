@@ -1766,6 +1766,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'Bu depoda değişiklik yok',
   'diffView.unavailable.untrackedDirectoryTitle': 'Yeni dosyalar klasörü',
   'diffView.unavailable.untrackedDirectoryDescription': 'Bu klasörde tek tek listelenemeyecek kadar çok yeni dosya var. Klasörü hazırlama alanına ekleyin ya da depoya ait değilse .gitignore dosyasına yazın.',
+  'diffView.unavailable.tooLargeTitle': 'Dosya diff için çok büyük',
+  'diffView.unavailable.tooLargeDescription': 'Dosya diff sınırı olan 20 MiB değerini aşıyor.',
   'diffView.submodule.title': 'Alt modül',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Hâlâ {commit} commit\'inde',

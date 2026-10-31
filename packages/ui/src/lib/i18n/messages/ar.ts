@@ -1820,6 +1820,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'لا توجد تغييرات في هذا المستودع',
   'diffView.unavailable.untrackedDirectoryTitle': 'مجلد ملفات جديدة',
   'diffView.unavailable.untrackedDirectoryDescription': 'يحتوي هذا المجلد على ملفات جديدة كثيرة جدًا لا يمكن سردها واحدًا واحدًا. أدرجه، أو أضفه إلى .gitignore إن لم يكن مكانه في المستودع.',
+  'diffView.unavailable.tooLargeTitle': 'الملف كبير جدًا لعرض الفرق',
+  'diffView.unavailable.tooLargeDescription': 'يتجاوز حد 20 ميبي بايت لعرض فروق الملفات.',
   'diffView.submodule.title': 'وحدة فرعية',
   'diffView.submodule.commitChanged': 'الإيداع {from} → {to}',
   'diffView.submodule.commitUnchanged': 'لا يزال على الإيداع {commit}',

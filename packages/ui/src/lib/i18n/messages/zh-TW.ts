@@ -1875,6 +1875,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '此儲存庫沒有變更',
   'diffView.unavailable.untrackedDirectoryTitle': '新檔案資料夾',
   'diffView.unavailable.untrackedDirectoryDescription': '此資料夾中的新檔案太多，無法逐一列出。請暫存該資料夾，或若它不屬於儲存庫，將其加入 .gitignore。',
+  'diffView.unavailable.tooLargeTitle': '檔案太大，無法顯示差異',
+  'diffView.unavailable.tooLargeDescription': '它超過了檔案差異 20 MiB 的上限。',
   'diffView.submodule.title': '子模組',
   'diffView.submodule.commitChanged': '提交 {from} → {to}',
   'diffView.submodule.commitUnchanged': '仍在提交 {commit}',

@@ -1820,6 +1820,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'אין שינויים במאגר הזה',
   'diffView.unavailable.untrackedDirectoryTitle': 'תיקייה של קבצים חדשים',
   'diffView.unavailable.untrackedDirectoryDescription': 'בתיקייה הזו יש יותר מדי קבצים חדשים כדי להציג אותם אחד אחד. אפשר להעביר אותה להכנה (stage), או להוסיף אותה ל-.gitignore אם היא לא שייכת למאגר.',
+  'diffView.unavailable.tooLargeTitle': 'הקובץ גדול מדי להצגת diff',
+  'diffView.unavailable.tooLargeDescription': 'הוא חורג ממגבלת 20 MiB עבור diff של קבצים.',
   'diffView.submodule.title': 'מודול משנה',
   'diffView.submodule.commitChanged': 'קומיט {from} → {to}',
   'diffView.submodule.commitUnchanged': 'עדיין בקומיט {commit}',

@@ -1894,6 +1894,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '이 저장소에 변경사항이 없습니다',
   'diffView.unavailable.untrackedDirectoryTitle': '새 파일 폴더',
   'diffView.unavailable.untrackedDirectoryDescription': '이 폴더에는 새 파일이 너무 많아 하나씩 나열할 수 없습니다. 스테이지하거나, 저장소에 포함되지 않아야 한다면 .gitignore에 추가하세요.',
+  'diffView.unavailable.tooLargeTitle': '파일이 너무 커서 diff를 표시할 수 없습니다',
+  'diffView.unavailable.tooLargeDescription': '파일 diff 제한인 20MiB를 초과합니다.',
   'diffView.submodule.title': '서브모듈',
   'diffView.submodule.commitChanged': '커밋 {from} → {to}',
   'diffView.submodule.commitUnchanged': '여전히 커밋 {commit}',

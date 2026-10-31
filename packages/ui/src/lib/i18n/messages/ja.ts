@@ -1890,6 +1890,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': 'このリポジトリに変更はありません',
   'diffView.unavailable.untrackedDirectoryTitle': '新規ファイルのフォルダー',
   'diffView.unavailable.untrackedDirectoryDescription': 'このフォルダーには新規ファイルが多すぎるため、個別に一覧表示できません。ステージするか、リポジトリに不要であれば .gitignore に追加してください。',
+  'diffView.unavailable.tooLargeTitle': 'ファイルが大きすぎて差分を表示できません',
+  'diffView.unavailable.tooLargeDescription': 'ファイル差分の上限である 20 MiB を超えています。',
   'diffView.submodule.title': 'サブモジュール',
   'diffView.submodule.commitChanged': 'コミット {from} → {to}',
   'diffView.submodule.commitUnchanged': 'コミット {commit} のまま',

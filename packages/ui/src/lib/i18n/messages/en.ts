@@ -1894,6 +1894,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'No changes in this repository',
   'diffView.unavailable.untrackedDirectoryTitle': 'Folder of new files',
   'diffView.unavailable.untrackedDirectoryDescription': 'This folder holds too many new files to list one by one. Stage it, or add it to .gitignore if it does not belong in the repository.',
+  'diffView.unavailable.tooLargeTitle': 'File is too large to diff',
+  'diffView.unavailable.tooLargeDescription': 'It is larger than the 20 MiB limit for file diffs.',
   'diffView.submodule.title': 'Submodule',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Still on commit {commit}',

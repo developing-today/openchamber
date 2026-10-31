@@ -1638,6 +1638,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'Keine Änderungen in diesem Repository',
   'diffView.unavailable.untrackedDirectoryTitle': 'Ordner mit neuen Dateien',
   'diffView.unavailable.untrackedDirectoryDescription': 'Dieser Ordner enthält zu viele neue Dateien, um sie einzeln aufzulisten. Stelle ihn bereit oder trage ihn in .gitignore ein, wenn er nicht ins Repository gehört.',
+  'diffView.unavailable.tooLargeTitle': 'Datei ist zu groß für einen Diff',
+  'diffView.unavailable.tooLargeDescription': 'Sie überschreitet das Limit von 20 MiB für Dateivergleiche.',
   'diffView.submodule.title': 'Submodul',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Weiterhin auf Commit {commit}',

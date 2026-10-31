@@ -1848,6 +1848,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.nestedRepository.noChanges": "У цьому репозиторії немає змін",
   "diffView.unavailable.untrackedDirectoryTitle": "Тека з новими файлами",
   "diffView.unavailable.untrackedDirectoryDescription": "У цій теці забагато нових файлів, щоб показувати їх окремо. Застейджте її або додайте в .gitignore, якщо їй не місце в репозиторії.",
+  "diffView.unavailable.tooLargeTitle": "Файл завеликий для відображення diff",
+  "diffView.unavailable.tooLargeDescription": "Він перевищує ліміт 20 MiB для diff файлів.",
   "diffView.submodule.title": "Субмодуль",
   "diffView.submodule.commitChanged": "Коміт {from} → {to}",
   "diffView.submodule.commitUnchanged": "Досі на коміті {commit}",
