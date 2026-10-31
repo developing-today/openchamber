@@ -60,6 +60,42 @@ describe('installed skill provenance registry', () => {
     expect(readInstalledSources().size).toBe(0);
   });
 
+  it('refuses to overwrite a malformed file on append and leaves it byte-identical', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    const corrupt = '{"version":1,"entries":[{"skillName":"skill-a"';
+    fs.writeFileSync(file, corrupt);
+
+    expect(() => appendInstalledSources([entry()])).toThrow(/malformed.*refusing to overwrite/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(corrupt);
+  });
+
+  it('refuses to overwrite a malformed file on remove and leaves it byte-identical', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    const corrupt = '{broken';
+    fs.writeFileSync(file, corrupt);
+
+    expect(() => removeInstalledSources('skill-creator')).toThrow(/malformed.*refusing to overwrite/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(corrupt);
+  });
+
+  it('refuses to overwrite a file with an unrecognized shape on append', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    const wrongShape = JSON.stringify({ version: 99, entries: [entry()] });
+    fs.writeFileSync(file, wrongShape);
+
+    expect(() => appendInstalledSources([entry({ skillName: 'other' })])).toThrow(/malformed/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(wrongShape);
+  });
+
+  it('creates the file on append when it is missing', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    expect(fs.existsSync(file)).toBe(false);
+
+    appendInstalledSources([entry()]);
+
+    expect(readInstalledSources().get('skill-creator')).toHaveLength(1);
+  });
+
   it('ignores entries that are missing their identity', () => {
     appendInstalledSources([entry({ sourceId: '' }), { skillName: '', skillDir: 'x', sourceId: 'a' }, entry({ skillDir: '' })]);
 

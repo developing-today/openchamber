@@ -27,20 +27,9 @@ const installedSourcesPath = () => path.join(
 
 const entryKey = (entry) => [entry.sourceId, entry.skillDir, entry.scope].join(' ');
 
-/**
- * All recorded installs keyed by skill name. A missing or malformed file is
- * "no provenance", never an error: the badge falls back to name matching
- * rather than losing its state because one write was interrupted.
- */
-export const readInstalledSources = () => {
+const entriesByName = (payload) => {
+  if (!payload || payload.version !== VERSION || !Array.isArray(payload.entries)) return null;
   const byName = new Map();
-  let payload;
-  try {
-    payload = JSON.parse(fs.readFileSync(installedSourcesPath(), 'utf8'));
-  } catch {
-    return byName;
-  }
-  if (!payload || payload.version !== VERSION || !Array.isArray(payload.entries)) return byName;
   for (const entry of payload.entries) {
     const skillName = asNonEmptyString(entry?.skillName);
     const sourceId = asNonEmptyString(entry?.sourceId);
@@ -54,9 +43,63 @@ export const readInstalledSources = () => {
 };
 
 /**
+ * All recorded installs keyed by skill name. A missing or malformed file is
+ * "no provenance", never an error: the badge falls back to name matching
+ * rather than losing its state because one write was interrupted.
+ */
+export const readInstalledSources = () => {
+  let payload;
+  try {
+    payload = JSON.parse(fs.readFileSync(installedSourcesPath(), 'utf8'));
+  } catch {
+    return new Map();
+  }
+  return entriesByName(payload) ?? new Map();
+};
+
+const malformedFileError = () => {
+  // No parse error is attached: the refusal is about the file's state, and
+  // callers log this message as-is.
+  const error = new Error(
+    `${installedSourcesPath()} is malformed. Fix or move it before saving; refusing to overwrite it.`,
+  );
+  error.code = 'MALFORMED';
+  return error;
+};
+
+// Strict read for write paths (#936, following the #907 Linear pattern):
+// three states — missing reads as an empty map, valid reads as its entries,
+// and malformed throws MALFORMED instead of reading as empty. The lenient
+// reader above conflates missing with malformed, so a writer seeding its
+// merge from it would overwrite a corrupt file with an empty-seeded
+// replacement and permanently destroy every recorded install's provenance.
+// Any other read failure (permissions, I/O) also propagates: a writer that
+// cannot see the current contents must not replace them. The malformed file
+// is preserved in place, byte-identical, for the user to fix or move.
+const readInstalledSourcesForUpdate = () => {
+  let raw;
+  try {
+    raw = fs.readFileSync(installedSourcesPath(), 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return new Map();
+    throw error;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    throw malformedFileError();
+  }
+  const byName = entriesByName(payload);
+  if (byName === null) throw malformedFileError();
+  return byName;
+};
+
+/**
  * Records provenance for freshly installed skills. Dedupes on source, repo
  * subpath and scope so a reinstall refreshes nothing and a second source for
- * the same name adds its own entry.
+ * the same name adds its own entry. Refuses (throws MALFORMED) rather than
+ * overwrite a malformed provenance file.
  */
 export const appendInstalledSources = (entries) => {
   const valid = (Array.isArray(entries) ? entries : []).filter((entry) =>
@@ -65,7 +108,7 @@ export const appendInstalledSources = (entries) => {
     && asNonEmptyString(entry?.skillDir));
   if (valid.length === 0) return;
 
-  const existing = readInstalledSources();
+  const existing = readInstalledSourcesForUpdate();
   const byName = new Map();
   for (const [name, list] of existing) byName.set(name, [...list]);
 
@@ -81,10 +124,11 @@ export const appendInstalledSources = (entries) => {
 /**
  * Forgets every recorded install of a deleted skill, so a later install from
  * another source is not narrowed by a stale entry. Without entries the name
- * falls back to the plain name match.
+ * falls back to the plain name match. Refuses (throws MALFORMED) rather than
+ * silently no-op or overwrite when the provenance file is malformed.
  */
 export const removeInstalledSources = (skillName) => {
-  const existing = readInstalledSources();
+  const existing = readInstalledSourcesForUpdate();
   if (!existing.has(skillName)) return;
   existing.delete(skillName);
   writeEntries([...existing.values()].flat());
