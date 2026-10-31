@@ -46,7 +46,7 @@
 // package); it carries a parity implementation that reads/writes the SAME dir.
 
 import fsp from 'node:fs/promises';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { renameWithRetry } from '../shared/atomic-rename.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -107,11 +107,43 @@ export const claimManagedProcess = (pid, fromOwner, claimant = process.pid) => {
   if (holder === null || holder === claimant || isPidAlive(holder)) return holder;
   // The recorded holder is gone: its claim has no end of life of its own, so
   // it must not answer ownership questions (or block adoption) forever.
-  // Supersede it — remove the stale file and re-run the exclusive create;
-  // a racing claimant that wins the recreate is reported the same way an
-  // ordinary lost race is.
+  // Supersede it — but never by blindly removing the file: two servers can
+  // read the same dead holder, and the loser's remove would delete the
+  // winner's freshly created live claim, letting both adopt the process.
+  // Move the file aside instead (rename is atomic, so only one superseder
+  // moves it), verify the moved file still names the dead holder, and only
+  // then drop it and re-run the exclusive create. A moved file naming
+  // anyone else is a live claim caught in the race: put it back untouched
+  // and report its holder.
+  const asidePath = `${claimPath}.superseding-${claimant}`;
   try {
-    rmSync(claimPath, { force: true });
+    renameSync(claimPath, asidePath);
+  } catch {
+    return readHolder();
+  }
+  let movedHolder = null;
+  try {
+    const moved = Number.parseInt(readFileSync(asidePath, 'utf8').trim(), 10);
+    movedHolder = Number.isInteger(moved) ? moved : null;
+  } catch {
+    movedHolder = null;
+  }
+  if (movedHolder !== holder) {
+    try {
+      renameSync(asidePath, claimPath);
+    } catch {
+      // The slot was taken while restoring: recreate the displaced claim if
+      // it is still the best record available, otherwise leave the winner's.
+      try {
+        writeFileSync(claimPath, String(movedHolder), { flag: 'wx' });
+      } catch {
+        // A newer claim owns the slot now; it wins.
+      }
+    }
+    return movedHolder ?? readHolder();
+  }
+  rmSync(asidePath, { force: true });
+  try {
     writeFileSync(claimPath, String(claimant), { flag: 'wx' });
     return claimant;
   } catch (error) {
@@ -166,7 +198,8 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     const dir = resolveRegistryDir();
     let names = [];
     try {
-      names = await fs.readdir(dir);
+      const listed = await fs.readdir(dir);
+      names = Array.isArray(listed) ? listed : [];
     } catch {
       return [];
     }
@@ -196,7 +229,29 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
       try {
         const holder = Number.parseInt((await fs.readFile(claim.filePath, 'utf8')).trim(), 10);
         if (!Number.isInteger(holder) || isPidAlive(holder)) continue;
-        await fs.rm(claim.filePath, { force: true });
+        // Same race as claim supersession: a claimant may have replaced the
+        // stale file with a live claim since the read above. Move the file
+        // aside (atomic), verify the moved file still names the dead
+        // holder, and restore it untouched when it does not.
+        const asidePath = `${claim.filePath}.sweeping-${process.pid}`;
+        await fs.rename(claim.filePath, asidePath);
+        let movedHolder = null;
+        try {
+          const moved = Number.parseInt((await fs.readFile(asidePath, 'utf8')).trim(), 10);
+          movedHolder = Number.isInteger(moved) ? moved : null;
+        } catch {
+          movedHolder = null;
+        }
+        if (movedHolder !== holder) {
+          try {
+            await fs.rename(asidePath, claim.filePath);
+          } catch {
+            // Slot taken while restoring; the newer claim wins.
+            await fs.rm(asidePath, { force: true }).catch(() => {});
+          }
+          continue;
+        }
+        await fs.rm(asidePath, { force: true });
       } catch {
         // Unreadable claim files are left for a later sweep, never guessed at.
       }
