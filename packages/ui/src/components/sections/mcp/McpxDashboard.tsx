@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {
@@ -6,6 +6,9 @@ import {
   SettingsCardIcon,
   SettingsCardPill,
 } from '@/components/sections/shared/SettingsCards';
+
+/** Deadline for every dashboard load, so a stalled daemon leaves Refresh usable. */
+export const MCPX_DASHBOARD_FETCH_TIMEOUT_MS = 10_000;
 
 interface McpxNamespace {
   namespace: string;
@@ -34,17 +37,20 @@ export const McpxDashboard: React.FC = () => {
   const [types, setTypes] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Monotonic id of the latest types request. A response applies only when its
+  // id is still current, so a slow earlier namespace never overwrites a later one.
+  const typesRequestIdRef = useRef(0);
 
   const fetchStatus = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/mcpx/status');
+      const res = await fetch('/api/mcpx/status', { signal: AbortSignal.timeout(MCPX_DASHBOARD_FETCH_TIMEOUT_MS) });
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
       }
-      const nsRes = await fetch('/api/mcpx/namespaces');
+      const nsRes = await fetch('/api/mcpx/namespaces', { signal: AbortSignal.timeout(MCPX_DASHBOARD_FETCH_TIMEOUT_MS) });
       if (nsRes.ok) {
         const nsData = await nsRes.json();
         setNamespaces(Array.isArray(nsData) ? nsData : nsData.namespaces || []);
@@ -58,15 +64,25 @@ export const McpxDashboard: React.FC = () => {
 
   const fetchTypes = async (ns: string) => {
     setSelectedNs(ns);
+    const requestId = (typesRequestIdRef.current += 1);
     try {
-      const res = await fetch(`/api/mcpx/types?namespace=${encodeURIComponent(ns)}`);
+      const res = await fetch(`/api/mcpx/types?namespace=${encodeURIComponent(ns)}`, {
+        signal: AbortSignal.timeout(MCPX_DASHBOARD_FETCH_TIMEOUT_MS),
+      });
+      if (typesRequestIdRef.current !== requestId) return;
       if (res.ok) {
         const data = await res.json();
         setTypes(typeof data.types === 'string' ? data.types : JSON.stringify(data.types, null, 2));
       }
     } catch {
+      if (typesRequestIdRef.current !== requestId) return;
       setTypes('Failed to load types');
     }
+  };
+
+  const closeTypes = () => {
+    typesRequestIdRef.current += 1;
+    setSelectedNs(null);
   };
 
   useEffect(() => {
@@ -143,7 +159,7 @@ export const McpxDashboard: React.FC = () => {
             <h3 className="font-mono text-sm font-semibold text-foreground">
               TypeScript Signatures: {selectedNs}
             </h3>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedNs(null)}>
+            <Button variant="ghost" size="sm" onClick={closeTypes}>
               Close
             </Button>
           </div>
