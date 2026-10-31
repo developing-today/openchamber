@@ -40,7 +40,10 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
   Created from the startup pipeline (`startup-pipeline-runtime.js`) before
   the generic OpenCode proxy so routes are not shadowed.
 - `stream-manager.js` — `DictationStreamManager`, one per WS connection.
-  Chunk reordering by `seq` + ack, resampling to the provider rate, segment
+  Chunk reordering by `seq` + ack (the reorder buffer is bounded at
+  8 MiB of buffered bytes; crossing the bound fails the stream with a
+  retryable error instead of retaining chunks behind a missing `seq`),
+  resampling to the provider rate, segment
   splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
 - `service.js` — provider resolution and readiness. Providers:
