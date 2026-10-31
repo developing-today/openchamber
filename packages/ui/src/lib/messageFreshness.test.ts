@@ -99,6 +99,40 @@ describe('MessageFreshnessDetector.shouldAnimateMessage', () => {
         expect(detector.getDebugInfo().seenMessageIds.size).toBe(MAX_SEEN_MESSAGE_IDS);
     });
 
+    test('regression #2124 after eviction: an evicted message does not re-animate once its freshness window has expired', () => {
+        const originalNow = Date.now;
+        let fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        try {
+            detector.recordSessionStart('session-a');
+            const evicted = makeAssistantMessage('msg-evicted', fakeNow);
+
+            // First render: the message is fresh and animates.
+            expect(detector.shouldAnimateMessage(evicted, 'session-a')).toBe(true);
+
+            // Push enough newer messages through to evict the first id.
+            const total = MAX_SEEN_MESSAGE_IDS + 10;
+            for (let i = 0; i < total; i += 1) {
+                detector.shouldAnimateMessage(makeAssistantMessage(`msg-fill-${i}`, fakeNow), 'session-a');
+            }
+            expect(detector.hasBeenAnimated('msg-evicted')).toBe(false);
+
+            // Return to the session an hour later. recordSessionStart runs
+            // in an effect after render, so the stale session start is still
+            // stored; the evicted message must not pass freshness against
+            // it now that its freshness window has expired.
+            fakeNow += 60 * 60 * 1000;
+            expect(detector.shouldAnimateMessage(evicted, 'session-a')).toBe(false);
+
+            // A genuinely new message arriving at the current time, however,
+            // still animates even against the stale session start.
+            const fresh = makeAssistantMessage('msg-new-arrival', fakeNow);
+            expect(detector.shouldAnimateMessage(fresh, 'session-a')).toBe(true);
+        } finally {
+            Date.now = originalNow;
+        }
+    });
+
     test('markMessageAsAnimated is bounded by the same cap', () => {
         const total = MAX_SEEN_MESSAGE_IDS + 5;
         for (let i = 0; i < total; i += 1) {

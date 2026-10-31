@@ -3,9 +3,16 @@ import type { Message } from '@/lib/opencode/model';
 // Upper bound on the seen-message set below. The detector is a page-lifetime
 // singleton, so without a cap the set grows by one entry for every assistant
 // message ever rendered. The cap is far above the visible/recent working set
-// of any session, so an evicted (oldest-first) id can only be re-rendered
-// long after its 5s freshness window has passed and cannot re-animate.
+// of any session.
 export const MAX_SEEN_MESSAGE_IDS = 2000;
+
+// How long after creation a message may still animate on first render, in
+// milliseconds. Freshness is checked against the current time as well as
+// the stored session start (see shouldAnimateMessage), so this window
+// genuinely expires: an id evicted from the capped seen set cannot
+// re-animate hours later by passing freshness against a stale session
+// start that was never refreshed (regression #2124, Codex review on #1014).
+export const FRESHNESS_WINDOW_MS = 5000;
 
 export class MessageFreshnessDetector {
     private static instance: MessageFreshnessDetector;
@@ -56,7 +63,17 @@ export class MessageFreshnessDetector {
             return false;
         }
 
-        const isFresh = message.time.created > (sessionStartTime - 5000);
+        // Fresh means created after the session start (with the window as
+        // grace for messages that landed just before the session opened)
+        // AND still inside the window right now. The second clause is what
+        // makes the window expire: comparing only against the stored
+        // session start would let a message whose seen id was evicted from
+        // the capped set pass freshness forever, replaying its animation
+        // when the session is revisited before recordSessionStart runs
+        // again (regression #2124).
+        const isFresh =
+            message.time.created > sessionStartTime - FRESHNESS_WINDOW_MS &&
+            message.time.created > Date.now() - FRESHNESS_WINDOW_MS;
 
         // Record fresh messages too so they animate at most once per detector
         // lifetime. The detector is a module singleton that outlives ChatViewport
