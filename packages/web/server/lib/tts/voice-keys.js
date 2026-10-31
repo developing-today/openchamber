@@ -1,8 +1,11 @@
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import {
+  preserveMalformedJsonFileSync,
+  readDurableJsonFileSync,
+  writeDurableJsonFileSync,
+} from '../shared/durable-json-store.js';
 
 /**
  * API keys for voice services the user typed in Settings: OpenAI read-aloud,
@@ -33,63 +36,53 @@ const resolveDataDir = () => (process.env.OPENCHAMBER_DATA_DIR
 
 const voiceKeysPath = () => path.join(resolveDataDir(), 'voice-keys.json');
 
+// This store rides the shared durable-store primitive (design #976): the
+// strict three-state reader judges the file, the preserve helper moves a
+// malformed file aside, and the writer is mode-explicit. The schema is the
+// reader's value judgement, so a parseable file holding the wrong shape is
+// malformed here exactly as a torn one is.
+const isStoredKeysValue = (value) => storedKeysSchema.safeParse(value).success;
+
 const readStoredKeys = () => {
-  let raw;
+  let result;
   try {
-    raw = fs.readFileSync(voiceKeysPath(), 'utf8');
+    result = readDurableJsonFileSync(voiceKeysPath(), { validateValue: isStoredKeysValue });
   } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      console.warn('[voice] voice-keys.json is unreadable:', error?.message ?? error);
-    }
+    console.warn('[voice] voice-keys.json is unreadable:', error?.message ?? error);
     return {};
   }
-  try {
-    return storedKeysSchema.parse(JSON.parse(raw));
-  } catch (error) {
-    console.warn('[voice] voice-keys.json is malformed:', error?.message ?? error);
+  if (result.state === 'missing') return {};
+  if (result.state === 'malformed') {
+    // The parse error itself is never logged: it quotes the file, and the
+    // file holds API keys.
+    console.warn('[voice] voice-keys.json is malformed: ignoring its contents');
     return {};
   }
+  return storedKeysSchema.parse(result.value);
 };
 
 // The update path cannot treat a malformed file as an empty store the way
 // a read can: it rewrites the file from what it read, so the stored keys
 // would be erased for good. Preserve the malformed bytes to a .corrupt-
-// sibling first (the parse error itself is never logged: it quotes the
-// file, and the file holds API keys), and fail closed when the file cannot
-// even be read — an update that cannot see the current keys must not
-// replace them.
-const preserveMalformedVoiceKeysFile = (filePath) => {
-  let preservedPath = null;
-  for (let attempt = 0; attempt < 10 && preservedPath === null; attempt += 1) {
-    const candidate = `${filePath}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-    if (!fs.existsSync(candidate)) preservedPath = candidate;
-  }
-  if (preservedPath === null) return false;
-  try {
-    renameSyncWithRetry((from, to) => fs.renameSync(from, to), filePath, preservedPath);
-    console.warn(`[voice] voice-keys.json is malformed: preserved the unreadable file at ${preservedPath}`);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const readStoredKeysForUpdate = (filePath) => {
-  let raw;
-  try {
-    raw = fs.readFileSync(filePath, 'utf8');
-  } catch (error) {
-    if (error?.code === 'ENOENT') return {};
-    throw error;
-  }
-  try {
-    return storedKeysSchema.parse(JSON.parse(raw));
-  } catch {
-    if (!preserveMalformedVoiceKeysFile(filePath)) {
-      throw new Error(`Refusing to overwrite the malformed voice keys file at ${filePath}: it could not be preserved`);
-    }
+// sibling first, and fail closed when the file cannot even be read — an
+// update that cannot see the current keys must not replace them. A
+// 'replaced' preserve outcome means a valid file landed in the meantime:
+// read that instead of the preserved one (bounded — repeated replacement
+// is a race no update should chase).
+const readStoredKeysForUpdate = (filePath, replacements = 0) => {
+  const result = readDurableJsonFileSync(filePath, { validateValue: isStoredKeysValue });
+  if (result.state === 'missing') return {};
+  if (result.state === 'valid') return storedKeysSchema.parse(result.value);
+  const preservation = preserveMalformedJsonFileSync(filePath, { validateValue: isStoredKeysValue });
+  if (preservation.preserved) {
+    console.warn(`[voice] voice-keys.json is malformed: preserved the unreadable file at ${preservation.preservedPath}`);
     return {};
   }
+  if (preservation.outcome === 'missing') return {};
+  if (preservation.outcome === 'replaced' && replacements < 3) {
+    return readStoredKeysForUpdate(filePath, replacements + 1);
+  }
+  throw new Error(`Refusing to overwrite the malformed voice keys file at ${filePath}: it could not be preserved`);
 };
 
 /** The stored key for one kind, or undefined. */
@@ -115,9 +108,6 @@ export const updateVoiceKeys = (body) => {
     if (value) next[kind] = value;
     else delete next[kind];
   }
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(temporaryPath, JSON.stringify(next, null, 2), { encoding: 'utf8', mode: 0o600 });
-  renameSyncWithRetry((from, to) => fs.renameSync(from, to), temporaryPath, filePath);
+  writeDurableJsonFileSync(filePath, JSON.stringify(next, null, 2), { mode: 0o600 });
   return describeVoiceKeys();
 };
