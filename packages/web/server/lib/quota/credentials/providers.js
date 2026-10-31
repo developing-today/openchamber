@@ -29,13 +29,20 @@ export const normalizers = {
   },
 };
 
+// Provider ids arrive from route segments. Only the registry's own keys name a
+// provider: inherited members such as `constructor` or `toString` are not
+// normalizers, and `__proto__` is not a provider.
+export const getCredentialNormalizer = (providerId) => (
+  Object.hasOwn(normalizers, providerId) ? normalizers[providerId] : null
+);
+
 export const readManagedCredential = (providerId) => {
-  const normalize = normalizers[providerId];
+  const normalize = getCredentialNormalizer(providerId);
   return normalize ? readQuotaCredential(providerId, normalize) : null;
 };
 
 export const writeManagedCredential = (providerId, value) => {
-  const credential = normalizers[providerId]?.(value);
+  const credential = getCredentialNormalizer(providerId)?.(value);
   if (!credential) throw new Error('Invalid credential');
   writeQuotaCredential(providerId, credential);
   return getManagedCredentialStatus(providerId);
