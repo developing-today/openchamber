@@ -1,7 +1,10 @@
 # Manual-only check that catches anything that breaks the flake's
-# evaluation: when dispatched, it evaluates every package. It does not
-# run on pull_request or push, so it does not gate a merge. Read-only:
-# no builds, no cache, no write permissions.
+# evaluation: when dispatched upstream, it evaluates every package.
+# It does not run on pull_request or push, so it does not gate a
+# merge. In this repository the eval job is skipped (gated below to
+# openchamber/openchamber), so a dispatch here validates nothing
+# until the flakes are reconciled. Read-only: no builds, no cache,
+# no write permissions.
 name: nix-eval
 
 on:

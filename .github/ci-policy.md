@@ -21,25 +21,31 @@ no CI tier gates a merge.**
 The `pr checks` jobs in oc-review.yml are display-named
 `basic: lint`, `basic: type-check`, `full (main tier): tests`, and
 `full (main tier): build` — those names are historical. All four run
-only after merge, on push to `main`, on the nightly schedule, and on
-`workflow_dispatch`; their results feed the remediation chain below
-instead of blocking PRs. (This file documents the policy;
-branch-protection settings themselves are a maintainer action and
-are not changed by the CI redesign.)
+automatically only after merge, on push to `main` and on the nightly
+schedule; a maintainer can also start them manually via
+`workflow_dispatch` (on a ref of their choosing). Automatic results
+feed the remediation chain below instead of blocking PRs. (This file
+documents the policy; branch-protection settings themselves are a
+maintainer action and are not changed by the CI redesign.)
 
 ## Main-only model
 
 - **No PR tier.** No workflow runs on `pull_request`, so a PR gets
-  no CI validation before merge; mergeability is a matter of the
-  normal review protocol only.
-- **Main tier — everything, once per merge.** On push to `main` each
-  workflow runs its full suite; a nightly schedule re-runs the full
-  set as a backstop, and `workflow_dispatch` allows manual runs.
-  Main-tier results feed the remediation chain (the `main-broken`
-  watcher workflow) instead of blocking PRs.
-- **Dedup rule.** A commit must not run the same suite twice. Shape:
-  `push` restricted to `branches: [main]`, plus `schedule` and
-  `workflow_dispatch`; no `pull_request` trigger.
+  no automatic CI validation before merge; mergeability is a matter
+  of the normal review protocol only. (A maintainer may still run a
+  workflow manually via `workflow_dispatch`.)
+- **Main tier — everything, once per merge.** On push to `main`,
+  `pr checks` (oc-review.yml) runs its full suite; its nightly
+  schedule re-runs it as a backstop, and `workflow_dispatch` allows
+  manual runs. (`nix-eval.yml` is the exception: manual dispatch
+  only — see the tier map below.) Main-tier results feed the
+  remediation chain (the `main-broken` watcher workflow) instead of
+  blocking PRs.
+- **Dedup rule.** A commit must not get duplicate automatic runs
+  from overlapping `push`/`pull_request` triggers. Shape: `push`
+  restricted to `branches: [main]`, plus `schedule` and
+  `workflow_dispatch`; no `pull_request` trigger. Scheduled and
+  manual reruns of the same commit are intentional, not duplicates.
 
 ## Change-class policy (design §3.3)
 
@@ -76,6 +82,9 @@ per distinct failure signature (Breakage-ID), not workflow fan-out.
 `nix-eval.yml` runs only on `workflow_dispatch` (manual dispatch):
 it has no `push`, `schedule`, or `pull_request` trigger and is not
 paths-gated (class 4: eval of the flake's outputs only, no build).
+In this repository its `eval` job is skipped outright — the job is
+gated to `openchamber/openchamber`, so a dispatch here validates
+nothing until the flakes are reconciled.
 
 ## Concurrency rules (design §4, Phase 1)
 
