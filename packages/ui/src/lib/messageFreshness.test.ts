@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { MessageFreshnessDetector } from './messageFreshness';
+import { MAX_SEEN_MESSAGE_IDS, MessageFreshnessDetector } from './messageFreshness';
 
 import type { Message } from '@/lib/opencode/model';
 
@@ -81,5 +81,39 @@ describe('MessageFreshnessDetector.shouldAnimateMessage', () => {
         expect(detector.shouldAnimateMessage(first, 'session-a')).toBe(true);
         expect(detector.shouldAnimateMessage(second, 'session-a')).toBe(true);
         expect(detector.shouldAnimateMessage(second, 'session-a')).toBe(false);
+    });
+
+    test('seen set is capped with oldest-first eviction and recent messages stay seen', () => {
+        detector.recordSessionStart('session-a');
+        const total = MAX_SEEN_MESSAGE_IDS + 100;
+        for (let i = 0; i < total; i += 1) {
+            detector.shouldAnimateMessage(makeAssistantMessage(`msg-cap-${i}`, Date.now()), 'session-a');
+        }
+
+        expect(detector.getDebugInfo().seenMessageIds.size).toBe(MAX_SEEN_MESSAGE_IDS);
+        // The oldest entries were evicted; the most recent ones are retained.
+        expect(detector.hasBeenAnimated('msg-cap-0')).toBe(false);
+        expect(detector.hasBeenAnimated(`msg-cap-${total - 1}`)).toBe(true);
+        // A retained recent message must not re-animate.
+        expect(detector.shouldAnimateMessage(makeAssistantMessage(`msg-cap-${total - 1}`, Date.now()), 'session-a')).toBe(false);
+        expect(detector.getDebugInfo().seenMessageIds.size).toBe(MAX_SEEN_MESSAGE_IDS);
+    });
+
+    test('markMessageAsAnimated is bounded by the same cap', () => {
+        const total = MAX_SEEN_MESSAGE_IDS + 5;
+        for (let i = 0; i < total; i += 1) {
+            detector.markMessageAsAnimated(`msg-marked-${i}`);
+        }
+
+        expect(detector.getDebugInfo().seenMessageIds.size).toBe(MAX_SEEN_MESSAGE_IDS);
+        expect(detector.hasBeenAnimated('msg-marked-0')).toBe(false);
+        expect(detector.hasBeenAnimated(`msg-marked-${total - 1}`)).toBe(true);
+    });
+
+    test('getDebugInfo exposes no messageCreationTimes state', () => {
+        detector.recordSessionStart('session-a');
+        detector.shouldAnimateMessage(makeAssistantMessage('msg-debug', Date.now()), 'session-a');
+
+        expect('messageCreationTimes' in detector.getDebugInfo()).toBe(false);
     });
 });

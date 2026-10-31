@@ -1,10 +1,16 @@
 import type { Message } from '@/lib/opencode/model';
 
+// Upper bound on the seen-message set below. The detector is a page-lifetime
+// singleton, so without a cap the set grows by one entry for every assistant
+// message ever rendered. The cap is far above the visible/recent working set
+// of any session, so an evicted (oldest-first) id can only be re-rendered
+// long after its 5s freshness window has passed and cannot re-animate.
+export const MAX_SEEN_MESSAGE_IDS = 2000;
+
 export class MessageFreshnessDetector {
     private static instance: MessageFreshnessDetector;
     private sessionStartTimes: Map<string, number> = new Map();
     private seenMessageIds: Set<string> = new Set();
-    private messageCreationTimes: Map<string, number> = new Map();
 
     private constructor() {}
 
@@ -23,6 +29,15 @@ export class MessageFreshnessDetector {
         return this.sessionStartTimes.get(sessionId);
     }
 
+    private recordSeenMessage(messageId: string): void {
+        this.seenMessageIds.add(messageId);
+        while (this.seenMessageIds.size > MAX_SEEN_MESSAGE_IDS) {
+            const oldest = this.seenMessageIds.values().next().value;
+            if (oldest === undefined) break;
+            this.seenMessageIds.delete(oldest);
+        }
+    }
+
     shouldAnimateMessage(message: Message, sessionId: string): boolean {
 
         if (message.role !== 'assistant') {
@@ -37,8 +52,7 @@ export class MessageFreshnessDetector {
 
         if (!sessionStartTime) {
 
-            this.seenMessageIds.add(message.id);
-            this.messageCreationTimes.set(message.id, message.time.created);
+            this.recordSeenMessage(message.id);
             return false;
         }
 
@@ -49,8 +63,7 @@ export class MessageFreshnessDetector {
         // remounts; without this, switching away and back re-evaluates the same
         // message against the stale session start time (recordSessionStart runs
         // in an effect after the first render) and replays the entry animation.
-        this.seenMessageIds.add(message.id);
-        this.messageCreationTimes.set(message.id, message.time.created);
+        this.recordSeenMessage(message.id);
 
         return isFresh;
     }
@@ -68,26 +81,22 @@ export class MessageFreshnessDetector {
         return this.seenMessageIds.has(messageId);
     }
 
-    markMessageAsAnimated(messageId: string, createdTime: number): void {
-        this.seenMessageIds.add(messageId);
-        this.messageCreationTimes.set(messageId, createdTime);
+    markMessageAsAnimated(messageId: string): void {
+        this.recordSeenMessage(messageId);
     }
 
     clearAll(): void {
         this.sessionStartTimes.clear();
         this.seenMessageIds.clear();
-        this.messageCreationTimes.clear();
     }
 
     getDebugInfo(): {
         sessionStartTimes: Map<string, number>;
         seenMessageIds: Set<string>;
-        messageCreationTimes: Map<string, number>;
     } {
         return {
             sessionStartTimes: new Map(this.sessionStartTimes),
-            seenMessageIds: new Set(this.seenMessageIds),
-            messageCreationTimes: new Map(this.messageCreationTimes)
+            seenMessageIds: new Set(this.seenMessageIds)
         };
     }
 }
