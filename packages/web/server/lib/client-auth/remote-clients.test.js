@@ -198,6 +198,41 @@ describe('remote client auth runtime store durability', () => {
     }
   });
 
+  it('revalidates an empty snapshot before treating the store as missing (Codex, PR #1019 pattern)', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const storePath = path.join(dir, 'remote-clients.json');
+      await runtime.createClient({ label: 'Phone' });
+
+      // First read returns empty bytes (a torn/empty snapshot) while the
+      // file on disk already holds the valid store written above:
+      // treating that snapshot as a missing store would let the next
+      // mutation overwrite the live clients.
+      let emptyPending = true;
+      const emptyReadRuntime = createRemoteClientAuthRuntime({
+        fsPromises: {
+          ...fs,
+          readFile: async (target, ...rest) => {
+            if (emptyPending && String(target) === storePath) {
+              emptyPending = false;
+              return '';
+            }
+            return fs.readFile(target, ...rest);
+          },
+        },
+        path,
+        crypto,
+        storePath,
+      });
+
+      await emptyReadRuntime.createClient({ label: 'Tablet' });
+      expect(JSON.parse(await fs.readFile(storePath, 'utf8')).clients).toHaveLength(2);
+      expect((await fs.readdir(dir)).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes via a temp file in the same directory renamed into place, never directly to the store path', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-remote-clients-atomic-'));
     const storePath = path.join(dir, 'remote-clients.json');
