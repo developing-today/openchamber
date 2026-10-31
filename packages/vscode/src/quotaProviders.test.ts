@@ -3090,10 +3090,10 @@ describe("Google quota provider (VS Code parity) - #545", () => {
       const result = await fetchQuotaForProvider("google");
 
       assert.equal(result.ok, true);
-      const bucketWindow = result.usage?.models?.["gemini/gemini-bucket"]?.windows.daily;
+      const bucketWindow = result.usage?.models?.["gemini/gemini-bucket"]?.windows["per-model"];
       assert.equal(bucketWindow?.usedPercent, expectedUsed);
       assert.equal(bucketWindow?.remainingPercent, expectedRemaining);
-      const modelWindow = result.usage?.models?.["gemini/gemini-model"]?.windows.daily;
+      const modelWindow = result.usage?.models?.["gemini/gemini-model"]?.windows["per-model"];
       assert.equal(modelWindow?.usedPercent, expectedUsed);
       assert.equal(modelWindow?.remainingPercent, expectedRemaining);
     });
