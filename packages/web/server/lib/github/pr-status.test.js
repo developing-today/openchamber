@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { findBranchPrCandidates, invalidateRepoPullsCache, isHistoricalPrOfCheckout, resolveGitHubPrStatus } from './pr-status.js';
+import { findBranchPrCandidates, getPrStatusCacheSizes, invalidateRepoPullsCache, isHistoricalPrOfCheckout, PR_STATUS_CACHE_MAX_ENTRIES, pruneExpiredPrStatusCaches, resolveGitHubPrStatus } from './pr-status.js';
 import { createOctokit, getOctokitCacheIdentity } from './octokit.js';
 
 const listMock = mock(async () => ({ data: [] }));
@@ -619,5 +619,167 @@ describe('resolveGitHubPrStatus fork history', () => {
     } finally {
       await fs.rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('pr-status cache bounds (#972)', () => {
+  beforeEach(() => {
+    listMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const callRepo = (owner, repo) => findBranchPrCandidates({
+    octokit: octokitFor('bounds-token', 'bounds-account'),
+    target: { repo: { owner, repo }, remoteName: 'origin' },
+    branch: 'feature',
+    sourceCandidates: [{ repo: { owner, repo } }],
+    force: false,
+    includeHistory: false,
+  });
+
+  test('sweeps expired repoPulls entries when a different repo is written', async () => {
+    listMock.mockResolvedValue({ data: [] });
+    const startedAt = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+
+    await callRepo('sweep-a', 'app');
+    const sizeAfterFirst = getPrStatusCacheSizes().repoPulls;
+    expect(sizeAfterFirst).toBeGreaterThan(0);
+
+    // Past the 45s repoPulls TTL: writing sweep-b must evict sweep-a's
+    // never-revisited entry instead of accumulating alongside it.
+    nowSpy.mockReturnValue(startedAt + 46_000);
+    await callRepo('sweep-b', 'app');
+    expect(getPrStatusCacheSizes().repoPulls).toBeLessThanOrEqual(sizeAfterFirst);
+    expect(pruneExpiredPrStatusCaches().repoPulls).toBeLessThanOrEqual(sizeAfterFirst);
+
+    // The fresh entry still hits; the evicted one is re-fetched.
+    const callsBefore = listMock.mock.calls.length;
+    await callRepo('sweep-b', 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore);
+    await callRepo('sweep-a', 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore + 1);
+    nowSpy.mockRestore();
+  });
+
+  test('caps repoPulls at PR_STATUS_CACHE_MAX_ENTRIES with oldest-first eviction', async () => {
+    listMock.mockResolvedValue({ data: [] });
+    const total = PR_STATUS_CACHE_MAX_ENTRIES + 5;
+    for (let i = 0; i < total; i += 1) {
+      await callRepo(`cap-${i}`, 'app');
+    }
+
+    expect(getPrStatusCacheSizes().repoPulls).toBe(PR_STATUS_CACHE_MAX_ENTRIES);
+
+    const callsBefore = listMock.mock.calls.length;
+    await callRepo(`cap-${total - 1}`, 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore);
+    await callRepo('cap-0', 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore + 1);
+  });
+});
+
+describe('pr-status repo metadata cache bounds (#972)', () => {
+  let directory;
+  let secondDirectory;
+
+  const makeDirectory = async (remoteUrl) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pr-status-bounds-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+    git('init', '-q', '-b', 'feature');
+    git('remote', 'add', 'origin', remoteUrl);
+    return dir;
+  };
+
+  beforeEach(async () => {
+    directory = await makeDirectory('https://github.com/bounds-a/app.git');
+    secondDirectory = await makeDirectory('https://github.com/bounds-b/app2.git');
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(secondDirectory, { recursive: true, force: true });
+  });
+
+  test('sweeps expired metadata entries when another repo is written; live entries still hit', async () => {
+    const getMock = mock(async () => ({ data: { default_branch: 'main' } }));
+    const client = {
+      openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit('bounds-meta-token', 'bounds-meta-account')),
+      rest: {
+        repos: { get: getMock },
+        pulls: { list: async () => ({ data: [] }) },
+        search: { issuesAndPullRequests: async () => ({ data: { items: [] } }) },
+      },
+    };
+    const startedAt = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    const sizesAfterFirst = getPrStatusCacheSizes();
+    expect(sizesAfterFirst.repoMetadata).toBeGreaterThan(0);
+    const callsAfterFirst = getMock.mock.calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    // A fresh resolve for the same repo is served from the caches.
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getMock.mock.calls.length).toBe(callsAfterFirst);
+
+    // Past the 5-minute metadata TTL, resolving a different repo sweeps the
+    // first repo's expired entries instead of letting them accumulate.
+    nowSpy.mockReturnValue(startedAt + 6 * 60_000);
+    await resolveGitHubPrStatus({ octokit: client, directory: secondDirectory, branch: 'feature', remoteName: 'origin', force: false });
+    const sizesAfterSecond = getPrStatusCacheSizes();
+    expect(sizesAfterSecond.repoMetadata).toBeLessThanOrEqual(sizesAfterFirst.repoMetadata);
+    expect(sizesAfterSecond.defaultBranch).toBeLessThanOrEqual(sizesAfterFirst.defaultBranch);
+
+    // The evicted first repo is fetched again on its next resolve.
+    const callsBeforeRefetch = getMock.mock.calls.length;
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getMock.mock.calls.length).toBeGreaterThan(callsBeforeRefetch);
+    nowSpy.mockRestore();
+  });
+
+  test('sweeps expired search-disabled entries after the retry window', async () => {
+    const searchMock = mock(async () => {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    });
+    const client = {
+      openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit('bounds-search-token', 'bounds-search-account')),
+      rest: {
+        repos: { get: async () => ({ data: { default_branch: 'main' } }) },
+        pulls: {
+          list: async ({ head }) => (head
+            ? { data: [] }
+            : { data: Array.from({ length: 100 }, (_, index) => ({ number: index, state: 'open', head: { ref: 'other' } })) }),
+        },
+        search: { issuesAndPullRequests: searchMock },
+      },
+    };
+    const startedAt = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const disabledBefore = getPrStatusCacheSizes().searchApiDisabled;
+
+    // An incomplete open list forces the search fallback, whose 403 records
+    // the repo set in _searchApiDisabledRepos.
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getPrStatusCacheSizes().searchApiDisabled).toBe(disabledBefore + 1);
+    expect(searchMock.mock.calls.length).toBe(1);
+
+    // Within the retry window the disabled repo set is not searched again.
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: true });
+    expect(searchMock.mock.calls.length).toBe(1);
+
+    // Past the 5-minute retry window, another repo's 403 sweeps the expired
+    // entry instead of accumulating, and the first repo is searched again.
+    nowSpy.mockReturnValue(startedAt + 6 * 60_000);
+    await resolveGitHubPrStatus({ octokit: client, directory: secondDirectory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getPrStatusCacheSizes().searchApiDisabled).toBe(disabledBefore + 1);
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(searchMock.mock.calls.length).toBe(3);
+    nowSpy.mockRestore();
   });
 });
