@@ -17,6 +17,7 @@ import {
   readLogTail,
   readManagedOpenCodeState,
   resolveManagedOpenCodePaths,
+  rotateManagedLogIfOversized,
   sameOpenCodeArgs,
   writeDrainingOpenCodeRecords,
   writeManagedOpenCodeState,
@@ -666,6 +667,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     console.log('[OpenCode] Launching managed server', state.lastOpenCodeLaunchDiagnostics);
 
     mkdirSync(managedPaths.dir, { recursive: true, mode: 0o700 });
+    // Rotate before opening so logOffset below is the fresh file's size, never a
+    // stale offset past the end of a rotated log.
+    rotateManagedLogIfOversized(managedPaths.logPath);
     const logFd = openSync(managedPaths.logPath, 'a', 0o600);
     const logOffset = fstatSync(logFd).size;
     let child;

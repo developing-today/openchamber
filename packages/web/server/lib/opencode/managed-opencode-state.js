@@ -119,6 +119,28 @@ export const readLogSince = (logPath, offset) => {
   }
 };
 
+const MANAGED_OPENCODE_LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+// Bounds the managed log at spawn time: an oversized log is renamed to a single
+// retained generation (`<log>.1`, replaced on each rotation) so the total kept is
+// roughly twice the cap. Spawn is the only safe trigger — it runs before the new
+// child's fd opens, so the spawn's logOffset is taken from the fresh file and the
+// readiness drain (readLogSince) never sees an offset past the end of a shrunken
+// file. A still-running adopted or other-server OpenCode may hold the old fd: on
+// POSIX it keeps writing to the renamed file (bounded, and its output stops
+// appearing in this log), and on Windows renaming an open file fails — so every
+// failure here is a no-op and rotation simply retries at the next spawn. Rotation
+// must never block a spawn.
+export const rotateManagedLogIfOversized = (logPath, maxBytes = MANAGED_OPENCODE_LOG_MAX_BYTES) => {
+  try {
+    if (statSync(logPath).size <= maxBytes) return false;
+    renameSync(logPath, `${logPath}.1`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const readLogTail = (logPath, offset, maxBytes) => {
   let size = 0;
   try {
