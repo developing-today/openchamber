@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 const existingFiles = new Set();
+const fileSizes = new Map();
+let readFileCalls = 0;
 const fsPromises = {
   realpath: mock(async (filePath) => {
     if (existingFiles.has(filePath)) return filePath;
@@ -9,12 +11,12 @@ const fsPromises = {
     throw error;
   }),
   stat: mock(async (filePath) => {
-    if (existingFiles.has(filePath)) return { isFile: () => true, size: 4, mtimeMs: 1 };
+    if (existingFiles.has(filePath)) return { isFile: () => true, size: fileSizes.get(filePath) ?? 4, mtimeMs: 1 };
     const error = new Error('missing');
     error.code = 'ENOENT';
     throw error;
   }),
-  readFile: mock(async () => Buffer.from('test')),
+  readFile: mock(async () => { readFileCalls += 1; return Buffer.from('test'); }),
 };
 
 mock.module('fs', () => ({
@@ -34,7 +36,7 @@ mock.module('vscode', () => ({
   },
 }));
 
-const { tryHandleLocalFsProxy } = await import('./bridge-localfs-proxy-runtime');
+const { tryHandleLocalFsProxy, LOCAL_FS_READ_MAX_BYTES, LOCAL_FS_RAW_MAX_BYTES } = await import('./bridge-localfs-proxy-runtime');
 
 describe('bridge local fs proxy', () => {
   it('does not forward server-owned Markdown image grant routes to OpenCode', async () => {
@@ -75,5 +77,39 @@ describe('bridge local fs proxy', () => {
 
     expect(response?.status).toBe(200);
     expect(Buffer.from(response?.bodyBase64 ?? '', 'base64').toString()).toBe('test');
+  });
+
+  it('rejects over-cap files with 413 before reading, on both read routes (#1027)', async () => {
+    existingFiles.add('/workspace/big.log');
+    fileSizes.set('/workspace/big.log', LOCAL_FS_READ_MAX_BYTES + 1);
+    readFileCalls = 0;
+    const read = await tryHandleLocalFsProxy('GET', '/api/fs/read?path=%2Fworkspace%2Fbig.log');
+    expect(read?.status).toBe(413);
+    expect(Buffer.from(read?.bodyBase64 ?? '', 'base64').toString('utf8'))
+      .toContain(`File exceeds maximum size of ${LOCAL_FS_READ_MAX_BYTES} bytes`);
+    expect(readFileCalls).toBe(0);
+
+    existingFiles.add('/workspace/big.bin');
+    fileSizes.set('/workspace/big.bin', LOCAL_FS_RAW_MAX_BYTES + 1);
+    const raw = await tryHandleLocalFsProxy('GET', '/api/fs/raw?path=%2Fworkspace%2Fbig.bin');
+    expect(raw?.status).toBe(413);
+    expect(Buffer.from(raw?.bodyBase64 ?? '', 'base64').toString('utf8'))
+      .toContain(`File exceeds maximum size of ${LOCAL_FS_RAW_MAX_BYTES} bytes`);
+    expect(readFileCalls).toBe(0);
+  });
+
+  it('serves files at exactly the cap on both read routes (#1027)', async () => {
+    existingFiles.add('/workspace/at-cap.txt');
+    fileSizes.set('/workspace/at-cap.txt', LOCAL_FS_READ_MAX_BYTES);
+    const read = await tryHandleLocalFsProxy('GET', '/api/fs/read?path=%2Fworkspace%2Fat-cap.txt');
+    expect(read?.status).toBe(200);
+    expect(read?.headers['content-type']).toBe('text/plain; charset=utf-8');
+    expect(Buffer.from(read?.bodyBase64 ?? '', 'base64').toString('utf8')).toBe('test');
+
+    existingFiles.add('/workspace/at-cap.bin');
+    fileSizes.set('/workspace/at-cap.bin', LOCAL_FS_RAW_MAX_BYTES);
+    const raw = await tryHandleLocalFsProxy('GET', '/api/fs/raw?path=%2Fworkspace%2Fat-cap.bin');
+    expect(raw?.status).toBe(200);
+    expect(Buffer.from(raw?.bodyBase64 ?? '', 'base64').toString()).toBe('test');
   });
 });

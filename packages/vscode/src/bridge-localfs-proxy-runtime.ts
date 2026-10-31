@@ -34,6 +34,17 @@ export const sanitizeForwardHeaders = (input: Record<string, string> | undefined
   return headers;
 };
 
+// Local-fs proxy read caps (#1027): the bridge answers with the whole file
+// base64-encoded inside one JSON payload, so neither read route can stream
+// and an uncapped file is held in memory several times over (Buffer, base64
+// string, payload copy). The text route is capped tighter because its body
+// is ALSO a UTF-8 string copy: 16 MiB of text is already a ~21 MiB payload,
+// and no legitimate editor text file approaches it. The raw route serves
+// the same previews/media as the web /api/fs/raw, so it takes the web
+// preview cap MAX_SERVE_BYTES (packages/web/server/lib/fs/routes.js).
+export const LOCAL_FS_READ_MAX_BYTES = 16 * 1024 * 1024;
+export const LOCAL_FS_RAW_MAX_BYTES = 100 * 1024 * 1024;
+
 const buildProxyJsonError = (status: number, error: string): ApiProxyResponsePayload => ({
   status,
   headers: { 'content-type': 'application/json' },
@@ -113,6 +124,9 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
     }
 
     if (fsProxyPath === '/api/fs/read') {
+      if (stats.size > LOCAL_FS_READ_MAX_BYTES) {
+        return buildProxyJsonError(413, `File exceeds maximum size of ${LOCAL_FS_READ_MAX_BYTES} bytes`);
+      }
       const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
       return {
         status: 200,
@@ -122,6 +136,10 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
         },
         bodyBase64: base64EncodeUtf8(content),
       };
+    }
+
+    if (stats.size > LOCAL_FS_RAW_MAX_BYTES) {
+      return buildProxyJsonError(413, `File exceeds maximum size of ${LOCAL_FS_RAW_MAX_BYTES} bytes`);
     }
 
     const raw = await fs.promises.readFile(resolution.resolvedPath);

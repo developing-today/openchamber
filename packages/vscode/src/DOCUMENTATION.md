@@ -90,6 +90,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-localfs-proxy-runtime.ts`
   - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
+  - Both read routes reject over-cap files with 413 before reading, because the answer is the whole file base64-encoded in one payload and cannot stream: `LOCAL_FS_READ_MAX_BYTES` (16 MiB, text) and `LOCAL_FS_RAW_MAX_BYTES` (100 MiB, the web preview `MAX_SERVE_BYTES`, for raw).
   - `/api/fs/directory-stat` and `/api/fs/directory-stats` return 501 locally. Directory-availability probes remain unknown in VS Code rather than falling through to OpenCode.
   - Workspace-contained Markdown gallery images use these local filesystem
     routes without calling the server grant route. Grant requests for OpenCode
