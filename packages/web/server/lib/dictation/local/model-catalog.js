@@ -352,7 +352,11 @@ export function isLocalModelId(modelId) {
  * @param {string} modelId
  */
 export function getLocalSttModelSpec(modelId) {
-  const spec = LOCAL_STT_MODEL_CATALOG[modelId] ?? LOCAL_TTS_MODEL_CATALOG[modelId];
+  const spec = Object.hasOwn(LOCAL_STT_MODEL_CATALOG, modelId)
+    ? LOCAL_STT_MODEL_CATALOG[modelId]
+    : Object.hasOwn(LOCAL_TTS_MODEL_CATALOG, modelId)
+      ? LOCAL_TTS_MODEL_CATALOG[modelId]
+      : undefined;
   if (!spec) {
     throw new Error(`Unknown local speech model id: ${modelId}`);
   }
