@@ -419,3 +419,16 @@ describe('provider catalogue', () => {
     expect(instance?.disabled).toBe(false);
   });
 });
+
+describe('prototype provider ids', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__'])(
+    'treats %s as an unsupported provider, like an unknown id',
+    async (providerId) => {
+      const result = await fetchQuotaForProvider(providerId);
+      expect(result).toMatchObject({ configured: false, error: 'Unsupported provider' });
+
+      const [instanceResult] = await fetchQuotaForProviderInstances(providerId);
+      expect(instanceResult).toMatchObject({ configured: false, error: 'Unsupported provider' });
+    },
+  );
+});

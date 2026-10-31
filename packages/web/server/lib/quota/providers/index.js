@@ -375,7 +375,7 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false } =
 
   const visible = includeDisabled
     ? configured
-    : configured.filter((id) => !isProviderDisabled(facts, registry[id]));
+    : configured.filter((id) => !isProviderDisabled(facts, getRegistryProvider(id)));
 
   for (const instanceId of facts.instances.keys()) {
     if (!includeDisabled && facts.disabled.has(instanceId)) continue;
@@ -481,8 +481,13 @@ const fetchInstanceResults = async (providerId) => {
   })];
 };
 
+// Own-property lookup: provider ids come from URLs, and a plain keyed read
+// resolves Object.prototype members ('constructor', 'toString', '__proto__')
+// as if they were registered providers.
+const getRegistryProvider = (providerId) => (Object.hasOwn(registry, providerId) ? registry[providerId] : undefined);
+
 export const fetchQuotaForProviderInstances = async (providerId) => {
-  const provider = registry[providerId];
+  const provider = getRegistryProvider(providerId);
 
   if (!provider) {
     return (await fetchInstanceResults(providerId)) ?? [unsupportedResult(providerId)];
@@ -500,7 +505,7 @@ export const fetchQuotaForProviderInstances = async (providerId) => {
 };
 
 const fetchQuotaForProviderUncoalesced = async (providerId) => {
-  const provider = registry[providerId];
+  const provider = getRegistryProvider(providerId);
 
   if (!provider) {
     // An instance id answers with its active credential's result, keeping
