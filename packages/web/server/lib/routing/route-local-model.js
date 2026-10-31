@@ -68,7 +68,7 @@ export const modelStatus = (file = modelPath(), model = LOCAL_MODEL) => {
  * without that bound a half-open connection would hold the download (and
  * the Settings state that tracks it) forever.
  */
-export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, fetchImpl = fetch, onProgress = () => {}, stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS } = {}) => {
+export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, fetchImpl = fetch, createWriteStreamImpl = fs.createWriteStream, onProgress = () => {}, stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS } = {}) => {
   if (modelStatus(file, model).installed) return modelStatus(file, model);
   assertVerifiable(model);
 
@@ -115,7 +115,7 @@ export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, f
     }
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const partial = `${file}.part`;
-    const out = fs.createWriteStream(partial);
+    const out = createWriteStreamImpl(partial);
     const digest = createHash('sha256');
     let received = 0;
     const reader = response.body.getReader();
@@ -136,10 +136,10 @@ export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, f
           );
         }
         digest.update(chunk);
-        if (!out.write(chunk)) await new Promise((resolve) => out.once('drain', resolve));
+        if (!out.write(chunk)) await raceStall(new Promise((resolve) => out.once('drain', resolve)));
         onProgress(received, model.bytes);
       }
-      await new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve())));
+      await raceStall(new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve()))));
     } catch (error) {
       // Leave nothing running behind the failure: abort the fetch and
       // cancel the body reader, or an abandoned transfer keeps consuming
