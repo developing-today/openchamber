@@ -671,7 +671,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // stale offset past the end of a rotated log.
     rotateManagedLogIfOversized(managedPaths.logPath);
     const logFd = openSync(managedPaths.logPath, 'a', 0o600);
-    const logOffset = fstatSync(logFd).size;
+    const logFdStats = fstatSync(logFd);
+    const logOffset = logFdStats.size;
+    // The readiness drain compares the live log against this identity to notice
+    // a rotation by another server sharing the data dir (see drainOutput).
+    const logFileIdentity = `${logFdStats.dev}:${logFdStats.ino}`;
     let child;
     try {
       // A file, not a pipe: an OpenCode left running after OpenChamber exits must not hit EPIPE.
@@ -757,10 +761,36 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         handler(value);
       };
 
+      // Rotation can also land mid-startup: another server sharing the data
+      // dir may cross the cap while this child is starting and rename the log
+      // this child is writing (its fd follows the renamed file). When the live
+      // log no longer matches the identity captured at spawn, this child's
+      // output continues in the `.1` generation, so drain both files — the
+      // port filter below still accepts only this child's listening line.
+      let replacementOffset = null;
       const drainOutput = () => {
-        const chunk = readLogSince(managedPaths.logPath, readOffset);
-        readOffset = chunk.offset;
-        output += chunk.text;
+        if (replacementOffset === null) {
+          let rotated = false;
+          try {
+            const liveStats = statSync(managedPaths.logPath);
+            rotated = `${liveStats.dev}:${liveStats.ino}` !== logFileIdentity;
+          } catch {
+            rotated = true;
+          }
+          if (rotated) replacementOffset = 0;
+        }
+        if (replacementOffset !== null) {
+          const fromRotated = readLogSince(`${managedPaths.logPath}.1`, readOffset);
+          readOffset = fromRotated.offset;
+          output += fromRotated.text;
+          const fromLive = readLogSince(managedPaths.logPath, replacementOffset);
+          replacementOffset = fromLive.offset;
+          output += fromLive.text;
+        } else {
+          const chunk = readLogSince(managedPaths.logPath, readOffset);
+          readOffset = chunk.offset;
+          output += chunk.text;
+        }
         // OpenCode 2.x prints `server listening on http://host:port` with no
         // "opencode" prefix, and `{"url":"http://host:port"}` under --stdio.
         // The log is shared by every server on the data dir; another server's
