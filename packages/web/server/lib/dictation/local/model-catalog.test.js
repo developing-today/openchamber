@@ -52,3 +52,12 @@ describe('local TTS catalog', () => {
     }
   });
 });
+
+describe('getLocalSttModelSpec prototype names', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__'])(
+    'rejects inherited %s with the unknown-model error',
+    (modelId) => {
+      expect(() => getLocalSttModelSpec(modelId)).toThrow(`Unknown local speech model id: ${modelId}`);
+    },
+  );
+});
