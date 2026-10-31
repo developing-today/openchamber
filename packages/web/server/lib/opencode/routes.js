@@ -2,6 +2,7 @@ import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
 import express from 'express';
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -28,6 +29,11 @@ import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 // OpenCode must settle the version, upgrade-status and health answers with
 // their existing error shapes instead of hanging them forever.
 const OPENCODE_INFO_DEADLINE_MS = 3_000;
+
+// A registry /latest document for one package version is a few KB; 1 MiB is
+// generous headroom while still bounding the memory a user-configured
+// registry can make the upgrade-status poll buffer (#1040).
+export const OPENCODE_LATEST_VERSION_MAX_BYTES = 1024 * 1024;
 let openCodeInfoDeadlineMs = OPENCODE_INFO_DEADLINE_MS;
 
 /** Test hook: replace the /api/info probe deadline; no argument restores the default. */
@@ -100,7 +106,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     if (!response.ok) {
       throw new Error(`OpenCode npm registry responded with ${response.status}`);
     }
-    const payload = await response.json();
+    const bounded = await readBoundedResponseText(response, OPENCODE_LATEST_VERSION_MAX_BYTES);
+    if (bounded.tooLarge) {
+      throw new Error(`OpenCode npm registry latest document exceeds ${OPENCODE_LATEST_VERSION_MAX_BYTES} bytes`);
+    }
+    const payload = JSON.parse(bounded.text);
     const version = typeof payload?.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
     if (!version) throw new Error('Failed to resolve latest OpenCode version');
     return version;
