@@ -65,6 +65,43 @@ afterEach(async () => {
 });
 
 describe('session warming runtime', () => {
+  it('bounds the activity map at 500, evicting oldest non-warmed entries and keeping warmed ones (#987)', async () => {
+    const { runtime, fetchImpl } = makeRuntime();
+    runtime.setEnabled(true);
+    const activeReads = () => fetchImpl.mock.calls.filter(([url]) => String(url).includes('/api/session/active')).length;
+
+    // The warmed session's activity is the oldest entry in the map.
+    runtime.processPayload(status('idle', SESSION));
+    runtime.setSessionWarm(SESSION, DIRECTORY, true);
+
+    // The stream reports far more distinct sessions than the cap.
+    for (let i = 0; i < 600; i += 1) {
+      runtime.processPayload(status('idle', `ses_flood_${String(i).padStart(4, '0')}`));
+    }
+
+    // The oldest non-warmed entry was evicted: warming it now has no recorded
+    // state to consult, so the runtime must ask OpenCode (a /active read).
+    const readsBeforeEvicted = activeReads();
+    runtime.setSessionWarm('ses_flood_0000', DIRECTORY, true);
+    await runDue();
+    expect(activeReads()).toBeGreaterThan(readsBeforeEvicted);
+
+    // A recent entry is still recorded: warming it consults the recorded idle
+    // state and asks OpenCode nothing.
+    const readsBeforeRecent = activeReads();
+    runtime.setSessionWarm('ses_flood_0599', DIRECTORY, true);
+    await runDue();
+    expect(activeReads()).toBe(readsBeforeRecent);
+
+    // The warmed session's entry survived the flood despite being oldest:
+    // toggling it off and back on still consults its recorded state.
+    runtime.setSessionWarm(SESSION, DIRECTORY, false);
+    const readsBeforeWarmed = activeReads();
+    runtime.setSessionWarm(SESSION, DIRECTORY, true);
+    await runDue();
+    expect(activeReads()).toBe(readsBeforeWarmed);
+  });
+
   it('pings a warmed session every interval after its turn ends, for the default duration', async () => {
     const { runtime, fetchImpl } = makeRuntime();
     runtime.setEnabled(true);

@@ -97,6 +97,27 @@ export const createSessionWarmingRuntime = ({
    */
   const activity = new Map(); // sessionId → { busy, idleAt }
 
+  // Bounded like the sibling per-session maps (#974): the stream reports
+  // every session, warmed or not, and this runtime lives for the whole
+  // process, so without a cap the map grows by one entry per session ever
+  // seen. Oldest non-warmed entries go first; a warmed session's entry is
+  // never evicted — if every entry is warmed the map may exceed the cap
+  // rather than drop state a toggle is about to consult.
+  const ACTIVITY_LIMIT = 500;
+  const setActivity = (sessionId, value) => {
+    activity.set(sessionId, value);
+    while (activity.size > ACTIVITY_LIMIT) {
+      let evicted = false;
+      for (const candidate of activity.keys()) {
+        if (sessions.has(candidate)) continue;
+        activity.delete(candidate);
+        evicted = true;
+        break;
+      }
+      if (!evicted) break;
+    }
+  };
+
   const snapshot = () => ({
     revision,
     enabled,
@@ -239,7 +260,7 @@ export const createSessionWarmingRuntime = ({
       armTimer(sessionId, entry, now() + STATUS_RETRY_MS, (next) => settle(sessionId, entry, next));
       return;
     }
-    activity.set(sessionId, { busy, idleAt: null });
+    setActivity(sessionId, { busy, idleAt: null });
     if (busy) {
       cancelTimer(entry);
       if (entry.warmUntil !== null) {
@@ -324,7 +345,7 @@ export const createSessionWarmingRuntime = ({
     const busy = parsed.data.properties.status.type !== 'idle';
     const previous = activity.get(sessionId);
     if (previous?.busy === busy) return;
-    activity.set(sessionId, { busy, idleAt: busy ? previous?.idleAt ?? null : now() });
+    setActivity(sessionId, { busy, idleAt: busy ? previous?.idleAt ?? null : now() });
 
     const entry = sessions.get(sessionId);
     if (!entry) return;
