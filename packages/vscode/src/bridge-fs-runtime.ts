@@ -73,6 +73,11 @@ export const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
+// Byte cap for the api:fs:read handler, matching the web twin
+// (MAX_READ_BYTES in packages/web/server/lib/fs/routes.js) and the local-fs
+// proxy twin (LOCAL_FS_READ_MAX_BYTES in bridge-localfs-proxy-runtime.ts).
+export const FS_READ_MAX_BYTES = 16 * 1024 * 1024;
+
 export const FS_EXEC_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
 
 // Per-stream byte cap for api:fs:exec command output, the same cap and env
@@ -294,7 +299,30 @@ export async function handleFsBridgeMessage(
       }
 
       try {
-        const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
+        const stats = await fs.promises.stat(resolution.resolvedPath);
+        if (stats.size > FS_READ_MAX_BYTES) {
+          return { id, type, success: false, error: `File exceeds maximum size of ${FS_READ_MAX_BYTES} bytes` };
+        }
+        // Read at most one byte past the cap, so a file that grows between
+        // the stat and the read is refused from a bounded buffer instead of
+        // being buffered whole.
+        const handle = await fs.promises.open(resolution.resolvedPath, 'r');
+        let content: string;
+        try {
+          const buffer = Buffer.alloc(FS_READ_MAX_BYTES + 1);
+          let bytesRead = 0;
+          while (bytesRead < buffer.length) {
+            const { bytesRead: chunk } = await handle.read(buffer, bytesRead, buffer.length - bytesRead, null);
+            if (chunk === 0) break;
+            bytesRead += chunk;
+          }
+          if (bytesRead > FS_READ_MAX_BYTES) {
+            return { id, type, success: false, error: `File exceeds maximum size of ${FS_READ_MAX_BYTES} bytes` };
+          }
+          content = buffer.toString('utf8', 0, bytesRead);
+        } finally {
+          await handle.close();
+        }
         return { id, type, success: true, data: { content, path: deps.normalizeFsPath(resolution.resolvedPath) } };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to read file';
