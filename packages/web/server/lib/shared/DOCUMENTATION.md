@@ -157,14 +157,16 @@ variant that answers differently stays with its owner.
 ### What stays out
 
 - `opencode/self-handoff.js` `resolveHandoffTimeoutMs` (phase 2, #804):
-  a deliberate variant of the strict parser. It checks
-  `Number.isInteger`, where the shared spellings check
-  `Number.isSafeInteger`, so a digit string beyond the safe-integer range
-  (26 digits, say) yields that huge value there and the fallback here.
-  Every other spelling judgement matches. It stays local under design
-  rule 5 — a copy that answers differently for a real input is recorded,
-  not silently redefined — until the design owner rules the difference a
-  bug or a feature.
+  the strict parser with a timer bound. Its spelling judgement matches
+  the shared spellings — plain decimal only, `Number.isSafeInteger` —
+  so a digit string beyond the safe-integer range (26 digits, say)
+  yields the fallback there too, not a huge value. What differs is the
+  accepted range: 1 to 2_147_483_647 ms, because the value feeds a
+  timer and a delay above Node's 2^31 - 1 ms maximum fires after ~1 ms
+  instead; a larger configured timeout falls back to the 30 s default
+  rather than killing every handoff successor immediately. It stays
+  local for that bound — a property of the timer it feeds, not of the
+  shared parser's caller-supplied range.
 - Parsers that accept a sign, a fraction, or a non-decimal spelling: no
   shared copy accepts them, and a caller that truly needs one keeps a
   local, differently-named variant.
