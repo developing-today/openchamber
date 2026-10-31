@@ -277,6 +277,14 @@ const registry = {
 
 const pendingFetches = new Map();
 
+// Provider ids arrive from route segments and CLI arguments. A registry row is
+// a provider only when it is the registry's own key: an inherited member such
+// as `constructor` or `toString` is not a provider, and `__proto__` resolves
+// to `Object.prototype` rather than to a row.
+const registeredProvider = (providerId) => (
+  Object.hasOwn(registry, providerId) ? registry[providerId] : undefined
+);
+
 /**
  * The two facts the quota listing takes from the merged OpenCode config,
  * read the way the OpenRouter provider reads its baseURL: `disabled_providers`
@@ -375,7 +383,7 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false } =
 
   const visible = includeDisabled
     ? configured
-    : configured.filter((id) => !isProviderDisabled(facts, registry[id]));
+    : configured.filter((id) => !isProviderDisabled(facts, registeredProvider(id)));
 
   for (const instanceId of facts.instances.keys()) {
     if (!includeDisabled && facts.disabled.has(instanceId)) continue;
@@ -482,7 +490,7 @@ const fetchInstanceResults = async (providerId) => {
 };
 
 export const fetchQuotaForProviderInstances = async (providerId) => {
-  const provider = registry[providerId];
+  const provider = registeredProvider(providerId);
 
   if (!provider) {
     return (await fetchInstanceResults(providerId)) ?? [unsupportedResult(providerId)];
@@ -500,7 +508,7 @@ export const fetchQuotaForProviderInstances = async (providerId) => {
 };
 
 const fetchQuotaForProviderUncoalesced = async (providerId) => {
-  const provider = registry[providerId];
+  const provider = registeredProvider(providerId);
 
   if (!provider) {
     // An instance id answers with its active credential's result, keeping

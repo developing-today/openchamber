@@ -381,6 +381,41 @@ The primary path reads `GetCurrentPeriodUsage` `planUsage` (Pro/Ultra). Enterpri
 
 `GetAggregatedUsageEvents` dollar totals are deliberately not used for the UI; they reflect internal token cost, not the dashboard request/on-demand meters. `spendCents` from `GetTeamSpend` is the member's on-demand spend and matches the dashboard meter; `includedSpendCents` from the same response is the internal included-pool usage and is not shown. `packages/web/server/lib/quota/providers/cursor.js` and `packages/vscode/src/quotaProviders.ts` implement the same fallback chain and verified-meter semantics — keep them in sync.
 
+## Provider id lookups resolve own properties only
+
+Every provider id that reaches the quota layer comes from outside it: route
+segments (`GET /api/quota/:providerId`, `/api/quota/credentials/:providerId`),
+CLI arguments, or a stored config id. The three registries in the layer
+(`normalizers` in `credentials/providers.js`, `validators` in `routes.js`, and
+the provider `registry` in `providers/index.js`) are plain objects, so a keyed
+lookup resolves inherited `Object.prototype` members: `normalizers.constructor`
+is `Object`, `registry.toString` is a function, and `registry.__proto__` is
+`Object.prototype`. A truthiness gate therefore accepted `constructor` as a
+supported credential provider, and the dispatcher treated `constructor` as a
+registry row with no `fetchQuota`, answering `configured: true` with
+`provider.fetchQuota is not a function`.
+
+Every lookup goes through an own-property check (`Object.hasOwn`):
+`getCredentialNormalizer(providerId)`, `getValidator(providerId)`, and
+`registeredProvider(providerId)`. A prototype name is then indistinguishable
+from an unknown id: `fetchQuotaForProvider` and `fetchQuotaForProviderInstances`
+return the `configured: false` / `Unsupported provider` result, and every
+`/api/quota/credentials/:providerId` route answers `404 UNSUPPORTED_PROVIDER`
+before any normalizer or validator runs. The credential routes require both an
+own normalizer and an own validator, so a provider whose registry row is half
+missing answers 404 instead of throwing at the call site.
+
+### Why own-property guards and not a `Map` or null-prototype registry
+
+Converting the registries to `Map`s or `Object.create(null)` objects would also
+close the hole, but each conversion changes every consumer: iteration
+(`Object.entries(registry)` in the dispatcher, the catalogue, and the
+per-instance resolution), the exported `normalizers` object that
+`opendesign.test.js` indexes directly, and any future caller that reads the
+registry as an object. A guard at each lookup leaves the registries and their
+consumers as they are, and the guard is the thing that has to be true where the
+untrusted id arrives.
+
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.

@@ -1,5 +1,5 @@
 import express from 'express';
-import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
+import { deleteManagedCredential, getCredentialNormalizer, getManagedCredentialStatus, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 import { fetchExeDevUsage } from './providers/exe-dev.js';
 import { validateOpenDesignCredential } from './providers/opendesign.js';
@@ -18,9 +18,19 @@ const validators = {
   opendesign: validateOpenDesignCredential,
 };
 
+// Same own-property rule as the normalizer registry: an inherited member of
+// Object.prototype is not a validator.
+const getValidator = (providerId) => (
+  Object.hasOwn(validators, providerId) ? validators[providerId] : null
+);
+
 const getProvider = (req, res) => {
   const providerId = req.params.providerId;
-  if (!normalizers[providerId]) {
+  // Own-property only: inherited members such as `constructor`, `toString`,
+  // `hasOwnProperty`, `valueOf`, and `__proto__` name no credential provider,
+  // so they answer exactly like an unknown id. Both registries are checked so
+  // a provider missing either half answers 404 here instead of failing later.
+  if (!getCredentialNormalizer(providerId) || !getValidator(providerId)) {
     res.status(404).json({ code: 'UNSUPPORTED_PROVIDER', error: 'Unsupported credential provider' });
     return null;
   }
@@ -51,10 +61,10 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
   app.put('/api/quota/credentials/:providerId', express.json({ limit: '16kb' }), async (req, res) => {
     const providerId = getProvider(req, res);
     if (!providerId) return;
-    const credential = normalizers[providerId](req.body);
+    const credential = getCredentialNormalizer(providerId)(req.body);
     if (!credential) return credentialError(res, new Error('Invalid credential'));
     try {
-      await validators[providerId](credential);
+      await getValidator(providerId)(credential);
       res.json(writeManagedCredential(providerId, credential));
     } catch (error) {
       credentialError(res, error);
@@ -67,7 +77,7 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
     const credential = readManagedCredential(providerId);
     if (!credential) return res.status(404).json({ code: 'NOT_CONFIGURED', error: 'Not configured' });
     try {
-      await validators[providerId](credential);
+      await getValidator(providerId)(credential);
       res.json({ valid: true });
     } catch (error) {
       credentialError(res, error);

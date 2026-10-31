@@ -419,3 +419,48 @@ describe('provider catalogue', () => {
     expect(instance?.disabled).toBe(false);
   });
 });
+
+// The registry is a plain object, so an unguarded lookup resolves these names
+// to Object.prototype members: `constructor` reached the fetch path and
+// fabricated a configured result, and `__proto__` resolved to an object with
+// no fetcher.
+const prototypeNames = ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__'];
+
+describe('provider registry lookup uses own properties', () => {
+  it('dispatches a prototype name exactly like an unknown provider id', async () => {
+    const unknown = await fetchQuotaForProvider('not-a-provider');
+    expect(unknown).toMatchObject({ providerId: 'not-a-provider', ok: false, configured: false, error: 'Unsupported provider' });
+
+    for (const providerName of prototypeNames) {
+      const fetched = await fetchQuotaForProvider(providerName);
+      expect(fetched).toMatchObject({ providerId: providerName, ok: false, configured: false, error: 'Unsupported provider' });
+
+      const instances = await fetchQuotaForProviderInstances(providerName);
+      expect(instances).toEqual([
+        expect.objectContaining({ providerId: providerName, ok: false, configured: false, error: 'Unsupported provider' }),
+      ]);
+    }
+  });
+
+  it('never reports a prototype name as configured', async () => {
+    authState.projected = { 'github-copilot': { type: 'oauth', access: 'gh-token' } };
+
+    const configured = await listConfiguredQuotaProviders();
+
+    expect(configured).toContain('github-copilot');
+    for (const providerName of prototypeNames) {
+      expect(configured).not.toContain(providerName);
+    }
+  });
+
+  it('still dispatches a real provider id through its registry row', async () => {
+    authState.projected = { 'github-copilot': { type: 'oauth', access: 'gh-token' } };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      quota_snapshots: { premium_interactions: { entitlement: 100, remaining: 80 } },
+    })));
+
+    const fetched = await fetchQuotaForProvider('github-copilot');
+
+    expect(fetched).toMatchObject({ providerId: 'github-copilot', ok: true, configured: true });
+  });
+});
