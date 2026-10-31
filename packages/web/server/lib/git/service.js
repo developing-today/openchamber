@@ -32,6 +32,35 @@ const remoteExistenceCache = new Map();
 const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
+// One entry per directory+remote ever checked: the TTL was only evaluated
+// when the same key was read again, so entries for never-re-visited
+// directories accumulated for the life of the process. Writes sweep expired
+// entries and the cache is capped oldest-first (#979).
+export const GIT_REMOTE_CACHE_MAX_ENTRIES = 500;
+
+const pruneExpiredRemoteExistenceEntries = (now = Date.now()) => {
+  for (const [key, entry] of remoteExistenceCache) {
+    if (!entry || !Number.isFinite(entry.checkedAt) || now - entry.checkedAt >= REMOTE_EXISTENCE_CACHE_TTL_MS) {
+      remoteExistenceCache.delete(key);
+    }
+  }
+  return remoteExistenceCache.size;
+};
+
+const capRemoteExistenceEntries = () => {
+  while (remoteExistenceCache.size > GIT_REMOTE_CACHE_MAX_ENTRIES) {
+    const oldest = remoteExistenceCache.keys().next();
+    if (oldest.done) break;
+    remoteExistenceCache.delete(oldest.value);
+  }
+};
+
+const setBoundedRemoteExistenceEntry = (key, value) => {
+  pruneExpiredRemoteExistenceEntries();
+  remoteExistenceCache.delete(key);
+  remoteExistenceCache.set(key, value);
+  capRemoteExistenceEntries();
+};
 // Patches this service reads, compares and applies use the a/ and b/ prefixes.
 // The user's diff.mnemonicPrefix (i/, w/, c/, 1/, 2/), diff.noprefix or
 // diff.srcPrefix/dstPrefix would otherwise change them, and a hunk would no
@@ -1082,7 +1111,7 @@ const getRemoteExistenceCacheKey = (directory, remoteName) => {
   return `${path.resolve(normalizedDirectory)}\0${remoteName}`;
 };
 
-const hasRemote = async (git, directory, remoteName) => {
+export const hasRemote = async (git, directory, remoteName) => {
   const remote = String(remoteName || '').trim();
   if (!remote) {
     return false;
@@ -1099,7 +1128,7 @@ const hasRemote = async (git, directory, remoteName) => {
     .then((value) => String(value || '').trim().length > 0)
     .catch(() => false);
 
-  remoteExistenceCache.set(key, { exists, checkedAt: Date.now() });
+  setBoundedRemoteExistenceEntry(key, { exists, checkedAt: Date.now() });
   return exists;
 };
 
@@ -4710,7 +4739,68 @@ async function getRemoteDefaultBranches(git) {
 const REMOTE_HEADS_TTL_MS = 30_000;
 const remoteHeadsCache = new Map();
 
-const readRemoteHeads = (git, directory, remote, localRefs) => {
+// The heads cache kept one entry per directory+remote for process life for
+// the same reason: the TTL was only checked when the same key was read
+// again. Writes sweep expired entries and the cache is capped oldest-first,
+// skipping in-flight ls-remote entries so concurrent listings still share one
+// round trip (#979).
+const pruneExpiredRemoteHeadsEntries = (now = Date.now()) => {
+  for (const [key, entry] of remoteHeadsCache) {
+    if (!entry || !Number.isFinite(entry.at) || now - entry.at >= REMOTE_HEADS_TTL_MS) {
+      remoteHeadsCache.delete(key);
+    }
+  }
+  return remoteHeadsCache.size;
+};
+
+const capRemoteHeadsEntries = () => {
+  while (remoteHeadsCache.size > GIT_REMOTE_CACHE_MAX_ENTRIES) {
+    // Evict the oldest settled entry. An in-flight entry carries a pending
+    // ls-remote whose sharers would otherwise start a duplicate request.
+    let evicted = false;
+    for (const [key, entry] of remoteHeadsCache) {
+      if (entry && entry.settled === false) {
+        continue;
+      }
+      remoteHeadsCache.delete(key);
+      evicted = true;
+      break;
+    }
+    if (!evicted) {
+      break;
+    }
+  }
+};
+
+const setBoundedRemoteHeadsEntry = (key, value) => {
+  pruneExpiredRemoteHeadsEntries();
+  remoteHeadsCache.delete(key);
+  remoteHeadsCache.set(key, value);
+  capRemoteHeadsEntries();
+};
+
+/** Remove expired entries from both remote caches so keys never re-read do not accumulate. */
+export function pruneExpiredGitRemoteCaches(now = Date.now()) {
+  pruneExpiredRemoteExistenceEntries(now);
+  pruneExpiredRemoteHeadsEntries(now);
+  return getGitRemoteCacheSizes();
+}
+
+/** Raw entry counts for tests (no implicit prune). */
+export function getGitRemoteCacheSizes() {
+  return {
+    remoteExistence: remoteExistenceCache.size,
+    remoteHeads: remoteHeadsCache.size,
+  };
+}
+
+/** Test hook: the caches are module-level, so tests clear them to isolate cases. */
+export function clearGitRemoteCachesForTest() {
+  remoteExistenceCache.clear();
+  remoteHeadsCache.clear();
+}
+
+export const readRemoteHeads = (git, directory, remote, localRefs) => {
   const key = `${directory}\0${remote.name}\0${remote.refs?.fetch ?? ''}`;
   const localKey = localRefs.join('\n');
   const cached = remoteHeadsCache.get(key);
@@ -4722,8 +4812,12 @@ const readRemoteHeads = (git, directory, remote, localRefs) => {
     }
     return names;
   });
-  const entry = { at: Date.now(), localKey, heads };
-  remoteHeadsCache.set(key, entry);
+  const entry = { at: Date.now(), localKey, heads, settled: false };
+  heads.then(
+    () => { entry.settled = true; },
+    () => { entry.settled = true; },
+  );
+  setBoundedRemoteHeadsEntry(key, entry);
   // A remote that did not answer is asked again next time.
   heads.catch(() => { if (remoteHeadsCache.get(key) === entry) remoteHeadsCache.delete(key); });
   return heads;

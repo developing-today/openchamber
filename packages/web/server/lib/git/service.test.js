@@ -13,6 +13,7 @@ import { configureProjectStartCommandSource } from '../opencode/project-start-co
 
 import {
   configureGitEnvironment,
+  clearGitRemoteCachesForTest,
   getCurrentIdentity,
   checkoutBranch,
   checkoutCommit,
@@ -38,11 +39,15 @@ import {
   stashApply,
   listStashes,
   getWorktrees,
+  GIT_REMOTE_CACHE_MAX_ENTRIES,
+  hasRemote,
   isGitRepository,
   isPatchEquivalentOfHead,
   observeWorktreeTopology,
   populateWorktreeWithLockRecovery,
   previewWorktreeCreate,
+  pruneExpiredGitRemoteCaches,
+  readRemoteHeads,
   removeWorktree,
   waitForWorktreeRemoval,
   snapshotWorktree,
@@ -55,6 +60,7 @@ import {
   setLocalIdentity,
   clearLocalIdentity,
   configureRepositoryTransport,
+  getGitRemoteCacheSizes,
   getGlobalIdentity,
   stageFiles,
   subscribeWorktreeTopologyChanges,
@@ -6638,5 +6644,187 @@ describe.runIf(canRunGit())('ensureOpenCodeProjectId', () => {
     const id = await ensureOpenCodeProjectId(worktree, separateGitDir);
     expect(fs.readFileSync(path.join(separateGitDir, 'opencode'), 'utf8')).toBe(id);
     await expect(ensureOpenCodeProjectId(worktree, separateGitDir)).resolves.toBe(id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// git remote cache eviction (#979)
+// ---------------------------------------------------------------------------
+
+describe('git remote cache eviction', () => {
+  const EXISTENCE_TTL_MS = 30_000;
+  const HEADS_TTL_MS = 30_000;
+
+  const stubGitWithRemote = (exists = true) => ({
+    raw: vi.fn(async () => {
+      if (!exists) {
+        throw new Error("remote 'origin' does not exist");
+      }
+      return 'https://example.com/repo.git\n';
+    }),
+  });
+
+  const stubGitWithHeads = (output = 'abc123\trefs/heads/main\ndef456\trefs/heads/other\n') => ({
+    raw: vi.fn(async () => output),
+  });
+
+  const headsRemote = (name, fetch = 'https://example.com/repo.git') => ({ name, refs: { fetch } });
+
+  beforeEach(() => {
+    clearGitRemoteCachesForTest();
+  });
+
+  afterEach(() => {
+    clearGitRemoteCachesForTest();
+    vi.restoreAllMocks();
+  });
+
+  it('serves fresh remote-existence answers without asking git again', async () => {
+    const git = stubGitWithRemote(true);
+    await expect(hasRemote(git, '/cache-test/fresh', 'origin')).resolves.toBe(true);
+    await expect(hasRemote(git, '/cache-test/fresh', 'origin')).resolves.toBe(true);
+    expect(git.raw).toHaveBeenCalledTimes(1);
+  });
+
+  it('sweeps expired remote-existence entries when a different directory+remote is written', async () => {
+    const startedAt = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const git = stubGitWithRemote(true);
+    try {
+      await hasRemote(git, '/cache-test/sweep-a', 'origin');
+      expect(getGitRemoteCacheSizes().remoteExistence).toBe(1);
+
+      // Past the 30s TTL: writing sweep-b must evict sweep-a's never-revisited
+      // entry instead of accumulating alongside it.
+      nowSpy.mockReturnValue(startedAt + EXISTENCE_TTL_MS + 1);
+      await hasRemote(git, '/cache-test/sweep-b', 'origin');
+      expect(getGitRemoteCacheSizes().remoteExistence).toBe(1);
+
+      // The evicted key is checked against git again ...
+      const callsBefore = git.raw.mock.calls.length;
+      await expect(hasRemote(git, '/cache-test/sweep-a', 'origin')).resolves.toBe(true);
+      expect(git.raw.mock.calls.length).toBe(callsBefore + 1);
+      // ... while the fresh entry still hits.
+      await expect(hasRemote(git, '/cache-test/sweep-b', 'origin')).resolves.toBe(true);
+      expect(git.raw.mock.calls.length).toBe(callsBefore + 1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('prunes expired remote-existence entries with no re-read at all', async () => {
+    const git = stubGitWithRemote(true);
+    await hasRemote(git, '/cache-test/prune-a', 'origin');
+    await hasRemote(git, '/cache-test/prune-b', 'origin');
+    expect(getGitRemoteCacheSizes().remoteExistence).toBe(2);
+    expect(pruneExpiredGitRemoteCaches(Date.now() + EXISTENCE_TTL_MS + 1).remoteExistence).toBe(0);
+  });
+
+  it('caps remote-existence entries oldest-first', async () => {
+    const git = stubGitWithRemote(true);
+    for (let i = 0; i < GIT_REMOTE_CACHE_MAX_ENTRIES + 10; i += 1) {
+      await hasRemote(git, '/cache-test/flood', `remote-${i}`);
+    }
+    expect(getGitRemoteCacheSizes().remoteExistence).toBe(GIT_REMOTE_CACHE_MAX_ENTRIES);
+
+    // The oldest entry was evicted, so it is checked against git again ...
+    const callsBefore = git.raw.mock.calls.length;
+    await expect(hasRemote(git, '/cache-test/flood', 'remote-0')).resolves.toBe(true);
+    expect(git.raw.mock.calls.length).toBe(callsBefore + 1);
+    // ... while the newest entry still hits.
+    await expect(hasRemote(git, '/cache-test/flood', `remote-${GIT_REMOTE_CACHE_MAX_ENTRIES + 9}`)).resolves.toBe(true);
+    expect(git.raw.mock.calls.length).toBe(callsBefore + 1);
+  });
+
+  it('shares one ls-remote for concurrent listings while local refs are unchanged', async () => {
+    const git = stubGitWithHeads();
+    const remote = headsRemote('origin');
+    const localRefs = ['remotes/origin/main'];
+    const [first, second] = await Promise.all([
+      readRemoteHeads(git, '/cache-test/shared', remote, localRefs),
+      readRemoteHeads(git, '/cache-test/shared', remote, localRefs),
+    ]);
+    expect(git.raw).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(new Set(['main', 'other']));
+    expect(second).toBe(first);
+
+    // Changed tracking refs read again ...
+    await readRemoteHeads(git, '/cache-test/shared', remote, [...localRefs, 'remotes/origin/other']);
+    expect(git.raw).toHaveBeenCalledTimes(2);
+    // ... while unchanged refs still hit.
+    await readRemoteHeads(git, '/cache-test/shared', remote, [...localRefs, 'remotes/origin/other']);
+    expect(git.raw).toHaveBeenCalledTimes(2);
+  });
+
+  it('sweeps expired remote-heads entries when a different directory+remote is written', async () => {
+    const startedAt = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const git = stubGitWithHeads();
+    try {
+      const localRefs = ['remotes/origin/main'];
+      await readRemoteHeads(git, '/cache-test/heads-a', headsRemote('origin'), localRefs);
+      expect(getGitRemoteCacheSizes().remoteHeads).toBe(1);
+
+      nowSpy.mockReturnValue(startedAt + HEADS_TTL_MS + 1);
+      await readRemoteHeads(git, '/cache-test/heads-b', headsRemote('origin'), []);
+      expect(getGitRemoteCacheSizes().remoteHeads).toBe(1);
+
+      const callsBefore = git.raw.mock.calls.length;
+      await readRemoteHeads(git, '/cache-test/heads-a', headsRemote('origin'), localRefs);
+      expect(git.raw.mock.calls.length).toBe(callsBefore + 1);
+      await readRemoteHeads(git, '/cache-test/heads-b', headsRemote('origin'), []);
+      expect(git.raw.mock.calls.length).toBe(callsBefore + 1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('prunes expired remote-heads entries with no re-read at all', async () => {
+    const git = stubGitWithHeads();
+    await readRemoteHeads(git, '/cache-test/heads-prune-a', headsRemote('origin'), []);
+    await readRemoteHeads(git, '/cache-test/heads-prune-b', headsRemote('origin'), []);
+    expect(getGitRemoteCacheSizes().remoteHeads).toBe(2);
+    expect(pruneExpiredGitRemoteCaches(Date.now() + HEADS_TTL_MS + 1).remoteHeads).toBe(0);
+  });
+
+  it('caps remote-heads entries oldest-first while preserving in-flight ls-remote entries', async () => {
+    let releaseHeld;
+    const held = new Promise((resolve) => { releaseHeld = resolve; });
+    const git = {
+      raw: vi.fn(async (args) => {
+        if (Array.isArray(args) && args[args.length - 1] === 'held-remote') {
+          await held;
+        }
+        return 'abc123\trefs/heads/main\n';
+      }),
+    };
+    const fetch = 'https://example.com/repo.git';
+    const pending = readRemoteHeads(git, '/cache-test/held', { name: 'held-remote', refs: { fetch } }, []);
+
+    // Fill the cache past the cap while held-remote's ls-remote is in flight.
+    for (let i = 0; i < GIT_REMOTE_CACHE_MAX_ENTRIES + 5; i += 1) {
+      await readRemoteHeads(git, `/cache-test/flood-${i}`, { name: `remote-${i}`, refs: { fetch } }, []);
+    }
+    expect(getGitRemoteCacheSizes().remoteHeads).toBe(GIT_REMOTE_CACHE_MAX_ENTRIES);
+
+    // A concurrent listing shares the in-flight round trip instead of
+    // starting a duplicate request.
+    const shared = readRemoteHeads(git, '/cache-test/held', { name: 'held-remote', refs: { fetch } }, []);
+    releaseHeld();
+    await pending;
+    await shared;
+    const heldCalls = git.raw.mock.calls.filter(
+      (call) => Array.isArray(call[0]) && call[0][call[0].length - 1] === 'held-remote',
+    );
+    expect(heldCalls).toHaveLength(1);
+  });
+
+  it('does not cache a rejected ls-remote', async () => {
+    const git = { raw: vi.fn(async () => { throw new Error('unreachable'); }) };
+    const remote = headsRemote('origin');
+    await expect(readRemoteHeads(git, '/cache-test/broken', remote, [])).rejects.toThrow('unreachable');
+    expect(getGitRemoteCacheSizes().remoteHeads).toBe(0);
+    await expect(readRemoteHeads(git, '/cache-test/broken', remote, [])).rejects.toThrow('unreachable');
+    expect(git.raw).toHaveBeenCalledTimes(2);
   });
 });
