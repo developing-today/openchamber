@@ -178,3 +178,46 @@ describe('VS Code OpenCode upgrade status probe deadline (#789)', () => {
     }
   });
 });
+
+describe('VS Code OpenCode upgrade status registry body cap (#1051)', () => {
+  const streamBody = (totalBytes: number, state: { pulledBytes: number; cancelled: boolean }) => new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (state.pulledBytes >= totalBytes) { controller.close(); return; }
+      const size = Math.min(64 * 1024, totalBytes - state.pulledBytes);
+      controller.enqueue(new Uint8Array(size).fill(0x20));
+      state.pulledBytes += size;
+    },
+    cancel() { state.cancelled = true; },
+  });
+
+  test('fails as an error instead of buffering a streamed registry body over the 1 MiB cap', async () => {
+    const state = { pulledBytes: 0, cancelled: false };
+    // SAFETY: the stub answers /api/info at once and streams only the
+    // registry route, with no content-length, like a chunked packument.
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/api/info')) return Response.json({ version: '2.0.1', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+      return new Response(streamBody(2 * 1024 * 1024, state), { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+    assert.equal(status.available, null);
+    assert.match(String(status.error ?? ''), /exceeds 1048576 bytes/);
+    assert.equal(state.cancelled, true);
+    assert.ok(state.pulledBytes < 2 * 1024 * 1024, 'stream must be cancelled, not drained');
+  });
+
+  test('accepts a registry body at exactly the 1 MiB cap', async () => {
+    const prefix = JSON.stringify({ version: '2.0.23' });
+    const body = prefix + ' '.repeat(1024 * 1024 - prefix.length);
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/api/info')) return Response.json({ version: '2.0.1', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+      return new Response(body, { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+    assert.equal(status.latestVersion, '2.0.23');
+    assert.equal(status.available, true);
+  });
+});
