@@ -26,13 +26,15 @@ const SPEECH_REQUEST_TIMEOUT_MS = 60_000;
 const SPEECH_BODY_MAX_BYTES = 64 * 1024 * 1024;
 
 // The SDK deadline covers the wait for the response. The speech body is
-// read after the create call settles, so that read is bounded by the same
-// budget: a server that answers and then stalls the body fails the request
-// the same way. The body is consumed through its reader so the deadline
+// read after the create call settles, so that read is bounded by what is
+// left of the SAME budget: callers pass the deadline instant they armed
+// for the create call, and a server that answers near it and then stalls
+// the body fails at the original deadline, not a second full timeout
+// later. The body is consumed through its reader so the deadline
 // can cancel the ACTIVE read — body.cancel() cannot do that once a read
 // has locked the stream (e.g. from arrayBuffer()), which would leave the
 // upstream connection open (Codex P2 on PR #839).
-const readSpeechBody = async (response, timeoutMs) => {
+const readSpeechBody = async (response, timeoutMs, deadlineAt) => {
   let cancelReader = null;
   let timer = null;
   const deadline = new Promise((_, reject) => {
@@ -42,7 +44,7 @@ const readSpeechBody = async (response, timeoutMs) => {
       // the pending read and closes the upstream connection.
       reject(new Error(`Speech request timed out after ${timeoutMs} ms`));
       cancelReader?.();
-    }, timeoutMs);
+    }, Math.max(0, deadlineAt - Date.now()));
     timer.unref?.();
   });
 
@@ -217,9 +219,10 @@ export class TTSService {
           };
 
       console.log('[TTSService] Generating speech — model:', model, 'voice:', voice, 'baseURL:', normalizedBaseURL ?? '(openai)');
+      const deadlineAt = Date.now() + timeoutMs;
       const response = await client.audio.speech.create(speechParams, { timeout: timeoutMs });
 
-      const arrayBuffer = await readSpeechBody(response, timeoutMs);
+      const arrayBuffer = await readSpeechBody(response, timeoutMs, deadlineAt);
       // Servers that ignore `response_format` may still label the bytes
       // correctly (or return an unexpected type); pass the upstream label
       // through and only fall back to mp3 when the server omits the header.
@@ -253,6 +256,7 @@ export class TTSService {
     } = options;
 
     try {
+      const deadlineAt = Date.now() + timeoutMs;
       const response = await client.audio.speech.create({
         model,
         voice,
@@ -262,7 +266,7 @@ export class TTSService {
         response_format: 'mp3',
       }, { timeout: timeoutMs });
 
-      const arrayBuffer = await readSpeechBody(response, timeoutMs);
+      const arrayBuffer = await readSpeechBody(response, timeoutMs, deadlineAt);
       return Buffer.from(arrayBuffer);
     } catch (error) {
       console.error('[TTSService] Error generating speech buffer:', error);
