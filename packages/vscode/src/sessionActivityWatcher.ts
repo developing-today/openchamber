@@ -50,6 +50,32 @@ export const buildSessionActivityV1Snapshot = (
   return { version: 1, serverTime, watcherReady, sessions };
 };
 
+// Retention bound (#999): a deleted session is pruned the moment its
+// `session.deleted` event arrives. A session whose deletion this host never
+// observed (deleted while the stream was down, before the watcher started)
+// is bounded instead by this idle TTL: an entry that has sat idle for a full
+// day is a ghost, not a live session, and the reconcile pass removes it.
+export const SESSION_ACTIVITY_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export const deleteSessionActivityEntry = (
+  phases: Map<string, { phase: ActivityPhase; updatedAt: number }>,
+  sessionId: string,
+): boolean => phases.delete(sessionId);
+
+export const pruneStaleSessionActivityEntries = (
+  phases: Map<string, { phase: ActivityPhase; updatedAt: number }>,
+  now: number,
+): string[] => {
+  const removed: string[] = [];
+  for (const [sessionId, data] of phases) {
+    if (data.phase === 'idle' && now - data.updatedAt >= SESSION_ACTIVITY_IDLE_TTL_MS) {
+      phases.delete(sessionId);
+      removed.push(sessionId);
+    }
+  }
+  return removed;
+};
+
 const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
 const sessionActivityCooldowns = new Map<string, NodeJS.Timeout>();
 const SESSION_COOLDOWN_DURATION_MS = 2000;
@@ -75,8 +101,11 @@ const createActivityClient = (manager: OpenCodeManager, baseUrl: string): OpenCo
 
 /**
  * `GET /api/session/active` is the authoritative set of sessions running an
- * agent loop. Anything not in it is idle, including sessions this process
- * believed were busy before the stream dropped.
+ * agent loop. Anything in it is busy. Anything tracked but absent is either
+ * idle or deleted while the stream was down; absent entries are marked idle
+ * so a live session survives a reconnect, and the idle-TTL prune below
+ * removes the ones that stay idle past SESSION_ACTIVITY_IDLE_TTL_MS, so
+ * missed deletions age out instead of being kept as idle ghosts forever.
  */
 const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promise<void> => {
   const active = await client.session.active({ signal: AbortSignal.timeout(8_000) });
@@ -91,6 +120,29 @@ const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promi
       setSessionActivityPhase(sessionId, 'idle');
     }
   }
+
+  // Absent-from-active only proves a session is not running, not that it is
+  // gone, so reconcile never deletes on absence alone. The TTL prune is the
+  // bound for sessions deleted while this host was not watching (#999).
+  for (const sessionId of pruneStaleSessionActivityEntries(sessionActivityPhases, Date.now())) {
+    const timer = sessionActivityCooldowns.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      sessionActivityCooldowns.delete(sessionId);
+    }
+  }
+};
+
+const removeSessionActivity = (sessionId: string): void => {
+  if (!sessionId) return;
+
+  const timer = sessionActivityCooldowns.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    sessionActivityCooldowns.delete(sessionId);
+  }
+
+  deleteSessionActivityEntry(sessionActivityPhases, sessionId);
 };
 
 const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void => {
@@ -147,9 +199,12 @@ export const getSessionActivitySnapshot = (): SessionActivityV1Snapshot =>
  * explicit status pushes) and they are cheap to honour.
  *
  * A finished run passes through `cooldown` so the UI does not flip the indicator
- * off the instant the last token lands.
+ * off the instant the last token lands. A deleted session is pruned outright
+ * (`session.deleted` carries no phase), including its pending cooldown timer.
  */
-const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => {
+type SessionActivityUpdate = SessionActivity | { sessionId: string; deleted: true };
+
+const deriveSessionActivity = (event: OpenCodeEvent): SessionActivityUpdate | null => {
   switch (event.type) {
     case 'session.status': {
       const statusType = event.data.status.type;
@@ -167,6 +222,8 @@ const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => 
       return { sessionId: event.data.sessionID, phase: 'idle' };
     case 'session.idle':
       return { sessionId: event.data.sessionID, phase: 'idle' };
+    case 'session.deleted':
+      return { sessionId: event.data.sessionID, deleted: true };
     default:
       return null;
   }
@@ -258,7 +315,11 @@ export const startGlobalEventWatcher = async (
 
           const activity = deriveSessionActivity(event);
           if (activity) {
-            setSessionActivityPhase(activity.sessionId, activity.phase);
+            if ('deleted' in activity) {
+              removeSessionActivity(activity.sessionId);
+            } else {
+              setSessionActivityPhase(activity.sessionId, activity.phase);
+            }
           }
 
           if (signal.aborted) {
