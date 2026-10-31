@@ -109,7 +109,7 @@ Three outbound-call primitives live here beside the guards, under the same
 admission rule: the dominant, behaviour-defining spelling is shared, and a
 variant that answers differently stays with its owner.
 
-- `bounded-fetch.js` — `fetchWithDeadline(fetchImpl, url, init, { timeoutMs, signal, headersOnly })`.
+- `bounded-fetch.js` — `fetchWithDeadline(fetchImpl, url, init, { timeoutMs, signal, headersOnly })` and the exported `combineAbortSignals(signals) -> { signal, detach }` composition helper (the one shared copy; callers import it instead of re-implementing signal composition).
   A per-attempt deadline that **composes** with the caller's signal (either
   firing aborts the call; `AbortSignal.any` where available, a composed
   controller otherwise) and never replaces it — the gitlab

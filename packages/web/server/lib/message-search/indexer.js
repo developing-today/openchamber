@@ -15,6 +15,8 @@
 
 import { z } from 'zod';
 
+import { combineAbortSignals } from '../shared/bounded-fetch.js';
+
 const PAGE_SIZE = 100;
 const SESSION_PAGE_SIZE = 200;
 const LIVE_DEBOUNCE_MS = 1_500;
@@ -82,32 +84,6 @@ const joinParts = (message, schema) => {
 const readSearchableText = (message) => {
   if (message.type === 'user') return stripTerminalContext(message.text ?? '').trim() || null;
   return joinParts(message, textPartSchema);
-};
-
-// Compose signals so any one of them aborts the result, mirroring
-// AbortSignal.any where the runtime has it and composing manually where
-// it does not (the oldest supported hosts lack AbortSignal.any). The
-// returned detach removes the forwarding listeners once settled.
-const combineAbortSignals = (signals) => {
-  const anyImpl = AbortSignal.any;
-  if (anyImpl) {
-    return { signal: anyImpl(signals), detach: () => {} };
-  }
-  const controller = new AbortController();
-  const forwarders = signals.map((signal) => () => controller.abort(signal.reason));
-  signals.forEach((signal, index) => {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-    } else {
-      signal.addEventListener('abort', forwarders[index], { once: true });
-    }
-  });
-  return {
-    signal: controller.signal,
-    detach: () => {
-      signals.forEach((signal, index) => signal.removeEventListener('abort', forwarders[index]));
-    },
-  };
 };
 
 // An assistant record is still being written until OpenCode stamps it

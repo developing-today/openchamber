@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { fetchWithDeadline } from './bounded-fetch.js';
+import { combineAbortSignals, fetchWithDeadline } from './bounded-fetch.js';
 
 // A fetch whose response never arrives; like a real fetch it rejects when
 // the request signal aborts.
@@ -87,5 +87,54 @@ describe('fetchWithDeadline', () => {
 
   it('requires a positive timeoutMs', async () => {
     await expect(fetchWithDeadline(stalledFetch(), 'https://example.test', {}, {})).rejects.toThrow(TypeError);
+  });
+});
+
+describe('combineAbortSignals', () => {
+  // The helper mirrors AbortSignal.any where the runtime has it and
+  // composes manually where it does not; the manual path is exercised by
+  // hiding AbortSignal.any for the duration of one composition.
+  const composeManually = (signals) => {
+    const originalAny = AbortSignal.any;
+    AbortSignal.any = undefined;
+    try {
+      return combineAbortSignals(signals);
+    } finally {
+      AbortSignal.any = originalAny;
+    }
+  };
+
+  it('aborts the composed signal when any source aborts, with that source reason', () => {
+    const first = new AbortController();
+    const second = new AbortController();
+    const { signal } = composeManually([first.signal, second.signal]);
+    expect(signal.aborted).toBe(false);
+    second.abort(new Error('second gave up'));
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason?.message).toBe('second gave up');
+  });
+
+  it('is already aborted when a source was already aborted', () => {
+    const source = new AbortController();
+    source.abort(new Error('already over'));
+    const { signal } = composeManually([new AbortController().signal, source.signal]);
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason?.message).toBe('already over');
+  });
+
+  it('detach removes the forwarding listeners: a later source abort does not reach the composed signal', () => {
+    const source = new AbortController();
+    const { signal, detach } = composeManually([source.signal, new AbortController().signal]);
+    detach();
+    source.abort(new Error('too late'));
+    expect(signal.aborted).toBe(false);
+  });
+
+  it('also composes through AbortSignal.any when the runtime provides it', () => {
+    const source = new AbortController();
+    const { signal } = combineAbortSignals([source.signal, new AbortController().signal]);
+    source.abort(new Error('native path'));
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason?.message).toBe('native path');
   });
 });
