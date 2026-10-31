@@ -128,6 +128,7 @@ export const openCodeCredentialSource = ({
         return false;
       }
     },
+    getLaunchEnvironment: () => getLaunchEnvironment(),
     listEnvironmentKeys: async () => {
       const environment = getLaunchEnvironment();
       if (!environment) return {};
@@ -340,6 +341,22 @@ export function readOpenCodeCredentials() {
 }
 
 /**
+ * The launch environment of the wired credential source, or null when the
+ * source does not say or the connected OpenCode was not launched by
+ * OpenChamber. Without it the local store's location cannot be established:
+ * OpenChamber's own process.env is not the environment the running OpenCode
+ * resolves its database from, and resolving against it can read a different
+ * store than the one the connected OpenCode uses.
+ */
+const wiredLaunchEnvironment = () => {
+  try {
+    return source?.getLaunchEnvironment?.() ?? null;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * The same projected credentials, read straight from OpenCode's credential
  * store on this machine with no server in between. The served projection
  * can withhold a secret a consumer must present itself (the stored-login
@@ -349,7 +366,13 @@ export function readOpenCodeCredentials() {
  * be read; each caller decides what that means for it.
  */
 export async function readLocalOpenCodeCredentials() {
-  return projectCredentialEntries(await openCodeLocalCredentialSource().list());
+  const launchEnvironment = wiredLaunchEnvironment();
+  if (!launchEnvironment) {
+    throw new Error(
+      "OpenCode local credential store location is unknown: the connected OpenCode was not launched by OpenChamber, so the environment it resolves its database from cannot be established",
+    );
+  }
+  return projectCredentialEntries(await openCodeLocalCredentialSource({ env: launchEnvironment }).list());
 }
 
 /**

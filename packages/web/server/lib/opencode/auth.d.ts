@@ -15,6 +15,8 @@ export type CredentialSource = {
   listEnvironmentKeys?: () => Promise<Record<string, string>>;
   /** Whether this source is known to read the credential store on this machine; absent means not known. */
   usesLocalStore?: () => boolean;
+  /** The environment the connected OpenCode was launched with; absent or null when it was not launched by OpenChamber. */
+  getLaunchEnvironment?: () => Record<string, string | undefined> | null;
 };
 
 export function configureOpenCodeCredentials(next: CredentialSource | null): void;

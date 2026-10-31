@@ -140,6 +140,7 @@ describe('Antigravity fetchQuota credential resolution', () => {
         value: { type: 'oauth', methodID: 'antigravity', access: 'projected-access-token', expires: 1 },
       }],
       usesLocalStore: () => true,
+      getLaunchEnvironment: () => ({ HOME: isolatedHome, XDG_DATA_HOME: path.join(isolatedHome, '.local', 'share') }),
     });
     createLocalGoogleStore();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })));
@@ -157,6 +158,7 @@ describe('Antigravity fetchQuota credential resolution', () => {
         throw new Error('OpenCode is not connected yet');
       },
       usesLocalStore: () => true,
+      getLaunchEnvironment: () => ({ HOME: isolatedHome, XDG_DATA_HOME: path.join(isolatedHome, '.local', 'share') }),
     });
     createLocalGoogleStore();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })));
