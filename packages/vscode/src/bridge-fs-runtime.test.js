@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const spawnCalls = [];
 let spawnExitCode = 0;
@@ -44,6 +47,7 @@ mock.module('vscode', () => ({
 
 const {
   FS_EXEC_OUTPUT_MAX_BYTES,
+  FS_READ_MAX_BYTES,
   clearGitReadCacheForTests,
   createFsExecOutputMaxBytes,
   createGitCheckIgnoreTimeoutMs,
@@ -242,5 +246,46 @@ describe('bridge fs check-ignore timeout timer bound', () => {
     expect(createGitCheckIgnoreTimeoutMs()).toBe(2500);
     process.env[name] = '9007199254740993';
     expect(createGitCheckIgnoreTimeoutMs()).toBe(2500);
+  });
+});
+
+describe('bridge fs read size cap', () => {
+  let dir;
+  const readDeps = {
+    ...deps,
+    resolveFileReadPath: mock(async (target) => ({ ok: true, resolvedPath: target })),
+  };
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-bridge-fs-read-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns a small file exactly as before', async () => {
+    const file = path.join(dir, 'small.txt');
+    fs.writeFileSync(file, 'hello');
+    const response = await handleFsBridgeMessage({ id: '1', type: 'api:fs:read', payload: { path: file } }, readDeps);
+    expect(response.success).toBe(true);
+    expect(response.data.content).toBe('hello');
+    expect(response.data.path).toBe(file);
+  });
+
+  it('returns a file at the cap', async () => {
+    const file = path.join(dir, 'at-cap.txt');
+    fs.writeFileSync(file, 'a'.repeat(FS_READ_MAX_BYTES));
+    const response = await handleFsBridgeMessage({ id: '2', type: 'api:fs:read', payload: { path: file } }, readDeps);
+    expect(response.success).toBe(true);
+    expect(response.data.content.length).toBe(FS_READ_MAX_BYTES);
+  });
+
+  it('refuses a file over the cap with an error naming the limit', async () => {
+    const file = path.join(dir, 'over-cap.txt');
+    fs.writeFileSync(file, 'a'.repeat(FS_READ_MAX_BYTES + 1));
+    const response = await handleFsBridgeMessage({ id: '3', type: 'api:fs:read', payload: { path: file } }, readDeps);
+    expect(response.success).toBe(false);
+    expect(response.error).toBe(`File exceeds maximum size of ${FS_READ_MAX_BYTES} bytes`);
   });
 });
