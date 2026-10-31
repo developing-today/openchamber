@@ -41,3 +41,33 @@ describe('bridge fs env readers judge values by their whole text', () => {
     assert.match(runtimeSource, /parsePlainDecimalInt\(process\.env\.OPENCHAMBER_GIT_READ_CACHE_TTL_MS\)/);
   });
 });
+
+const webModelsMetadataSource = readFileSync(new URL('../../web/server/lib/opencode/models-metadata.js', import.meta.url), 'utf8');
+
+describe('models.dev catalog read ceiling', () => {
+  // fetchModelsMetadata cannot be imported here (the module imports
+  // `vscode`), so the bound is pinned on the source text like the search
+  // ceiling above, alongside its deliberate mirror in the web server.
+  for (const [label, source] of [['VS Code', helpersSource], ['web', webModelsMetadataSource]] as const) {
+    test(`${label} catalog read is capped at the named 16 MiB bound`, () => {
+      assert.match(source, /MODELS_DEV_CATALOG_MAX_BYTES = 16 \* 1024 \* 1024/);
+      assert.match(source, /readBoundedResponseText\(response, MODELS_DEV_CATALOG_MAX_BYTES\)/);
+    });
+  }
+
+  test('VS Code fetchModelsMetadata never buffers the body whole', () => {
+    assert.doesNotMatch(helpersSource, /response\.json\(\)/);
+    assert.match(helpersSource, /return JSON\.parse\(bounded\.text\)/);
+  });
+
+  test('VS Code bounded read rejects a declared over-cap length and cancels an over-cap stream', () => {
+    assert.match(helpersSource, /declared > maxBytes/);
+    assert.match(helpersSource, /size > maxBytes/);
+    assert.match(helpersSource, /reader\.cancel\(\)/);
+  });
+
+  test('VS Code over-cap body throws the web copy\u2019s error and a non-OK status still throws its own', () => {
+    assert.match(helpersSource, /models\.dev response exceeded size limit/);
+    assert.match(helpersSource, /models\.dev responded with \$\{response\.status\}/);
+  });
+});
