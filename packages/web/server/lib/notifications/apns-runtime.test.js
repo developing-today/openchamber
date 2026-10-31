@@ -277,6 +277,65 @@ describe('apns runtime relay mode (default)', () => {
     await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('reports a relay body-read timeout instead of swallowing it as an empty result (#993)', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const fetchMock = vi.fn(async (url, init) => {
+        if (isRegister([url])) return jsonResponse({ ok: true });
+        // Headers arrive, but the body only settles when the caller's
+        // deadline signal aborts.
+        return {
+          ok: true,
+          status: 200,
+          json: () =>
+            new Promise((_, reject) => {
+              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+            }),
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+      const runtime = createApnsRuntime(makeDeps());
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'x' }, {});
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(sending).resolves.toBeUndefined();
+
+      expect(warnSpy).toHaveBeenCalledWith('[APNs relay] request failed:', 'aborted');
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the null fallback for a malformed relay body (no request-failed warning) (#993)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const fetchMock = vi.fn(async (url) =>
+        isRegister([url])
+          ? jsonResponse({ ok: true })
+          : {
+              ok: true,
+              status: 200,
+              json: async () => {
+                throw new SyntaxError('Unexpected token < in JSON');
+              },
+            },
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+      const runtime = createApnsRuntime(makeDeps());
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+
+      await expect(runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'x' }, {})).resolves.toBeUndefined();
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('[APNs relay] request failed'));
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe('apns runtime direct fallback (relay disabled)', () => {

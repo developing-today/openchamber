@@ -557,7 +557,14 @@ export const createApnsRuntime = (deps) => {
         console.warn(`[APNs relay] send failed status=${res.status}`);
         return;
       }
-      const data = await res.json().catch(() => null);
+      const data = await res.json().catch((error) => {
+        // The deadline signal stays live until the body is read (see the
+        // finally below): an abort here is a transport failure, not an
+        // empty result — rethrow so the outer catch reports it. Only a
+        // malformed body keeps the null fallback.
+        if (signal.aborted) throw error;
+        return null;
+      });
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const result of results) {
         if (result && result.drop === true && typeof result.token === 'string') {
