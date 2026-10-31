@@ -11,6 +11,21 @@ const DISK_CACHE_FILE = 'skills-github-meta.json';
 const metaCache = new Map();
 const inFlight = new Map();
 
+/** Remove expired entries so they do not accumulate until re-read. */
+export function pruneExpiredGitHubMeta(now = Date.now()) {
+  for (const [repo, entry] of metaCache.entries()) {
+    if (!entry || typeof entry.expiresAt !== 'number' || now >= entry.expiresAt) {
+      metaCache.delete(repo);
+    }
+  }
+  return metaCache.size;
+}
+
+/** Raw entry count for tests (no implicit prune). */
+export function getGitHubMetaCacheSize() {
+  return metaCache.size;
+}
+
 let diskLoaded = false;
 let diskWriteTimer = null;
 
@@ -71,9 +86,14 @@ const parseMeta = (payload) => {
 
 const fetchRepoMeta = async (normalizedRepo) => {
   loadDiskEntries();
+  pruneExpiredGitHubMeta();
   const cached = metaCache.get(normalizedRepo);
-  if (cached && Date.now() < cached.expiresAt) {
-    return cached.value;
+  if (cached) {
+    if (Date.now() >= cached.expiresAt) {
+      metaCache.delete(normalizedRepo);
+    } else {
+      return cached.value;
+    }
   }
 
   const existing = inFlight.get(normalizedRepo);

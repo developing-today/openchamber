@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { clearGitHubMetaCache, fetchGitHubRepoMetas } from './github-meta.js';
+import { clearGitHubMetaCache, fetchGitHubRepoMetas, getGitHubMetaCacheSize, pruneExpiredGitHubMeta } from './github-meta.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -67,5 +67,55 @@ describe('fetchGitHubRepoMetas', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(metas['a/b']).toEqual({ stars: 1, repoUpdatedAt: null });
+  });
+
+  it('serves live entries from memory without refetching', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ stargazers_count: 7, pushed_at: '2026-08-01T00:00:00Z' }),
+      { status: 200 },
+    ));
+    globalThis.fetch = fetchMock;
+
+    await fetchGitHubRepoMetas(['a/b']);
+    const second = await fetchGitHubRepoMetas(['a/b']);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(second['a/b']).toEqual({ stars: 7, repoUpdatedAt: '2026-08-01T00:00:00Z' });
+  });
+});
+
+describe('github-meta eviction', () => {
+  it('sweeps expired entries without re-reading the same repo', async () => {
+    const start = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      globalThis.fetch = vi.fn(async () => new Response(
+        JSON.stringify({ stargazers_count: 1, pushed_at: null }),
+        { status: 200 },
+      ));
+
+      await fetchGitHubRepoMetas(['a/b']);
+      expect(getGitHubMetaCacheSize()).toBe(1);
+
+      // Move past the 3-hour success TTL, then touch a different repo so the
+      // sweep runs without anyone re-reading 'a/b'.
+      nowSpy.mockReturnValue(start + 3 * 60 * 60 * 1000 + 1);
+      await fetchGitHubRepoMetas(['c/d']);
+
+      expect(getGitHubMetaCacheSize()).toBe(1);
+      expect(pruneExpiredGitHubMeta()).toBe(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    // After expiry, the stale repo misses the cache and refetches.
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ stargazers_count: 2, pushed_at: null }),
+      { status: 200 },
+    ));
+    globalThis.fetch = fetchMock;
+    const metas = await fetchGitHubRepoMetas(['a/b']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(metas['a/b']).toEqual({ stars: 2, repoUpdatedAt: null });
   });
 });
