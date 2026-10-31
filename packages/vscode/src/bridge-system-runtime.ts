@@ -20,6 +20,44 @@ import type { BridgeContext, BridgeResponse } from './bridge';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery';
 
+// Update answers are small JSON documents; anything past this cap is not one.
+// The web twin caps the same endpoint at the same size
+// (UPDATE_RESPONSE_MAX_BYTES in packages/web/server/lib/package-manager.js, #1047).
+const UPDATE_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
+
+// The bounded read the web copy gets from readBoundedResponseText
+// (packages/web/server/lib/shared/response-body.js), mirrored here: a
+// declared length past the cap is rejected up front, and the stream is
+// cancelled as soon as it crosses the limit, so a body with no declared
+// length is never buffered whole in the extension host.
+const readBoundedResponseText = async (
+  response: Response,
+  maxBytes: number,
+): Promise<{ tooLarge: false; text: string } | { tooLarge: true }> => {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    return { tooLarge: true };
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { tooLarge: false, text: '' };
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { tooLarge: true };
+    }
+    chunks.push(value);
+  }
+  return { tooLarge: false, text: Buffer.concat(chunks, size).toString('utf8') };
+};
+
 /** The base URL a custom provider was saved with; discovery sends its stored key only there. */
 const readStoredProviderBaseURL = (providerID: string): string | undefined => {
   const provider = readConfig().provider;
@@ -316,11 +354,30 @@ export async function handleSystemBridgeMessage(
         });
 
         if (!response.ok) {
-          const text = await response.text().catch(() => 'update check failed');
+          // The error body becomes the bridge error string, so it is read
+          // through the same bound: an over-cap body falls back to the
+          // status message instead of being buffered whole.
+          let text = '';
+          if (!response.body && typeof response.text === 'function') {
+            text = await response.text().catch(() => '');
+          } else {
+            const bounded = await readBoundedResponseText(response, UPDATE_RESPONSE_MAX_BYTES).catch(() => null);
+            if (bounded && !bounded.tooLarge) text = bounded.text;
+          }
           return { id, type, success: false, error: text || `Update check failed with ${response.status}` };
         }
 
-        const data = await response.json();
+        // Test doubles pass a plain { ok, json } without a body; real
+        // responses go through the bounded reader (the web twin's shape).
+        if (!response.body && typeof response.json === 'function') {
+          const data = await response.json();
+          return { id, type, success: true, data };
+        }
+        const bounded = await readBoundedResponseText(response, UPDATE_RESPONSE_MAX_BYTES);
+        if (bounded.tooLarge) {
+          throw new Error('update check response exceeded size limit');
+        }
+        const data = JSON.parse(bounded.text);
         return { id, type, success: true, data };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
