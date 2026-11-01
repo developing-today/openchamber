@@ -12,7 +12,7 @@ import {
   toUsageWindow
 } from '../../utils/index.js';
 
-const GOOGLE_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
+const GOOGLE_WINDOW_LABEL = 'Antigravity Code Assist (per-model)';
 
 export const parseGoogleRefreshToken = (rawRefreshToken) => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
@@ -27,8 +27,6 @@ export const parseGoogleRefreshToken = (rawRefreshToken) => {
     managedProjectId: asNonEmptyString(rawManagedProject)
   };
 };
-
-const resolveGoogleWindow = () => ({ label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS });
 
 export const transformQuotaBucket = (bucket, sourceId) => {
   const modelId = asNonEmptyString(bucket?.modelId);
@@ -46,14 +44,13 @@ export const transformQuotaBucket = (bucket, sourceId) => {
     : null;
   const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
   const resetAt = toTimestamp(bucket?.resetTime);
-  const window = resolveGoogleWindow();
 
   return {
     [scopedName]: {
       windows: {
-        [window.label]: toUsageWindow({
+        [GOOGLE_WINDOW_LABEL]: toUsageWindow({
           usedPercent,
-          windowSeconds: window.seconds,
+          windowSeconds: null,
           resetAt
         })
       }
@@ -72,14 +69,13 @@ export const transformModelData = (modelName, modelData, sourceId) => {
     : null;
   const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
   const resetAt = toTimestamp(modelData?.quotaInfo?.resetTime);
-  const window = resolveGoogleWindow();
 
   return {
     [scopedName]: {
       windows: {
-        [window.label]: toUsageWindow({
+        [GOOGLE_WINDOW_LABEL]: toUsageWindow({
           usedPercent,
-          windowSeconds: window.seconds,
+          windowSeconds: null,
           resetAt
         })
       }

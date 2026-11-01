@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { transformModelData, transformQuotaBucket } from './transforms.js';
 
 describe('Google transforms', () => {
+  it('keeps the reported reset without inventing a window duration for either response shape', () => {
+    const resetTime = '2026-10-08T14:29:35Z';
+    const bucket = transformQuotaBucket({ modelId: 'test', remainingFraction: 0.5, resetTime }, 'google');
+    const model = transformModelData('test', { quotaInfo: { remainingFraction: 0.5, resetTime } }, 'google');
+
+    for (const result of [bucket, model]) {
+      const windows = result['google/test'].windows;
+      expect(Object.keys(windows)).toEqual(['Antigravity Code Assist (per-model)']);
+      expect(windows['Antigravity Code Assist (per-model)']).toMatchObject({
+        usedPercent: 50, windowSeconds: null, resetAt: Date.parse(resetTime)
+      });
+    }
+  });
+
   it.each([
     [-0.5, 100],
     [0, 100],
@@ -13,7 +27,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.usedPercent).toBe(expectedUsedPercent);
+    expect(result['google/gemini-2.5-pro'].windows['Antigravity Code Assist (per-model)'].usedPercent).toBe(expectedUsedPercent);
   });
 
   it.each([
@@ -28,7 +42,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.usedPercent).toBe(expectedUsedPercent);
+    expect(result['google/gemini-2.5-pro'].windows['Antigravity Code Assist (per-model)'].usedPercent).toBe(expectedUsedPercent);
   });
 
   it('transformModelData returns the parsed resetAt for a valid resetTime', () => {
@@ -38,7 +52,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBe(Date.parse('2026-10-08T14:29:35Z'));
+    expect(result['google/gemini-2.5-pro'].windows['Antigravity Code Assist (per-model)'].resetAt).toBe(Date.parse('2026-10-08T14:29:35Z'));
   });
 
   it('transformModelData returns resetAt null for an unparseable resetTime', () => {
@@ -48,7 +62,7 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBeNull();
+    expect(result['google/gemini-2.5-pro'].windows['Antigravity Code Assist (per-model)'].resetAt).toBeNull();
   });
 
   it.each([
@@ -58,7 +72,7 @@ describe('Google transforms', () => {
   ])('transformModelData returns resetAt null for %s', (_label, modelData) => {
     const result = transformModelData('gemini-2.5-pro', modelData, 'google');
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBeNull();
+    expect(result['google/gemini-2.5-pro'].windows['Antigravity Code Assist (per-model)'].resetAt).toBeNull();
   });
 
   it('transformModelData does not double-prefix an already scoped model name', () => {
@@ -81,6 +95,6 @@ describe('Google transforms', () => {
       'google'
     );
 
-    expect(result['google/gemini-2.5-pro'].windows.daily.resetAt).toBe(expectedResetAt);
+    expect(result['google/gemini-2.5-pro'].windows['Antigravity Code Assist (per-model)'].resetAt).toBe(expectedResetAt);
   });
 });

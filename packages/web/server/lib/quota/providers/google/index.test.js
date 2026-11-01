@@ -47,7 +47,10 @@ describe('Google quota OAuth client compatibility', () => {
     const clients = stubGoogle(() => Response.json({ access_token: 'new-access' }));
     const result = await fetchGoogleQuota();
     expect(result.ok).toBe(true);
-    expect(result.usage.models['gemini/gemini-test'].windows.daily.usedPercent).toBe(25);
+    expect(result.providerId).toBe('google');
+    expect(result.providerName).toBe('Antigravity Code Assist (per-model)');
+    expect(result.usage.models['gemini/gemini-test'].windows['Antigravity Code Assist (per-model)'].usedPercent).toBe(25);
+    expect(result.usage.models['gemini/gemini-test'].windows['Antigravity Code Assist (per-model)'].windowSeconds).toBeNull();
     expect(clients).toEqual([GEMINI_CLIENT_ID]);
   });
 
