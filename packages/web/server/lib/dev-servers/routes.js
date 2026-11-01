@@ -20,6 +20,8 @@ import {
 } from './parse.js';
 
 const SCAN_TIMEOUT_MS = 2_500;
+/** Same 4 MiB bound the environment command runner enforces (runtime.js). */
+export const MAX_SCAN_OUTPUT_BYTES = 4 * 1024 * 1024;
 /** Enumeration is cheap but not free; a short cache absorbs panel re-renders. */
 const CACHE_TTL_MS = 3_000;
 
@@ -43,7 +45,13 @@ const runCommand = (spawn, command, args, timeoutMs) => new Promise((resolve) =>
   };
 
   const timer = setTimeout(() => finish(null), timeoutMs);
-  child.stdout?.on('data', (chunk) => { stdout += String(chunk); });
+  child.stdout?.on('data', (chunk) => {
+    stdout += String(chunk);
+    // An oversize stream is a failed scan, never a result: finishing with
+    // null kills the child and routes the caller to its fallback, instead
+    // of parsing a truncated stream into an authoritative answer (#1081).
+    if (stdout.length > MAX_SCAN_OUTPUT_BYTES) finish(null);
+  });
   child.on('error', () => finish(null));
   child.on('close', (code) => finish(code === 0 || stdout ? stdout : null));
 });
