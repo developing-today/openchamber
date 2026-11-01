@@ -113,6 +113,21 @@ describe('snippets', () => {
     expect(expandSnippets('#at-cap', projectDir)).toBe(content);
   });
 
+  test('refuses to create a snippet past the byte cap and writes nothing', () => {
+    const filePath = path.join(projectDir, '.opencode', 'snippet', 'too-big.md');
+    expect(() => createSnippet('too-big', { content: 'x'.repeat(SNIPPET_FILE_MAX_BYTES + 1) }, projectDir, 'project')).toThrow('-byte limit');
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  test('refuses an update past the byte cap and preserves the existing snippet', () => {
+    createSnippet('keep-me', { content: 'Original' }, projectDir, 'project');
+    const filePath = path.join(projectDir, '.opencode', 'snippet', 'keep-me.md');
+    const before = fs.readFileSync(filePath, 'utf8');
+    expect(() => updateSnippet('keep-me', { content: 'y'.repeat(SNIPPET_FILE_MAX_BYTES + 1) }, projectDir)).toThrow('-byte limit');
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+    expect(getSnippet('keep-me', projectDir)?.content).toBe('Original');
+  });
+
   test('creates updates and deletes snippets', () => {
     expect(createSnippet('custom-one', { content: 'Body', aliases: ['co'] }, projectDir, 'project')).toEqual(
       expect.objectContaining({ name: 'custom-one', content: 'Body', aliases: ['co'] }),

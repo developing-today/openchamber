@@ -70,6 +70,10 @@ function writeMarkdownFile(filePath, { content, aliases = [], description }) {
     ? `---\n${yaml.stringify(frontmatter)}---\n${body ? `\n${body}` : ''}`
     : body;
 
+  if (Buffer.byteLength(output, 'utf8') > SNIPPET_FILE_MAX_BYTES) {
+    throw new Error(`Snippet file exceeds the ${SNIPPET_FILE_MAX_BYTES}-byte limit`);
+  }
+
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, output, 'utf8');
 }
