@@ -26,6 +26,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `MESSAGE_STREAM_GLOBAL_WS_PATH`: `/api/global/event/ws`
 - `MESSAGE_STREAM_DIRECTORY_WS_PATH`: `/api/event/ws`
 - `MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS`: heartbeat interval for browser-facing WS connections.
+- `MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES`: 64 KiB per-message inbound payload cap passed as `maxPayload` to the WS server. The stream is receive-only, so an over-cap frame is refused by the ws layer (close 1009) instead of being assembled in server memory up to the 100 MiB ws default.
 - `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, payload }`.
 - `sendMessageStreamWsFrame(socket, payload)`: serializes and sends a JSON WS frame.
 - `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId` and `directory`.

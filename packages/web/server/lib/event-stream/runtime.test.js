@@ -1,9 +1,12 @@
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
 import { describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 import { createGlobalMessageStreamHub } from './global-hub.js';
 import { decodeOpenChamberCursor } from './sse-cursor.js';
+import { MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES } from './protocol.js';
 import { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
 
 // OpenCode's cursor form, `<instance>:<sequence>`, as its feed puts it in `id:` lines. Only such ids
@@ -585,4 +588,79 @@ describe('message stream websocket runtime', () => {
     socket.close();
     await runtime.close();
   });
+});
+
+describe('message stream WS payload cap (#1108)', () => {
+  async function startRuntime() {
+    const server = createServer();
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (_url, options) => createSseResponse({
+        signal: options.signal, holdOpen: true,
+        blocks: [
+          `id: ${INSTANCE}:1\ndata: {"id":"first","type":"first","properties":{}}\n\n`,
+        ],
+      }),
+    });
+    const runtime = createMessageStreamWsRuntime({
+      server, globalEventHub: hub, wsClients: new Set(),
+      uiAuthController: null, isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade(_socket, statusCode) {
+        throw new Error(`unexpected upgrade rejection: ${statusCode}`);
+      },
+      buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}), processForwardedEventPayload() {},
+    });
+    return { server, hub, runtime, port: server.address().port };
+  }
+
+  async function stopRuntime({ server, hub, runtime }) {
+    hub.stop();
+    await runtime.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  function connectClient(port, onMessage) {
+    const client = new WebSocket(`ws://127.0.0.1:${port}/api/global/event/ws`);
+    if (onMessage) client.on('message', onMessage);
+    return new Promise((resolve, reject) => {
+      client.once('open', () => resolve(client));
+      client.once('error', reject);
+    });
+  }
+
+  it('closes with 1009 when a single frame exceeds the payload cap', async () => {
+    const ctx = await startRuntime();
+    const client = await connectClient(ctx.port);
+    try {
+      const closed = new Promise((resolve) => client.once('close', (code) => resolve(code)));
+      client.send(Buffer.alloc(MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES + 1, 0x61));
+      const code = await Promise.race([
+        closed,
+        new Promise((resolve) => setTimeout(() => resolve(0), 5_000)),
+      ]);
+      expect(code).toBe(1009);
+    } finally {
+      client.close();
+      await stopRuntime(ctx);
+    }
+  }, 20_000);
+
+  it('keeps the ready flow and an at-cap frame on an open connection', async () => {
+    const ctx = await startRuntime();
+    const frames = [];
+    const client = await connectClient(ctx.port, (data) => frames.push(JSON.parse(String(data))));
+    try {
+      await expect.poll(() => frames.length).toBeGreaterThan(0);
+      expect(frames.some((frame) => frame.type === 'ready' || frame.type === 'event')).toBe(true);
+      client.send(Buffer.alloc(MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES, 0x62));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(client.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      client.close();
+      await stopRuntime(ctx);
+    }
+  }, 20_000);
 });

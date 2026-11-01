@@ -6,6 +6,7 @@ import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
   MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS,
+  MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES,
   serializeMessageStreamWsEvent,
   sendSerializedMessageStreamWsFrame,
 } from './protocol.js';
@@ -73,6 +74,7 @@ export function createMessageStreamWsRuntime({
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
+    maxPayload: MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES,
   });
 
   // Directory-scoped streams create one upstream reader per client
