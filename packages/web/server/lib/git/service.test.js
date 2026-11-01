@@ -3635,6 +3635,37 @@ describe('contributor checkout trust inspection', () => {
     })]);
   });
 
+  it('refuses a post-checkout hook larger than the inspection cap without reading it', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const hookPath = path.join(repository, '.git', 'hooks', 'post-checkout');
+    fs.writeFileSync(hookPath, Buffer.alloc(1024 * 1024 + 1, 0x23));
+    fs.chmodSync(hookPath, 0o755);
+    const sourceSha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+
+    const inspection = await inspectContributorCheckoutActions(repository, {
+      sourceSha, projectId: 'missing_project', setupCommand: '',
+    });
+
+    expect(inspection.actions).toEqual([]);
+  });
+
+  it('inspects a post-checkout hook at exactly the inspection cap', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const hookPath = path.join(repository, '.git', 'hooks', 'post-checkout');
+    fs.writeFileSync(hookPath, Buffer.alloc(1024 * 1024, 0x23));
+    fs.chmodSync(hookPath, 0o755);
+    const sourceSha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+
+    const inspection = await inspectContributorCheckoutActions(repository, {
+      sourceSha, projectId: 'missing_project', setupCommand: '',
+    });
+
+    expect(inspection.actions).toEqual([expect.objectContaining({
+      kind: 'post-checkout-hook', path: hookPath,
+    })]);
+    expect(inspection.actions[0].content.length).toBe(1024 * 1024);
+  });
+
   it('binds checkout trust to the hook invocation path as well as its bytes', async () => {
     const { repository } = createRepositoryWithRemote();
     const firstDirectory = path.join(repository, 'first-hooks');

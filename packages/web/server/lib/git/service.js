@@ -1424,6 +1424,8 @@ export const populateWorktreeWithLockRecovery = async (directory) => {
   }
 };
 
+const MAX_POST_CHECKOUT_HOOK_SIZE = 1024 * 1024;
+
 const inspectPostCheckoutHook = async (directory) => {
   const result = await runGitCommand(directory, ['rev-parse', '--git-path', 'hooks']);
   if (!result.success) return null;
@@ -1434,7 +1436,7 @@ const inspectPostCheckoutHook = async (directory) => {
   try {
     handle = await fsp.open(hookPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     const stat = await handle.stat();
-    if (!stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) return null;
+    if (!stat.isFile() || stat.size > MAX_POST_CHECKOUT_HOOK_SIZE || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) return null;
     const content = await handle.readFile();
     const gitDirResult = await runGitCommand(directory, ['rev-parse', '--absolute-git-dir']);
     const gitDir = normalizeGitOutputPath(String(gitDirResult.stdout || '').trim());
