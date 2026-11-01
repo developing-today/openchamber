@@ -239,14 +239,18 @@ injection. The contract rules:
   surfaces: the primitive knows paths, bytes, JSON and modes only, and
   callers keep the rest.
 
-## Bounded file read (design #1254 phase 1, #1256)
+## Bounded file read (design #1254, #1256 and #1255)
 
 `bounded-file-read.js` holds the one bounded read for files whose size the
 server does not control — project and user files, as opposed to response
 bodies (#802) and the server's own state files (#976). It generalises
 `skills-catalog/scan.js`'s `readSkillMdFile`, the family's one correct
-embodiment. This phase changes no call site: scan, snippets and plugins
-keep their current spellings until the phase-2 migration (#1255).
+embodiment. Phase 2 (#1255) migrated the call sites: scan's
+`readSkillMdFile`, snippets' `parseMarkdownFile`, plugins'
+`readPluginDirFile`, the guests entry-HTML read in `guestBuiltScriptsReady`,
+and git's `readFileDiffWorkingTreeFile` all read through this module now.
+Each caller maps the coded outcomes back onto its own existing contract,
+so error surfaces and missing-file behaviour are unchanged.
 
 - `readBoundedFile(filePath, maxBytes)` / `readBoundedFileSync(filePath, maxBytes)`
   answer identically: `{ ok: true, buffer, size }` for a complete read at

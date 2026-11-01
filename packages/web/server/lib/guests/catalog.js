@@ -9,6 +9,7 @@ import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './ht
 import { effectiveGrants, guestGrantScope } from './grant-scope.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { ensureGuestStorageIds, onExtensionStoreWrite, readExtensionStore } from './persist.js';
 import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
@@ -185,11 +186,15 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
   if (!entryPath) {
     return false;
   }
-  const entrySize = await fileSizeOrNull(entryPath);
-  if (entrySize === null || entrySize > GUEST_ASSET_MAX_BYTES) {
+  // The shared bounded read (design #1254) enforces the cap during the
+  // read, where the previous stat-then-read left a grow-between gap. Any
+  // non-ok outcome (missing, non-regular, over-cap) means the entry page
+  // is not a built page this package can serve, as the stat gate meant.
+  const entryRead = await readBoundedFile(entryPath, GUEST_ASSET_MAX_BYTES);
+  if (!entryRead.ok) {
     return false;
   }
-  const html = await fs.readFile(entryPath, 'utf8');
+  const html = entryRead.buffer.toString('utf8');
   for (const href of listRelativeGuestScriptHrefs(html)) {
     const relativePath = resolveGuestHtmlRelativePath(entry, href);
     if (!relativePath || !relativePath.endsWith('.js')) {
