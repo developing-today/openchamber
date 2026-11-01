@@ -9,7 +9,7 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
-const { getGitLog } = await import('./gitService.ts?log-max-count-test');
+const { getGitLog, normalizeMaxCount, MAX_LOG_COUNT } = await import('./gitService.ts?log-max-count-test');
 
 const tempDirs = [];
 
@@ -67,6 +67,27 @@ describe('VS Code git service getGitLog maxCount normalization (#641)', () => {
     const result = await getGitLog(dir, { maxCount: -5, all: true });
     expect(result.total).toBe(50);
     expect(result.all).toHaveLength(50);
+  });
+
+  it('clamps a huge finite maxCount to the ceiling (#1121)', async () => {
+    expect(normalizeMaxCount(1_000_000_000)).toBe(MAX_LOG_COUNT);
+    expect(normalizeMaxCount(MAX_LOG_COUNT + 1)).toBe(MAX_LOG_COUNT);
+    expect(normalizeMaxCount(MAX_LOG_COUNT)).toBe(MAX_LOG_COUNT);
+    expect(normalizeMaxCount(100)).toBe(100);
+  });
+
+  it('reads a huge finite maxCount as the bounded history on both paths (#1121)', async () => {
+    if (!canRunGit()) return;
+
+    const dir = makeRepo();
+
+    const plain = await getGitLog(dir, { maxCount: 1_000_000_000 });
+    expect(plain.total).toBe(55);
+    expect(plain.all).toHaveLength(55);
+
+    const allRefs = await getGitLog(dir, { maxCount: 1_000_000_000, all: true });
+    expect(allRefs.total).toBe(55);
+    expect(allRefs.all).toHaveLength(55);
   });
 
   it('passes valid maxCount through unchanged and defaults when omitted', async () => {
