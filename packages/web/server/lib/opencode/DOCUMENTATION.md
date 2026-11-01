@@ -48,6 +48,14 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, system prompt optimizer) and publishes them in a file OpenCode watches.
 - `packages/web/server/lib/opencode/instance-dir.js`: this server's own folder under `<data-dir>/run/instances/<pid>/` for the files its managed OpenCode reads, and removal of folders whose owner is gone. A server that adopts a running managed OpenCode (a self-handoff successor, or a restart) takes over the folder saved with the managed state (`instanceDir` in `state.json`) when its owner is gone or is the predecessor handing off; the new owner's pid goes in the folder's `owner` file, which removal reads before the folder name. Otherwise the adopting server's `OPENCODE_CONFIG` path, and with it the launch fingerprint, would differ and it would start a second OpenCode, and the adopted one's config folder would be removed. A second live server on the same data dir keeps its own folder.
 
+### Snippet loading
+
+`snippets.js` reads Markdown files from the global and project snippet directories during each list, get, and expansion call. Before reading a file, it checks the byte size against `SNIPPET_FILE_MAX_BYTES` (4 MiB). A larger file produces the existing load warning and is skipped; siblings continue to load. Files exactly at the limit are accepted. This is a per-file limit, not a combined registry limit.
+
+#### Why snippets use a per-file cap
+
+A per-file cap lets the registry skip one oversized snippet while keeping valid siblings available. Total memory can still grow with the number of snippets under the cap.
+
 ### Managed plugins on OpenCode 2.x
 A configured plugin must be a DIRECTORY holding a `package.json` that resolves an
 entrypoint; a path to a `.js` file is skipped with "configured plugin path must
