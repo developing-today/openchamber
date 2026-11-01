@@ -28,6 +28,22 @@ export const registerBuiltInGuests = async ({ persistPath, root }) => {
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
+/**
+ * Byte cap for one guest asset on the serve path and for the entry HTML
+ * read during package inspection, judged from stat before any read.
+ * Sized to the in-feature precedent: files.js refuses file content over
+ * GUEST_FILE_CONTENT_MAX (2,000,000) before reading it.
+ */
+export const GUEST_ASSET_MAX_BYTES = 2_000_000;
+
+const fileSizeOrNull = async (filePath) => {
+  try {
+    return (await fs.stat(filePath)).size;
+  } catch {
+    return null;
+  }
+};
+
 const MIME_BY_EXT = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -93,7 +109,7 @@ export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRun
     return null;
   }
   if (filePath && contentType) {
-    return { filePath, contentType };
+    return { filePath, contentType, size: await fileSizeOrNull(filePath) };
   }
   if (!hasRuntime || !relativePath.endsWith('.js')) {
     return null;
@@ -102,9 +118,11 @@ export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRun
   if (!tsPath) {
     return null;
   }
+  const compiledPath = `${tsPath.slice(0, -3)}.js`;
   return {
-    filePath: `${tsPath.slice(0, -3)}.js`,
+    filePath: compiledPath,
     contentType: MIME_BY_EXT['.js'],
+    size: await fileSizeOrNull(compiledPath),
   };
 };
 
@@ -132,6 +150,10 @@ export const resolveGuestPackageRoot = async (rawPath) => {
 const guestBuiltScriptsReady = async (packageRoot, entry) => {
   const entryPath = await resolveGuestAssetPath(packageRoot, entry);
   if (!entryPath) {
+    return false;
+  }
+  const entrySize = await fileSizeOrNull(entryPath);
+  if (entrySize === null || entrySize > GUEST_ASSET_MAX_BYTES) {
     return false;
   }
   const html = await fs.readFile(entryPath, 'utf8');

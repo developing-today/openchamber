@@ -20,6 +20,7 @@ import {
 } from '@openchamber/sdk';
 
 import {
+  GUEST_ASSET_MAX_BYTES,
   findInstalledGuest,
   hasGuestFrame,
   isGuestPanelId,
@@ -881,6 +882,11 @@ export const registerGuestRoutes = (app, {
         return res.status(404).end();
       }
       const { filePath, contentType } = served;
+      // Judged from the resolver's stat, before any read: an over-cap file
+      // is refused here and never buffered whole into the server.
+      if (typeof served.size === 'number' && served.size > GUEST_ASSET_MAX_BYTES) {
+        return res.status(413).json({ error: 'file-too-large' });
+      }
       let raw;
       try {
         raw = await fs.readFile(filePath);
