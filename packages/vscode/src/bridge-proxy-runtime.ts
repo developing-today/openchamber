@@ -1,5 +1,6 @@
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { waitForApiUrl } from './opencode-ready';
+import { readBoundedResponseBody, ResponseBodyTooLargeError } from './bounded-response-body';
 import {
   CREDENTIAL_LIST_ERROR,
   ENTERPRISE_MODE_ERROR,
@@ -53,6 +54,22 @@ const collectProxyResponseHeaders = (headers: Headers, deps: Pick<ProxyRuntimeDe
   delete result['content-encoding'];
   delete result['transfer-encoding'];
   return result;
+};
+
+const collectProxyResponsePayload = async (
+  response: Response,
+  deps: Pick<ProxyRuntimeDeps, 'collectHeaders'>,
+): Promise<ApiProxyResponsePayload> => {
+  const headers = collectProxyResponseHeaders(response.headers, deps);
+  const body = await readBoundedResponseBody(response);
+  if (shouldReturnTextBody(response.headers)) {
+    return { status: response.status, headers, bodyText: new TextDecoder().decode(body) };
+  }
+  return {
+    status: response.status,
+    headers,
+    bodyBase64: Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString('base64'),
+  };
 };
 
 // OpenCode 2.x has one event stream, `GET /api/event`.
@@ -171,16 +188,7 @@ const performApiProxyFetch = async (
 ): Promise<ApiProxyResponsePayload> => {
   try {
     const response = await fetch(targetUrl, { method, headers, body, signal });
-    const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
-    if (shouldReturnTextBody(response.headers)) {
-      return { status: response.status, headers: responseHeaders, bodyText: await response.text() };
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return {
-      status: response.status,
-      headers: responseHeaders,
-      bodyBase64: Buffer.from(arrayBuffer).toString('base64'),
-    };
+    return await collectProxyResponsePayload(response, deps);
   } catch (error) {
     return {
       status: 502,
@@ -493,37 +501,30 @@ export async function handleProxyBridgeMessage(
           body: typeof bodyText === 'string' ? bodyText : '',
           signal: abortController.signal,
         });
-
-        const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
-        if (shouldReturnTextBody(response.headers)) {
-          const bodyText = await response.text();
-          const data: ApiProxyResponsePayload = {
-            status: response.status,
-            headers: responseHeaders,
-            bodyText,
-          };
-
-          return { id, type, success: true, data };
-        }
-
-        const arrayBuffer = await response.arrayBuffer();
-        const data: ApiProxyResponsePayload = {
-          status: response.status,
-          headers: responseHeaders,
-          bodyBase64: Buffer.from(arrayBuffer).toString('base64'),
-        };
-
+        const data = await collectProxyResponsePayload(response, deps);
         return { id, type, success: true, data };
       } catch (error) {
+        const isTooLarge = error instanceof ResponseBodyTooLargeError;
         const isTimeout =
           error instanceof Error &&
           ((error as Error & { name?: string }).name === 'TimeoutError' ||
             (error as Error & { name?: string }).name === 'AbortError');
+        let errorMessage = 'OpenCode message forward failed';
+        let status = 503;
+        if (isTooLarge) {
+          errorMessage = error.message;
+          status = 502;
+        } else if (isTimeout) {
+          errorMessage = 'OpenCode message forward timed out';
+          status = 504;
+        } else if (error instanceof Error) {
+          errorMessage = error.message;
+        }
         const body = JSON.stringify({
-          error: isTimeout ? 'OpenCode message forward timed out' : error instanceof Error ? error.message : 'OpenCode message forward failed',
+          error: errorMessage,
         });
         const data: ApiProxyResponsePayload = {
-          status: isTimeout ? 504 : 503,
+          status,
           headers: { 'content-type': 'application/json' },
           bodyText: body,
         };

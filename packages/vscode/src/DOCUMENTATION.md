@@ -103,6 +103,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
   - The webview forwards the request path unchanged (`/api/<x>` → `/api/<x>`): OpenCode 2.x serves its own routes under `/api`, so nothing strips the prefix.
+  - Both handlers cap upstream response bodies at `API_PROXY_RESPONSE_MAX_BYTES` (16 MiB). A larger declared `Content-Length` is rejected before reading; streamed overflow stops and cancels the upstream body. The response is a 502 with the limit in its error message, and exactly 16 MiB remains valid. Text and base64 response selection, filtered headers, and the existing abort/deadline behavior are preserved.
   - SSE routes are intentionally excluded from the generic proxy and use `sseProxy.ts`, whose upstream-only stall watchdog closes a quiet OpenCode stream so the webview can reconnect instead of trusting an open but silent response.
   - The webview allocates each SSE stream ID and installs its listener before requesting the upstream stream, so immediate OpenCode replay events cannot race the bridge start response.
   - OpenCode 2.x has one global stream, `GET /api/event`. Every frame names its own `location.directory`, so the proxy no longer scopes the request to a directory.
