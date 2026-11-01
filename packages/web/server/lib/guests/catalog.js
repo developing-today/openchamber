@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -41,6 +42,38 @@ const fileSizeOrNull = async (filePath) => {
     return (await fs.stat(filePath)).size;
   } catch {
     return null;
+  }
+};
+
+const readGuestManifest = async (manifestPath) => {
+  let handle;
+  try {
+    const nonBlockingFlag = process.platform === 'win32' ? 0 : (fsConstants.O_NONBLOCK ?? 0);
+    handle = await fs.open(manifestPath, fsConstants.O_RDONLY | nonBlockingFlag);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > GUEST_ASSET_MAX_BYTES) {
+      return null;
+    }
+
+    const buffer = Buffer.alloc(GUEST_ASSET_MAX_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const result = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (result.bytesRead === 0) {
+        break;
+      }
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead > GUEST_ASSET_MAX_BYTES) {
+      return null;
+    }
+    return buffer.toString('utf8', 0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => {});
+    }
   }
 };
 
@@ -172,14 +205,8 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
 
 export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
   const manifestPath = path.join(packageRoot, 'package.json');
-  if ((await fileSizeOrNull(manifestPath)) > GUEST_ASSET_MAX_BYTES) {
-    return { ok: false, code: 'invalid-manifest' };
-  }
-
-  let raw;
-  try {
-    raw = await fs.readFile(manifestPath, 'utf8');
-  } catch {
+  const raw = await readGuestManifest(manifestPath);
+  if (raw === null) {
     return { ok: false, code: 'invalid-manifest' };
   }
   const parsed = parseManifestJson(raw);

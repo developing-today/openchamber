@@ -549,4 +549,19 @@ describe('guest package manifest size gate (#1149)', () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  if (process.platform !== 'win32') {
+    test('refuses a manifest symlink to a non-regular file', async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-manifest-device-'));
+      try {
+        await fs.symlink('/dev/null', path.join(root, 'package.json'));
+        expect(await inspectGuestPackage(root, { openchamberVersion: '1.0.0' })).toEqual({
+          ok: false,
+          code: 'invalid-manifest',
+        });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
+  }
 });
