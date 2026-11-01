@@ -18,8 +18,9 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, foreground/background server launch, startup summaries, and foreground shutdown behavior.
 
 - `commands-lifecycle.js`
-  - Implements `openchamber stop` and `openchamber restart`.
+  - Implements `openchamber stop`, `openchamber restart`, and `openchamber rotate-credentials`.
   - Owns lifecycle stop/restart semantics, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options.
+  - Rotation stops through the same SIGINT path as `stop`, then serves with `rotateCredentials`, which `commands-serve.js` passes to the server as the one-shot `OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS` flag; the server discards the saved managed OpenCode password and agent tool token for that start and writes a fresh pair. The command never reads or prints credential values. Foreground instances are only stopped: the stop clears the saved state, so the process manager's restart generates the fresh pair.
 
 - `commands-status.js`
   - Implements `openchamber status`.

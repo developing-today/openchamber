@@ -820,6 +820,11 @@ const {
 
 const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
                                     process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
+// Set by `openchamber rotate-credentials` for one start. Read once and
+// deleted here, before anything spawns: a handoff successor or a managed
+// OpenCode child must never inherit it and rotate again on its own start.
+const ENV_ROTATE_MANAGED_CREDENTIALS = process.env.OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS === 'true';
+delete process.env.OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS;
 const ENV_DESKTOP_NOTIFY = (() => {
   if (process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true') {
     return true;
@@ -1636,7 +1641,12 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
-  getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
+  rotateManagedCredentials: ENV_ROTATE_MANAGED_CREDENTIALS,
+  // The lifecycle decides reuse per start: it passes the saved token for an
+  // adopt/handoff start and null for a rotation start. Forward it; dropping
+  // it would mint a fresh token on every start and strand the adopted
+  // OpenCode, which still calls back with the token it was started with.
+  getManagedOpenCodeEnv: async ({ agentToolToken = null } = {}) => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv({ agentToolToken }) : {}),
   getInstanceDir: () => instanceDir,
   getHandoffPredecessorPid: () => handoffPredecessorPid,
   getUserEnvironment: () => environmentRuntime.forOpenCode(),

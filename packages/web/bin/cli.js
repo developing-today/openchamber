@@ -203,6 +203,8 @@ const commands = {
 
   handoff: null,
 
+  'rotate-credentials': null,
+
   status: statusCommand,
 
   schedule: scheduleCommand,
@@ -236,6 +238,7 @@ commands.serve = createServeCommand({
   commands.stop = lifecycleCommands.stop;
   commands.restart = lifecycleCommands.restart;
   commands.handoff = lifecycleCommands.handoff;
+  commands['rotate-credentials'] = lifecycleCommands.rotateCredentials;
 }
 
 commands.tunnel = createTunnelCommand({
@@ -356,7 +359,7 @@ async function main() {
   }
 
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'handoff', 'status', 'schedule', 'session', 'models', 'projects', 'quota', 'control', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'handoff', 'rotate-credentials', 'status', 'schedule', 'session', 'models', 'projects', 'quota', 'control', 'tunnel', 'startup', 'logs', 'update'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {
