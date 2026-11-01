@@ -495,6 +495,56 @@ describe('skill-routes directory soft fallback', () => {
     expect(await missing.json()).toEqual({ error: 'File not found' });
   });
 
+  it('writes and deletes nested skill supporting files at their real paths (#1146)', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'files-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: files-skill\ndescription: Has files\n---\nBody\n',
+    );
+    fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+    const filesBase = `${appHandle.baseUrl}/api/config/skills/files-skill/files`;
+    const putJson = (url, content) => fetch(url, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    const putNested = await putJson(`${filesBase}/references/new.md${query}`, '# New\n');
+    expect(putNested.status).toBe(200);
+    expect(await putNested.json()).toEqual({ success: true, message: 'File references/new.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'references', 'new.md'), 'utf8')).toBe('# New\n');
+    expect(fs.existsSync(path.join(skillDir, 'references,new.md'))).toBe(false);
+
+    const putFlat = await putJson(`${filesBase}/flat.md${query}`, '# Flat\n');
+    expect(putFlat.status).toBe(200);
+    expect(await putFlat.json()).toEqual({ success: true, message: 'File flat.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'flat.md'), 'utf8')).toBe('# Flat\n');
+
+    const putPercent = await putJson(`${filesBase}/references/100%25.md${query}`, '# Percent\n');
+    expect(putPercent.status).toBe(200);
+    expect(await putPercent.json()).toEqual({ success: true, message: 'File references/100%.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'references', '100%.md'), 'utf8')).toBe('# Percent\n');
+
+    const getPercent = await fetch(`${filesBase}/references/100%25.md${query}`);
+    expect(getPercent.status).toBe(200);
+    expect(await getPercent.json()).toEqual({ path: 'references/100%.md', content: '# Percent\n' });
+
+    const deleteNested = await fetch(`${filesBase}/references/guide.md${query}`, { method: 'DELETE' });
+    expect(deleteNested.status).toBe(200);
+    expect(await deleteNested.json()).toEqual({ success: true, message: 'File references/guide.md deleted successfully' });
+    expect(fs.existsSync(path.join(skillDir, 'references', 'guide.md'))).toBe(false);
+
+    const deleteFlat = await fetch(`${filesBase}/flat.md${query}`, { method: 'DELETE' });
+    expect(deleteFlat.status).toBe(200);
+    expect(await deleteFlat.json()).toEqual({ success: true, message: 'File flat.md deleted successfully' });
+    expect(fs.existsSync(path.join(skillDir, 'flat.md'))).toBe(false);
+  });
+
   it('bounds the read if a supporting file grows after its descriptor is checked', () => {
     projectRoot = createTempProject();
     const skillDir = path.join(projectRoot, '.agents', 'skills', 'growing-skill');
