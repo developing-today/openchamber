@@ -833,6 +833,14 @@ function writePromptFile(filePath, content) {
 
 // ============== SKILL FILE OPERATIONS ==============
 
+// Skill supporting files are hand-maintained docs and scripts shipped with
+// third-party skills; nothing OpenChamber writes bounds their size, so the
+// GET route must never buffer an arbitrary one whole. Judged from stat
+// before any read (the house stat-gate pattern): a file over this cap is
+// refused, never read. 1 MiB matches the AGENTS.md behavior-prompt cap.
+const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
+const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_large';
+
 async function pathExists(target) {
   try {
     await fs.promises.access(target);
@@ -1015,10 +1023,62 @@ function assertPathWithinSkillDir(skillDir, relativePath) {
 
 function readSkillSupportingFile(skillDir, relativePath) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
-  if (!fs.existsSync(fullPath)) {
-    return null;
+  const createTooLargeError = () => Object.assign(
+    new Error(`Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),
+    { code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE },
+  );
+  const rejectNonRegularFile = () => {
+    throw Object.assign(new Error('Access to file denied'), { code: 'EACCES' });
+  };
+
+  let pathStats;
+  try {
+    pathStats = fs.statSync(fullPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
   }
-  return fs.readFileSync(fullPath, 'utf8');
+  if (!pathStats.isFile()) rejectNonRegularFile();
+  if (pathStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+  let fileDescriptor;
+  try {
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0);
+    fileDescriptor = fs.openSync(fullPath, flags);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+
+  try {
+    const openedFileStats = fs.fstatSync(fileDescriptor);
+    if (!openedFileStats.isFile()) rejectNonRegularFile();
+    if (openedFileStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+    let buffer = Buffer.allocUnsafe(Math.max(1, openedFileStats.size + 1));
+    let bytesRead = 0;
+    while (true) {
+      if (bytesRead === buffer.length) {
+        if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+        const nextBuffer = Buffer.allocUnsafe(Math.min(buffer.length * 2, SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
+        buffer.copy(nextBuffer, 0, 0, bytesRead);
+        buffer = nextBuffer;
+      }
+      const count = fs.readSync(
+        fileDescriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    fs.closeSync(fileDescriptor);
+  }
 }
 
 function writeSkillSupportingFile(skillDir, relativePath, content) {
@@ -1085,6 +1145,8 @@ export {
   addSkillFromMdFile,
   resolveSkillSearchDirectories,
   listSkillSupportingFiles,
+  SKILL_SUPPORTING_FILE_MAX_BYTES,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile

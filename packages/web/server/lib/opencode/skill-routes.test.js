@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import fs from 'fs';
 import os from 'os';
@@ -17,6 +17,8 @@ import {
 import {
   SKILL_DIR,
   SKILL_SCOPE,
+  SKILL_SUPPORTING_FILE_MAX_BYTES,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   deleteSkillSupportingFile,
   readSkillSupportingFile,
   writeSkillSupportingFile,
@@ -438,6 +440,139 @@ describe('skill-routes directory soft fallback', () => {
       path: path.join('references', 'guide.md'),
       fullPath: path.join(skillDir, 'references', 'guide.md'),
     }]);
+  });
+
+  it('refuses over-cap skill supporting files with 413 and serves at-cap files byte-identically', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'capped-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: capped-skill\ndescription: Has capped files\n---\nBody\n',
+    );
+    const atCap = 'a'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES);
+    fs.writeFileSync(path.join(skillDir, 'references', 'at-cap.md'), atCap);
+    fs.writeFileSync(path.join(skillDir, 'references', 'over-cap.md'), 'b'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
+    fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+    fs.writeFileSync(path.join(skillDir, 'references', '100%.md'), '# Percent path\n');
+    fs.mkdirSync(path.join(skillDir, 'references', 'folder'));
+
+    const readSpy = vi.spyOn(fs, 'readSync');
+    try {
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'over-cap.md')))
+        .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'folder')))
+        .toThrow(expect.objectContaining({ code: 'EACCES' }));
+      expect(readSpy).not.toHaveBeenCalled();
+    } finally {
+      readSpy.mockRestore();
+    }
+    expect(readSkillSupportingFile(skillDir, path.join('references', 'at-cap.md'))).toBe(atCap);
+    expect(readSkillSupportingFile(skillDir, path.join('references', 'missing.md'))).toBeNull();
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+    const filesBase = `${appHandle.baseUrl}/api/config/skills/capped-skill/files`;
+
+    const overCap = await fetch(`${filesBase}/references/over-cap.md${query}`);
+    expect(overCap.status).toBe(413);
+    expect(await overCap.json()).toEqual({ error: 'File too large to read' });
+
+    const atCapResponse = await fetch(`${filesBase}/references/at-cap.md${query}`);
+    expect(atCapResponse.status).toBe(200);
+    expect(await atCapResponse.json()).toEqual({ path: 'references/at-cap.md', content: atCap });
+
+    const small = await fetch(`${filesBase}/references/guide.md${query}`);
+    expect(small.status).toBe(200);
+    expect(await small.json()).toEqual({ path: 'references/guide.md', content: '# Guide\n' });
+
+    const percentPath = await fetch(`${filesBase}/references/100%25.md${query}`);
+    expect(percentPath.status).toBe(200);
+    expect(await percentPath.json()).toEqual({ path: 'references/100%.md', content: '# Percent path\n' });
+
+    const missing = await fetch(`${filesBase}/references/missing.md${query}`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'File not found' });
+  });
+
+  it('writes and deletes nested skill supporting files at their real paths (#1146)', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'files-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: files-skill\ndescription: Has files\n---\nBody\n',
+    );
+    fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+    const filesBase = `${appHandle.baseUrl}/api/config/skills/files-skill/files`;
+    const putJson = (url, content) => fetch(url, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    const putNested = await putJson(`${filesBase}/references/new.md${query}`, '# New\n');
+    expect(putNested.status).toBe(200);
+    expect(await putNested.json()).toEqual({ success: true, message: 'File references/new.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'references', 'new.md'), 'utf8')).toBe('# New\n');
+    expect(fs.existsSync(path.join(skillDir, 'references,new.md'))).toBe(false);
+
+    const putFlat = await putJson(`${filesBase}/flat.md${query}`, '# Flat\n');
+    expect(putFlat.status).toBe(200);
+    expect(await putFlat.json()).toEqual({ success: true, message: 'File flat.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'flat.md'), 'utf8')).toBe('# Flat\n');
+
+    const putPercent = await putJson(`${filesBase}/references/100%25.md${query}`, '# Percent\n');
+    expect(putPercent.status).toBe(200);
+    expect(await putPercent.json()).toEqual({ success: true, message: 'File references/100%.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'references', '100%.md'), 'utf8')).toBe('# Percent\n');
+
+    const getPercent = await fetch(`${filesBase}/references/100%25.md${query}`);
+    expect(getPercent.status).toBe(200);
+    expect(await getPercent.json()).toEqual({ path: 'references/100%.md', content: '# Percent\n' });
+
+    const deleteNested = await fetch(`${filesBase}/references/guide.md${query}`, { method: 'DELETE' });
+    expect(deleteNested.status).toBe(200);
+    expect(await deleteNested.json()).toEqual({ success: true, message: 'File references/guide.md deleted successfully' });
+    expect(fs.existsSync(path.join(skillDir, 'references', 'guide.md'))).toBe(false);
+
+    const deleteFlat = await fetch(`${filesBase}/flat.md${query}`, { method: 'DELETE' });
+    expect(deleteFlat.status).toBe(200);
+    expect(await deleteFlat.json()).toEqual({ success: true, message: 'File flat.md deleted successfully' });
+    expect(fs.existsSync(path.join(skillDir, 'flat.md'))).toBe(false);
+  });
+
+  it('bounds the read if a supporting file grows after its descriptor is checked', () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'growing-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    const filePath = path.join(skillDir, 'references', 'growing.md');
+    fs.writeFileSync(filePath, 'a'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES));
+
+    const originalFstatSync = fs.fstatSync;
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockImplementation((fileDescriptor) => {
+      const stats = originalFstatSync(fileDescriptor);
+      fs.appendFileSync(filePath, 'b');
+      return stats;
+    });
+    const originalReadSync = fs.readSync;
+    let bytesRead = 0;
+    const readSpy = vi.spyOn(fs, 'readSync').mockImplementation((...args) => {
+      const count = originalReadSync(...args);
+      bytesRead += count;
+      return count;
+    });
+    try {
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'growing.md')))
+        .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+      expect(bytesRead).toBe(SKILL_SUPPORTING_FILE_MAX_BYTES + 1);
+    } finally {
+      fstatSpy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 
   it('flags the list as partial when OpenCode skill list fails, and not when it succeeds', async () => {

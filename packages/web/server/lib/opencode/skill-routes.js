@@ -14,6 +14,16 @@ const isEnvFlagEnabled = (value) => {
   return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
 };
 
+/**
+ * Express 5 wildcard params (*filePath) arrive as an array of
+ * already-decoded path segments. Join them without decoding again:
+ * decodeURIComponent would coerce the array to a comma-joined string
+ * (mangling nested paths) and double-decode percent-bearing names.
+ */
+const extractWildcardFilePath = (filePathParam) => (Array.isArray(filePathParam)
+  ? filePathParam.join('/')
+  : (filePathParam || ''));
+
 export const registerSkillRoutes = (app, dependencies) => {
   const {
     fs,
@@ -687,7 +697,8 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.get('/api/config/skills/:name/files/*filePath', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const filePath = decodeURIComponent(req.params.filePath);
+      // Express already decodes wildcard segments; join without decoding again.
+      const filePath = extractWildcardFilePath(req.params.filePath);
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
@@ -710,6 +721,9 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       res.json({ path: filePath, content });
     } catch (error) {
+      if (error?.code === 'skill_supporting_file_too_large') {
+        return res.status(413).json({ error: 'File too large to read' });
+      }
       if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
@@ -780,7 +794,7 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.put('/api/config/skills/:name/files/*filePath', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const filePath = decodeURIComponent(req.params.filePath);
+      const filePath = extractWildcardFilePath(req.params.filePath);
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
@@ -815,7 +829,7 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.delete('/api/config/skills/:name/files/*filePath', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const filePath = decodeURIComponent(req.params.filePath);
+      const filePath = extractWildcardFilePath(req.params.filePath);
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }

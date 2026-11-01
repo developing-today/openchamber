@@ -6,6 +6,7 @@ import { OPENCODE_CONFIG_DIR } from './shared.js';
 const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
 const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');
 const SNIPPET_EXTENSION = '.md';
+export const SNIPPET_FILE_MAX_BYTES = 4 * 1024 * 1024;
 const SNIPPET_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 const HASHTAG_PATTERN = /#([a-z0-9_-]+)/gi;
 const MAX_EXPANSION_COUNT = 15;
@@ -36,6 +37,10 @@ function assertValidSnippetName(name) {
 }
 
 function parseMarkdownFile(filePath) {
+  const { size } = fs.statSync(filePath);
+  if (size > SNIPPET_FILE_MAX_BYTES) {
+    throw new Error(`Snippet file exceeds the ${SNIPPET_FILE_MAX_BYTES}-byte limit`);
+  }
   const content = fs.readFileSync(filePath, 'utf8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
@@ -64,6 +69,10 @@ function writeMarkdownFile(filePath, { content, aliases = [], description }) {
   const output = Object.keys(frontmatter).length > 0
     ? `---\n${yaml.stringify(frontmatter)}---\n${body ? `\n${body}` : ''}`
     : body;
+
+  if (Buffer.byteLength(output, 'utf8') > SNIPPET_FILE_MAX_BYTES) {
+    throw new Error(`Snippet file exceeds the ${SNIPPET_FILE_MAX_BYTES}-byte limit`);
+  }
 
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, output, 'utf8');

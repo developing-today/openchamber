@@ -48,6 +48,14 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, system prompt optimizer) and publishes them in a file OpenCode watches.
 - `packages/web/server/lib/opencode/instance-dir.js`: this server's own folder under `<data-dir>/run/instances/<pid>/` for the files its managed OpenCode reads, and removal of folders whose owner is gone. A server that adopts a running managed OpenCode (a self-handoff successor, or a restart) takes over the folder saved with the managed state (`instanceDir` in `state.json`) when its owner is gone or is the predecessor handing off; the new owner's pid goes in the folder's `owner` file, which removal reads before the folder name. Otherwise the adopting server's `OPENCODE_CONFIG` path, and with it the launch fingerprint, would differ and it would start a second OpenCode, and the adopted one's config folder would be removed. A second live server on the same data dir keeps its own folder.
 
+### Snippet loading
+
+`snippets.js` reads Markdown files from the global and project snippet directories during each list, get, and expansion call. Before reading a file, it checks the byte size against `SNIPPET_FILE_MAX_BYTES` (4 MiB). A larger file produces the existing load warning and is skipped; siblings continue to load. Files exactly at the limit are accepted. This is a per-file limit, not a combined registry limit.
+
+#### Why snippets use a per-file cap
+
+A per-file cap lets the registry skip one oversized snippet while keeping valid siblings available. Total memory can still grow with the number of snippets under the cap.
+
 ### Managed plugins on OpenCode 2.x
 A configured plugin must be a DIRECTORY holding a `package.json` that resolves an
 entrypoint; a path to a `.js` file is skipped with "configured plugin path must
@@ -243,7 +251,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `walkSkillMdFiles(rootDir)`: Async. Recursively finds all SKILL.md files at any depth, following links and skipping a link back to its own ancestor. Sibling directories are read in parallel, at most 8 file-system calls at once, and the result keeps depth-first readdir order: discovery lets a later file win a duplicate name, so the order is part of the contract.
 - `addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source)`: Indexes an already parsed skill file; `parsed` null (unreadable file) adds nothing.
 - `resolveSkillSearchDirectories(workingDirectory)`: Returns skill search path order (config, project, home, custom).
-- `listSkillSupportingFiles(skillDir)` (async), `readSkillSupportingFile(skillDir, relativePath)`, `writeSkillSupportingFile(skillDir, relativePath, content)`, `deleteSkillSupportingFile(skillDir, relativePath)`: Skill supporting file management.
+- `listSkillSupportingFiles(skillDir)` (async), `readSkillSupportingFile(skillDir, relativePath)`, `writeSkillSupportingFile(skillDir, relativePath, content)`, `deleteSkillSupportingFile(skillDir, relativePath)`: Skill supporting file management. `readSkillSupportingFile` accepts regular files up to `SKILL_SUPPORTING_FILE_MAX_BYTES` (1 MiB), checks the opened file descriptor, and reads at most one byte over the cap. An oversized file throws code `skill_supporting_file_too_large` and the skill-files GET route maps it to 413 `File too large to read`; a missing file still returns null (404).
 
 ## Public exports (routes.js)
 - `registerOpenCodeRoutes(app, dependencies)`: Registers OpenCode-owned HTTP routes and internal module runtime:
@@ -653,6 +661,13 @@ monorepo package counts; a nested id (`team/reviewer`) maps onto the path.
 Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
 OpenCode loads and OpenChamber does not touch.
+
+The plugins page reads editable files through `GET /api/config/plugins/file/:id`
+and reads the existing file before `PUT /api/config/plugins/file/:id`. Both
+paths stat the file before reading and reject files larger than 1 MiB
+(`MAX_PLUGIN_FILE_BYTES`) with HTTP 413 and code `PLUGIN_FILE_TOO_LARGE`. Files
+at the limit keep the `{ fileName, scope, content }` response and update
+behavior. Missing files keep the existing 404 response.
 
 The global config directory is what OpenCode 2 uses: `OPENCODE_CONFIG_DIR`
 when set, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. Config
