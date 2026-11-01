@@ -654,6 +654,13 @@ Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
 OpenCode loads and OpenChamber does not touch.
 
+The plugins page reads editable files through `GET /api/config/plugins/file/:id`
+and reads the existing file before `PUT /api/config/plugins/file/:id`. Both
+paths stat the file before reading and reject files larger than 1 MiB
+(`MAX_PLUGIN_FILE_BYTES`) with HTTP 413 and code `PLUGIN_FILE_TOO_LARGE`. Files
+at the limit keep the `{ fileName, scope, content }` response and update
+behavior. Missing files keep the existing 404 response.
+
 The global config directory is what OpenCode 2 uses: `OPENCODE_CONFIG_DIR`
 when set, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. Config
 files are `opencode.json(c)` only: OpenCode 2 no longer discovers the v1-era
