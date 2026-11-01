@@ -73,6 +73,21 @@ const trackTree = (child) => {
   liveTrees.add(child);
 };
 
+/**
+ * Registers a child spawned OUTSIDE runCommand with the same live-tree
+ * cleanup: while it runs, an exit of this process kills its whole tree via
+ * killLiveTrees. The entry leaves the set when the child itself exits or
+ * fails to spawn, mirroring runCommand's own bookkeeping above. For
+ * spawns that lead their own process group but are not run through
+ * runCommand — the git service's worktree start command (#1084).
+ */
+export const trackLiveTree = (child) => {
+  trackTree(child);
+  const untrack = () => { liveTrees.delete(child); };
+  child.once('exit', untrack);
+  child.once('error', untrack);
+};
+
 /** What an abort rejects with: the caller's own SpaceError, or one of ours for any other reason. */
 const abortReason = (signal, file, args) => (signal.reason instanceof SpaceError
   ? signal.reason
