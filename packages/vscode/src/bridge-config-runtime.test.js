@@ -331,3 +331,47 @@ describe('VS Code config bridge plugin parity', () => {
     });
   });
 });
+
+describe('VS Code config bridge behavior AGENTS.md size gate', () => {
+  const agentsMdPath = path.join(scratchConfigRoot, 'xdg', 'opencode', 'AGENTS.md');
+  const CAP = 1024 * 1024;
+
+  const writeAgentsMd = (size) => {
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    fs.writeFileSync(agentsMdPath, 'x'.repeat(size), 'utf8');
+  };
+
+  afterEach(() => {
+    fs.rmSync(agentsMdPath, { force: true });
+  });
+
+  test('get refuses an over-cap AGENTS.md without returning its content', async () => {
+    writeAgentsMd(CAP + 1);
+    const ctx = createCtx(scratchConfigRoot);
+    const result = await handleConfigBridgeMessage({ id: 'get-big', type: 'api:behavior/agents-md:get' }, ctx, deps);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(`maximum size of ${CAP} bytes`);
+    expect(result.data).toBeUndefined();
+  });
+
+  test('get returns an at-cap AGENTS.md byte-identically', async () => {
+    writeAgentsMd(CAP);
+    const ctx = createCtx(scratchConfigRoot);
+    const result = await handleConfigBridgeMessage({ id: 'get-cap', type: 'api:behavior/agents-md:get' }, ctx, deps);
+    expect(result.success).toBe(true);
+    expect(result.data.exists).toBe(true);
+    expect(result.data.content).toBe('x'.repeat(CAP));
+  });
+
+  test('get reports a missing AGENTS.md as not existing', async () => {
+    fs.rmSync(agentsMdPath, { force: true });
+    const ctx = createCtx(scratchConfigRoot);
+    const result = await handleConfigBridgeMessage({ id: 'get-missing', type: 'api:behavior/agents-md:get' }, ctx, deps);
+    expect(result).toEqual({
+      id: 'get-missing',
+      type: 'api:behavior/agents-md:get',
+      success: true,
+      data: { content: '', exists: false, path: agentsMdPath },
+    });
+  });
+});

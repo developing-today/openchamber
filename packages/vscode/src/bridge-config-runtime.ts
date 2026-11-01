@@ -195,6 +195,10 @@ export async function handleConfigBridgeMessage(
 
     case 'api:behavior/agents-md:get': {
       try {
+        const { size } = await fs.promises.stat(AGENTS_MD_PATH);
+        if (size > MAX_BEHAVIOR_PROMPT_SIZE) {
+          return { id, type, success: false, error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` };
+        }
         const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
         return { id, type, success: true, data: { content, exists: true, path: AGENTS_MD_PATH } };
       } catch (error) {
