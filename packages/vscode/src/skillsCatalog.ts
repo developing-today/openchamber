@@ -24,8 +24,15 @@ const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit
 // handle so a symlink to a device or FIFO (stat size 0) cannot make the
 // read unbounded; a non-regular file throws so the caller falls back to
 // git show.
+function isGitOutputTooLarge(result: { message?: string }): boolean {
+  return /maxbuffer/i.test(String(result?.message || ''));
+}
+
 async function readSkillMdFile(filePath: string): Promise<{ tooLarge: boolean; content: string }> {
-  const handle = await fs.promises.open(filePath, 'r');
+  // O_NONBLOCK (POSIX only): open() must not block on a FIFO with no writer
+  // before handle.stat() can reject it as non-regular.
+  const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+  const handle = await fs.promises.open(filePath, openFlags);
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) {
@@ -392,7 +399,10 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
         }
       } catch {
         const show = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
-        if (!show.ok) {
+        if (!show.ok && isGitOutputTooLarge(show)) {
+          skillMdTooLarge = true;
+          warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+        } else if (!show.ok) {
           warnings.push('Failed to read SKILL.md');
         } else {
           content = show.stdout;

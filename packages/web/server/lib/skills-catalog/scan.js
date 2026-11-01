@@ -14,12 +14,23 @@ const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 export const SKILL_MD_MAX_BYTES = 4 * 1024 * 1024;
 const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit; skipped';
 
+// A failed git-show whose output exceeded the exec maxBuffer is an
+// over-cap SKILL.md, not a generic read failure.
+export function isGitOutputTooLarge(result) {
+  if (!result) return false;
+  if (result.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return true;
+  return /maxbuffer/i.test(String(result.message || ''));
+}
+
 export async function readSkillMdFile(filePath) {
   // Open once and read from the handle: stat-then-readFile by path would
   // follow a symlink to a device or FIFO (stat size 0) and buffer without
   // bound, and a file swapped or grown between the two calls escapes the
   // gate. A non-regular file throws so the caller falls back to git show.
-  const handle = await fs.promises.open(filePath, 'r');
+  // O_NONBLOCK (POSIX only) keeps open() itself from blocking on a FIFO
+  // with no writer before handle.stat() can reject it as non-regular.
+  const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+  const handle = await fs.promises.open(filePath, openFlags);
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) {
@@ -226,7 +237,10 @@ export async function scanSkillsRepository({
           }
         } catch {
           const showResult = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { ...remoteGitOptions, timeoutMs: 15_000 });
-          if (!showResult.ok) {
+          if (!showResult.ok && isGitOutputTooLarge(showResult)) {
+            skillMdTooLarge = true;
+            warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+          } else if (!showResult.ok) {
             warnings.push('Failed to read SKILL.md');
           } else {
             skillMdContent = showResult.stdout;
