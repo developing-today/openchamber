@@ -15,6 +15,19 @@ const FORWARDED_QUERY_KEYS = new Set([
 
 const UNSENDABLE_CLOSE_CODES = new Set([1005, 1006, 1015]);
 
+/**
+ * Largest single WebSocket frame the persistent-pty proxy accepts from a
+ * client. ws assembles a whole message before 'message' fires, so without
+ * an explicit maxPayload one frame up to the ws default of 100 MiB was
+ * assembled and forwarded whole (#1109). Sized at the terminal sibling
+ * precedent (64 KiB) for terminal input. Under Node the ws layer refuses
+ * an oversized frame (close 1009) before assembly; under Bun the bundled
+ * ws does not enforce maxPayload, so the message handler below ALSO checks
+ * the assembled size and drops the pair before the frame is forwarded or
+ * queued (dev-tunnel #1082 precedent).
+ */
+export const PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES = 64 * 1024;
+
 const parsePathname = (rawUrl) => {
   try {
     return new URL(rawUrl || '/', 'http://127.0.0.1').pathname;
@@ -44,7 +57,7 @@ export function createPersistentPtyWsRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
 }) {
-  const wsServer = new WebSocketServer({ noServer: true });
+  const wsServer = new WebSocketServer({ noServer: true, maxPayload: PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES });
 
   wsServer.on('connection', (client, req) => {
     let upstream;
@@ -67,6 +80,16 @@ export function createPersistentPtyWsRuntime({
     };
 
     client.on('message', (data, isBinary) => {
+      // Per-frame bound (#1109): see the constant above — refuse an
+      // oversized frame here, before it is forwarded or queued, with the
+      // same 1009 the ws layer would have used.
+      if (data.length > PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES) {
+        try { client.close(1009, 'Persistent PTY frame too large'); } catch { /* already closing */ }
+        if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+          try { upstream.close(); } catch { /* already closing */ }
+        }
+        return;
+      }
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(data, { binary: isBinary });
       } else if (upstream.readyState === WebSocket.CONNECTING) {

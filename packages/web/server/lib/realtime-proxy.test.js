@@ -5,7 +5,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { attachRealtimeProxy, buildRealtimeProxySseUrl, buildRealtimeProxyWsUrl } from './realtime-proxy.js';
+import { REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES, attachRealtimeProxy, buildRealtimeProxySseUrl, buildRealtimeProxyWsUrl } from './realtime-proxy.js';
 import { createUiAuth } from './ui-auth/ui-auth.js';
 
 const servers = [];
@@ -378,6 +378,54 @@ describe('realtime proxy WebSocket bounds', () => {
     } finally {
       runtime.stop();
       destroyHostSockets(host);
+    }
+  }, 10_000);
+
+  const startRecordingUpstream = async () => {
+    const received = [];
+    const upstreamServer = http.createServer();
+    const upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', (socket) => {
+      socket.on('message', (data, isBinary) => {
+        received.push(Buffer.from(data));
+        socket.send(data, { binary: isBinary });
+      });
+    });
+    const upstreamOrigin = await listen(upstreamServer);
+    return { received, upstreamOrigin, upstreamWs };
+  };
+
+  it('refuses a single frame over the maxPayload cap with 1009 and forwards nothing upstream', async () => {
+    const { received, upstreamOrigin, upstreamWs } = await startRecordingUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    try {
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
+      const client = await connectClient(origin, target);
+      const closed = nextClose(client);
+      client.send(Buffer.alloc(REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES + 1, 0x63));
+      expect(await closed).toBe(1009);
+      expect(received).toEqual([]);
+      upstreamWs.close();
+    } finally {
+      runtime.stop();
+    }
+  }, 10_000);
+
+  it('forwards a single frame at the maxPayload cap byte-identically', async () => {
+    const { received, upstreamOrigin, upstreamWs } = await startRecordingUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    try {
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
+      const client = await connectClient(origin, target);
+      const frame = Buffer.alloc(REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES, 0x64);
+      const echoed = new Promise((resolve) => client.once('message', (data) => resolve(Buffer.from(data))));
+      client.send(frame);
+      expect(await echoed).toEqual(frame);
+      expect(received).toEqual([frame]);
+      client.close();
+      upstreamWs.close();
+    } finally {
+      runtime.stop();
     }
   }, 10_000);
 
