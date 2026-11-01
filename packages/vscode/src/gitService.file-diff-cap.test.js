@@ -124,6 +124,28 @@ describe('VS Code getGitFileDiff working-tree size cap (#1057)', () => {
     expect(result).toEqual({ kind: 'file-diff', original: 'original line\n', modified: 'changed line\n', path: 'file.txt', submodule: null });
   });
 
+  it('answers file_too_large for an oversized untracked file', async () => {
+    const dir = makeRepo();
+    fs.writeFileSync(path.join(dir, 'big-untracked.bin'), Buffer.alloc(MAX_FILE_DIFF_WORKING_TREE_BYTES + 1, 0x78));
+
+    const result = await getGitFileDiff(dir, 'big-untracked.bin', false);
+
+    expect(result.kind).toBe('unavailable');
+    expect(result.reason).toBe('file_too_large');
+    expect(result.message).toContain('20 MiB');
+    expect(readFileCalls).toBe(0);
+  });
+
+  it('falls through to the empty-diff fallback for a deleted file', async () => {
+    const dir = makeRepo();
+    fs.rmSync(path.join(dir, 'file.txt'));
+
+    const result = await getGitFileDiff(dir, 'file.txt', false);
+
+    expect(result.kind).toBe('file-diff');
+    expect(result.modified).toBe('');
+  });
+
   it('does not stat or read the working tree for a staged diff', async () => {
     const dir = makeRepo();
     fs.writeFileSync(path.join(dir, 'file.txt'), 'staged line\n');
