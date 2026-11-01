@@ -41,6 +41,25 @@ describe('readSkillMdFile', () => {
     expect(result.content).toBe('');
   });
 
+  it('rejects a SKILL.md that is not a regular file (symlink to a device)', async () => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-scan-test-'));
+    tempDirs.push(dir);
+    const filePath = path.join(dir, 'SKILL.md');
+    await fs.promises.symlink('/dev/null', filePath);
+    await expect(readSkillMdFile(filePath)).rejects.toThrow('not a regular file');
+  });
+
+  it('reads a SKILL.md through a symlink to a regular file', async () => {
+    const target = await writeTempSkillMd('---\nname: linked\n---\nbody');
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-scan-test-'));
+    tempDirs.push(dir);
+    const filePath = path.join(dir, 'SKILL.md');
+    await fs.promises.symlink(target, filePath);
+    const result = await readSkillMdFile(filePath);
+    expect(result.tooLarge).toBe(false);
+    expect(result.content).toContain('name: linked');
+  });
+
   it('throws for a missing file so the caller can fall back to git show', async () => {
     await expect(readSkillMdFile(path.join(os.tmpdir(), 'openchamber-scan-test-missing', 'SKILL.md'))).rejects.toThrow();
   });

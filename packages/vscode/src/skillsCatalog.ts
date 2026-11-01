@@ -20,6 +20,36 @@ const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024;
 const SKILL_MD_MAX_BYTES = DEFAULT_MAX_BUFFER;
 const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit; skipped';
 
+// Mirror of readSkillMdFile in the web scan: open once and read from the
+// handle so a symlink to a device or FIFO (stat size 0) cannot make the
+// read unbounded; a non-regular file throws so the caller falls back to
+// git show.
+async function readSkillMdFile(filePath: string): Promise<{ tooLarge: boolean; content: string }> {
+  const handle = await fs.promises.open(filePath, 'r');
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error(`SKILL.md is not a regular file: ${filePath}`);
+    }
+    if (stat.size > SKILL_MD_MAX_BYTES) {
+      return { tooLarge: true, content: '' };
+    }
+    const buffer = Buffer.alloc(SKILL_MD_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > SKILL_MD_MAX_BYTES) {
+      return { tooLarge: true, content: '' };
+    }
+    return { tooLarge: false, content: buffer.toString('utf8', 0, total) };
+  } finally {
+    await handle.close();
+  }
+}
+
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
 type SkillScope = 'user' | 'project';
@@ -350,13 +380,15 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
 
       const warnings: string[] = [];
       let content = '';
+      let skillMdTooLarge = false;
 
       try {
-        const stat = await fs.promises.stat(toFsPath(skillMdPath));
-        if (stat.size > SKILL_MD_MAX_BYTES) {
+        const diskRead = await readSkillMdFile(toFsPath(skillMdPath));
+        if (diskRead.tooLarge) {
+          skillMdTooLarge = true;
           warnings.push(SKILL_MD_TOO_LARGE_WARNING);
         } else {
-          content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
+          content = diskRead.content;
         }
       } catch {
         const show = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
@@ -367,7 +399,9 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
         }
       }
 
-      const parsedMd = parseSkillMd(content);
+      // An oversized file was skipped, not read: parsing its empty
+      // content would report a bogus missing-frontmatter warning.
+      const parsedMd: ReturnType<typeof parseSkillMd> = skillMdTooLarge ? { frontmatter: {}, warnings: [] } : parseSkillMd(content);
       warnings.push(...parsedMd.warnings);
 
       const description = typeof parsedMd.frontmatter.description === 'string' ? parsedMd.frontmatter.description : undefined;
