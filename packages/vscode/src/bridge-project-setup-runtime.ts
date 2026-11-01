@@ -16,6 +16,7 @@ import {
   EMPTY_SHARED_PROJECT_CONFIG,
   ProjectSetupValidationError,
   SHARED_CONFIG_RELATIVE_PATH,
+  SHARED_PROJECT_CONFIG_MAX_BYTES,
   applySharedProjectSetupPatch,
   isSharedProjectConfigEmpty,
   mergeProjectSetup,
@@ -136,12 +137,44 @@ export const createProjectSetupStore = (
   };
   const sharedConfigPathOf = (projectPath: string): string => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
 
+  // Open once and read from the handle, mirroring the web reader in
+  // project-config.js: stat-then-readFile by path would follow a symlink to
+  // a device or FIFO and buffer without bound, and a file swapped or grown
+  // between the two calls escapes the gate. O_NONBLOCK (POSIX only) keeps
+  // open() itself from blocking on a FIFO with no writer before
+  // handle.stat() can reject it as non-regular.
+  const readSharedConfigRaw = async (filePath: string): Promise<string> => {
+    const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+    const handle = await fs.promises.open(filePath, openFlags);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        throw new Error(`shared project config is not a regular file: ${filePath}`);
+      }
+      const tooLarge = (): Error => new Error(
+        `shared project config is too large: ${filePath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+      );
+      if (stat.size > SHARED_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      const buffer = Buffer.alloc(SHARED_PROJECT_CONFIG_MAX_BYTES + 1);
+      let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+      if (total > SHARED_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      return buffer.toString('utf8', 0, total);
+    } finally {
+      await handle.close();
+    }
+  };
+
   const readShared = async (projectId: string, personalRaw: Record<string, unknown>): Promise<SharedProjectConfigRead> => {
     const projectPath = projectPathOf(projectId, personalRaw);
     if (!projectPath) return { status: 'missing' };
     let raw: string;
     try {
-      raw = await fs.promises.readFile(sharedConfigPathOf(projectPath), 'utf8');
+      raw = await readSharedConfigRaw(sharedConfigPathOf(projectPath));
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return { status: 'missing' };
       return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
@@ -184,6 +217,18 @@ export const createProjectSetupStore = (
       const isDirectory = await fs.promises.stat(projectPath).then((stat) => stat.isDirectory()).catch(() => false);
       if (!isDirectory) throw new ProjectSetupValidationError('project checkout not found');
       const currentRead = await readShared(projectId, personalRaw);
+      // Same rule as the web writer: a size-limit refusal is not a broken
+      // file — falling back to the empty config would let a patch overwrite
+      // settings the gate refused to read (or delete the file). Reject and
+      // leave the file unchanged; other invalid reads keep the repair
+      // behaviour.
+      if (
+        currentRead.status === 'invalid'
+        && typeof currentRead.reason === 'string'
+        && currentRead.reason.startsWith('shared project config is too large:')
+      ) {
+        throw new ProjectSetupValidationError(currentRead.reason);
+      }
       const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
       const nextShared = applySharedProjectSetupPatch(current, patch);
       const sharedPath = sharedConfigPathOf(projectPath);
@@ -191,7 +236,13 @@ export const createProjectSetupStore = (
         await fs.promises.rm(sharedPath, { force: true });
         await fs.promises.rmdir(path.dirname(sharedPath)).catch(() => {});
       } else {
-        await writeJsonAtomic(sharedPath, serializeSharedProjectConfig(nextShared));
+        const serialized = serializeSharedProjectConfig(nextShared);
+        if (Buffer.byteLength(serialized, 'utf8') > SHARED_PROJECT_CONFIG_MAX_BYTES) {
+          throw new ProjectSetupValidationError(
+            `shared project config is too large: ${sharedPath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+          );
+        }
+        await writeJsonAtomic(sharedPath, serialized);
       }
       const hash = sharedTrustHashOf(nextShared);
       const personalNext: Record<string, unknown> = { ...personalRaw };

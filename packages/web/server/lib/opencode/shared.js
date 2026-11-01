@@ -87,12 +87,86 @@ function sanitizeFrontmatter(frontmatter) {
     .join('\n');
 }
 
+// Agent/command/skill/loop markdown is project/clone-controlled content;
+// nothing bounds its on-disk size, so never buffer one whole past this cap
+// (same 4 MiB precedent as SKILL_MD_MAX_BYTES in skills-catalog/scan.js).
+const MD_FILE_MAX_BYTES = 4 * 1024 * 1024;
+
+const mdFileTooLargeError = (filePath) => {
+  const error = new Error(
+    `Markdown file exceeds the ${MD_FILE_MAX_BYTES}-byte size limit: ${filePath}`,
+  );
+  error.code = 'ERR_MD_FILE_TOO_LARGE';
+  return error;
+};
+
+// Read at most MD_FILE_MAX_BYTES from an already-open handle: stat-then-read
+// by path would follow a symlink to a device/FIFO and a file swapped or grown
+// between the two calls would escape the gate. O_NONBLOCK (POSIX only) keeps
+// open() itself from blocking on a FIFO before the regular-file check runs.
+const mdFileOpenFlags = () =>
+  process.platform === 'win32'
+    ? fs.constants.O_RDONLY
+    : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+
+function readMdFileSync(filePath) {
+  const fd = fs.openSync(filePath, mdFileOpenFlags());
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error(`Markdown file is not a regular file: ${filePath}`);
+    }
+    if (stat.size > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    const buffer = Buffer.alloc(MD_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function readMdFileAsync(filePath) {
+  const handle = await fs.promises.open(filePath, mdFileOpenFlags());
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error(`Markdown file is not a regular file: ${filePath}`);
+    }
+    if (stat.size > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    const buffer = Buffer.alloc(MD_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    await handle.close();
+  }
+}
+
 function parseMdFile(filePath) {
-  return parseMdContent(fs.readFileSync(filePath, 'utf8'), filePath);
+  return parseMdContent(readMdFileSync(filePath), filePath);
 }
 
 async function parseMdFileAsync(filePath) {
-  return parseMdContent(await fs.promises.readFile(filePath, 'utf8'), filePath);
+  return parseMdContent(await readMdFileAsync(filePath), filePath);
 }
 
 function parseMdContent(rawContent, filePath) {
@@ -261,6 +335,29 @@ function isInvalidJsoncError(error) {
   return Boolean(error && typeof error === 'object' && error.code === INVALID_JSONC);
 }
 
+const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
+
+// Config files are hand-written JSONC; the precedent caps in this server run
+// 1-4 MiB (AGENTS.md 1 MiB, SKILL.md 4 MiB). 4 MiB is generous for a config
+// while keeping a cloned project's oversized opencode.json(c) from being
+// buffered whole, synchronously, on every settings/plugin/MCP read.
+const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
+
+function isConfigFileTooLargeError(error) {
+  return Boolean(error && error.code === CONFIG_FILE_TOO_LARGE);
+}
+
+function assertConfigFileWithinCap(filePath) {
+  const { size } = fs.statSync(filePath);
+  if (size > MAX_CONFIG_FILE_BYTES) {
+    const error = new Error(
+      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
+    );
+    error.code = CONFIG_FILE_TOO_LARGE;
+    throw error;
+  }
+}
+
 function formatJsoncParseError(filePath, errors) {
   const first = Array.isArray(errors) && errors.length > 0 ? errors[0] : null;
   const location = first && Number.isFinite(first.offset)
@@ -300,6 +397,7 @@ function readConfigFile(filePath) {
     return {};
   }
   try {
+    assertConfigFileWithinCap(filePath);
     const content = fs.readFileSync(filePath, 'utf8');
     const normalized = content.trim();
     if (!normalized) {
@@ -309,7 +407,7 @@ function readConfigFile(filePath) {
     // rewrite a truncated object (often only `$schema`) over the full config.
     return parseConfigObject(normalized, filePath);
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       throw error;
     }
     console.error(`Failed to read config file: ${filePath}`, error);
@@ -345,7 +443,7 @@ function readConfigLayer(filePath) {
   try {
     return { config: readConfigFile(filePath), error: null };
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       console.error(error.message);
       return { config: {}, error };
     }
@@ -581,26 +679,46 @@ function writeConfig(config, filePath = CONFIG_FILE) {
   try {
     let existingRaw = '';
     let existingParse = null;
-    if (fs.existsSync(filePath)) {
+    const hadExistingFile = fs.existsSync(filePath);
+    if (hadExistingFile) {
       // Defense in depth: never overwrite a file we cannot fully parse.
+      assertConfigFileWithinCap(filePath);
       existingRaw = fs.readFileSync(filePath, 'utf8');
       if (existingRaw.trim()) {
         existingParse = parseConfigResult(existingRaw.trim(), filePath);
       }
-
-      const backupFile = `${filePath}.openchamber.backup`;
-      fs.copyFileSync(filePath, backupFile);
-      console.log(`Created config backup: ${backupFile}`);
     }
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     // A JSON round-trip normalizes the config at the write boundary: it drops
     // `undefined` values exactly like the serialized write would.
     const desired = JSON.parse(JSON.stringify(config));
-    writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
+    const content = buildConfigFileContent(desired, existingRaw, existingParse);
+    // Enforce the cap on the serialized result too: writing a config that
+    // crosses the read cap would strand the layer — later reads omit it as
+    // CONFIG_FILE_TOO_LARGE and later writes refuse it, so the user could
+    // not undo the change through OpenChamber. Reject before replacing the
+    // file, preserving the readable original.
+    if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+      const error = new Error(
+        `Serialized OpenCode configuration for ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be written safely`,
+      );
+      error.code = CONFIG_FILE_TOO_LARGE;
+      throw error;
+    }
+    // The backup is part of the write, so it is created only once the
+    // write is known acceptable: a refused write (unparseable, over-cap,
+    // or a serialized result over the cap) leaves the previous backup —
+    // the restore point from the last successful write — untouched.
+    if (hadExistingFile) {
+      const backupFile = `${filePath}.openchamber.backup`;
+      fs.copyFileSync(filePath, backupFile);
+      console.log(`Created config backup: ${backupFile}`);
+    }
+    writeFileAtomic(filePath, content);
     console.log(`Successfully wrote config file: ${filePath}`);
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       throw error;
     }
     console.error(`Failed to write config file: ${filePath}`, error);
@@ -789,6 +907,14 @@ function writePromptFile(filePath, content) {
 
 // ============== SKILL FILE OPERATIONS ==============
 
+// Skill supporting files are hand-maintained docs and scripts shipped with
+// third-party skills; nothing OpenChamber writes bounds their size, so the
+// GET route must never buffer an arbitrary one whole. Judged from stat
+// before any read (the house stat-gate pattern): a file over this cap is
+// refused, never read. 1 MiB matches the AGENTS.md behavior-prompt cap.
+const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
+const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_large';
+
 async function pathExists(target) {
   try {
     await fs.promises.access(target);
@@ -971,10 +1097,62 @@ function assertPathWithinSkillDir(skillDir, relativePath) {
 
 function readSkillSupportingFile(skillDir, relativePath) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
-  if (!fs.existsSync(fullPath)) {
-    return null;
+  const createTooLargeError = () => Object.assign(
+    new Error(`Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),
+    { code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE },
+  );
+  const rejectNonRegularFile = () => {
+    throw Object.assign(new Error('Access to file denied'), { code: 'EACCES' });
+  };
+
+  let pathStats;
+  try {
+    pathStats = fs.statSync(fullPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
   }
-  return fs.readFileSync(fullPath, 'utf8');
+  if (!pathStats.isFile()) rejectNonRegularFile();
+  if (pathStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+  let fileDescriptor;
+  try {
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0);
+    fileDescriptor = fs.openSync(fullPath, flags);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+
+  try {
+    const openedFileStats = fs.fstatSync(fileDescriptor);
+    if (!openedFileStats.isFile()) rejectNonRegularFile();
+    if (openedFileStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+    let buffer = Buffer.allocUnsafe(Math.max(1, openedFileStats.size + 1));
+    let bytesRead = 0;
+    while (true) {
+      if (bytesRead === buffer.length) {
+        if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+        const nextBuffer = Buffer.allocUnsafe(Math.min(buffer.length * 2, SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
+        buffer.copy(nextBuffer, 0, 0, bytesRead);
+        buffer = nextBuffer;
+      }
+      const count = fs.readSync(
+        fileDescriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    fs.closeSync(fileDescriptor);
+  }
 }
 
 function writeSkillSupportingFile(skillDir, relativePath, content) {
@@ -1018,7 +1196,9 @@ export {
   ensureDirs,
   parseMdFile,
   parseMdFileAsync,
+  MD_FILE_MAX_BYTES,
   writeMdFile,
+  MAX_CONFIG_FILE_BYTES,
   readConfigFile,
   readConfigLayer,
   isPlainObject,
@@ -1040,6 +1220,8 @@ export {
   addSkillFromMdFile,
   resolveSkillSearchDirectories,
   listSkillSupportingFiles,
+  SKILL_SUPPORTING_FILE_MAX_BYTES,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile

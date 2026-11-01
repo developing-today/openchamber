@@ -17,6 +17,7 @@ import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
 // reads both and always writes `plugins` with v2 entries.
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
+const MAX_PLUGIN_FILE_BYTES = 1024 * 1024;
 
 /**
  * @typedef {'user' | 'project'} PluginScope
@@ -418,6 +419,9 @@ function readPluginDirFile(id, workingDirectory) {
   const target = fileTargetFromId(id, workingDirectory);
   if (!fs.existsSync(target.absolutePath)) {
     return null;
+  }
+  if (fs.statSync(target.absolutePath).size > MAX_PLUGIN_FILE_BYTES) {
+    throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
   }
   return {
     fileName: target.fileName,

@@ -55,6 +55,9 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `opencodeCliDiscovery.ts`
   - Finds a usable standalone CLI on PATH before trying known install locations, on Windows and Unix. The resolver in `opencode.ts` still gives the administrator's pin, VS Code and shared settings, and environment overrides priority over discovery.
 
+- `shikiThemes.ts`
+  - Resolves extension-contributed themes for the VS Code sidebar and session-editor webviews. Theme JSON over `SHIKI_THEME_MAX_BYTES` (16 MiB) is rejected before reading; a post-read byte check catches a file that grows after its stat, and the existing one-side fallback handles the rejected variant.
+
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
   - `revertGitFile` validates before it deletes: the directory must resolve to a repository root (`rev-parse --show-toplevel`), the target must sit inside that root and be neither the root nor the requested directory itself, and the `git clean` / recursive `fs.rm` removal path runs only for a path `ls-files --others --error-unmatch` affirmatively lists as untracked. Any other git failure throws and deletes nothing, because the old fallback read every `ls-files` failure as 'untracked' and recursively deleted ordinary files outside a repository - the whole directory for `.` (#734).
@@ -106,8 +109,12 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
+  - VS Code plugin file reads use a 1 MiB cap. `readPluginDirFile` stats before
+    reading, and an over-limit GET or PUT pre-read returns
+    `PLUGIN_FILE_TOO_LARGE`; PUT leaves the existing file unchanged. Missing
+    files keep the `Plugin file not found` response.
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
-  - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
+  - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) and reject files over 4 MiB (`CONFIG_FILE_TOO_LARGE`) before reading them, so mutations cannot rewrite an unreadable config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Project config size errors propagate through websearch override detection. Writes apply the same size check to the existing file before reading, backing it up, or replacing it.
   - `writeConfig` and the agent/command markdown writer replace their file atomically through `writeFileAtomic` from `packages/web/server/lib/opencode/atomic-write.js`, the same function the web server uses, so OpenCode's watcher never reads a partial file.
   - Config writes through `writeConfig` are structural, not whole-file re-serializations: the parsed file is diffed against the desired config and each change is applied with `jsonc-parser` edits (property removal locates the separator comma with the scanner so surrounding comments survive and no stray comma is left behind). Comments, formatting, and line endings outside the changed values are preserved; changed arrays are replaced whole; comment-only files keep their comments with the serialized config appended below. The edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite, so a structural edit can never corrupt the file.
 
@@ -146,7 +153,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Owns managed-versus-external capability decisions and latest-version checks.
   - Managed runtimes run the resolved CLI with `upgrade` through the manager's operation queue and the shared `packages/web/server/lib/opencode/cli-upgrade.js` executor. The queued action resolves the CLI with the same fallback as capability reporting; it does not require a live server process just to update the binary. OpenCode chooses its installer. Concurrent webviews share one installation; failures allow another attempt. The existing Reload action restarts the server afterwards. The bridge waits for command completion without its default 30-second timeout. External connections and missing CLIs reject upgrades before spawning. Version checks remain available for external connections.
 
-- Plugin metadata and OpenCode version checks use `packages/web/server/lib/opencode/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers.
+- Plugin metadata and OpenCode version checks use `packages/web/server/lib/opencode/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers. The plugin packument body is bounded at a mirrored 16 MiB cap with `readBoundedResponseText`; keep it in sync with `NPM_PACKUMENT_MAX_BYTES` in `packages/web/server/lib/opencode/npm-registry.js`.
 
 - `sessionNotifications.ts`
   - Shows OpenChamber notifications (finished turn, error, question, the Settings test) as `vscode.window.showInformationMessage`. The webview keeps deciding which events notify and their text from the shared notification settings.

@@ -204,6 +204,14 @@ export const projectSetupPatchToStored = (patch) => {
 // ── Shared file ──
 
 export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
+/**
+ * The shared file is written only from sanitized, length-clamped fields, so a
+ * legitimate one is a few KB; it is committed in the checkout, though, so any
+ * project a user opens decides its size. Readers on both surfaces refuse
+ * anything over this cap instead of buffering it whole (mirrored in
+ * packages/vscode/src/project-setup.ts — keep the two in sync).
+ */
+export const SHARED_PROJECT_CONFIG_MAX_BYTES = 1024 * 1024;
 /** Where repository plans live unless the shared file's `plansDir` says otherwise. */
 export const DEFAULT_PLANS_DIR = '.openchamber/plans';
 const SHARED_CONFIG_VERSION = 1;

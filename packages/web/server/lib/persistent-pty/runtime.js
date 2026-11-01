@@ -28,6 +28,21 @@ const UNSENDABLE_CLOSE_CODES = new Set([1005, 1006, 1015]);
  */
 export const PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES = 64 * 1024;
 
+/**
+ * Largest single WebSocket frame the persistent-pty proxy accepts from
+ * its upstream (#1249). The upstream direction carries terminal OUTPUT,
+ * which legitimately exceeds the client-direction cap above — one output
+ * frame holds whatever a program flushed, not one keystroke — so this
+ * bound is larger (16x), while staying far below the 100 MiB ws default
+ * that applied before. Under Node the ws layer refuses an oversized
+ * frame (close 1009) before assembly; under Bun the bundled ws does not
+ * enforce maxPayload, so the upstream message handler ALSO checks the
+ * assembled size and drops the pair before the frame is forwarded
+ * (dev-tunnel #1082 precedent). Either way no oversized upstream frame
+ * is ever forwarded.
+ */
+export const PERSISTENT_PTY_UPSTREAM_WS_MAX_PAYLOAD_BYTES = 1024 * 1024;
+
 const parsePathname = (rawUrl) => {
   try {
     return new URL(rawUrl || '/', 'http://127.0.0.1').pathname;
@@ -65,6 +80,9 @@ export function createPersistentPtyWsRuntime({
       upstream = new WebSocket(buildUpstreamUrl(buildOpenCodeUrl, req.url), {
         headers: getOpenCodeAuthHeaders(),
         origin: new URL(buildOpenCodeUrl('/', '')).origin,
+        // Bound upstream frames at assembly (#1249); the message handler
+        // below re-checks because maxPayload is not enforced everywhere.
+        maxPayload: PERSISTENT_PTY_UPSTREAM_WS_MAX_PAYLOAD_BYTES,
       });
     } catch {
       client.close(1011, 'OpenCode service unavailable');
@@ -98,6 +116,16 @@ export function createPersistentPtyWsRuntime({
     });
     upstream.on('open', flush);
     upstream.on('message', (data, isBinary) => {
+      // Per-frame bound (#1249): see the upstream constant above — refuse
+      // an oversized frame here, before it is forwarded, with the same
+      // 1009 the ws layer would have used.
+      if (data.length > PERSISTENT_PTY_UPSTREAM_WS_MAX_PAYLOAD_BYTES) {
+        try { client.close(1009, 'Persistent PTY upstream frame too large'); } catch { /* already closing */ }
+        if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+          try { upstream.close(); } catch { /* already closing */ }
+        }
+        return;
+      }
       if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
     });
     upstream.on('close', (code, reason) => {
@@ -105,9 +133,16 @@ export function createPersistentPtyWsRuntime({
         client.close(safeCloseCode(code), reason);
       }
     });
-    upstream.on('error', () => {
+    upstream.on('error', (error) => {
       if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
-        client.close(1011, 'OpenCode terminal upstream error');
+        // Where the ws layer DOES enforce the upstream maxPayload (Node),
+        // the refusal surfaces here as a RangeError instead of a 'message'
+        // event; the pair still closes with the same 1009 (#1249).
+        if (error instanceof RangeError && /max payload/i.test(error.message)) {
+          client.close(1009, 'Persistent PTY upstream frame too large');
+        } else {
+          client.close(1011, 'OpenCode terminal upstream error');
+        }
       }
     });
     client.on('close', () => {

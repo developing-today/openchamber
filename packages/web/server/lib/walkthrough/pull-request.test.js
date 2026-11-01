@@ -114,6 +114,16 @@ describe('getPullRequestDiff', () => {
     await expect(read()).rejects.toThrow();
   });
 
+  it('returns an at-cap diff byte-identically and rejects an over-cap diff', async () => {
+    const prefix = 'diff --git a/src/a.ts b/src/a.ts\n';
+    const atCap = prefix + 'x'.repeat(50 * 1024 * 1024 - prefix.length);
+    request.mockResolvedValue({ data: atCap });
+    expect((await read()).patch).toBe(atCap);
+
+    request.mockResolvedValue({ data: `${atCap}x` });
+    await expect(read()).rejects.toMatchObject({ code: 'patch-too-large', statusCode: 413 });
+  });
+
   it('requires the exact bound account before repository resolution', async () => {
     getOctokitForAccountId.mockResolvedValue(null);
 

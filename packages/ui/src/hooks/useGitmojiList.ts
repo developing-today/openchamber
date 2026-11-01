@@ -1,4 +1,5 @@
 import React from 'react';
+import { readBoundedResponseText } from '@/lib/boundedResponse';
 
 type GitmojiEntry = {
   emoji: string;
@@ -19,6 +20,11 @@ const GITMOJI_CACHE_VERSION = '1';
 // stalled upstream must not wedge the module-level in-flight entry (and
 // every later caller) for the rest of the session.
 export const GITMOJI_FETCH_TIMEOUT_MS = 10_000;
+
+// The gitmoji catalog is tens of KB; the 1 MiB cap is generous on purpose:
+// the deadline bounds time, the cap bounds memory, and an over-cap body
+// throws like a fetch failure so the cached/empty fallback applies.
+export const GITMOJI_CATALOG_MAX_BYTES = 1 * 1024 * 1024;
 
 const GITMOJI_SOURCE_URL =
   'https://raw.githubusercontent.com/carloscuesta/gitmoji/master/packages/gitmojis/src/gitmojis.json';
@@ -84,7 +90,7 @@ export const fetchGitmojiList = async (): Promise<GitmojiEntry[]> => {
       if (!response.ok) {
         throw new Error(`Failed to load gitmojis: ${response.statusText}`);
       }
-      const payload = (await response.json()) as { gitmojis?: GitmojiEntry[] };
+      const payload = JSON.parse(await readBoundedResponseText(response, GITMOJI_CATALOG_MAX_BYTES)) as { gitmojis?: GitmojiEntry[] };
       const gitmojis = Array.isArray(payload.gitmojis)
         ? payload.gitmojis.filter(isGitmojiEntry)
         : [];
