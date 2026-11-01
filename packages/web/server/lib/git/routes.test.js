@@ -1414,7 +1414,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app);
     const handler = getRoute('GET', '/api/git/diff');
-    const cases = [['10junk', 3], ['1e3', 3], ['2.9', 3], ['-5', 3], ['abc', 3], [undefined, 3], ['0', 0], ['10', 10], ['9'.repeat(309), 3], ['100001', 3], ['100000', 100000]];
+    const cases = [['10junk', 3], ['1e3', 3], ['2.9', 3], ['-5', 3], ['abc', 3], [undefined, 3], ['0', 0], ['10', 10], ['9'.repeat(309), 3], ['100001', 100000], ['1000000', 100000], ['100000', 100000]];
     for (const [context, expected] of cases) {
       gitLibraries.getPathDiff.mockClear();
       const response = createMockResponse();

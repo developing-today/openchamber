@@ -30,14 +30,17 @@ const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
 // Diff context: a non-negative integer, else the 3-line default. Digits
 // alone are not enough (#1079): a 309-digit string parses to Infinity and a
 // merely huge one asks git for an absurd -U value, so the parsed number
-// must be a safe integer under a generous ceiling — 100k lines of context
-// covers a whole-file view of any file these endpoints realistically serve.
+// must be a safe integer, clamped to a generous ceiling — 100k lines of
+// context covers a whole-file view of any file these endpoints
+// realistically serve. Oversized finite requests clamp instead of falling
+// back to 3: the UI's full-context callers ask for 1,000,000 lines
+// (FULL_CONTEXT_DIFF_LINES) and must still get a whole-file patch.
 const MAX_DIFF_CONTEXT_LINES = 100_000;
 const parseDiffContextLines = (value) => {
   const text = String(value ?? '');
   if (!/^\d+$/.test(text)) return 3;
   const contextLines = Number(text);
-  return Number.isSafeInteger(contextLines) && contextLines <= MAX_DIFF_CONTEXT_LINES ? contextLines : 3;
+  return Number.isSafeInteger(contextLines) ? Math.min(contextLines, MAX_DIFF_CONTEXT_LINES) : 3;
 };
 
 // Log maxCount: a positive integer, else undefined so the service applies
