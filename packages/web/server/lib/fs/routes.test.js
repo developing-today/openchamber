@@ -608,6 +608,68 @@ describe('fs write', () => {
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
     expect(fsPromises.rename).not.toHaveBeenCalled();
   });
+
+  it('does not read a length-differing existing file whole before writing (#1127)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 5 * 1024 * 1024 })),
+      readFile: vi.fn(async () => 'old'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.stat).toHaveBeenCalledWith('/repo/file.txt');
+    expect(fsPromises.readFile).not.toHaveBeenCalled();
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
+  });
+
+  it('still short-circuits an identical small save without rewriting (#1127)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 4 })),
+      readFile: vi.fn(async () => 'same'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'same' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/file.txt', 'utf8');
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('writes an over-cap existing file via the atomic path without reading it whole (#1127)', async () => {
+    const content = 'x'.repeat(16 * 1024 * 1024 + 1);
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 })),
+      readFile: vi.fn(async () => 'different'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/big.txt', content });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, path: '/repo/big.txt' });
+    expect(fsPromises.readFile).not.toHaveBeenCalled();
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, content, 'utf8');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/big.txt');
+  });
 });
 
 describe('fs rename', () => {
