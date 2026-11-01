@@ -2,6 +2,7 @@ import React from 'react';
 import { ThemeImportButton } from './ThemeImportButton';
 import { ThemePicker } from './ThemePicker';
 import { SessionRowDisplaySettings } from './SessionRowDisplaySettings';
+import type { VisibleSetting } from './visualSettings';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
@@ -157,8 +158,6 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
         labelKey: 'settings.openchamber.visual.option.weekStart.sunday.label',
     },
 ];
-
-type VisibleSetting = 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'animatedActivityIndicators' | 'sidebarRows';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
