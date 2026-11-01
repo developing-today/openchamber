@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
-import { fetchGitmojiList, GITMOJI_FETCH_TIMEOUT_MS } from './useGitmojiList';
+import { fetchGitmojiList, GITMOJI_CATALOG_MAX_BYTES, GITMOJI_FETCH_TIMEOUT_MS } from './useGitmojiList';
 
 const ENTRY = { emoji: '✨', code: ':sparkles:', description: 'Introduce new features.' };
 
@@ -91,5 +91,43 @@ test('a stalled body read also settles via the failure path at the deadline', as
   expect(fetchCalls).toBe(1);
 
   globalThis.fetch = Object.assign(successFetch, originalFetch);
+  expect(await fetchGitmojiList()).toEqual([ENTRY]);
+});
+
+test('a streamed over-cap catalog body falls back to the empty list without being consumed whole', async () => {
+  let pulls = 0;
+  const chunk = 'x'.repeat(512 * 1024);
+  // Five chunks of 512 KiB against a 1 MiB cap: the third chunk crosses
+  // the cap, so chunks four and five must never be pulled.
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1;
+      if (pulls > 5) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(new TextEncoder().encode(chunk));
+    },
+  });
+  expect(GITMOJI_CATALOG_MAX_BYTES).toBe(1024 * 1024);
+  globalThis.fetch = Object.assign(async () => new Response(stream, { status: 200 }), originalFetch);
+
+  expect(await fetchGitmojiList()).toEqual([]);
+  // The Response wrapper may prefetch one chunk ahead of the reader, but
+  // the fifth chunk is never pulled: the body is not consumed whole.
+  expect(pulls).toBeLessThan(5);
+});
+
+test('a representative streamed catalog body parses and returns its entries', async () => {
+  const payload = JSON.stringify({ gitmojis: [ENTRY] });
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(payload.slice(0, 8)));
+      controller.enqueue(new TextEncoder().encode(payload.slice(8)));
+      controller.close();
+    },
+  });
+  globalThis.fetch = Object.assign(async () => new Response(stream, { status: 200 }), originalFetch);
+
   expect(await fetchGitmojiList()).toEqual([ENTRY]);
 });

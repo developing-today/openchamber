@@ -249,6 +249,8 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: m
 
 const {
   useConfigStore,
+  fetchModelsDevMetadata,
+  MODELS_DEV_CATALOG_MAX_BYTES,
   selectConfigAgentsForDirectory,
   selectProvidersForDirectory,
   selectCatalogLoadedForDirectory,
@@ -3385,5 +3387,62 @@ describe('getModelMetadata limits', () => {
     });
 
     expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.limit).toEqual({ context: 32_000, output: 4_000 });
+  });
+});
+
+describe('fetchModelsDevMetadata byte cap', () => {
+  const streamedCatalog = (chunks: string[], onPull?: () => void): Response => {
+    let index = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        onPull?.();
+        if (index >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode(chunks[index]));
+        index += 1;
+      },
+    });
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  test('a streamed over-cap catalog body is refused during the read and both sources fall back to an empty map', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    let pulls = 0;
+    const chunk = 'x'.repeat(9 * 1024 * 1024);
+    try {
+      expect(MODELS_DEV_CATALOG_MAX_BYTES).toBe(16 * 1024 * 1024);
+      // Two 9 MiB chunks cross the 16 MiB cap on each source. The
+      // bounded reader cancels there; a Response wrapper may prefetch
+      // one chunk ahead, but five chunks per source (10 pulls) would
+      // mean the bodies were consumed whole.
+      const fiveChunks = [chunk, chunk, chunk, chunk, chunk];
+      runtimeFetchImpl = async () => streamedCatalog(fiveChunks, () => { pulls += 1; });
+      globalThis.fetch = Object.assign(async () => streamedCatalog(fiveChunks, () => { pulls += 1; }), originalFetch);
+
+      expect((await fetchModelsDevMetadata()).size).toBe(0);
+      expect(pulls).toBeLessThan(10);
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.warn = originalWarn;
+      runtimeFetchImpl = null;
+    }
+  });
+
+  test('a representative streamed catalog body parses into the same metadata map as before', async () => {
+    const payload = JSON.stringify({
+      openai: { id: 'openai', models: { 'gpt-x': { id: 'gpt-x', name: 'GPT X' } } },
+    });
+    runtimeFetchImpl = async () => streamedCatalog([payload.slice(0, 10), payload.slice(10)]);
+    try {
+      const metadata = await fetchModelsDevMetadata();
+      expect(metadata.size).toBe(1);
+      expect(metadata.get('openai/gpt-x')?.name).toBe('GPT X');
+    } finally {
+      runtimeFetchImpl = null;
+    }
   });
 });
