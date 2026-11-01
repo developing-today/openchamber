@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseMdFile, writeMdFile, readConfigFile, readConfigLayer, readConfigLayers, writeConfig, walkSkillMdFiles, MAX_CONFIG_FILE_BYTES } from './shared.js';
+import { parseMdFile, parseMdFileAsync, MD_FILE_MAX_BYTES, writeMdFile, readConfigFile, readConfigLayer, readConfigLayers, writeConfig, walkSkillMdFiles, MAX_CONFIG_FILE_BYTES } from './shared.js';
 import { updateAgent } from './agents.js';
 import { updateMcpConfig, createMcpConfig, deleteMcpConfig } from './mcp.js';
 
@@ -102,6 +102,59 @@ describe('parseMdFile', () => {
     const { frontmatter, body } = parseMdFile(file);
     expect(frontmatter).toEqual({});
     expect(body).toBe('Just a prompt body.');
+  });
+});
+
+describe('parseMdFile size gate (#1143)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it('exports a positive named cap', () => {
+    expect(MD_FILE_MAX_BYTES).toBe(4 * 1024 * 1024);
+  });
+
+  it('refuses an over-cap file on the sync helper without parsing it', () => {
+    const file = writeFixture('over-cap.md', 'a'.repeat(MD_FILE_MAX_BYTES + 1));
+    expect(() => parseMdFile(file)).toThrow(/exceeds the .* size limit/);
+    try {
+      parseMdFile(file);
+      expect.unreachable();
+    } catch (error) {
+      expect(error.code).toBe('ERR_MD_FILE_TOO_LARGE');
+    }
+  });
+
+  it('refuses an over-cap file on the async helper without parsing it', async () => {
+    const file = writeFixture('over-cap-async.md', 'a'.repeat(MD_FILE_MAX_BYTES + 1));
+    await expect(parseMdFileAsync(file)).rejects.toThrow(/exceeds the .* size limit/);
+    await expect(parseMdFileAsync(file)).rejects.toMatchObject({ code: 'ERR_MD_FILE_TOO_LARGE' });
+  });
+
+  it('parses a file exactly at the cap byte-identically on both helpers', async () => {
+    const content = 'a'.repeat(MD_FILE_MAX_BYTES);
+    const file = writeFixture('at-cap.md', content);
+    expect(fs.statSync(file).size).toBe(MD_FILE_MAX_BYTES);
+    expect(parseMdFile(file).body).toBe(content);
+    expect((await parseMdFileAsync(file)).body).toBe(content);
+  });
+
+  it('keeps missing-file behaviour unchanged on both helpers', async () => {
+    const missing = path.join(FIXTURE_DIR, 'missing.md');
+    expect(() => parseMdFile(missing)).toThrow(/ENOENT/);
+    await expect(parseMdFileAsync(missing)).rejects.toThrow(/ENOENT/);
+  });
+
+  it('parses ordinary frontmatter files through the async helper', async () => {
+    const file = writeFixture('standard-async.md', STANDARD_MD);
+    const { frontmatter, body } = await parseMdFileAsync(file);
+    expect(frontmatter.description).toBe('My build agent');
+    expect(body).toBe('This is the prompt body.');
   });
 });
 
