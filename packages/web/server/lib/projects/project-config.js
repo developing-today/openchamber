@@ -7,6 +7,7 @@ import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
   SHARED_CONFIG_RELATIVE_PATH,
+  SHARED_PROJECT_CONFIG_MAX_BYTES,
   applySharedProjectSetupPatch,
   isSharedProjectConfigEmpty,
   mergeProjectSetup,
@@ -1017,12 +1018,47 @@ export const createProjectConfigRuntime = (deps) => {
   );
   const sharedConfigPathOf = (projectPath) => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
 
+  // Open once and read from the handle: stat-then-readFile by path would
+  // follow a symlink to a device or FIFO (stat size 0) and buffer without
+  // bound, and a file swapped or grown between the two calls escapes the
+  // gate (same pattern as skills-catalog readSkillMdFile). O_NONBLOCK
+  // (POSIX only) keeps open() itself from blocking on a FIFO with no writer
+  // before handle.stat() can reject it as non-regular.
+  const readSharedConfigRaw = async (filePath) => {
+    const constants = fsPromises.constants ?? {};
+    const openFlags = process.platform === 'win32' || constants.O_NONBLOCK === undefined
+      ? 'r'
+      : constants.O_RDONLY | constants.O_NONBLOCK;
+    const handle = await fsPromises.open(filePath, openFlags);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        throw new Error(`shared project config is not a regular file: ${filePath}`);
+      }
+      const tooLarge = () => new Error(
+        `shared project config is too large: ${filePath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+      );
+      if (stat.size > SHARED_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      const buffer = Buffer.alloc(SHARED_PROJECT_CONFIG_MAX_BYTES + 1);
+      let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+      if (total > SHARED_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      return buffer.toString('utf8', 0, total);
+    } finally {
+      await handle.close();
+    }
+  };
+
   const readSharedProjectConfig = async (projectID, personalRaw) => {
     const projectPath = projectPathOf(projectID, personalRaw);
     if (!projectPath) return { status: 'missing' };
     let raw;
     try {
-      raw = await fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8');
+      raw = await readSharedConfigRaw(sharedConfigPathOf(projectPath));
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') return { status: 'missing' };
       return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
@@ -1069,6 +1105,18 @@ export const createProjectConfigRuntime = (deps) => {
         throw new Error('project checkout not found');
       }
       const currentRead = await readSharedProjectConfig(projectID, personalRaw);
+      // A size-limit refusal is not a broken file: treating the existing
+      // config as empty here would let a patch overwrite settings the gate
+      // refused to read (or delete the file on an empty result). Reject and
+      // leave the file unchanged; other invalid reads keep the repair
+      // behaviour of falling back to the empty config.
+      if (
+        currentRead.status === 'invalid'
+        && typeof currentRead.reason === 'string'
+        && currentRead.reason.startsWith('shared project config is too large:')
+      ) {
+        throw new Error(currentRead.reason);
+      }
       const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
       const next = applySharedProjectSetupPatch(current, patch);
 
@@ -1077,10 +1125,16 @@ export const createProjectConfigRuntime = (deps) => {
         await fsPromises.rm(filePath, { force: true });
         await fsPromises.rmdir(path.dirname(filePath)).catch(() => {});
       } else {
+        const serialized = serializeSharedProjectConfig(next);
+        if (Buffer.byteLength(serialized, 'utf8') > SHARED_PROJECT_CONFIG_MAX_BYTES) {
+          throw new Error(
+            `shared project config is too large: ${filePath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+          );
+        }
         await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
         const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
         try {
-          await fsPromises.writeFile(temporaryPath, serializeSharedProjectConfig(next), 'utf8');
+          await fsPromises.writeFile(temporaryPath, serialized, 'utf8');
           await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
         } catch (error) {
           await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});

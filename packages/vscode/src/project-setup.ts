@@ -77,6 +77,12 @@ export type ProjectSetupView = {
 };
 
 export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
+/**
+ * Mirror of SHARED_PROJECT_CONFIG_MAX_BYTES in
+ * packages/web/server/lib/projects/project-setup.js — keep the two in sync.
+ * Readers refuse a shared file over this cap instead of buffering it whole.
+ */
+export const SHARED_PROJECT_CONFIG_MAX_BYTES = 1024 * 1024;
 const SHARED_CONFIG_VERSION = 1;
 
 /**
