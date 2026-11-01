@@ -1598,7 +1598,18 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+      // Identical-content shortcut: settle it from stat first so a save
+      // never buffers the existing file whole when it cannot be identical
+      // (byte length differs) or is over the read cap. Over-cap and
+      // length-differing files fall through to the atomic write below.
+      const contentByteLength = Buffer.byteLength(content, 'utf8');
+      const existingStats =
+        typeof fsPromises.stat === 'function' ? await fsPromises.stat(writePath).catch(() => null) : null;
+      const canCompare =
+        !existingStats ||
+        typeof existingStats.size !== 'number' ||
+        (existingStats.size <= MAX_READ_BYTES && existingStats.size === contentByteLength);
+      const existing = canCompare ? await fsPromises.readFile(writePath, 'utf8').catch(() => null) : null;
       if (existing === content) {
         return res.json({ success: true, path: resolved.resolved });
       }
