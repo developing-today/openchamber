@@ -9,6 +9,7 @@ import {
   mergeProjectSetup,
   normalizePlansDir,
   parseSharedProjectConfig,
+  SHARED_PROJECT_CONFIG_MAX_BYTES,
   personalProjectSetupOf,
   projectSetupPatchToStored,
   sanitizeDraftStarters,
@@ -248,6 +249,24 @@ describe('project setup bridge', () => {
       const broken = await store.read(projectId);
       assert.equal(broken.shared.status, 'invalid');
       assert.deepEqual(broken.setupWorktree, ['mine']);
+    });
+  });
+
+  test('refuses a shared file over the size cap and reads one at the cap', async () => {
+    await withStore(async (store, dir) => {
+      const repo = path.join(dir, 'repo');
+      await fs.promises.mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      const projectId = projectIdFor(repo);
+      const emptyDoc = JSON.stringify({ version: 1, pad: '' });
+      const atCap = JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES - emptyDoc.length) });
+      assert.equal(atCap.length, SHARED_PROJECT_CONFIG_MAX_BYTES);
+      await fs.promises.writeFile(sharedPath, atCap);
+      assert.equal((await store.read(projectId)).shared.status, 'ok');
+      await fs.promises.writeFile(sharedPath, JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES) }));
+      const overCap = await store.read(projectId);
+      assert.equal(overCap.shared.status, 'invalid');
+      assert.match(overCap.shared.reason ?? '', /too large/);
     });
   });
 

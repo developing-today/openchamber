@@ -12,6 +12,7 @@ import {
   normalizePlansDir,
   serializeSharedProjectConfig,
   parseSharedProjectConfig,
+  SHARED_PROJECT_CONFIG_MAX_BYTES,
   sharedTrustHashOf,
   projectSetupPatchToStored,
   projectSetupViewOf,
@@ -420,6 +421,27 @@ describe('project setup runtime', () => {
       expect(raw.scheduledTasks).toHaveLength(1);
       expect(raw['setup-worktree']).toEqual(['bun install']);
       expect(raw.draftStarters).toEqual([{ type: 'skill', name: 's' }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('refuses a shared file over the size cap and reads one at the cap', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const repo = path.join(tempRoot, 'repo');
+      await mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      const projectId = createProjectIdFromPath(repo);
+      const emptyDoc = JSON.stringify({ version: 1, pad: '' });
+      const atCap = JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES - emptyDoc.length) });
+      expect(atCap.length).toBe(SHARED_PROJECT_CONFIG_MAX_BYTES);
+      await writeFile(sharedPath, atCap);
+      expect((await runtime.readProjectSetup(projectId)).shared.status).toBe('ok');
+      await writeFile(sharedPath, JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES) }));
+      const overCap = await runtime.readProjectSetup(projectId);
+      expect(overCap.shared.status).toBe('invalid');
+      expect(overCap.shared.reason).toMatch(/too large/);
     } finally {
       await cleanup();
     }
