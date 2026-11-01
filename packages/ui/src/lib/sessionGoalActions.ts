@@ -126,9 +126,18 @@ export const goalObjectiveRevision = (text: string): string => {
 };
 
 /** Whether the stored goal is still the one an edit started from. */
-const isSameGoal = (current: { id?: unknown; status?: unknown; objective?: unknown; objectiveFile?: unknown; objectiveRevision?: unknown } | null, existing: SessionGoalPayload): boolean => {
+const isSameGoal = (current: { id?: unknown; status?: unknown; objective?: unknown; objectiveFile?: unknown; objectiveRevision?: unknown; tokenBudget?: unknown; ignoreObjectiveLimit?: unknown } | null, existing: SessionGoalPayload): boolean => {
   if (current === null) return false;
   if (current.id !== existing.id || current.status !== existing.status) return false;
+  // The budget and the limit flag are editable settings accounting cannot
+  // change, so a difference there is another save, not a settlement bump:
+  // accepting it would silently overwrite the newer setting with the
+  // editor's stale value. Normalized exactly as getSessionGoal reads them.
+  const currentTokenBudget = typeof current.tokenBudget === 'number' && Number.isFinite(current.tokenBudget) && current.tokenBudget > 0
+    ? Math.floor(current.tokenBudget)
+    : null;
+  if (currentTokenBudget !== existing.tokenBudget) return false;
+  if ((current.ignoreObjectiveLimit === true) !== existing.ignoreObjectiveLimit) return false;
   // updatedAt is deliberately not compared: the server runtime stamps a
   // fresh one on every accounting merge-write (token/turn settlement), so
   // routine accounting between opening the editor and saving used to read

@@ -80,6 +80,23 @@ describe('goal record for a save', () => {
     expect(next).toMatchObject({ changed: false, record: { objectiveRevision: 'rev-new', tokensUsed: 1500 } });
   });
 
+  // Budget and limit flag are user-editable settings an accounting
+  // merge-write cannot change; another window lowering the budget while
+  // this edit is open is a real conflict, not an accounting bump.
+  test('a budget or limit change after the edit began is a conflicting edit', () => {
+    expect(save({ ...stored, tokenBudget: 5000 })).toEqual({ changed: true });
+    expect(save({ ...stored, ignoreObjectiveLimit: true })).toEqual({ changed: true });
+  });
+
+  test('an edit begun after the budget was set still saves over accounting bumps', () => {
+    const budgeted = { ...existing, tokenBudget: 5000, ignoreObjectiveLimit: true };
+    const next = save(
+      { ...stored, tokenBudget: 5000, ignoreObjectiveLimit: true, updatedAt: 999, tokensUsed: 1500 },
+      { existing: budgeted },
+    );
+    expect(next).toMatchObject({ changed: false, record: { id: 'goal-1', tokensUsed: 1500 } });
+  });
+
   test('an edit is refused when the stored goal changed after it began', () => {
     expect(save({ ...stored, status: 'complete' })).toEqual({ changed: true });
     expect(save({ ...stored, status: 'paused', updatedAt: 60 })).toEqual({ changed: true });
