@@ -4,13 +4,29 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// No antigravity-accounts.json in the scratch config dir: every sign-in
-// below lives only in OpenCode's credential store, which is the shape
-// current opencode-antigravity-auth versions produce. The accounts file
-// path is resolved when the module loads, so point it at the scratch
-// directory before importing the providers.
+// No antigravity-accounts.json in either scratch dir: every sign-in below
+// lives only in OpenCode's credential store, which is the shape current
+// opencode-antigravity-auth versions produce. The providers read TWO
+// accounts-file paths — the config-dir file and the data-dir file
+// (~/.local/share/opencode) — and both resolve from the environment when
+// the module loads, so OPENCODE_CONFIG_DIR and XDG_DATA_HOME both point at
+// scratch directories before the import; redirecting the config dir alone
+// would let a developer's real accounts file silently supply the
+// credential these tests attribute to the store (#1114).
 const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-antigravity-store-'));
+const dataHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-antigravity-data-'));
+const originalConfigDir = process.env.OPENCODE_CONFIG_DIR;
+const originalDataHome = process.env.XDG_DATA_HOME;
 process.env.OPENCODE_CONFIG_DIR = configDir;
+process.env.XDG_DATA_HOME = dataHomeDir;
+
+const restoreEnv = (name: string, original: string | undefined) => {
+  if (original === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = original;
+  }
+};
 
 const { fetchQuotaForProvider, listConfiguredQuotaProviders } = await import('./quotaProviders');
 const { configureOpenCodeCredentials } = await import('./opencodeAuth');
@@ -23,7 +39,10 @@ afterEach(() => {
 });
 
 after(() => {
+  restoreEnv('OPENCODE_CONFIG_DIR', originalConfigDir);
+  restoreEnv('XDG_DATA_HOME', originalDataHome);
   fs.rmSync(configDir, { recursive: true, force: true });
+  fs.rmSync(dataHomeDir, { recursive: true, force: true });
 });
 
 const configureStoreOAuth = (refresh: string) => {

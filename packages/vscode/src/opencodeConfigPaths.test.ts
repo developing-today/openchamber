@@ -22,6 +22,24 @@ test('unset and blank XDG keep the existing global directory', () => {
   }
 });
 
+test('data dir follows XDG_DATA_HOME and defaults to ~/.local/share/opencode', () => {
+  for (const [value, expected] of [
+    [undefined, path.join(os.homedir(), '.local', 'share', 'opencode')],
+    ['', path.join(os.homedir(), '.local', 'share', 'opencode')],
+    ['/scratch/data', path.join('/scratch/data', 'opencode')],
+  ]) {
+    const env = { ...process.env };
+    if (value === undefined) delete env.XDG_DATA_HOME;
+    else env.XDG_DATA_HOME = value;
+    const result = spawnSync(process.execPath, ['--eval', `
+      const { OPENCODE_DATA_DIR } = await import(${JSON.stringify(moduleUrl)});
+      process.stdout.write(OPENCODE_DATA_DIR);
+    `], { env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, expected);
+  }
+});
+
 test('global CRUD uses XDG while project writes stay in the project', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-xdg-'));
   const configHome = path.join(root, 'config');
