@@ -687,10 +687,11 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.get('/api/config/skills/:name/files/*filePath', async (req, res) => {
     try {
       const skillName = req.params.name;
-      // Express 5 wildcard params arrive as path segments; join them back
-      // (same handling as the guest file route) or nested files 404.
-      const rawFilePath = req.params.filePath;
-      const filePath = decodeURIComponent(Array.isArray(rawFilePath) ? rawFilePath.join('/') : (rawFilePath || ''));
+      // Express already decodes wildcard segments; join without decoding again.
+      const filePathSegments = req.params.filePath;
+      const filePath = Array.isArray(filePathSegments)
+        ? filePathSegments.join('/')
+        : (filePathSegments || '');
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
@@ -713,7 +714,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       res.json({ path: filePath, content });
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'skill_supporting_file_too_large') {
+      if (error?.code === 'skill_supporting_file_too_large') {
         return res.status(413).json({ error: 'File too large to read' });
       }
       if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {

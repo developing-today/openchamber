@@ -979,16 +979,62 @@ function assertPathWithinSkillDir(skillDir, relativePath) {
 
 function readSkillSupportingFile(skillDir, relativePath) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
-  if (!fs.existsSync(fullPath)) {
-    return null;
+  const createTooLargeError = () => Object.assign(
+    new Error(`Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),
+    { code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE },
+  );
+  const rejectNonRegularFile = () => {
+    throw Object.assign(new Error('Access to file denied'), { code: 'EACCES' });
+  };
+
+  let pathStats;
+  try {
+    pathStats = fs.statSync(fullPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
   }
-  if (fs.statSync(fullPath).size > SKILL_SUPPORTING_FILE_MAX_BYTES) {
-    throw Object.assign(
-      new Error(`Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),
-      { code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE },
-    );
+  if (!pathStats.isFile()) rejectNonRegularFile();
+  if (pathStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+  let fileDescriptor;
+  try {
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0);
+    fileDescriptor = fs.openSync(fullPath, flags);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
   }
-  return fs.readFileSync(fullPath, 'utf8');
+
+  try {
+    const openedFileStats = fs.fstatSync(fileDescriptor);
+    if (!openedFileStats.isFile()) rejectNonRegularFile();
+    if (openedFileStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+    let buffer = Buffer.allocUnsafe(Math.max(1, openedFileStats.size + 1));
+    let bytesRead = 0;
+    while (true) {
+      if (bytesRead === buffer.length) {
+        if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+        const nextBuffer = Buffer.allocUnsafe(Math.min(buffer.length * 2, SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
+        buffer.copy(nextBuffer, 0, 0, bytesRead);
+        buffer = nextBuffer;
+      }
+      const count = fs.readSync(
+        fileDescriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    fs.closeSync(fileDescriptor);
+  }
 }
 
 function writeSkillSupportingFile(skillDir, relativePath, content) {

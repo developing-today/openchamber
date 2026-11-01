@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import fs from 'fs';
 import os from 'os';
@@ -454,11 +454,19 @@ describe('skill-routes directory soft fallback', () => {
     fs.writeFileSync(path.join(skillDir, 'references', 'at-cap.md'), atCap);
     fs.writeFileSync(path.join(skillDir, 'references', 'over-cap.md'), 'b'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
     fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+    fs.writeFileSync(path.join(skillDir, 'references', '100%.md'), '# Percent path\n');
+    fs.mkdirSync(path.join(skillDir, 'references', 'folder'));
 
-    // The shared reader refuses over-cap files with a distinct signal,
-    // before reading them whole (a whole read would succeed and return).
-    expect(() => readSkillSupportingFile(skillDir, path.join('references', 'over-cap.md')))
-      .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+    const readSpy = vi.spyOn(fs, 'readSync');
+    try {
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'over-cap.md')))
+        .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'folder')))
+        .toThrow(expect.objectContaining({ code: 'EACCES' }));
+      expect(readSpy).not.toHaveBeenCalled();
+    } finally {
+      readSpy.mockRestore();
+    }
     expect(readSkillSupportingFile(skillDir, path.join('references', 'at-cap.md'))).toBe(atCap);
     expect(readSkillSupportingFile(skillDir, path.join('references', 'missing.md'))).toBeNull();
 
@@ -478,9 +486,43 @@ describe('skill-routes directory soft fallback', () => {
     expect(small.status).toBe(200);
     expect(await small.json()).toEqual({ path: 'references/guide.md', content: '# Guide\n' });
 
+    const percentPath = await fetch(`${filesBase}/references/100%25.md${query}`);
+    expect(percentPath.status).toBe(200);
+    expect(await percentPath.json()).toEqual({ path: 'references/100%.md', content: '# Percent path\n' });
+
     const missing = await fetch(`${filesBase}/references/missing.md${query}`);
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: 'File not found' });
+  });
+
+  it('bounds the read if a supporting file grows after its descriptor is checked', () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'growing-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    const filePath = path.join(skillDir, 'references', 'growing.md');
+    fs.writeFileSync(filePath, 'a'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES));
+
+    const originalFstatSync = fs.fstatSync;
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockImplementation((fileDescriptor) => {
+      const stats = originalFstatSync(fileDescriptor);
+      fs.appendFileSync(filePath, 'b');
+      return stats;
+    });
+    const originalReadSync = fs.readSync;
+    let bytesRead = 0;
+    const readSpy = vi.spyOn(fs, 'readSync').mockImplementation((...args) => {
+      const count = originalReadSync(...args);
+      bytesRead += count;
+      return count;
+    });
+    try {
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'growing.md')))
+        .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+      expect(bytesRead).toBe(SKILL_SUPPORTING_FILE_MAX_BYTES + 1);
+    } finally {
+      fstatSpy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 
   it('flags the list as partial when OpenCode skill list fails, and not when it succeeds', async () => {
