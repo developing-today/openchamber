@@ -49,6 +49,19 @@ const MAX_PENDING_BYTES = 256 * 1024;
  * bound matches the 1 MB run-ahead the opposite direction allows itself.
  */
 const MAX_HELD_BYTES = 1_000_000;
+/**
+ * Largest single WebSocket frame the tunnel accepts. ws assembles a whole
+ * message before 'message' fires, so without an explicit maxPayload one
+ * frame up to the ws default of 100 MiB was assembled and forwarded whole,
+ * bypassing both caps above (#1082). Equal to MAX_HELD_BYTES: no frame may
+ * be larger than what the tunnel would ever hold for a stalled peer, and
+ * Under Node the ws layer refuses an oversized frame (close 1009) before
+ * assembly; under Bun the bundled ws does not enforce maxPayload, so the
+ * message handler below ALSO checks the assembled size and drops the
+ * connection before the frame is queued or written anywhere. Either way
+ * no oversized frame is ever forwarded or held whole.
+ */
+const MAX_FRAME_BYTES = MAX_HELD_BYTES;
 
 const parseRequestedPort = (url) => {
   try {
@@ -78,7 +91,7 @@ export function createDevTunnelRuntime({
   rejectWebSocketUpgrade,
   logger = console,
 }) {
-  const wsServer = new WebSocketServer({ noServer: true });
+  const wsServer = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   let openSockets = 0;
 
   /**
@@ -189,6 +202,17 @@ export function createDevTunnelRuntime({
 
     socket.on('message', (data) => {
       if (settled) return;
+      // Per-frame bound (#1082): maxPayload alone is not enforced by the
+      // bundled ws under every runtime (Bun delivers the oversized message
+      // whole), so refuse it here — before it is queued or written — with
+      // the same 1009 the ws layer would have used.
+      const frameBytes = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data));
+      if (frameBytes > MAX_FRAME_BYTES) {
+        logger.warn?.('[dev-tunnel] dropped a connection that sent a ' + frameBytes + '-byte frame over the ' + MAX_FRAME_BYTES + '-byte bound for port ' + port);
+        try { socket.close(1009, 'Frame too large'); } catch { /* already closing */ }
+        teardown();
+        return;
+      }
       if (connected) {
         if (upstreamBackedUp) {
           heldWrites.push(data);

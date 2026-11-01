@@ -520,3 +520,60 @@ describe('dev tunnel backpressure', () => {
     expect(devReceived).toBe(0);
   }, 20_000);
 });
+
+describe('dev tunnel frame size (#1082)', () => {
+  test('a single frame over the held cap is refused by the ws layer and the dev server receives none of it', async () => {
+    let devReceived = 0;
+    const devServer = net.createServer((socket) => {
+      socket.on('data', (chunk) => { devReceived += chunk.length; });
+    });
+    const devSockets = trackSockets(devServer);
+    const devPort = await listen(devServer);
+    started.push(stopServer(devServer, devSockets));
+    const host = await startHost({ allowedPorts: [devPort] });
+
+    const sender = new WebSocket(`ws://127.0.0.1:${host.port}/api/dev-tunnel?port=${devPort}`);
+    started.push(async () => { try { sender.close(); } catch { /* already closed */ } });
+    await new Promise((resolve) => sender.on('open', resolve));
+    const closed = new Promise((resolve) => sender.on('close', (code) => resolve(code)));
+    sender.send(Buffer.alloc(1_000_001, 0x65));
+
+    const closeCode = await Promise.race([
+      closed,
+      new Promise((resolve) => setTimeout(() => resolve(0), 5_000)),
+    ]);
+    expect(closeCode).toBe(1009);
+    expect(host.runtime.openSocketCount).toBe(0);
+    expect(devReceived).toBe(0);
+  }, 20_000);
+
+  test('a single frame at the held cap forwards byte-identically', async () => {
+    const received = [];
+    const devServer = net.createServer((socket) => {
+      socket.on('data', (chunk) => received.push(chunk));
+    });
+    const devSockets = trackSockets(devServer);
+    const devPort = await listen(devServer);
+    started.push(stopServer(devServer, devSockets));
+    const host = await startHost({ allowedPorts: [devPort] });
+
+    const sender = new WebSocket(`ws://127.0.0.1:${host.port}/api/dev-tunnel?port=${devPort}`);
+    started.push(async () => { try { sender.close(); } catch { /* already closed */ } });
+    await new Promise((resolve) => sender.on('open', resolve));
+    const frame = Buffer.alloc(1_000_000, 0x66);
+    sender.send(frame);
+
+    const delivered = await Promise.race([
+      (async () => {
+        while (received.reduce((sum, chunk) => sum + chunk.length, 0) < frame.length) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return true;
+      })(),
+      new Promise((resolve) => setTimeout(() => resolve(false), 5_000)),
+    ]);
+    expect(delivered).toBe(true);
+    expect(createHash('sha256').update(Buffer.concat(received)).digest('hex'))
+      .toBe(createHash('sha256').update(frame).digest('hex'));
+  }, 20_000);
+});

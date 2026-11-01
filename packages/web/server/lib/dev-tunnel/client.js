@@ -108,7 +108,11 @@ export const createDevTunnelClient = ({
         // fail alone.
         let upstream;
         try {
-          upstream = new WebSocket(target, { headers, perMessageDeflate: false });
+          // maxPayload matches the host end's frame bound (#1082): the host
+          // forwards dev-server socket reads, whose chunks are far below
+          // MAX_BUFFERED_BYTES, so a larger single frame is never legitimate
+          // tunnel traffic — refuse it instead of assembling it whole.
+          upstream = new WebSocket(target, { headers, perMessageDeflate: false, maxPayload: MAX_BUFFERED_BYTES });
         } catch (error) {
           logger.warn?.(`[dev-tunnel] failed to dial upstream for port ${remotePort}: ${error?.message || error}`);
           sockets.delete(socket);
