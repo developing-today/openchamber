@@ -150,6 +150,8 @@ function liveIssueSummary(ref, raw) {
 
 /** Above this the full-context view is no longer a readable diff, and the round trip is wasted. */
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
+/** A whole merge request patch is far larger than one file: ten times the per-file cap, matching the walkthrough GitHub cap. */
+const MAX_PATCH_BYTES = 50 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 export function createGitLabResourceService({ origin, client, download, resolveProjects = resolveGitLabProjectsFromDirectory, canonicalReads = false }) {
@@ -1083,8 +1085,16 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       if (!Array.isArray(diffs)) throw new Error('GitLab returned an invalid merge request diff list');
       const files = diffs.filter((diff) => isPlainObject(diff) && (text(diff.new_path) || text(diff.old_path)));
       if (files.length !== diffs.length) throw new Error('GitLab returned an invalid merge request diff');
+      const pieces = files.map(gitPatchForDiff);
+      let patchBytes = 0;
+      for (const piece of pieces) {
+        patchBytes += Buffer.byteLength(piece);
+        if (patchBytes > MAX_PATCH_BYTES) {
+          throw Object.assign(new Error('This merge request diff is too large to show'), { status: 413, code: 'patch-too-large' });
+        }
+      }
       return {
-        patch: files.map(gitPatchForDiff).join(''),
+        patch: pieces.join(''),
         meta: { owner: target.project.owner, repo: target.project.name, number },
       };
     },
