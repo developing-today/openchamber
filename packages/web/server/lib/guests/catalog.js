@@ -29,8 +29,8 @@ export const registerBuiltInGuests = async ({ persistPath, root }) => {
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
 /**
- * Byte cap for one guest asset on the serve path and for the entry HTML
- * read during package inspection, judged from stat before any read.
+ * Byte cap for one guest asset on the serve path and for the manifest and
+ * entry HTML reads during package inspection, judged from stat before reading.
  * Sized to the in-feature precedent: files.js refuses file content over
  * GUEST_FILE_CONTENT_MAX (2,000,000) before reading it.
  */
@@ -171,9 +171,14 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
 };
 
 export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
+  const manifestPath = path.join(packageRoot, 'package.json');
+  if ((await fileSizeOrNull(manifestPath)) > GUEST_ASSET_MAX_BYTES) {
+    return { ok: false, code: 'invalid-manifest' };
+  }
+
   let raw;
   try {
-    raw = await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8');
+    raw = await fs.readFile(manifestPath, 'utf8');
   } catch {
     return { ok: false, code: 'invalid-manifest' };
   }
