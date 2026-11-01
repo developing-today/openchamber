@@ -659,10 +659,17 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.get('/api/behavior/agents-md', async (_req, res) => {
     try {
+      let stat;
       try {
-        await fs.promises.access(AGENTS_MD_PATH);
+        stat = await fs.promises.stat(AGENTS_MD_PATH);
       } catch {
         return res.json({ content: '', exists: false, path: AGENTS_MD_PATH });
+      }
+      // The file is user-managed, so it can be far larger than anything the
+      // PUT below would ever write; refuse it from its size alone instead
+      // of buffering it whole into the server.
+      if (stat.size > MAX_BEHAVIOR_PROMPT_SIZE) {
+        return res.status(413).json({ error: `AGENTS.md exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
       }
       const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
       return res.json({ content, exists: true, path: AGENTS_MD_PATH });
@@ -686,6 +693,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         const expected = req.body.expectedContent;
         let current = null;
         try {
+          const stat = await fs.promises.stat(AGENTS_MD_PATH);
+          if (stat.size > MAX_BEHAVIOR_PROMPT_SIZE) {
+            return res.status(413).json({ error: `AGENTS.md exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
+          }
           current = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
         } catch (error) {
           if (error?.code !== 'ENOENT') throw error;

@@ -126,4 +126,46 @@ describe('OpenCode global config paths', () => {
     expect(fs.readFileSync(path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md'), 'utf8')).toBe('Current draft');
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it('refuses an over-cap AGENTS.md from its size alone, on GET and on the PUT conflict check', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-agents-md-big-'));
+    process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+    delete process.env.OPENCODE_CONFIG;
+
+    const [, , , , , , routes] = await loadOpenCodeModules();
+    const handlers = new Map();
+    const app = {
+      get(route, ...callbacks) { handlers.set(`GET ${route}`, callbacks.at(-1)); },
+      put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
+      post() {},
+      delete() {},
+      use() {},
+    };
+    routes.registerOpenCodeRoutes(app, {});
+
+    const agentsMdPath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    const oversized = 'x'.repeat(1024 * 1024 + 1);
+    fs.writeFileSync(agentsMdPath, oversized);
+
+    const readSpy = vi.spyOn(fs.promises, 'readFile');
+    try {
+      const response = { json: vi.fn(), status: vi.fn(() => response) };
+      await handlers.get('GET /api/behavior/agents-md')({}, response);
+      expect(response.status).toHaveBeenLastCalledWith(413);
+      expect(response.json).toHaveBeenLastCalledWith({
+        error: 'AGENTS.md exceeds maximum size of 1048576 bytes',
+      });
+
+      await handlers.get('PUT /api/behavior/agents-md')({
+        body: { content: 'Replacement', expectedContent: 'anything' },
+      }, response);
+      expect(response.status).toHaveBeenLastCalledWith(413);
+      expect(readSpy).not.toHaveBeenCalled();
+      expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe(oversized);
+    } finally {
+      readSpy.mockRestore();
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
