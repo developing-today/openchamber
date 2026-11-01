@@ -43,9 +43,13 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
 - `vault.js`: vault references. A value matching `op://<vault>/<item>/<field>`
   (optionally with a section) is read with `op read --no-newline` when a
   process needs it (`createVaultResolver().resolve(variables, { refresh })`).
-  The secret stays in memory only. `refresh: true` reads a reference with no
-  value yet or one older than five minutes; `refresh: false` uses only what
-  an earlier read left, so Git status polling never starts `op`. A failed
+  The secret stays in memory only. `refresh: true` re-reads every reference
+  on every call, even one read moments ago, so a relaunch after a rotation
+  gets the rotated value instead of the fresh cached one; `refresh: false`
+  uses only what an earlier read left, fresh or stale, so Git status polling
+  never starts `op`. `readSecret` keeps the five-minute TTL instead: it
+  serves a fresh cached value and re-reads only once the entry is older
+  than five minutes. A failed
   read leaves the variable out (a stale good value is kept instead when
   there is one) and records `{ state: 'failed', reason }` per variable:
   `op-not-installed`, `timeout` (30 s), `op-read-failed`, `empty`. It warns
