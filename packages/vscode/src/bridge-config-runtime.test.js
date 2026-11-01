@@ -19,6 +19,7 @@ process.env.XDG_CONFIG_HOME = path.join(scratchConfigRoot, 'xdg');
 process.env.OPENCODE_CONFIG_DIR = '';
 
 const { handleConfigBridgeMessage } = await import('./bridge-config-runtime.ts');
+const { MAX_PLUGIN_FILE_BYTES } = await import('./opencodeConfig.ts');
 
 const tempRoots = [];
 const originalOpencodeConfig = process.env.OPENCODE_CONFIG;
@@ -213,6 +214,157 @@ describe('VS Code config bridge plugin parity', () => {
       payload: { method: 'GET', target: 'file', directory: root, pluginId: file?.id },
     }, ctx, deps);
     expect(read?.data).toEqual({ fileName: 'demo-plugin.ts', scope: 'project', content: 'export default {}' });
+  });
+
+  test('refuses over-limit plugin files on GET and PUT without reading or overwriting them', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-file-limit-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+    const fileName = 'large-plugin.ts';
+    const pluginPath = path.join(root, '.opencode', 'plugins', fileName);
+    const content = 'x'.repeat(MAX_PLUGIN_FILE_BYTES + 1);
+
+    fs.mkdirSync(path.dirname(pluginPath), { recursive: true });
+    fs.writeFileSync(pluginPath, content, 'utf8');
+    const listed = await handleConfigBridgeMessage({
+      id: 'list-large-file',
+      type: 'api:config/plugins',
+      payload: { method: 'GET', target: 'list', directory: root },
+    }, ctx, deps);
+    const file = listed?.data?.files?.find((candidate) => candidate.fileName === fileName);
+    const readPaths = [];
+    const originalReadFileSync = fs.readFileSync;
+    let read;
+    let updated;
+
+    fs.readFileSync = (...args) => {
+      readPaths.push(args[0]);
+      return originalReadFileSync.apply(fs, args);
+    };
+
+    try {
+      read = await handleConfigBridgeMessage({
+        id: 'read-large-file',
+        type: 'api:config/plugins',
+        payload: { method: 'GET', target: 'file', directory: root, pluginId: file?.id },
+      }, ctx, deps);
+      updated = await handleConfigBridgeMessage({
+        id: 'update-large-file',
+        type: 'api:config/plugins',
+        payload: {
+          method: 'PUT',
+          target: 'file',
+          directory: root,
+          pluginId: file?.id,
+          body: { content: 'replacement' },
+        },
+      }, ctx, deps);
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+    }
+
+    const error = {
+      success: false,
+      error: `Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`,
+      code: 'PLUGIN_FILE_TOO_LARGE',
+    };
+    expect(read).toMatchObject({ id: 'read-large-file', type: 'api:config/plugins', ...error });
+    expect(updated).toMatchObject({ id: 'update-large-file', type: 'api:config/plugins', ...error });
+    expect(readPaths).not.toContain(pluginPath);
+    expect(fs.readFileSync(pluginPath, 'utf8')).toBe(content);
+  });
+
+  test('reads and updates plugin files exactly at the size limit', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-file-at-limit-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+    const fileName = 'at-limit-plugin.ts';
+    const content = 'x'.repeat(MAX_PLUGIN_FILE_BYTES);
+
+    const created = await handleConfigBridgeMessage({
+      id: 'create-at-limit-file',
+      type: 'api:config/plugins',
+      payload: {
+        method: 'POST',
+        target: 'file',
+        directory: root,
+        body: { scope: 'project', fileName, content },
+      },
+    }, ctx, deps);
+    expect(created?.success).toBe(true);
+
+    const listed = await handleConfigBridgeMessage({
+      id: 'list-at-limit-file',
+      type: 'api:config/plugins',
+      payload: { method: 'GET', target: 'list', directory: root },
+    }, ctx, deps);
+    const file = listed?.data?.files?.find((candidate) => candidate.fileName === fileName);
+    const pluginPath = path.join(root, '.opencode', 'plugins', fileName);
+
+    const read = await handleConfigBridgeMessage({
+      id: 'read-at-limit-file',
+      type: 'api:config/plugins',
+      payload: { method: 'GET', target: 'file', directory: root, pluginId: file?.id },
+    }, ctx, deps);
+    expect(fs.statSync(pluginPath).size).toBe(MAX_PLUGIN_FILE_BYTES);
+    expect(read?.data).toEqual({ fileName, scope: 'project', content });
+
+    const updated = await handleConfigBridgeMessage({
+      id: 'update-at-limit-file',
+      type: 'api:config/plugins',
+      payload: {
+        method: 'PUT',
+        target: 'file',
+        directory: root,
+        pluginId: file?.id,
+        body: { content },
+      },
+    }, ctx, deps);
+    expect(updated?.success).toBe(true);
+    expect(fs.readFileSync(pluginPath, 'utf8')).toBe(content);
+  });
+
+  test('keeps missing plugin files on the existing not-found path', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-file-missing-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+    const fileName = 'missing-plugin.ts';
+
+    await handleConfigBridgeMessage({
+      id: 'create-missing-file',
+      type: 'api:config/plugins',
+      payload: {
+        method: 'POST',
+        target: 'file',
+        directory: root,
+        body: { scope: 'project', fileName, content: 'export default {}' },
+      },
+    }, ctx, deps);
+    const listed = await handleConfigBridgeMessage({
+      id: 'list-missing-file',
+      type: 'api:config/plugins',
+      payload: { method: 'GET', target: 'list', directory: root },
+    }, ctx, deps);
+    const file = listed?.data?.files?.find((candidate) => candidate.fileName === fileName);
+    fs.unlinkSync(path.join(root, '.opencode', 'plugins', fileName));
+
+    for (const method of ['GET', 'PUT']) {
+      const response = await handleConfigBridgeMessage({
+        id: `missing-${method.toLowerCase()}-file`,
+        type: 'api:config/plugins',
+        payload: {
+          method,
+          target: 'file',
+          directory: root,
+          pluginId: file?.id,
+          body: { content: 'replacement' },
+        },
+      }, ctx, deps);
+      expect(response).toMatchObject({
+        success: false,
+        error: 'Plugin file not found',
+      });
+    }
   });
 
   test('updates and deletes user plugin entries from OPENCODE_CONFIG source', async () => {

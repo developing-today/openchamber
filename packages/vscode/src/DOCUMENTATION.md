@@ -106,6 +106,10 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
+  - VS Code plugin file reads use a 1 MiB cap. `readPluginDirFile` stats before
+    reading, and an over-limit GET or PUT pre-read returns
+    `PLUGIN_FILE_TOO_LARGE`; PUT leaves the existing file unchanged. Missing
+    files keep the `Plugin file not found` response.
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
   - `writeConfig` and the agent/command markdown writer replace their file atomically through `writeFileAtomic` from `packages/web/server/lib/opencode/atomic-write.js`, the same function the web server uses, so OpenCode's watcher never reads a partial file.

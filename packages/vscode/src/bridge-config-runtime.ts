@@ -558,7 +558,15 @@ export async function handleConfigBridgeMessage(
       if (target === 'file') {
         if (normalizedMethod === 'GET') {
           if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
-          const file = readPluginDirFile(pluginId, workingDirectory);
+          let file: ReturnType<typeof readPluginDirFile>;
+          try {
+            file = readPluginDirFile(pluginId, workingDirectory);
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'PLUGIN_FILE_TOO_LARGE') {
+              return { id, type, success: false, error: error.message, code: 'PLUGIN_FILE_TOO_LARGE' };
+            }
+            throw error;
+          }
           if (!file) return { id, type, success: false, error: 'Plugin file not found' };
           return { id, type, success: true, data: file };
         }
@@ -566,7 +574,15 @@ export async function handleConfigBridgeMessage(
           writePluginDirFile(body || {}, workingDirectory);
         } else if (normalizedMethod === 'PUT') {
           if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
-          const existing = readPluginDirFile(pluginId, workingDirectory);
+          let existing: ReturnType<typeof readPluginDirFile>;
+          try {
+            existing = readPluginDirFile(pluginId, workingDirectory);
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'PLUGIN_FILE_TOO_LARGE') {
+              return { id, type, success: false, error: error.message, code: 'PLUGIN_FILE_TOO_LARGE' };
+            }
+            throw error;
+          }
           if (!existing) return { id, type, success: false, error: 'Plugin file not found' };
           writePluginDirFile({ fileName: existing.fileName, scope: existing.scope, content: body?.content }, workingDirectory, { overwrite: true });
         } else if (normalizedMethod === 'DELETE') {
