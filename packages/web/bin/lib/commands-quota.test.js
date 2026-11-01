@@ -602,6 +602,20 @@ describe('quota fallback credential source', () => {
     expect(source.servedBy()).toBe('server');
   });
 
+  it('forwards usesLocalStore from the server source, so a known-local server enables the store fallback', () => {
+    const fallback = { list: vi.fn(async () => ['local-row']) };
+    const localPrimary = { list: vi.fn(async () => ['server-row']), usesLocalStore: () => true };
+    expect(createFallbackCredentialSource(localPrimary, fallback).usesLocalStore()).toBe(true);
+    const remotePrimary = { list: vi.fn(async () => ['server-row']), usesLocalStore: () => false };
+    expect(createFallbackCredentialSource(remotePrimary, fallback).usesLocalStore()).toBe(false);
+  });
+
+  it('reports usesLocalStore as false when the server source does not say', () => {
+    const primary = { list: vi.fn(async () => ['server-row']) };
+    const fallback = { list: vi.fn(async () => ['local-row']) };
+    expect(createFallbackCredentialSource(primary, fallback).usesLocalStore()).toBe(false);
+  });
+
   it('names both failures when the server is down and the store cannot be read', async () => {
     const primary = { list: vi.fn(async () => { throw transportError(); }) };
     const fallback = { list: vi.fn(async () => { throw new Error('store missing'); }) };

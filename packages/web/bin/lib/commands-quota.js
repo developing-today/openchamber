@@ -205,11 +205,17 @@ const isTransportFailure = (error) => {
  * `servedBy()` reports which source the run's reads came from, so the
  * output never presents a store read as a live server read. Writes and
  * the launch environment always stay with the server source.
+ * `usesLocalStore()` forwards the server source's answer, so a resolver
+ * that gates a direct store read on a known-local source (the
+ * Antigravity fallback) works through this combined source too; the
+ * server source only claims local for a managed or loopback OpenCode,
+ * so a remote server is never answered with this machine's store.
  */
 const createFallbackCredentialSource = (primary, fallback) => {
   let fellBack = false;
   const source = {
     servedBy: () => (fellBack ? 'local' : 'server'),
+    usesLocalStore: () => primary.usesLocalStore?.() ?? false,
     list: async () => {
       if (fellBack) return fallback.list();
       try {
