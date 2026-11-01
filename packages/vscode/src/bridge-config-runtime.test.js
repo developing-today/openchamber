@@ -388,4 +388,30 @@ describe('VS Code config bridge skill supporting-file size gate (#1158)', () => 
     expect(small?.success).toBe(true);
     expect(small?.data).toEqual({ content: 'hello' });
   });
+
+  test('preserves supporting-file PUT and DELETE behavior', async () => {
+    const root = createProjectSkill({});
+
+    const mutateSupportingFile = (method, filePath, content) => handleConfigBridgeMessage({
+      id: 'skill-file-mutate',
+      type: 'api:config/skills/files',
+      payload: { method, name: 'cap-test-skill', filePath, content },
+    }, createCtx(root), deps);
+
+    const written = await mutateSupportingFile('PUT', 'nested/file.txt', 'hello');
+    expect(written?.success).toBe(true);
+    expect(written?.data).toEqual({ success: true });
+
+    const read = await getSupportingFile(root, 'nested/file.txt');
+    expect(read?.success).toBe(true);
+    expect(read?.data).toEqual({ content: 'hello' });
+
+    const deleted = await mutateSupportingFile('DELETE', 'nested/file.txt');
+    expect(deleted?.success).toBe(true);
+    expect(deleted?.data).toEqual({ success: true });
+
+    const afterDelete = await getSupportingFile(root, 'nested/file.txt');
+    expect(afterDelete?.success).toBe(false);
+    expect(afterDelete?.error).toContain('not found');
+  });
 });

@@ -3326,15 +3326,41 @@ export const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_l
 
 export const readSkillSupportingFile = (skillDir: string, relativePath: string): string | null => {
   const fullPath = path.join(skillDir, relativePath);
-  if (!fs.existsSync(fullPath)) return null;
-  const stats = fs.statSync(fullPath);
-  if (stats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) {
-    throw codedError(
-      `Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`,
-      SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
-    );
+  let fd: number;
+  try {
+    // O_NONBLOCK stops open() from waiting on a FIFO. Regular files ignore it.
+    fd = fs.openSync(fullPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  } catch (error) {
+    // SAFETY: fs.openSync failures are Node system errors that carry a string code;
+    // anything without ENOENT/ENOTDIR is rethrown untouched below.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw error;
   }
-  return fs.readFileSync(fullPath, 'utf8');
+  try {
+    const stats = fs.fstatSync(fd);
+    if (!stats.isFile()) {
+      throw new Error(`Skill file is not a regular file: ${relativePath}`);
+    }
+    // Read at most the cap plus one byte from the same descriptor, so a
+    // file swapped in after the open can never be buffered whole.
+    const buffer = Buffer.alloc(SKILL_SUPPORTING_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, total, buffer.length - total, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > SKILL_SUPPORTING_FILE_MAX_BYTES) {
+      throw codedError(
+        `Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`,
+        SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
+      );
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    fs.closeSync(fd);
+  }
 };
 
 export const writeSkillSupportingFile = (skillDir: string, relativePath: string, content: string): void => {
