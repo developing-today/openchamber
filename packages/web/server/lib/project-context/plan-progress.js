@@ -23,6 +23,34 @@ const CHECKLIST_ITEM = /^\s*[-*+]\s+\[([ xX])\]\s/;
  */
 export const PLAN_FILE_READ_MAX_BYTES = 1024 * 1024;
 
+/**
+ * Read a file as UTF-8 reading at most `maxBytes + 1` bytes from one open
+ * handle, so a file that grows after its `stat` can never be buffered
+ * whole. Returns the text, or null when the file holds more than
+ * `maxBytes` bytes at read time. Falls back to a plain read when the
+ * injected fs has no `open` (test doubles); the fallback still refuses an
+ * over-cap result, it just cannot bound the transient buffer.
+ */
+export const readBoundedUtf8 = async (fsPromises, filePath, maxBytes) => {
+  if (typeof fsPromises.open !== 'function') {
+    const raw = await fsPromises.readFile(filePath, 'utf8');
+    return Buffer.byteLength(raw, 'utf8') > maxBytes ? null : raw;
+  }
+  const handle = await fsPromises.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    return offset > maxBytes ? null : buffer.subarray(0, offset).toString('utf8');
+  } finally {
+    await handle.close();
+  }
+};
+
 /** `{ done, total }` for a plan with a `## Steps` checklist, null otherwise. */
 export const parsePlanProgress = (raw) => {
   const lines = raw.replace(/\r\n?/g, '\n').split('\n');
@@ -75,7 +103,13 @@ export const createPlanSummaryCache = ({ fsPromises, parseTitle }) => {
       entries.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, summary });
       return summary;
     }
-    const raw = await fsPromises.readFile(filePath, 'utf8');
+    const raw = await readBoundedUtf8(fsPromises, filePath, PLAN_FILE_READ_MAX_BYTES);
+    if (raw === null) {
+      // Grew past the cap between the stat above and this read.
+      const summary = { title: 'Plan', progress: null, mtimeMs: stat.mtimeMs, tooLarge: true };
+      entries.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, summary });
+      return summary;
+    }
     const summary = { title: parseTitle(raw), progress: parsePlanProgress(raw), mtimeMs: stat.mtimeMs };
     entries.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, summary });
     return summary;

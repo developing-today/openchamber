@@ -15,7 +15,7 @@
 import { renameWithRetry } from '../shared/atomic-rename.js';
 import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
-import { createPlanSummaryCache, PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
+import { createPlanSummaryCache, readBoundedUtf8, PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
 import { z } from 'zod';
 
 const optionalTextInput = z.string().optional();
@@ -510,7 +510,9 @@ export const createProjectContextRuntime = (deps) => {
     const folder = link.shared ? sharedDir : plansDirFor(projectId);
     if (!folder) return null;
     try {
-      return (await planSummaries.summaryOf(path.join(folder, link.file)))?.progress ?? null;
+      const summary = await planSummaries.summaryOf(path.join(folder, link.file));
+      if (!summary) return null;
+      return { progress: summary.progress ?? null, tooLarge: summary.tooLarge === true };
     } catch {
       return null;
     }
@@ -529,8 +531,9 @@ export const createProjectContextRuntime = (deps) => {
       // A moved plan is only reachable while the project still has a shared folder.
       .filter((plan) => !plan.shared || shared.dir)
       .map(async ({ shared: isShared, ...plan }) => {
-        const progress = await progressOfLink(projectId, { ...plan, shared: isShared }, shared.dir);
-        return withProgress({ ...plan, source: isShared ? 'shared' : 'personal' }, progress);
+        const info = await progressOfLink(projectId, { ...plan, shared: isShared }, shared.dir);
+        const listed = withProgress({ ...plan, source: isShared ? 'shared' : 'personal' }, info?.progress ?? null);
+        return info?.tooLarge ? { ...listed, tooLarge: true } : listed;
       }));
     const withSession = (plan) => (planSessions[plan.id] ? { ...plan, session: planSessions[plan.id] } : plan);
     return {
@@ -752,12 +755,18 @@ export const createProjectContextRuntime = (deps) => {
     if (stat.size > PLAN_FILE_READ_MAX_BYTES) {
       throw mutationError(`Plan file is too large to read (${stat.size} bytes; limit is ${PLAN_FILE_READ_MAX_BYTES} bytes)`, 413);
     }
+    let raw;
     try {
-      return await fsPromises.readFile(planPath, 'utf8');
+      raw = await readBoundedUtf8(fsPromises, planPath, PLAN_FILE_READ_MAX_BYTES);
     } catch (error) {
       if (error && error.code === 'ENOENT') return null;
       throw error;
     }
+    if (raw === null) {
+      // Grew past the cap between the stat above and this read.
+      throw mutationError(`Plan file is too large to read (limit is ${PLAN_FILE_READ_MAX_BYTES} bytes)`, 413);
+    }
+    return raw;
   };
 
   const readPlan = async (projectId, planId) => {

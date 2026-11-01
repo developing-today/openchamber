@@ -912,6 +912,34 @@ describe('shared plans', () => {
     expect((await counting.readPlan(PROJECT_ID, 'shared:small.md')).raw).toBe('# Small\n\n## Steps\n- [x] one\n');
   });
 
+  test('an over-cap personal plan is listed as tooLarge in the context', async () => {
+    const mine = await runtime.createPlan(PROJECT_ID, { title: 'Mine', body: 'x' });
+    await fsPromises.writeFile(path.join(plansDir(), mine.plan.file), `# Mine\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    const context = await runtime.readContext(PROJECT_ID);
+    const listed = context.plans.find((plan) => plan.id === mine.plan.id);
+    expect(listed.tooLarge).toBe(true);
+    expect(listed.progress).toBeUndefined();
+  });
+
+  test('a shared plan that grows past the cap after its stat is refused by readPlan', async () => {
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'big.md'), `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    const lyingStat = createProjectContextRuntime({
+      fsPromises: {
+        ...fsPromises,
+        stat: async (...args) => {
+          const stat = await fsPromises.stat(...args);
+          return String(args[0]).endsWith('big.md') ? { ...stat, size: 10 } : stat;
+        },
+      },
+      path,
+      projectsDirPath,
+      createId: () => `plan-${++idCounter}`,
+      resolveSharedPlansDir: async () => sharedDir,
+    });
+    await expect(lyingStat.readPlan(PROJECT_ID, 'shared:big.md')).rejects.toThrow('too large');
+  });
+
   test('an over-cap personal plan is refused by readPlan without a whole-file read', async () => {
     const mine = await runtime.createPlan(PROJECT_ID, { title: 'Mine', body: 'x' });
     await fsPromises.writeFile(path.join(plansDir(), mine.plan.file), `# Mine\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);

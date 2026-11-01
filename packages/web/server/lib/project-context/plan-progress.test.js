@@ -3,7 +3,7 @@ import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createPlanSummaryCache, parsePlanProgress, PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
+import { createPlanSummaryCache, parsePlanProgress, readBoundedUtf8, PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
 
 describe('parsePlanProgress', () => {
   test('counts the ticked and open steps of the ## Steps checklist', () => {
@@ -61,5 +61,26 @@ describe('createPlanSummaryCache', () => {
     } finally {
       await fsPromises.rm(dir, { recursive: true, force: true });
     }
+  });
+
+  test('a file that grows past the cap after its stat degrades to tooLarge without a whole read', async () => {
+    // stat reports a small file, but the open handle yields cap+1 bytes:
+    // the bounded read must stop at the cap and mark the plan tooLarge.
+    const fake = {
+      stat: async () => ({ mtimeMs: 1, size: 10 }),
+      readFile: async () => { throw new Error('readFile must not be used when open exists'); },
+      open: async () => ({
+        read: async (buffer, offset, length) => {
+          buffer.fill(120, offset, offset + length);
+          return { bytesRead: length };
+        },
+        close: async () => {},
+      }),
+    };
+    const cache = createPlanSummaryCache({ fsPromises: fake, parseTitle: () => 'Plan' });
+    const summary = await cache.summaryOf('/plans/growing.md');
+    expect(summary.tooLarge).toBe(true);
+    expect(summary.progress).toBeNull();
+    expect(await readBoundedUtf8(fake, '/plans/growing.md', 8)).toBeNull();
   });
 });
