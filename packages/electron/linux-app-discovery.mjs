@@ -460,9 +460,16 @@ export const findLinuxFileManagerEntry = (entries, options = {}) => {
   }) || null;
 };
 
-const iconFileToDataUrl = (filePath) => {
+// Icons are display thumbnails: 512 KiB matches MAX_FAVICON_BYTES in
+// main.mjs (#817) — keep the two in sync. A .desktop Icon= path is
+// package-controlled content, so the read is stat-gated before the file
+// is buffered whole into a base64 string.
+export const MAX_INSTALLED_APP_ICON_BYTES = 512 * 1024;
+
+export const iconFileToDataUrl = (filePath) => {
   if (!filePath || !/\.png$/i.test(filePath)) return null;
   try {
+    if (fs.statSync(filePath).size > MAX_INSTALLED_APP_ICON_BYTES) return null;
     return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
   } catch {
     return null;

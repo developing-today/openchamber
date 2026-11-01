@@ -4118,6 +4118,11 @@ const resolveWindowsTerminalExecutable = () => {
 const imageFileToDataUrl = (filePath) => {
   if (!filePath) return null;
   try {
+    // Stat-gated at the favicon cap: an icon is a display thumbnail, and
+    // the path is package-controlled, so its size is not bounded by
+    // construction. Mirrors MAX_INSTALLED_APP_ICON_BYTES in
+    // linux-app-discovery.mjs — keep the 512 KiB values in sync.
+    if (fs.statSync(filePath).size > MAX_FAVICON_BYTES) return null;
     return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
   } catch {
     return null;
