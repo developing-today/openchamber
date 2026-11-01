@@ -1,4 +1,5 @@
 import { isRecord } from '../shared/guards.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -420,13 +421,29 @@ function readPluginDirFile(id, workingDirectory) {
   if (!fs.existsSync(target.absolutePath)) {
     return null;
   }
-  if (fs.statSync(target.absolutePath).size > MAX_PLUGIN_FILE_BYTES) {
-    throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
+  // The shared bounded read (design #1254) judges the file from its
+  // handle and enforces the cap during the read. Over-cap keeps this
+  // module's coded error; a file that vanishes after the existence check
+  // throws the ENOENT a stat would have thrown, and a non-regular file
+  // throws the EISDIR a read would have thrown.
+  const result = readBoundedFileSync(target.absolutePath, MAX_PLUGIN_FILE_BYTES);
+  if (!result.ok) {
+    if (result.reason === 'too-large') {
+      throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
+    }
+    if (result.reason === 'missing') {
+      const error = new Error(`ENOENT: no such file or directory, stat '${target.absolutePath}'`);
+      error.code = 'ENOENT';
+      throw error;
+    }
+    const error = new Error('EISDIR: illegal operation on a directory, read');
+    error.code = 'EISDIR';
+    throw error;
   }
   return {
     fileName: target.fileName,
     scope: target.scope,
-    content: fs.readFileSync(target.absolutePath, 'utf8'),
+    content: result.buffer.toString('utf8'),
   };
 }
 

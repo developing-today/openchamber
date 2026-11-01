@@ -11,6 +11,7 @@ import { createRequire } from 'module';
 import crypto from 'node:crypto';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { MAX_GIT_LOG_COUNT } from './log-limits.js';
@@ -3980,28 +3981,27 @@ const createFileDiffTooLargeError = (filePath) => Object.assign(
 // first, but a file can grow between that stat and the read, so this read
 // itself stops at maxBytes and rejects instead of buffering past the cap.
 export async function readFileDiffWorkingTreeFile(absolutePath, filePath, maxBytes = MAX_FILE_DIFF_WORKING_TREE_BYTES) {
-  const handle = await fsp.open(absolutePath, 'r');
-  try {
-    const chunks = [];
-    let total = 0;
-    let position = 0;
-    for (;;) {
-      const chunk = Buffer.alloc(64 * 1024);
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
-      if (bytesRead <= 0) {
-        break;
-      }
-      total += bytesRead;
-      if (total > maxBytes) {
-        throw createFileDiffTooLargeError(filePath);
-      }
-      position += bytesRead;
-      chunks.push(chunk.subarray(0, bytesRead));
-    }
-    return Buffer.concat(chunks, total);
-  } finally {
-    await handle.close();
+  // The shared bounded read (design #1254): the caller stats first, but a
+  // file can grow between that stat and the read, so the read itself
+  // enforces the cap. Outcomes map back onto this module's contract:
+  // over-cap throws the route's file_too_large error, a missing file
+  // throws the ENOENT the open would have thrown, and a non-regular file
+  // throws the EISDIR a read would have thrown.
+  const result = await readBoundedFile(absolutePath, maxBytes);
+  if (result.ok) {
+    return result.buffer;
   }
+  if (result.reason === 'too-large') {
+    throw createFileDiffTooLargeError(filePath);
+  }
+  if (result.reason === 'missing') {
+    const error = new Error(`ENOENT: no such file or directory, open '${absolutePath}'`);
+    error.code = 'ENOENT';
+    throw error;
+  }
+  const error = new Error('EISDIR: illegal operation on a directory, read');
+  error.code = 'EISDIR';
+  throw error;
 }
 
 function isImageFile(filePath) {

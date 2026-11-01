@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
 import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 
 const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
 const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');
@@ -37,11 +38,26 @@ function assertValidSnippetName(name) {
 }
 
 function parseMarkdownFile(filePath) {
-  const { size } = fs.statSync(filePath);
-  if (size > SNIPPET_FILE_MAX_BYTES) {
-    throw new Error(`Snippet file exceeds the ${SNIPPET_FILE_MAX_BYTES}-byte limit`);
+  // The shared bounded read (design #1254) judges the file from its handle
+  // and enforces the cap during the read. Its outcomes map back onto this
+  // module's existing contract: over-cap throws the limit error, a missing
+  // file throws the ENOENT a stat would have thrown, and a non-regular
+  // file throws the EISDIR a read would have thrown.
+  const result = readBoundedFileSync(filePath, SNIPPET_FILE_MAX_BYTES);
+  if (!result.ok) {
+    if (result.reason === 'too-large') {
+      throw new Error(`Snippet file exceeds the ${SNIPPET_FILE_MAX_BYTES}-byte limit`);
+    }
+    if (result.reason === 'missing') {
+      const error = new Error(`ENOENT: no such file or directory, stat '${filePath}'`);
+      error.code = 'ENOENT';
+      throw error;
+    }
+    const error = new Error(`EISDIR: illegal operation on a directory, read`);
+    error.code = 'EISDIR';
+    throw error;
   }
-  const content = fs.readFileSync(filePath, 'utf8');
+  const content = result.buffer.toString('utf8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
     return { frontmatter: {}, body: content.trim() };
