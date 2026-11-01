@@ -5,6 +5,7 @@ import yaml from 'yaml';
 
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
@@ -23,36 +24,26 @@ export function isGitOutputTooLarge(result) {
 }
 
 export async function readSkillMdFile(filePath) {
-  // Open once and read from the handle: stat-then-readFile by path would
-  // follow a symlink to a device or FIFO (stat size 0) and buffer without
-  // bound, and a file swapped or grown between the two calls escapes the
-  // gate. A non-regular file throws so the caller falls back to git show.
-  // O_NONBLOCK (POSIX only) keeps open() itself from blocking on a FIFO
-  // with no writer before handle.stat() can reject it as non-regular.
-  const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
-  const handle = await fs.promises.open(filePath, openFlags);
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile()) {
-      throw new Error(`SKILL.md is not a regular file: ${filePath}`);
-    }
-    if (stat.size > SKILL_MD_MAX_BYTES) {
-      return { tooLarge: true, content: '' };
-    }
-    const buffer = Buffer.alloc(SKILL_MD_MAX_BYTES + 1);
-    let total = 0;
-    while (total < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
-      if (bytesRead === 0) break;
-      total += bytesRead;
-    }
-    if (total > SKILL_MD_MAX_BYTES) {
-      return { tooLarge: true, content: '' };
-    }
-    return { tooLarge: false, content: buffer.toString('utf8', 0, total) };
-  } finally {
-    await handle.close();
+  // The shared bounded read (design #1254) does the open-once,
+  // handle-judged, cap-enforced-in-flight read this module originated.
+  // Its outcomes are mapped back onto this module's existing contract:
+  // over-cap is an answer, while missing and non-regular files throw so
+  // the caller falls back to git show exactly as before (a non-regular
+  // file there throws, and a missing file's git show reports the failure
+  // the caller already handles).
+  const result = await readBoundedFile(filePath, SKILL_MD_MAX_BYTES);
+  if (result.ok) {
+    return { tooLarge: false, content: result.buffer.toString('utf8') };
   }
+  if (result.reason === 'too-large') {
+    return { tooLarge: true, content: '' };
+  }
+  if (result.reason === 'missing') {
+    const error = new Error(`ENOENT: no such file or directory, open '${filePath}'`);
+    error.code = 'ENOENT';
+    throw error;
+  }
+  throw new Error(`SKILL.md is not a regular file: ${filePath}`);
 }
 
 function validateSkillName(skillName) {
