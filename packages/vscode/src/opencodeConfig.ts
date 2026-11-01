@@ -1465,9 +1465,14 @@ export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
   return files.sort((a, b) => `${a.scope}:${a.fileName}`.localeCompare(`${b.scope}:${b.fileName}`));
 };
 
+export const MAX_PLUGIN_FILE_BYTES = 1024 * 1024;
+
 export const readPluginDirFile = (id: string, workingDirectory?: string): { fileName: string; scope: PluginScope; content: string } | null => {
   const target = getPluginFileTarget(id, workingDirectory);
   if (!fs.existsSync(target.filePath)) return null;
+  if (fs.statSync(target.filePath).size > MAX_PLUGIN_FILE_BYTES) {
+    throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
+  }
   return {
     fileName: target.fileName,
     scope: target.scope,
