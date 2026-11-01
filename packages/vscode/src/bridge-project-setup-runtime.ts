@@ -224,7 +224,13 @@ export const createProjectSetupStore = (
         await fs.promises.rm(sharedPath, { force: true });
         await fs.promises.rmdir(path.dirname(sharedPath)).catch(() => {});
       } else {
-        await writeJsonAtomic(sharedPath, serializeSharedProjectConfig(nextShared));
+        const serialized = serializeSharedProjectConfig(nextShared);
+        if (Buffer.byteLength(serialized, 'utf8') > SHARED_PROJECT_CONFIG_MAX_BYTES) {
+          throw new ProjectSetupValidationError(
+            `shared project config is too large: ${sharedPath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+          );
+        }
+        await writeJsonAtomic(sharedPath, serialized);
       }
       const hash = sharedTrustHashOf(nextShared);
       const personalNext: Record<string, unknown> = { ...personalRaw };

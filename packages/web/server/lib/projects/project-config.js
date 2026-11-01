@@ -1113,10 +1113,16 @@ export const createProjectConfigRuntime = (deps) => {
         await fsPromises.rm(filePath, { force: true });
         await fsPromises.rmdir(path.dirname(filePath)).catch(() => {});
       } else {
+        const serialized = serializeSharedProjectConfig(next);
+        if (Buffer.byteLength(serialized, 'utf8') > SHARED_PROJECT_CONFIG_MAX_BYTES) {
+          throw new Error(
+            `shared project config is too large: ${filePath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+          );
+        }
         await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
         const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
         try {
-          await fsPromises.writeFile(temporaryPath, serializeSharedProjectConfig(next), 'utf8');
+          await fsPromises.writeFile(temporaryPath, serialized, 'utf8');
           await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
         } catch (error) {
           await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});

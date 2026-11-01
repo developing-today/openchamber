@@ -529,6 +529,24 @@ describe('project setup runtime', () => {
     }
   });
 
+  it('refuses to persist a shared file over the size cap instead of writing an unreadable one', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const repo = path.join(tempRoot, 'repo');
+      await mkdir(repo, { recursive: true });
+      const projectId = createProjectIdFromPath(repo);
+      const projectActions = Array.from({ length: 260 }, (_, index) => ({
+        id: `action-${index}`,
+        name: `Action ${index}`,
+        command: 'x'.repeat(4000),
+      }));
+      await expect(runtime.updateSharedProjectSetup(projectId, { projectActions })).rejects.toThrow('too large');
+      await expect(readFile(path.join(repo, '.openchamber', 'project.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('refuses to write the shared file for a checkout that does not exist and on a bad patch', async () => {
     const { runtime, tempRoot, cleanup } = await createRuntime();
     try {

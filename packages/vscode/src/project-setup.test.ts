@@ -270,6 +270,21 @@ describe('project setup bridge', () => {
     });
   });
 
+  test('refuses to persist a shared file over the size cap instead of writing an unreadable one', async () => {
+    await withStore(async (store, dir) => {
+      const repo = path.join(dir, 'repo');
+      await fs.promises.mkdir(repo, { recursive: true });
+      const projectId = projectIdFor(repo);
+      const projectActions = Array.from({ length: 260 }, (_, index) => ({
+        id: `action-${index}`,
+        name: `Action ${index}`,
+        command: 'x'.repeat(4000),
+      }));
+      await assert.rejects(store.updateShared(projectId, { projectActions }), /too large/);
+      assert.equal(fs.existsSync(path.join(repo, '.openchamber', 'project.json')), false);
+    });
+  });
+
   test('writes and removes the shared file through the bridge, trusting the writer', async () => {
     await withStore(async (store, dir) => {
       const repo = path.join(dir, 'repo');
