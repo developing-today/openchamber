@@ -8,6 +8,20 @@ const HANDSHAKE_TIMEOUT_MS = 15_000;
 const MAX_PENDING_BYTES = 256 * 1024;
 /** A peer further behind than this after connect is closed as too slow (event-stream precedent). */
 const MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
+/**
+ * Largest single WebSocket frame the proxy accepts from a client. ws
+ * assembles a whole message before 'message' fires, so without an explicit
+ * maxPayload one frame up to the ws default of 100 MiB was assembled and
+ * forwarded whole, bypassing the post-assembly caps above (#1109). Sized
+ * above the dictation 512 KiB legitimate-audio-frame precedent and far
+ * below the 100 MiB default. Under Node the ws layer refuses an oversized
+ * frame (close 1009) before assembly; under Bun the bundled ws does not
+ * enforce maxPayload, so the message handler below ALSO checks the
+ * assembled size and drops the pair before the frame is forwarded or
+ * queued (dev-tunnel #1082 precedent). Either way no oversized frame is
+ * ever forwarded.
+ */
+export const REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES = 1024 * 1024;
 
 const isAllowedSsePath = (pathname) => {
   return pathname === '/api/event'
@@ -199,7 +213,7 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
     }
   });
 
-  const wsServer = new WebSocketServer({ noServer: true });
+  const wsServer = new WebSocketServer({ noServer: true, maxPayload: REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES });
 
   wsServer.on('connection', (client, request) => {
     const resolved = resolveProxyTarget(request, getDesktopRuntimeConfig, 'ws');
@@ -258,6 +272,14 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
     };
 
     client.on('message', (data, isBinary) => {
+      // Per-frame bound (#1109): maxPayload alone is not enforced by the
+      // bundled ws under every runtime (Bun delivers the oversized message
+      // whole), so refuse it here — before it is forwarded or queued —
+      // with the same 1009 the ws layer would have used.
+      if (data.length > REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES) {
+        closePair(1009, 'Realtime proxy frame too large');
+        return;
+      }
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(data, { binary: isBinary });
         closeIfPeerTooSlow(upstream);

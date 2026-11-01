@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { createPersistentPtyWsRuntime } from './runtime.js';
+import { PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES, createPersistentPtyWsRuntime } from './runtime.js';
 
 const PTY_ID = 'pty_abc-123';
 const CONNECT_PATH = `/api/experimental/persistent-pty/${PTY_ID}/connect`;
@@ -97,6 +97,33 @@ it('proxies framed input and output for a persistent PTY connection', async () =
   expect(upstream.searchParams.get('location[directory]')).toBe('/tmp/proj');
   expect(upstream.searchParams.has('ticket')).toBe(false);
   expect(upstreamReceived[0].auth).toBe('Basic b3Bj');
+  socket.close();
+});
+
+it('refuses a single frame over the maxPayload cap with 1009 and forwards nothing upstream', async () => {
+  const forwarded = [];
+  const { port } = await setupFixture({
+    upstreamHandler: (_ws, data) => { forwarded.push(Buffer.from(data)); },
+  });
+  const { socket, opened } = await openSocket(`ws://127.0.0.1:${port}${CONNECT_PATH}?role=controller`);
+  expect(opened).toBe(true);
+  await socket.next();
+  const closed = new Promise((resolve) => socket.once('close', (code) => resolve(code)));
+  socket.send(Buffer.alloc(PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES + 1, 0x65));
+  expect(await closed).toBe(1009);
+  expect(forwarded).toEqual([]);
+});
+
+it('forwards a single frame at the maxPayload cap byte-identically', async () => {
+  const { port } = await setupFixture();
+  const { socket, opened } = await openSocket(`ws://127.0.0.1:${port}${CONNECT_PATH}?role=controller`);
+  expect(opened).toBe(true);
+  await socket.next();
+  const frame = Buffer.alloc(PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES, 0x66);
+  socket.send(frame);
+  const echoed = await socket.next();
+  expect(echoed.data).toEqual(frame);
+  expect(echoed.isBinary).toBe(true);
   socket.close();
 });
 
