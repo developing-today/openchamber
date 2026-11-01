@@ -371,16 +371,23 @@ export const createProjectContextRuntime = (deps) => {
 
       let raw = null;
       try {
-        raw = await fsPromises.readFile(targetPath, 'utf8');
+        raw = await readPlanFile(targetPath);
       } catch (error) {
-        if (!error || error.code !== 'ENOENT') throw error;
+        // An over-cap legacy plan is skipped, never buffered whole: the
+        // cap is a property of the module, and the migration still
+        // completes for the remaining items.
+        if (!error || error.status !== 413) throw error;
+        continue;
+      }
+      if (raw === null) {
         // Not in the plans directory yet — recover it from the recorded path.
         try {
-          raw = await fsPromises.readFile(absolutePath, 'utf8');
+          raw = await readPlanFile(absolutePath);
         } catch (recoverError) {
-          if (!recoverError || recoverError.code !== 'ENOENT') throw recoverError;
+          if (!recoverError || recoverError.status !== 413) throw recoverError;
           continue;
         }
+        if (raw === null) continue;
         await fsPromises.mkdir(plansDir, { recursive: true });
         await fsPromises.writeFile(targetPath, raw, 'utf8');
       }
@@ -826,8 +833,11 @@ export const createProjectContextRuntime = (deps) => {
     }
     const raw = clampLength(value.raw, PROJECT_PLAN_BODY_MAX_LENGTH);
     const checkExpectedRaw = async (filePath) => {
-      if (expectedRaw.data !== undefined
-        && await fsPromises.readFile(filePath, 'utf8') !== expectedRaw.data) {
+      if (expectedRaw.data === undefined) return;
+      // Compare through the capped read: an over-cap current file is
+      // refused (413) instead of being buffered whole for the compare.
+      const currentRaw = await readPlanFile(filePath);
+      if (currentRaw !== expectedRaw.data) {
         throw mutationError('Plan changed; reload before saving', 409);
       }
     };
@@ -1072,13 +1082,11 @@ export const createProjectContextRuntime = (deps) => {
       const sharedFile = ownLink ? ownLink.file : sharedPlanFileOf(id);
       if (!sharedFile) return null;
       const from = path.join(dir, sharedFile);
-      let raw;
-      try {
-        raw = await fsPromises.readFile(from, 'utf8');
-      } catch (error) {
-        if (error && error.code === 'ENOENT') return null;
-        throw error;
-      }
+      // The title is all that is read here, and it goes through the
+      // capped read: an over-cap shared plan is refused (413), never
+      // buffered whole just to parse its first line.
+      const raw = await readPlanFile(from);
+      if (raw === null) return null;
       const plansDir = plansDirFor(projectId);
       await fsPromises.mkdir(plansDir, { recursive: true });
       const taken = new Set(current.plans.filter((entry) => !entry.shared).map((entry) => entry.file));

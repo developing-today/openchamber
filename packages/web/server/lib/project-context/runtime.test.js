@@ -343,6 +343,23 @@ describe('legacy migration', () => {
     expect(context.plans).toEqual([]);
   });
 
+  test('skips an over-cap legacy plan instead of buffering it, and still migrates the rest', async () => {
+    await fsPromises.mkdir(plansDir(), { recursive: true });
+    await fsPromises.writeFile(path.join(plansDir(), '10-big.md'), `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`, 'utf8');
+    await fsPromises.writeFile(path.join(plansDir(), '11-old.md'), '# Old plan\n\nbody here', 'utf8');
+    await writeJson(legacyConfigPath(), {
+      projectNotes: 'legacy notes',
+      projectPlanFiles: [
+        { id: 'p1', path: path.join(plansDir(), '10-big.md'), createdAt: 10 },
+        { id: 'p2', path: path.join(plansDir(), '11-old.md'), createdAt: 11 },
+      ],
+    });
+
+    const context = await runtime.readContext(PROJECT_ID);
+    expect(context.notes.map((note) => note.body)).toEqual(['legacy notes']);
+    expect(context.plans).toEqual([{ id: 'p2', file: '11-old.md', title: 'Old plan', createdAt: 11, pinned: false, source: 'personal' }]);
+  });
+
   test('does not run when the legacy config holds no context keys', async () => {
     await writeJson(legacyConfigPath(), { 'setup-worktree': ['bun install'] });
 
@@ -910,6 +927,31 @@ describe('shared plans', () => {
     expect(bigReads).toBe(0);
     expect(await counting.readPlan(PROJECT_ID, 'shared:missing.md')).toBeNull();
     expect((await counting.readPlan(PROJECT_ID, 'shared:small.md')).raw).toBe('# Small\n\n## Steps\n- [x] one\n');
+  });
+
+  test('an over-cap shared plan is refused by unsharePlan and by an expectedRaw update, without a whole-file read', async () => {
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'big.md'), `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    let bigReads = 0;
+    const counting = createProjectContextRuntime({
+      fsPromises: {
+        ...fsPromises,
+        readFile: (...args) => {
+          if (String(args[0]).endsWith('big.md')) bigReads += 1;
+          return fsPromises.readFile(...args);
+        },
+      },
+      path,
+      projectsDirPath,
+      createId: () => `plan-${++idCounter}`,
+      resolveSharedPlansDir: async () => sharedDir,
+    });
+
+    await expect(counting.unsharePlan(PROJECT_ID, 'shared:big.md')).rejects.toThrow('too large');
+    await expect(counting.updatePlan(PROJECT_ID, 'shared:big.md', { raw: '# Big\n' }, { expectedRaw: '# Big\n' })).rejects.toThrow('too large');
+    expect(bigReads).toBe(0);
+    // The refused unshare leaves the file in the shared folder.
+    expect(await fsPromises.readFile(path.join(sharedDir, 'big.md'), 'utf8')).toContain('# Big');
   });
 
   test('an over-cap personal plan is listed as tooLarge in the context', async () => {
