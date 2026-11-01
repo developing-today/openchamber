@@ -9,8 +9,20 @@ import {
 } from '@openchamber/sdk';
 
 import { dropGuestTokens, getGuestAuth, patchGuestAuth } from './auth-store.js';
+import { readBoundedResponseText } from './response-body.js';
 
 const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
+
+/**
+ * The most a guest-declared OAuth answer (a token response, or the account
+ * probe that only yields one label) may weigh. Token answers are a few
+ * hundred bytes and an account label is one short string, so the cap follows
+ * the 64 KiB token-answer precedent in spaces/login-keeper.js (#842): the
+ * bounded reader enforces it while the answer streams in, so a chunked body
+ * with no declared length cannot grow server memory past it before being
+ * refused.
+ */
+export const GUEST_OAUTH_RESPONSE_MAX = 64 * 1024;
 
 const pendingByState = new Map();
 const pendingByGuestId = new Map();
@@ -117,6 +129,28 @@ const readTokenError = (payload, status) => {
   return description || `Token request failed (${status})`;
 };
 
+/**
+ * Reads a token-endpoint answer through the bounded reader and parses it,
+ * preserving the old bare response.json() semantics for in-cap bodies: an
+ * unparseable body is a null payload, never a throw. An over-cap body is
+ * refused with RESPONSE_TOO_LARGE instead, so it can never fall through as
+ * a silent null payload / empty-token error.
+ */
+const readBoundedJsonPayload = async (response) => {
+  const body = await readBoundedResponseText(response, GUEST_OAUTH_RESPONSE_MAX);
+  if (body.tooLarge) {
+    throw new GuestOAuthError(
+      `The token endpoint answered with more than ${GUEST_OAUTH_RESPONSE_MAX} bytes.`,
+      'RESPONSE_TOO_LARGE',
+    );
+  }
+  try {
+    return JSON.parse(body.text);
+  } catch {
+    return null;
+  }
+};
+
 const postForm = async (url, body) => {
   const response = await fetch(url, {
     method: 'POST',
@@ -127,7 +161,7 @@ const postForm = async (url, body) => {
     body: new URLSearchParams(body).toString(),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
-  const payload = await response.json().catch(() => null);
+  const payload = await readBoundedJsonPayload(response);
   if (!response.ok) {
     throw new GuestOAuthError(readTokenError(payload, response.status));
   }
@@ -144,7 +178,7 @@ const postJson = async (url, body) => {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
-  const payload = await response.json().catch(() => null);
+  const payload = await readBoundedJsonPayload(response);
   if (!response.ok) {
     throw new GuestOAuthError(readTokenError(payload, response.status));
   }
@@ -222,7 +256,16 @@ const fetchAccountLabel = async (api, accessToken) => {
   if (!response.ok) {
     return { ok: false, account: '' };
   }
-  const payload = await response.json().catch(() => null);
+  const body = await readBoundedResponseText(response, GUEST_OAUTH_RESPONSE_MAX);
+  if (body.tooLarge) {
+    return { ok: false, account: '' };
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(body.text);
+  } catch {
+    payload = null;
+  }
   return { ok: true, account: readAccountLabel(payload, api.account.name) };
 };
 
