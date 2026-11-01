@@ -536,9 +536,51 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
             body: JSON.stringify({ input: args, sessionID: context.sessionID, callID: context.id, tool: ${JSON.stringify(name)} }),
             signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}
           })
-          const content = await response.text()
+          // The callback response is read through a bounded stream, not
+          // response.text(): a loopback body with no end would otherwise be
+          // buffered whole into the OpenCode process. The generated source
+          // is a template string with no imports, so the shared bounded-read
+          // primitive cannot be reused and the cap is spelled out here: one
+          // named constant, sized like the codebase's other 16 MiB catalog
+          // caps and generously above any legitimate action result. A body
+          // over the cap is refused while it streams in (the stream is
+          // cancelled as soon as it crosses, and a declared Content-Length
+          // over the cap is refused up front), and the read then returns
+          // null, which falls through to the same invalid-response failure
+          // envelope below - no throw escapes, no partial content returned.
+          // Ordinary actions deliberately get no fetch deadline of their
+          // own: the session signal above aborts them when the session is
+          // stopped, and Bun's fetch idle timeout (about six minutes with
+          // no response) is the intended outer bound for a stalled body; a
+          // shorter deadline would cut legitimate long actions short. The
+          // awaitAnswer wait is separate and keeps its timeout: false.
+          const AGENT_TOOL_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
+          const readBoundedContent = async () => {
+            const declared = Number(response.headers?.get("content-length"))
+            if (Number.isFinite(declared) && declared > AGENT_TOOL_RESPONSE_MAX_BYTES) {
+              await response.body?.cancel().catch(() => {})
+              return null
+            }
+            const reader = response.body?.getReader()
+            if (!reader) return ""
+            const decoder = new TextDecoder()
+            let text = ""
+            let size = 0
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              size += value.byteLength
+              if (size > AGENT_TOOL_RESPONSE_MAX_BYTES) {
+                await reader.cancel().catch(() => {})
+                return null
+              }
+              text += decoder.decode(value, { stream: true })
+            }
+            return text + decoder.decode()
+          }
+          const content = await readBoundedContent()
           let result = null
-          try { result = JSON.parse(content) } catch {}
+          try { if (content !== null) result = JSON.parse(content) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
           await progress({ ok: valid && result.ok === true })
           if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
