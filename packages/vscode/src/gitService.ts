@@ -2825,8 +2825,25 @@ export async function getGitFileDiff(
     };
   }
 
+  if (!staged) {
+    // The size gate runs ahead of the repository gate and any repo.show
+    // reads: for an untracked file repo.show throws before the in-repo
+    // gate below can run, and with no repository there is no gate at
+    // all, so an oversized file on either path used to fall through to
+    // the silent empty-diff fallback (#1065). A stat failure (e.g. a
+    // deleted file) falls through to the existing handling.
+    try {
+      const earlyStat = await vscode.workspace.fs.stat(vscode.Uri.file(path.join(directory, filePath)));
+      if (earlyStat.size > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+        return fileDiffTooLarge(filePath);
+      }
+    } catch {
+      // Fall through: the repo path and fallback decide the answer.
+    }
+  }
+
   const repo = await getRepository(directory);
-  
+
   if (repo) {
     try {
       // For staged files, get content from HEAD
