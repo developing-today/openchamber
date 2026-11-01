@@ -270,7 +270,7 @@ const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
 const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
 
 function isConfigFileTooLargeError(error) {
-  return Boolean(error && typeof error === 'object' && error.code === CONFIG_FILE_TOO_LARGE);
+  return Boolean(error && error.code === CONFIG_FILE_TOO_LARGE);
 }
 
 function assertConfigFileWithinCap(filePath) {
@@ -605,17 +605,14 @@ function writeConfig(config, filePath = CONFIG_FILE) {
   try {
     let existingRaw = '';
     let existingParse = null;
-    if (fs.existsSync(filePath)) {
+    const hadExistingFile = fs.existsSync(filePath);
+    if (hadExistingFile) {
       // Defense in depth: never overwrite a file we cannot fully parse.
       assertConfigFileWithinCap(filePath);
       existingRaw = fs.readFileSync(filePath, 'utf8');
       if (existingRaw.trim()) {
         existingParse = parseConfigResult(existingRaw.trim(), filePath);
       }
-
-      const backupFile = `${filePath}.openchamber.backup`;
-      fs.copyFileSync(filePath, backupFile);
-      console.log(`Created config backup: ${backupFile}`);
     }
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -634,6 +631,15 @@ function writeConfig(config, filePath = CONFIG_FILE) {
       );
       error.code = CONFIG_FILE_TOO_LARGE;
       throw error;
+    }
+    // The backup is part of the write, so it is created only once the
+    // write is known acceptable: a refused write (unparseable, over-cap,
+    // or a serialized result over the cap) leaves the previous backup —
+    // the restore point from the last successful write — untouched.
+    if (hadExistingFile) {
+      const backupFile = `${filePath}.openchamber.backup`;
+      fs.copyFileSync(filePath, backupFile);
+      console.log(`Created config backup: ${backupFile}`);
     }
     writeFileAtomic(filePath, content);
     console.log(`Successfully wrote config file: ${filePath}`);
