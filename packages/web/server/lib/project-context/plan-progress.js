@@ -12,6 +12,17 @@ const STEPS_HEADING = /^##\s+steps\s*$/i;
 const SECTION_END = /^#{1,2}\s/;
 const CHECKLIST_ITEM = /^\s*[-*+]\s+\[([ xX])\]\s/;
 
+/**
+ * Largest plan file the read paths will buffer whole, in bytes.
+ *
+ * Plans this app writes are clamped to 200,000 characters
+ * (PROJECT_PLAN_BODY_MAX_LENGTH in runtime.js) - at most ~800,000 bytes of
+ * UTF-8 - but shared plan files are also written by other tools with no
+ * clamp. 1 MiB leaves headroom over every app-written plan while keeping
+ * one oversized file from being loaded whole into the server.
+ */
+export const PLAN_FILE_READ_MAX_BYTES = 1024 * 1024;
+
 /** `{ done, total }` for a plan with a `## Steps` checklist, null otherwise. */
 export const parsePlanProgress = (raw) => {
   const lines = raw.replace(/\r\n?/g, '\n').split('\n');
@@ -58,6 +69,11 @@ export const createPlanSummaryCache = ({ fsPromises, parseTitle }) => {
     const cached = entries.get(filePath);
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
       return cached.summary;
+    }
+    if (stat.size > PLAN_FILE_READ_MAX_BYTES) {
+      const summary = { title: 'Plan', progress: null, mtimeMs: stat.mtimeMs, tooLarge: true };
+      entries.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, summary });
+      return summary;
     }
     const raw = await fsPromises.readFile(filePath, 'utf8');
     const summary = { title: parseTitle(raw), progress: parsePlanProgress(raw), mtimeMs: stat.mtimeMs };

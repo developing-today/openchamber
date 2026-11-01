@@ -15,7 +15,7 @@
 import { renameWithRetry } from '../shared/atomic-rename.js';
 import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
-import { createPlanSummaryCache } from './plan-progress.js';
+import { createPlanSummaryCache, PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
 import { z } from 'zod';
 
 const optionalTextInput = z.string().optional();
@@ -486,14 +486,16 @@ export const createProjectContextRuntime = (deps) => {
       const summary = await planSummaries.summaryOf(path.join(dir, entry.name));
       // Removed between the directory read and this one.
       if (!summary) continue;
-      plans.push(withProgress({
+      const listed = {
         id: `${SHARED_PLAN_ID_PREFIX}${entry.name}`,
         file: entry.name,
         title: summary.title,
         createdAt: Math.round(summary.mtimeMs),
         pinned: false,
         source: 'shared',
-      }, summary.progress));
+      };
+      if (summary.tooLarge) listed.tooLarge = true;
+      plans.push(withProgress(listed, summary.progress));
     }
     plans.sort((left, right) => right.createdAt - left.createdAt);
     return { dir, plans };
@@ -732,6 +734,32 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
+  /**
+   * Read a plan file whole, gated on its size: a plan over
+   * PLAN_FILE_READ_MAX_BYTES is refused (413) from its stat alone, so an
+   * oversized file other tools wrote is never buffered whole. A missing
+   * file returns null, the answer readPlan has always given for a plan
+   * that is gone.
+   */
+  const readPlanFile = async (planPath) => {
+    let stat;
+    try {
+      stat = await fsPromises.stat(planPath);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+    if (stat.size > PLAN_FILE_READ_MAX_BYTES) {
+      throw mutationError(`Plan file is too large to read (${stat.size} bytes; limit is ${PLAN_FILE_READ_MAX_BYTES} bytes)`, 413);
+    }
+    try {
+      return await fsPromises.readFile(planPath, 'utf8');
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+  };
+
   const readPlan = async (projectId, planId) => {
     const id = asNonEmptyString(planId);
     if (!id) {
@@ -742,13 +770,8 @@ export const createProjectContextRuntime = (deps) => {
       const dir = await sharedPlansDirFor(projectId);
       if (!dir) return null;
       const planPath = path.join(dir, sharedFile);
-      let raw;
-      try {
-        raw = await fsPromises.readFile(planPath, 'utf8');
-      } catch (error) {
-        if (error && error.code === 'ENOENT') return null;
-        throw error;
-      }
+      const raw = await readPlanFile(planPath);
+      if (raw === null) return null;
       const parsed = parsePlanMarkdown(raw);
       return { id, file: sharedFile, path: planPath, createdAt: 0, title: parsed.title, body: parsed.body, raw, source: 'shared' };
     }
@@ -761,13 +784,8 @@ export const createProjectContextRuntime = (deps) => {
     const folder = await folderOfLink(projectId, link);
     if (!folder) return null;
     const planPath = path.join(folder, link.file);
-    let raw;
-    try {
-      raw = await fsPromises.readFile(planPath, 'utf8');
-    } catch (error) {
-      if (error && error.code === 'ENOENT') return null;
-      throw error;
-    }
+    const raw = await readPlanFile(planPath);
+    if (raw === null) return null;
 
     const parsed = parsePlanMarkdown(raw);
     return { id: link.id, file: link.file, path: planPath, createdAt: link.createdAt, title: parsed.title, body: parsed.body, raw, source: link.shared ? 'shared' : 'personal' };

@@ -3,7 +3,7 @@ import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createPlanSummaryCache, parsePlanProgress } from './plan-progress.js';
+import { createPlanSummaryCache, parsePlanProgress, PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
 
 describe('parsePlanProgress', () => {
   test('counts the ticked and open steps of the ## Steps checklist', () => {
@@ -51,6 +51,13 @@ describe('createPlanSummaryCache', () => {
 
       await fsPromises.rm(file);
       expect(await cache.summaryOf(file)).toBeNull();
+
+      await fsPromises.writeFile(file, `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+      const readsBefore = reads;
+      const big = await cache.summaryOf(file);
+      expect(big.tooLarge).toBe(true);
+      expect(big.progress).toBeNull();
+      expect(reads).toBe(readsBefore);
     } finally {
       await fsPromises.rm(dir, { recursive: true, force: true });
     }

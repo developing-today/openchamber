@@ -196,6 +196,13 @@ Clients re-read authoritative context for the visible owner. This is a commit no
   instead of silently evicting the oldest entry.
 - **Per-entry sanitization never fails the whole read.** A malformed todo or
   plan link is dropped; the rest of the context still loads.
+- **Plan reads are size-gated on stat, before any read.** App writes clamp
+  plan bodies to 200,000 characters, but shared plan files are written by
+  other tools with no clamp, so `summaryOf` and `readPlan` compare
+  `stat.size` against `PLAN_FILE_READ_MAX_BYTES` (1 MiB) first: an over-cap
+  plan's list entry degrades to `tooLarge` with no progress (the rest of the
+  list still loads), `readPlan` answers 413, and a missing file still reads
+  as gone rather than as too large.
 
 ## Legacy migration
 
