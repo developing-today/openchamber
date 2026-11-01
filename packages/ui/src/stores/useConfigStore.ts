@@ -26,6 +26,7 @@ import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier
 import type { ModelRef } from "@/lib/settings/parsers";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { readBoundedResponseText } from "@/lib/boundedResponse";
 import { ensureDisabledProviders } from "@/lib/disabledProviders";
 import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
@@ -43,6 +44,12 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-sw
 import { readCachedCatalog, shouldHoldFirstLoadAgainstCache, writeCachedCatalogWhenSettled, type CachedCatalog } from "./configCatalogCache";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
+
+// Mirrors the server twin in packages/web/server/lib/opencode/models-metadata.js
+// (#1006): the models.dev catalog is several megabytes, so the 16 MiB cap is
+// generous on purpose. The deadline bounds time, the cap bounds memory, and
+// an over-cap body throws like a fetch failure so the next source is tried.
+export const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
 
 const FALLBACK_PROVIDER_ID = "opencode";
@@ -728,7 +735,7 @@ const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata
     return metadataMap;
 };
 
-const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => {
+export const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => {
     if (typeof fetch !== 'function') {
         return new Map();
     }
@@ -763,7 +770,7 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
                 throw new Error(`Metadata request to ${source} returned status ${response.status}`);
             }
 
-            const data = await response.json();
+            const data: unknown = JSON.parse(await readBoundedResponseText(response, MODELS_DEV_CATALOG_MAX_BYTES));
             return transformModelsDevResponse(data);
         } catch (error: unknown) {
             if ((error as Error)?.name === 'AbortError') {
