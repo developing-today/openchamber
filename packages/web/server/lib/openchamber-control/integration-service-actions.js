@@ -156,7 +156,7 @@ const GITLAB_DEFAULT_INSTANCE = 'https://gitlab.com';
  * name a stored account, not a secret) stay. A name like `monkey` also ends
  * in `key` and is treated as a secret on both sides, fail-closed.
  */
-const SECRET_KEY = /(?:tokens?|secrets?|passwords?|passwd|passphrases?|api[-_]?keys?|keys?|cookies?|authorization)$/i;
+const SECRET_KEY = /(?:tokens?|secrets?|passwords?|passwd|passphrases?|api[-_]?keys?|keys?|cookies?|authorizations?)$/i;
 
 const badRequest = (message) => new OpenChamberControlError(message, 400);
 

@@ -20,7 +20,7 @@ const expectError = async (promise, status, pattern) => {
 
 /** Operations shaped like the route modules return them; every answer carries the seeded token under secret-named keys. */
 const makeOperations = () => {
-  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED, apiKey: SEED, api_key: SEED, cookie: SEED, authorization: SEED, privateKey: SEED, accessKey: SEED, sshKey: SEED, licenseKey: SEED, private_key: SEED, key: SEED, privateKeys: SEED, accessKeys: SEED, apiKeys: SEED, tokens: SEED, secrets: SEED, passwords: SEED, keys: SEED, cookies: SEED };
+  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED, apiKey: SEED, api_key: SEED, cookie: SEED, authorization: SEED, authorizations: SEED, privateKey: SEED, accessKey: SEED, sshKey: SEED, licenseKey: SEED, private_key: SEED, key: SEED, privateKeys: SEED, accessKeys: SEED, apiKeys: SEED, tokens: SEED, secrets: SEED, passwords: SEED, keys: SEED, cookies: SEED };
   const ok = (body) => ({ status: 200, body: { ...body, ...leak } });
   const guest = {
     id: 'acme', name: 'Acme', version: '1.0.0', source: 'git', enabled: true,
@@ -191,6 +191,7 @@ describe('secrets never leave', () => {
     await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { apiKeys: 'x' } }), 400, /looks like a secret/);
     await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { passwords: 'x' } }), 400, /looks like a secret/);
     await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { keys: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { authorizations: 'x' } }), 400, /extensionSettings\.authorizations looks like a secret/);
     // `monkey` ends in `key`; both guards treat it as a secret, fail-closed.
     await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { monkey: 'x' } }), 400, /looks like a secret/);
     await expectError(run('linear.mapping', { linearMapping: { clientSecret: 'x' } }), 400, /looks like a secret/);
