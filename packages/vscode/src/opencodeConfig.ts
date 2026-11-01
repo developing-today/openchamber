@@ -2006,7 +2006,23 @@ export const getAgentPermissions = (agentName: string, workingDirectory?: string
   };
 };
 
-const parseMdFile = (filePath: string): { frontmatter: Record<string, unknown>; body: string } => {
+// Agent, command, skill and snippet markdown files are hand-maintained;
+// nothing bounds their on-disk size, so never buffer one whole past this cap
+// (same 4 MiB precedent as MD_FILE_MAX_BYTES in the web parser,
+// packages/web/server/lib/opencode/shared.js). Judged from stat before any
+// read: a file over the cap is refused with a coded error, never truncated.
+// Discovery walks that call this parser already skip a file whose parse
+// throws; single-entity reads surface the error to the caller.
+export const MD_FILE_MAX_BYTES = 4 * 1024 * 1024;
+
+export const parseMdFile = (filePath: string): { frontmatter: Record<string, unknown>; body: string } => {
+  const stats = fs.statSync(filePath);
+  if (stats.size > MD_FILE_MAX_BYTES) {
+    throw codedError(
+      `Markdown file exceeds the ${MD_FILE_MAX_BYTES}-byte size limit: ${filePath}`,
+      'ERR_MD_FILE_TOO_LARGE',
+    );
+  }
   const content = fs.readFileSync(filePath, 'utf8');
   // The closing fence may end the file: an agent with no system prompt has
   // nothing after it.
