@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -29,8 +30,8 @@ export const registerBuiltInGuests = async ({ persistPath, root }) => {
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
 /**
- * Byte cap for one guest asset on the serve path and for the entry HTML
- * read during package inspection, judged from stat before any read.
+ * Byte cap for one guest asset on the serve path and for the manifest and
+ * entry HTML reads during package inspection, judged from stat before reading.
  * Sized to the in-feature precedent: files.js refuses file content over
  * GUEST_FILE_CONTENT_MAX (2,000,000) before reading it.
  */
@@ -41,6 +42,38 @@ const fileSizeOrNull = async (filePath) => {
     return (await fs.stat(filePath)).size;
   } catch {
     return null;
+  }
+};
+
+const readGuestManifest = async (manifestPath) => {
+  let handle;
+  try {
+    const nonBlockingFlag = process.platform === 'win32' ? 0 : (fsConstants.O_NONBLOCK ?? 0);
+    handle = await fs.open(manifestPath, fsConstants.O_RDONLY | nonBlockingFlag);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > GUEST_ASSET_MAX_BYTES) {
+      return null;
+    }
+
+    const buffer = Buffer.alloc(GUEST_ASSET_MAX_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const result = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (result.bytesRead === 0) {
+        break;
+      }
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead > GUEST_ASSET_MAX_BYTES) {
+      return null;
+    }
+    return buffer.toString('utf8', 0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => {});
+    }
   }
 };
 
@@ -171,10 +204,9 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
 };
 
 export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
-  let raw;
-  try {
-    raw = await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8');
-  } catch {
+  const manifestPath = path.join(packageRoot, 'package.json');
+  const raw = await readGuestManifest(manifestPath);
+  if (raw === null) {
     return { ok: false, code: 'invalid-manifest' };
   }
   const parsed = parseManifestJson(raw);
