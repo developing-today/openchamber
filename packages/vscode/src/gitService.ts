@@ -3663,11 +3663,19 @@ async function resolveBaseRefForLog(
 // unlimited, and a fractional value is rejected as not-an-integer, so an
 // invalid value must never pass through (#641). Normalizing here, in the
 // service, mirrors the web git service (#463).
-const normalizeMaxCount = (maxCount?: number): number => {
+//
+// A huge FINITE value needs a ceiling too (#1121): it is a valid integer,
+// so the #641 guard passed it straight to --max-count and the extension
+// host buffered the repository's entire history whole for one bridge
+// call. Legitimate callers ask for at most 100 (the UI's LOG_SIZE_OPTIONS
+// plus load-more steps), so 10,000 is generous headroom. Keep this value
+// in lockstep with the web log route's ceiling (#1120).
+export const MAX_LOG_COUNT = 10_000;
+export const normalizeMaxCount = (maxCount?: number): number => {
   if (maxCount === undefined || !Number.isInteger(maxCount) || maxCount <= 0) {
     return 50;
   }
-  return maxCount;
+  return Math.min(maxCount, MAX_LOG_COUNT);
 };
 
 /**
