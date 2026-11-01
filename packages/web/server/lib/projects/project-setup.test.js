@@ -447,6 +447,23 @@ describe('project setup runtime', () => {
     }
   });
 
+  it('refuses to patch over a shared file the size gate refused to read', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const repo = path.join(tempRoot, 'repo');
+      await mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      const projectId = createProjectIdFromPath(repo);
+      const oversized = JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES) });
+      await writeFile(sharedPath, oversized);
+      await expect(runtime.updateSharedProjectSetup(projectId, { plansDir: 'docs/plans' })).rejects.toThrow('too large');
+      await expect(runtime.updateSharedProjectSetup(projectId, {})).rejects.toThrow('too large');
+      expect(await readFile(sharedPath, 'utf8')).toBe(oversized);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('reads the shared file from the checkout the id names and merges it', async () => {
     const { runtime, tempRoot, cleanup } = await createRuntime();
     try {

@@ -270,6 +270,20 @@ describe('project setup bridge', () => {
     });
   });
 
+  test('refuses to patch over a shared file the size gate refused to read', async () => {
+    await withStore(async (store, dir) => {
+      const repo = path.join(dir, 'repo');
+      await fs.promises.mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      const projectId = projectIdFor(repo);
+      const oversized = JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES) });
+      await fs.promises.writeFile(sharedPath, oversized);
+      await assert.rejects(store.updateShared(projectId, { plansDir: 'docs/plans' }), /too large/);
+      await assert.rejects(store.updateShared(projectId, {}), /too large/);
+      assert.equal(await fs.promises.readFile(sharedPath, 'utf8'), oversized);
+    });
+  });
+
   test('refuses to persist a shared file over the size cap instead of writing an unreadable one', async () => {
     await withStore(async (store, dir) => {
       const repo = path.join(dir, 'repo');

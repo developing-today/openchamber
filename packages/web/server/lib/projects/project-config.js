@@ -1105,6 +1105,18 @@ export const createProjectConfigRuntime = (deps) => {
         throw new Error('project checkout not found');
       }
       const currentRead = await readSharedProjectConfig(projectID, personalRaw);
+      // A size-limit refusal is not a broken file: treating the existing
+      // config as empty here would let a patch overwrite settings the gate
+      // refused to read (or delete the file on an empty result). Reject and
+      // leave the file unchanged; other invalid reads keep the repair
+      // behaviour of falling back to the empty config.
+      if (
+        currentRead.status === 'invalid'
+        && typeof currentRead.reason === 'string'
+        && currentRead.reason.startsWith('shared project config is too large:')
+      ) {
+        throw new Error(currentRead.reason);
+      }
       const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
       const next = applySharedProjectSetupPatch(current, patch);
 

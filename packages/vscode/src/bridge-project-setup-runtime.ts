@@ -217,6 +217,18 @@ export const createProjectSetupStore = (
       const isDirectory = await fs.promises.stat(projectPath).then((stat) => stat.isDirectory()).catch(() => false);
       if (!isDirectory) throw new ProjectSetupValidationError('project checkout not found');
       const currentRead = await readShared(projectId, personalRaw);
+      // Same rule as the web writer: a size-limit refusal is not a broken
+      // file — falling back to the empty config would let a patch overwrite
+      // settings the gate refused to read (or delete the file). Reject and
+      // leave the file unchanged; other invalid reads keep the repair
+      // behaviour.
+      if (
+        currentRead.status === 'invalid'
+        && typeof currentRead.reason === 'string'
+        && currentRead.reason.startsWith('shared project config is too large:')
+      ) {
+        throw new ProjectSetupValidationError(currentRead.reason);
+      }
       const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
       const nextShared = applySharedProjectSetupPatch(current, patch);
       const sharedPath = sharedConfigPathOf(projectPath);
