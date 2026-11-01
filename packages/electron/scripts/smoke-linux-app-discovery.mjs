@@ -7,6 +7,8 @@ import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
   fetchLinuxAppIcons,
+  iconFileToDataUrl,
+  MAX_INSTALLED_APP_ICON_BYTES,
   filterLinuxInstalledApps,
   findLinuxFileManagerEntry,
   linuxApplicationDirs,
@@ -182,6 +184,20 @@ try {
   });
   assert(fetchedIcons.length === 2, 'fetchLinuxAppIcons should return resolved icons');
   assert(fetchedIcons.every((entry) => entry.data_url?.startsWith('data:image/png;base64,')), 'fetched icons should be PNG data URLs');
+
+  // Bounded icon reads (#1257): the stat gate refuses an over-cap icon
+  // before it is read, so the caller falls back to no icon; an at-cap
+  // icon returns its byte-identical data URL; missing and non-PNG
+  // behaviour is unchanged.
+  const overCapIcon = path.join(tempRoot, 'over-cap.png');
+  await fs.writeFile(overCapIcon, Buffer.alloc(MAX_INSTALLED_APP_ICON_BYTES + 1, 1));
+  assert(iconFileToDataUrl(overCapIcon) === null, 'over-cap icon must be refused, not read whole');
+  const atCapBytes = Buffer.alloc(MAX_INSTALLED_APP_ICON_BYTES, 2);
+  const atCapIcon = path.join(tempRoot, 'at-cap.png');
+  await fs.writeFile(atCapIcon, atCapBytes);
+  assert(iconFileToDataUrl(atCapIcon) === `data:image/png;base64,${atCapBytes.toString('base64')}`, 'at-cap icon must return its byte-identical data URL');
+  assert(iconFileToDataUrl(path.join(tempRoot, 'missing.png')) === null, 'missing icon stays null');
+  assert(iconFileToDataUrl(path.join(tempRoot, 'not-an-icon.svg')) === null, 'non-PNG icon stays null');
 
   const specs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'vscode', appName: 'Visual Studio Code', targetKind: 'project', entries, env });
   assert(specs.length === 1, 'desktop entry should provide an opener when CLI is absent');
