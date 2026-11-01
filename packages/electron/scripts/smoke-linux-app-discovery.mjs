@@ -12,6 +12,7 @@ import {
   filterLinuxInstalledApps,
   findLinuxFileManagerEntry,
   linuxApplicationDirs,
+  MAX_DESKTOP_ENTRY_BYTES,
   parseDesktopEntry,
   readLinuxDesktopEntries,
   resolveLinuxIconFile,
@@ -104,6 +105,25 @@ try {
   assert(!entries.some((entry) => entry.name === 'Hidden App'), 'Hidden=true entry should be skipped');
   assert(!entries.some((entry) => entry.name === 'No Display App'), 'NoDisplay=true entry should be skipped');
   assert(!entries.some((entry) => entry.name === 'Missing Exec'), 'missing Exec entry should be skipped');
+
+  // Bounded .desktop entry reads (#1261): the stat gate skips an over-cap
+  // entry before it is buffered, exactly like an unreadable file, while an
+  // at-cap entry parses normally and siblings in the same directory are
+  // still returned.
+  const capApps = path.join(tempRoot, 'cap-apps');
+  await fs.mkdir(capApps, { recursive: true });
+  const padEntry = (name, exec, totalBytes) => {
+    const head = '[Desktop Entry]\nType=Application\nName=' + name + '\nExec=' + exec + ' %f\n# ';
+    return head + 'x'.repeat(totalBytes - head.length - 1) + '\n';
+  };
+  await fs.writeFile(path.join(capApps, 'over-cap.desktop'), padEntry('Over Cap App', 'over-cap', MAX_DESKTOP_ENTRY_BYTES + 1), 'utf8');
+  await fs.writeFile(path.join(capApps, 'at-cap.desktop'), padEntry('At Cap App', 'at-cap', MAX_DESKTOP_ENTRY_BYTES), 'utf8');
+  await fs.writeFile(path.join(capApps, 'sibling.desktop'), '[Desktop Entry]\nType=Application\nName=Sibling App\nExec=sibling %f\n', 'utf8');
+  const capEntries = await readLinuxDesktopEntries({ applicationDirs: [capApps], env, homeDir: tempRoot });
+  assert(capEntries.length === 2, 'over-cap entry must be skipped while at-cap and sibling entries return, got ' + capEntries.length);
+  assert(!capEntries.some((entry) => entry.name === 'Over Cap App'), 'over-cap entry must not appear in results');
+  assert(capEntries.some((entry) => entry.name === 'At Cap App'), 'at-cap entry must parse normally');
+  assert(capEntries.some((entry) => entry.name === 'Sibling App'), 'sibling entry must still be returned');
 
   const codeEntry = parseDesktopEntry(await fs.readFile(codeDesktopPath, 'utf8'), codeDesktopPath);
   assert(codeEntry?.name === 'Visual Studio Code', 'parser should read Name');
