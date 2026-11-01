@@ -280,6 +280,15 @@ describe('project context routes over HTTP', () => {
     expect((await request(app).post('/api/project-context/proj/plans/p1/share')).status).toBe(400);
   });
 
+  it('answers 413 when the runtime refuses an oversized plan', async () => {
+    const { app } = createApp({
+      readPlan: async () => {
+        throw Object.assign(new Error('Plan file is too large to read'), { status: 413 });
+      },
+    });
+    expect((await request(app).get(`${BASE}/plans/p1`)).status).toBe(413);
+  });
+
   it('returns 404 for an unknown plan', async () => {
     const { app } = createApp();
     await request(app).get(`${BASE}/plans/nope`).expect(404);

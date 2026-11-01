@@ -30,7 +30,7 @@ const isValidationError = (error) => {
 
 const respondWithError = (res, error, fallbackMessage) => {
   const message = error instanceof Error ? error.message : fallbackMessage;
-  if (error?.status === 400 || error?.status === 404) {
+  if (error?.status === 400 || error?.status === 404 || error?.status === 413) {
     return res.status(error.status).json({ error: message });
   }
   if (isValidationError(error)) {
