@@ -5,7 +5,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES, attachRealtimeProxy, buildRealtimeProxySseUrl, buildRealtimeProxyWsUrl } from './realtime-proxy.js';
+import { REALTIME_PROXY_UPSTREAM_WS_MAX_PAYLOAD_BYTES, REALTIME_PROXY_WS_MAX_PAYLOAD_BYTES, attachRealtimeProxy, buildRealtimeProxySseUrl, buildRealtimeProxyWsUrl } from './realtime-proxy.js';
 import { createUiAuth } from './ui-auth/ui-auth.js';
 
 const servers = [];
@@ -428,6 +428,73 @@ describe('realtime proxy WebSocket bounds', () => {
       runtime.stop();
     }
   }, 10_000);
+
+  const startSendingUpstream = async () => {
+    const sockets = [];
+    const received = [];
+    const upstreamServer = http.createServer();
+    const upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', (socket) => {
+      sockets.push(socket);
+      socket.on('message', (data) => {
+        received.push(Buffer.from(data));
+      });
+    });
+    const upstreamOrigin = await listen(upstreamServer);
+    const waitForSocket = async () => {
+      const deadline = Date.now() + 3_000;
+      while (sockets.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      if (sockets.length === 0) throw new Error('Upstream socket never connected');
+      return sockets[0];
+    };
+    return { received, upstreamOrigin, upstreamWs, waitForSocket };
+  };
+
+  it('refuses a single upstream frame over the upstream maxPayload cap with 1009 and forwards nothing to the client', async () => {
+    const { upstreamOrigin, upstreamWs, waitForSocket } = await startSendingUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    try {
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
+      const client = await connectClient(origin, target);
+      const upstreamSocket = await waitForSocket();
+      const receivedByClient = [];
+      client.on('message', (data) => receivedByClient.push(Buffer.from(data)));
+      const closed = nextClose(client);
+      upstreamSocket.send(Buffer.alloc(REALTIME_PROXY_UPSTREAM_WS_MAX_PAYLOAD_BYTES + 1, 0x67));
+      expect(await closed).toBe(1009);
+      expect(receivedByClient).toEqual([]);
+      upstreamWs.close();
+    } finally {
+      runtime.stop();
+    }
+  }, 30_000);
+
+  it('forwards a single upstream frame at the upstream maxPayload cap byte-identically', async () => {
+    const { received, upstreamOrigin, upstreamWs, waitForSocket } = await startSendingUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    try {
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
+      const client = await connectClient(origin, target);
+      const upstreamSocket = await waitForSocket();
+      const frame = Buffer.alloc(REALTIME_PROXY_UPSTREAM_WS_MAX_PAYLOAD_BYTES, 0x68);
+      const delivered = new Promise((resolve) => client.once('message', (data) => resolve(Buffer.from(data))));
+      upstreamSocket.send(frame);
+      expect(await delivered).toEqual(frame);
+      // The pair survived: a small client frame still reaches upstream.
+      client.send(Buffer.from('still-open'));
+      const deadline = Date.now() + 3_000;
+      while (received.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(received).toEqual([Buffer.from('still-open')]);
+      client.close();
+      upstreamWs.close();
+    } finally {
+      runtime.stop();
+    }
+  }, 30_000);
 
   it('closes the pair when the upstream stops draining after connect', async () => {
     const host = await startRawHost({ completeHandshake: true });

@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES, createPersistentPtyWsRuntime } from './runtime.js';
+import { PERSISTENT_PTY_UPSTREAM_WS_MAX_PAYLOAD_BYTES, PERSISTENT_PTY_WS_MAX_PAYLOAD_BYTES, createPersistentPtyWsRuntime } from './runtime.js';
 
 const PTY_ID = 'pty_abc-123';
 const CONNECT_PATH = `/api/experimental/persistent-pty/${PTY_ID}/connect`;
@@ -124,6 +124,42 @@ it('forwards a single frame at the maxPayload cap byte-identically', async () =>
   const echoed = await socket.next();
   expect(echoed.data).toEqual(frame);
   expect(echoed.isBinary).toBe(true);
+  socket.close();
+});
+
+it('refuses a single upstream frame over the upstream maxPayload cap with 1009 and forwards nothing to the client', async () => {
+  const { port } = await setupFixture({
+    upstreamHandler: (ws, data) => {
+      if (data.toString() === 'send-over-cap') {
+        ws.send(Buffer.alloc(PERSISTENT_PTY_UPSTREAM_WS_MAX_PAYLOAD_BYTES + 1, 0x67));
+      }
+    },
+  });
+  const { socket, opened } = await openSocket(`ws://127.0.0.1:${port}${CONNECT_PATH}?role=controller`);
+  expect(opened).toBe(true);
+  await socket.next();
+  const seen = [];
+  socket.on('message', (data) => seen.push(Buffer.from(data)));
+  const closed = new Promise((resolve) => socket.once('close', (code) => resolve(code)));
+  socket.send(Buffer.from('send-over-cap'));
+  expect(await closed).toBe(1009);
+  expect(seen).toEqual([]);
+});
+
+it('forwards a single upstream frame at the upstream maxPayload cap byte-identically', async () => {
+  const frame = Buffer.alloc(PERSISTENT_PTY_UPSTREAM_WS_MAX_PAYLOAD_BYTES, 0x68);
+  const { port } = await setupFixture({
+    upstreamHandler: (ws, data) => {
+      if (data.toString() === 'send-at-cap') ws.send(frame);
+    },
+  });
+  const { socket, opened } = await openSocket(`ws://127.0.0.1:${port}${CONNECT_PATH}?role=controller`);
+  expect(opened).toBe(true);
+  await socket.next();
+  socket.send(Buffer.from('send-at-cap'));
+  const delivered = await socket.next();
+  expect(delivered.data).toEqual(frame);
+  expect(delivered.isBinary).toBe(true);
   socket.close();
 });
 
