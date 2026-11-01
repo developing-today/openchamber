@@ -16,6 +16,7 @@ import {
   type ParseError,
 } from 'jsonc-parser';
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
+import { readBoundedResponseText } from '../../web/server/lib/shared/response-body.js';
 import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
 import {
@@ -1507,6 +1508,10 @@ type NpmLookupResult =
   | { ok: true; latest: string | null; versions: string[] }
   | { ok: false; status: number | 'network'; error: string };
 
+// Keep this in sync with NPM_PACKUMENT_MAX_BYTES in packages/web/server/lib/opencode/npm-registry.js.
+// Packuments can be large, and this lookup only needs the latest tag and version keys.
+const NPM_PACKUMENT_MAX_BYTES = 16 * 1024 * 1024;
+
 const npmInfoCache = new Map<string, { fetchedAt: number; payload: NpmLookupResult }>();
 const npmInfoInFlight = new Map<string, Promise<NpmLookupResult>>();
 const NPM_CACHE_TTL_MS = 3_600_000;
@@ -1538,7 +1543,11 @@ const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
       signal: AbortSignal.timeout(5000),
     });
     if (response.ok) {
-      const data = await response.json() as { versions?: unknown; 'dist-tags'?: { latest?: unknown } };
+      const bounded = await readBoundedResponseText(response, NPM_PACKUMENT_MAX_BYTES);
+      if (bounded.tooLarge) {
+        return { ok: false, status: 'network', error: 'Registry response exceeded size limit' };
+      }
+      const data = JSON.parse(bounded.text.replace(/^\uFEFF/, '')) as { versions?: unknown; 'dist-tags'?: { latest?: unknown } };
       return {
         ok: true,
         latest: typeof data['dist-tags']?.latest === 'string' ? data['dist-tags'].latest : null,
