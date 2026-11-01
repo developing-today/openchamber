@@ -109,6 +109,22 @@ describe('opencodeConfig JSONC parse safety (issue #2923)', () => {
     assert.equal(fs.existsSync(`${configPath}.openchamber.backup`), false);
   });
 
+  test('refuses a save whose result would exceed the byte limit', () => {
+    // Adding a new key via setWebSearchSelection grows a near-cap config
+    // past the limit: the save must be refused, leaving the file untouched.
+    const configPath2 = path.join(tempDir, 'near-cap-no-websearch.json');
+    const suffix = '"}';
+    const prefix2 = '{"padding":"';
+    const markerLength2 = MAX_CONFIG_FILE_BYTES - Buffer.byteLength(prefix2) - Buffer.byteLength(suffix) - 8;
+    const content2 = `${prefix2}${'x'.repeat(markerLength2)}${suffix}`;
+    fs.writeFileSync(configPath2, content2, 'utf8');
+    process.env.OPENCODE_CONFIG = configPath2;
+
+    assert.throws(() => setWebSearchSelection('exa'), { code: 'CONFIG_FILE_TOO_LARGE' });
+    assert.equal(fs.readFileSync(configPath2, 'utf8'), content2);
+    assert.equal(fs.existsSync(`${configPath2}.openchamber.backup`), false);
+  });
+
   test('loads and merges a project config exactly at the byte limit', () => {
     const projectDir = path.join(tempDir, 'project');
     fs.mkdirSync(projectDir);

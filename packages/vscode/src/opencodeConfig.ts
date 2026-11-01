@@ -1090,6 +1090,20 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
     if (existingRaw.trim()) {
       existingParse = parseConfigResult(existingRaw.trim(), filePath);
     }
+  }
+  // A JSON round-trip normalizes the config at the write boundary: it drops
+  // `undefined` values exactly like the serialized write would.
+  const desired: JsonValue = JSON.parse(JSON.stringify(config));
+  const content = buildConfigFileContent(desired, existingRaw, existingParse);
+  // Never save a config the read gate would refuse to load: validate the
+  // final serialized size before backing up or replacing the file.
+  if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+    throw codedError(
+      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be saved safely`,
+      CONFIG_FILE_TOO_LARGE,
+    );
+  }
+  if (fs.existsSync(filePath)) {
     const backupFile = `${filePath}.openchamber.backup`;
     try {
       fs.copyFileSync(filePath, backupFile);
@@ -1098,10 +1112,7 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
     }
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  // A JSON round-trip normalizes the config at the write boundary: it drops
-  // `undefined` values exactly like the serialized write would.
-  const desired: JsonValue = JSON.parse(JSON.stringify(config));
-  writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
+  writeFileAtomic(filePath, content);
 };
 
 const codedError = (message: string, code: string): Error & { code: string } => {
