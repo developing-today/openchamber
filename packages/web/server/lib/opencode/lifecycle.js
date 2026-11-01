@@ -6,7 +6,7 @@ import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries, commandIdentifiesOurServer } from './managed-process-registry.js';
-import { parsePositiveIntWithDefault } from '../shared/parse-int.js';
+import { parseBoundedIntWithDefault, parsePositiveIntWithDefault } from '../shared/parse-int.js';
 import {
   clearManagedOpenCodeState,
   createLaunchFingerprint,
@@ -54,12 +54,17 @@ const execFileAsync = (file, args, options) =>
 // name is kept for its importers.
 export const parsePositiveInt = parsePositiveIntWithDefault;
 
-const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000);
+export const resolveHealthCheckTimeoutMs = (env = process.env) =>
+  parseBoundedIntWithDefault(env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000, 1, 2_147_483_647);
+export const resolveHealthCheckIntervalMs = (env = process.env) =>
+  parseBoundedIntWithDefault(env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0, 0, 2_147_483_647);
+
+const HEALTH_CHECK_TIMEOUT_MS = resolveHealthCheckTimeoutMs();
 const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
   process.env.OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES,
   20
 );
-const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
+const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = resolveHealthCheckIntervalMs();
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const OPENCODE_HEALTH_PATH = '/api/info';
 const OPENCODE_REQUIRED_MAJOR_VERSION = 2;

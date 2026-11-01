@@ -29,7 +29,7 @@ vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
-const { createOpenCodeLifecycleRuntime, parsePositiveInt } = await import('./lifecycle.js');
+const { createOpenCodeLifecycleRuntime, parsePositiveInt, resolveHealthCheckIntervalMs, resolveHealthCheckTimeoutMs } = await import('./lifecycle.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
@@ -1856,5 +1856,24 @@ describe('parsePositiveInt health env parsing (#689)', () => {
       expect(parsePositiveInt(invalid, 5000)).toBe(5000);
       expect(parsePositiveInt(invalid, 20)).toBe(20);
     }
+  });
+});
+
+describe('health timer env readers', () => {
+  it('bounds the health timeout at the timer maximum', () => {
+    const read = (value) => resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: value });
+    expect(read('0')).toBe(5000);
+    expect(read('1')).toBe(1);
+    expect(read('2147483647')).toBe(2_147_483_647);
+    expect(read('3000000000')).toBe(5000);
+    expect(read('9007199254740993')).toBe(5000);
+  });
+
+  it('bounds the health interval at the timer maximum', () => {
+    const read = (value) => resolveHealthCheckIntervalMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: value });
+    expect(read('0')).toBe(0);
+    expect(read('2147483647')).toBe(2_147_483_647);
+    expect(read('3000000000')).toBe(0);
+    expect(read('9007199254740993')).toBe(0);
   });
 });
