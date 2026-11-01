@@ -8,6 +8,7 @@ const existing: SessionGoalPayload = {
   id: 'goal-1',
   objective: 'Old objective',
   objectiveFile: true,
+  objectiveRevision: 'rev-a',
   ignoreObjectiveLimit: false,
   status: 'active',
   tokenBudget: null,
@@ -28,6 +29,7 @@ const save = (currentGoal: Metadata | null, overrides: Partial<Parameters<typeof
   existing,
   objective: '',
   objectiveFile: true,
+  objectiveRevision: 'rev-new',
   ignoreLimit: false,
   tokenBudget: null,
   kickoff: true,
@@ -52,6 +54,49 @@ describe('goal record for a save', () => {
   // A rewrite can take minutes: the check may complete the goal, the user may
   // pause it, another window may replace it. Saving over any of those would
   // reactivate an outcome or reset another goal's usage.
+  // The server runtime stamps a fresh updatedAt on every accounting
+  // merge-write, so a settlement landing while the editor is open must not
+  // read as somebody else editing the goal.
+  test('an accounting bump after the edit began is not a conflicting edit', () => {
+    const next = save({ ...stored, updatedAt: 999, tokensUsed: 1500, turnsUsed: 5, lastAccountedMessageID: 'msg-10' });
+    expect(next).toMatchObject({ changed: false, record: { id: 'goal-1', tokensUsed: 1500, turnsUsed: 5 } });
+  });
+
+  test('a genuine objective change after the edit began is still refused', () => {
+    const inlineExisting = { ...existing, objectiveFile: false };
+    expect(save({ ...stored, objective: 'Old objective' }, { existing: inlineExisting }).changed).toBe(false);
+    expect(save({ ...stored, objective: 'Rewritten elsewhere' }, { existing: inlineExisting })).toEqual({ changed: true });
+  });
+
+  // File-backed goals carry no objective text in the record, so an
+  // intervening save is detected by the objective revision it stamps:
+  // accounting preserves the revision, a save replaces it.
+  test('a file-backed goal whose objective was saved elsewhere is refused', () => {
+    expect(save({ ...stored, objectiveRevision: 'rev-b', updatedAt: 999 })).toEqual({ changed: true });
+  });
+
+  test('an accounting bump on a file-backed goal keeps its revision and is not a conflict', () => {
+    const next = save({ ...stored, objectiveRevision: 'rev-a', updatedAt: 999, tokensUsed: 1500 });
+    expect(next).toMatchObject({ changed: false, record: { objectiveRevision: 'rev-new', tokensUsed: 1500 } });
+  });
+
+  // Budget and limit flag are user-editable settings an accounting
+  // merge-write cannot change; another window lowering the budget while
+  // this edit is open is a real conflict, not an accounting bump.
+  test('a budget or limit change after the edit began is a conflicting edit', () => {
+    expect(save({ ...stored, tokenBudget: 5000 })).toEqual({ changed: true });
+    expect(save({ ...stored, ignoreObjectiveLimit: true })).toEqual({ changed: true });
+  });
+
+  test('an edit begun after the budget was set still saves over accounting bumps', () => {
+    const budgeted = { ...existing, tokenBudget: 5000, ignoreObjectiveLimit: true };
+    const next = save(
+      { ...stored, tokenBudget: 5000, ignoreObjectiveLimit: true, updatedAt: 999, tokensUsed: 1500 },
+      { existing: budgeted },
+    );
+    expect(next).toMatchObject({ changed: false, record: { id: 'goal-1', tokensUsed: 1500 } });
+  });
+
   test('an edit is refused when the stored goal changed after it began', () => {
     expect(save({ ...stored, status: 'complete' })).toEqual({ changed: true });
     expect(save({ ...stored, status: 'paused', updatedAt: 60 })).toEqual({ changed: true });
