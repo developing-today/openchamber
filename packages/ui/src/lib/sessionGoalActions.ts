@@ -116,12 +116,19 @@ const rewriteObjective = async (
 };
 
 /** Whether the stored goal is still the one an edit started from. */
-const isSameGoal = (current: { id?: unknown; status?: unknown; updatedAt?: unknown } | null, existing: SessionGoalPayload): boolean => (
-  current !== null
-  && current.id === existing.id
-  && current.status === existing.status
-  && current.updatedAt === existing.updatedAt
-);
+const isSameGoal = (current: { id?: unknown; status?: unknown; objective?: unknown; objectiveFile?: unknown } | null, existing: SessionGoalPayload): boolean => {
+  if (current === null) return false;
+  if (current.id !== existing.id || current.status !== existing.status) return false;
+  // updatedAt is deliberately not compared: the server runtime stamps a
+  // fresh one on every accounting merge-write (token/turn settlement), so
+  // routine accounting between opening the editor and saving used to read
+  // as a conflicting edit. What accounting cannot change is the objective.
+  // For a file-backed goal the objective text lives in the file, not in
+  // the stored record this check reads, so there is nothing to compare.
+  if (existing.objectiveFile) return true;
+  const currentObjective = typeof current.objective === 'string' ? current.objective.trim() : '';
+  return currentObjective === existing.objective;
+};
 
 /**
  * The goal record a save writes: the edited goal in place (id and usage kept,

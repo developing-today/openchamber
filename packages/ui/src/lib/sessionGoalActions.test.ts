@@ -52,6 +52,20 @@ describe('goal record for a save', () => {
   // A rewrite can take minutes: the check may complete the goal, the user may
   // pause it, another window may replace it. Saving over any of those would
   // reactivate an outcome or reset another goal's usage.
+  // The server runtime stamps a fresh updatedAt on every accounting
+  // merge-write, so a settlement landing while the editor is open must not
+  // read as somebody else editing the goal.
+  test('an accounting bump after the edit began is not a conflicting edit', () => {
+    const next = save({ ...stored, updatedAt: 999, tokensUsed: 1500, turnsUsed: 5, lastAccountedMessageID: 'msg-10' });
+    expect(next).toMatchObject({ changed: false, record: { id: 'goal-1', tokensUsed: 1500, turnsUsed: 5 } });
+  });
+
+  test('a genuine objective change after the edit began is still refused', () => {
+    const inlineExisting = { ...existing, objectiveFile: false };
+    expect(save({ ...stored, objective: 'Old objective' }, { existing: inlineExisting }).changed).toBe(false);
+    expect(save({ ...stored, objective: 'Rewritten elsewhere' }, { existing: inlineExisting })).toEqual({ changed: true });
+  });
+
   test('an edit is refused when the stored goal changed after it began', () => {
     expect(save({ ...stored, status: 'complete' })).toEqual({ changed: true });
     expect(save({ ...stored, status: 'paused', updatedAt: 60 })).toEqual({ changed: true });
