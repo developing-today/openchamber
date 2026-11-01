@@ -239,6 +239,54 @@ injection. The contract rules:
   surfaces: the primitive knows paths, bytes, JSON and modes only, and
   callers keep the rest.
 
+## Bounded file read (design #1254 phase 1, #1256)
+
+`bounded-file-read.js` holds the one bounded read for files whose size the
+server does not control — project and user files, as opposed to response
+bodies (#802) and the server's own state files (#976). It generalises
+`skills-catalog/scan.js`'s `readSkillMdFile`, the family's one correct
+embodiment. This phase changes no call site: scan, snippets and plugins
+keep their current spellings until the phase-2 migration (#1255).
+
+- `readBoundedFile(filePath, maxBytes)` / `readBoundedFileSync(filePath, maxBytes)`
+  answer identically: `{ ok: true, buffer, size }` for a complete read at
+  or under the cap, or a coded refusal — `too-large` (carrying `path`,
+  `size` and `limit`), `missing`, or `not-regular`. Unexpected I/O errors
+  throw; the three expected outcomes never do.
+
+The contract (rules 1–5 of #1254):
+
+1. Every read of a file whose size the reader does not control goes
+   through this reader; the cap is stated at the call site (mechanism
+   shared, values local — 1 MiB plugins, 4 MiB config/SKILL.md/snippets,
+   the diff readers' larger caps all stay as they are).
+2. Open once, judge from the handle: `O_NONBLOCK` where available,
+   handle stat, non-regular files refused — never stat-by-path then
+   read-by-path, which follows a symlink to a device or FIFO and races
+   a growing file.
+3. The cap is enforced during the read (at most cap+1 bytes are read),
+   so a file that grows after the stat is over-cap, not buffered whole.
+4. One uniform over-cap answer, coded `BOUNDED_FILE_TOO_LARGE` and
+   carrying path, size and limit; the caller states its policy —
+   `refuse`, or `skip`-with-warning. Truncation is not a policy: a
+   truncated config or markdown file parses as a different file.
+5. Sync and async spellings answer identically; missing ≠ over-cap ≠
+   non-regular, so adopting the reader never changes a caller's
+   missing-file behaviour.
+
+### What stays out
+
+- `diagnostics/local-files.js` — offset sampling of diagnostic logs is
+  a sampling policy, not a bounded whole-file read; partial reads there
+  are the point and stay.
+- Response bodies stay `response-body.js` (#802): a stream is not a
+  file, and its cap is enforced by cancelling the stream.
+- The server's own state files stay `durable-json-store.js` (#976):
+  contents the server controls, with preserve-on-malformed semantics
+  this reader does not have.
+- Cap values, error surfaces and HTTP shapes at the call sites: the
+  primitive knows paths, bytes and caps only.
+
 ## Notes for contributors
 
 - Add a predicate here only when two or more feature modules need the exact
