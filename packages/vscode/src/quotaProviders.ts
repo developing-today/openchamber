@@ -1165,10 +1165,11 @@ const resolveAntigravityAuth = (): GoogleAuthSource | null => {
       const account = (accounts[index] as Record<string, unknown> | undefined) ?? (accounts[0] as Record<string, unknown> | undefined);
       if (account?.refreshToken) {
         const refreshParts = parseGoogleRefreshToken(account.refreshToken);
+        if (!refreshParts.refreshToken) continue;
         return {
           sourceId: 'antigravity',
           sourceLabel: 'Antigravity',
-          refreshToken: refreshParts.refreshToken ?? undefined,
+          refreshToken: refreshParts.refreshToken,
           projectId: asNonEmptyString(account.projectId)
             ?? asNonEmptyString(account.managedProjectId)
             ?? refreshParts.projectId
