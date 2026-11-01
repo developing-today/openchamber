@@ -15,6 +15,11 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024;
 
+// Same gate as the web scan: a clone-controlled SKILL.md is never buffered
+// whole past the 4 MiB cap the git-show fallback already enforces.
+const SKILL_MD_MAX_BYTES = DEFAULT_MAX_BUFFER;
+const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit; skipped';
+
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
 type SkillScope = 'user' | 'project';
@@ -347,7 +352,12 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
       let content = '';
 
       try {
-        content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
+        const stat = await fs.promises.stat(toFsPath(skillMdPath));
+        if (stat.size > SKILL_MD_MAX_BYTES) {
+          warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+        } else {
+          content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
+        }
       } catch {
         const show = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
         if (!show.ok) {

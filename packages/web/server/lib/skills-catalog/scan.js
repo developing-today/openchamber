@@ -8,6 +8,20 @@ import { parseSkillRepoSource } from './source.js';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
+// A catalog SKILL.md is clone-controlled content; never buffer one whole
+// past the same 4 MiB cap the git-show fallback already enforces
+// (DEFAULT_MAX_BUFFER in git.js).
+export const SKILL_MD_MAX_BYTES = 4 * 1024 * 1024;
+const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit; skipped';
+
+export async function readSkillMdFile(filePath) {
+  const stat = await fs.promises.stat(filePath);
+  if (stat.size > SKILL_MD_MAX_BYTES) {
+    return { tooLarge: true, content: '' };
+  }
+  return { tooLarge: false, content: await fs.promises.readFile(filePath, 'utf8') };
+}
+
 function validateSkillName(skillName) {
   if (typeof skillName !== 'string') return false;
   if (skillName.length < 1 || skillName.length > 64) return false;
@@ -180,7 +194,12 @@ export async function scanSkillsRepository({
         // Prefer filesystem reads when sparse checkout succeeded.
         const filePath = toFsPath(skillMdPath);
         try {
-          skillMdContent = await fs.promises.readFile(filePath, 'utf8');
+          const diskRead = await readSkillMdFile(filePath);
+          if (diskRead.tooLarge) {
+            warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+          } else {
+            skillMdContent = diskRead.content;
+          }
         } catch {
           const showResult = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { ...remoteGitOptions, timeoutMs: 15_000 });
           if (!showResult.ok) {
