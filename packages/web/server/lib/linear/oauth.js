@@ -7,6 +7,7 @@ import {
   getLinearScopes,
 } from './auth.js';
 import { isPlainObject, isString, readFiniteNumber, readTrimmedString } from './parse.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 const LINEAR_AUTHORIZE_URL = 'https://linear.app/oauth/authorize';
 const LINEAR_TOKEN_URL = 'https://api.linear.app/oauth/token';
@@ -19,6 +20,10 @@ const LINEAR_TOKEN_TIMEOUT_MS = 15_000;
 // deadline is shared by the overlapping polls through brokerPollsByState, so a
 // broker that takes a few seconds to answer still completes inside it.
 const LINEAR_BROKER_TIMEOUT_MS = 5_000;
+// Broker and token JSON answers are a few hundred bytes; the cap matches the
+// other bounded auth-body reads (GitLab AUTH_BODY_MAX_BYTES) and keeps an
+// operator-configured broker from buffering an unbounded body via .json().
+const LINEAR_JSON_RESPONSE_MAX_BYTES = 1024 * 1024;
 
 const pendingByState = new Map();
 const brokerPollsByState = new Map();
@@ -51,11 +56,18 @@ async function fetchWithDeadline(url, options, timeoutMs, onTimeout) {
   }
 }
 
-async function readJsonWithDeadline(response, signal, onTimeout) {
+async function readJsonWithDeadline(response, signal, onTimeout, onTooLarge) {
+  let bounded;
   try {
-    return await response.json();
+    bounded = await readBoundedResponseText(response, LINEAR_JSON_RESPONSE_MAX_BYTES);
   } catch (error) {
     if (isTimeoutAbort(error) || signal.aborted) throw onTimeout();
+    return null;
+  }
+  if (bounded.tooLarge) throw onTooLarge();
+  try {
+    return JSON.parse(bounded.text);
+  } catch {
     return null;
   }
 }
@@ -124,7 +136,8 @@ async function postForm(url, body) {
     },
     body: new URLSearchParams(body).toString(),
   }, LINEAR_TOKEN_TIMEOUT_MS, tokenTimeoutError);
-  const payload = await readJsonWithDeadline(response, signal, tokenTimeoutError);
+  const payload = await readJsonWithDeadline(response, signal, tokenTimeoutError,
+    () => new LinearOAuthError('Linear token response exceeded the size limit', 'LINEAR_OAUTH_FAILED'));
   if (!response.ok) {
     const description = isPlainObject(payload)
       ? (readTrimmedString(payload.error_description) || readTrimmedString(payload.error))
@@ -140,7 +153,8 @@ async function postForm(url, body) {
 }
 
 async function readJsonResponse(response, signal, fallbackMessage) {
-  const payload = await readJsonWithDeadline(response, signal, brokerTimeoutError);
+  const payload = await readJsonWithDeadline(response, signal, brokerTimeoutError,
+    () => new LinearOAuthError(`${fallbackMessage}: response exceeded the size limit`, 'LINEAR_BROKER_FAILED'));
   if (!response.ok) {
     const message = isPlainObject(payload) && readTrimmedString(payload.error)
       ? readTrimmedString(payload.error)

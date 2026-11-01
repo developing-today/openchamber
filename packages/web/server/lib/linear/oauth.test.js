@@ -224,6 +224,69 @@ describe('Linear OAuth PKCE', () => {
     await expect(completeAuthorizationBroker(result.brokerReceipt)).resolves.toBe(true);
     expect(brokerAndTokenFetch).toHaveBeenCalledTimes(4);
   });
+
+  it('rejects an over-cap broker /start response instead of parsing it', async () => {
+    delete process.env.OPENCHAMBER_LINEAR_REDIRECT_URI;
+    const oversized = JSON.stringify({
+      redirectUri: 'https://api.openchamber.dev/v1/oauth/linear/callback',
+      padding: 'x'.repeat(1024 * 1024),
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(oversized, { status: 200 })));
+
+    await expect(startAuthorization({ origin: 'web' })).rejects.toMatchObject({
+      name: 'LinearOAuthError',
+      code: 'LINEAR_BROKER_FAILED',
+    });
+  });
+
+  it('rejects an over-cap broker /poll response instead of parsing it', async () => {
+    delete process.env.OPENCHAMBER_LINEAR_REDIRECT_URI;
+    const oversized = JSON.stringify({ status: 'complete', code: 'x', padding: 'x'.repeat(1024 * 1024) });
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const target = String(url);
+      if (target.endsWith('/start')) {
+        return new Response(JSON.stringify({
+          redirectUri: 'https://api.openchamber.dev/v1/oauth/linear/callback',
+        }), { status: 200 });
+      }
+      if (target.endsWith('/poll')) {
+        return new Response(oversized, { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${target}`);
+    }));
+
+    await startAuthorization({ origin: 'web' });
+    await expect(pollAuthorizationBroker()).rejects.toMatchObject({
+      name: 'LinearOAuthError',
+      code: 'LINEAR_BROKER_FAILED',
+    });
+  });
+
+  it('rejects an over-cap token response instead of parsing it', async () => {
+    delete process.env.OPENCHAMBER_LINEAR_REDIRECT_URI;
+    const oversized = JSON.stringify({ access_token: 'x', padding: 'x'.repeat(1024 * 1024) });
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const target = String(url);
+      if (target.endsWith('/start')) {
+        return new Response(JSON.stringify({
+          redirectUri: 'https://api.openchamber.dev/v1/oauth/linear/callback',
+        }), { status: 200 });
+      }
+      if (target.endsWith('/poll')) {
+        return new Response(JSON.stringify({ status: 'complete', code: 'broker-code' }), { status: 200 });
+      }
+      if (target === 'https://api.linear.app/oauth/token') {
+        return new Response(oversized, { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${target}`);
+    }));
+
+    await startAuthorization({ origin: 'web' });
+    await expect(pollAuthorizationBroker()).rejects.toMatchObject({
+      name: 'LinearOAuthError',
+      code: 'LINEAR_OAUTH_FAILED',
+    });
+  });
 });
 
 function restoreEnv(name, previous) {
