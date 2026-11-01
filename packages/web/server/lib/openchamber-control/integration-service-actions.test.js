@@ -119,6 +119,40 @@ describe('integration service action contract', () => {
     }
   });
 
+  it('names every field the binding operations consume in the bindingIntent schema', () => {
+    // The binding service (source-control/binding-service.js) validates each
+    // operation's intent by exact key set; a field missing here is a field a
+    // model cannot learn from the schema, and a field named here that no
+    // operation takes is refused as an extra key.
+    const intent = INTEGRATION_SERVICE_PARAMETERS.bindingIntent;
+    const fields = [
+      'directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
+      'operation', 'target', 'provider', 'remote', 'transport',
+      'expectedFetchFingerprint', 'expectedPushFingerprint', 'unverifiedConfirmed',
+      'credentialAccount', 'sshCredentialId', 'parentRemote', 'expectedParentFingerprint',
+      'kind', 'path', 'expectedEndpointFingerprint', 'confirmed',
+    ];
+    for (const name of fields) expect(intent.properties).toHaveProperty(name);
+    expect(Object.keys(intent.properties).sort()).toEqual([...fields].sort());
+    // Only the revisions every operation takes are unconditionally required:
+    // provider rejects expectedConfigRevision as an extra key.
+    expect(intent.required).toEqual(['expectedRepositoryId', 'expectedRevision']);
+    expect(intent.properties.expectedRevision.type).toBe('integer');
+    expect(intent.properties.transport.enum).toEqual(['system', 'https', 'ssh', 'anonymous']);
+    expect(intent.properties.kind.enum).toEqual(['submodule', 'lfs']);
+    expect(intent.properties.operation.enum).toEqual(['add', 'replace', 'remove', 'configure']);
+    for (const nested of ['target', 'provider', 'credentialAccount']) {
+      expect(Object.keys(intent.properties[nested].properties).sort())
+        .toContain('provider');
+    }
+    expect(Object.keys(intent.properties.credentialAccount.properties).sort())
+      .toEqual(['accountId', 'instance', 'provider']);
+    expect(Object.keys(intent.properties.target.properties).sort())
+      .toEqual(['accountId', 'instance', 'primaryRemote', 'provider']);
+    expect(Object.keys(intent.properties.provider.properties).sort())
+      .toEqual(['accountId', 'instance', 'primaryRemote', 'provider', 'repository']);
+  });
+
   it('rejects prototype-named actions instead of dispatching inherited members', async () => {
     const { run } = setup();
     for (const action of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
