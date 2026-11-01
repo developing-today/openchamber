@@ -55,6 +55,9 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `opencodeCliDiscovery.ts`
   - Finds a usable standalone CLI on PATH before trying known install locations, on Windows and Unix. The resolver in `opencode.ts` still gives the administrator's pin, VS Code and shared settings, and environment overrides priority over discovery.
 
+- `shikiThemes.ts`
+  - Resolves extension-contributed themes for the VS Code sidebar and session-editor webviews. Theme JSON over `SHIKI_THEME_MAX_BYTES` (16 MiB) is rejected before reading; a post-read byte check catches a file that grows after its stat, and the existing one-side fallback handles the rejected variant.
+
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
   - `revertGitFile` validates before it deletes: the directory must resolve to a repository root (`rev-parse --show-toplevel`), the target must sit inside that root and be neither the root nor the requested directory itself, and the `git clean` / recursive `fs.rm` removal path runs only for a path `ls-files --others --error-unmatch` affirmatively lists as untracked. Any other git failure throws and deletes nothing, because the old fallback read every `ls-files` failure as 'untracked' and recursively deleted ordinary files outside a repository - the whole directory for `.` (#734).
