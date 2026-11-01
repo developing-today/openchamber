@@ -105,6 +105,9 @@ async function readGitLab(reader, input) {
   return reader(input);
 }
 
+/** A whole pull request patch is far larger than one file: ten times the per-file cap, matching the local-diff cap in git/service.js. */
+const MAX_PATCH_BYTES = 50 * 1024 * 1024;
+
 async function readGitHubPullRequestDiff(directory, number, readContext, options) {
   const { octokit, repo: target } = await resolvePullRequestRepo(directory, number, readContext, options);
 
@@ -116,6 +119,9 @@ async function readGitHubPullRequestDiff(directory, number, readContext, options
   });
 
   assert.match(response.data, /^(?:diff --git |\s*$)/, 'GitHub returned an invalid pull request diff');
+  if (Buffer.byteLength(response.data) > MAX_PATCH_BYTES) {
+    throw Object.assign(new Error('This pull request diff is too large to show'), { statusCode: 413, code: 'patch-too-large' });
+  }
   return { patch: response.data, meta: { owner: target.owner, repo: target.repo, number } };
 }
 

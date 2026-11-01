@@ -861,6 +861,30 @@ describe('GitLab merge request comparison reads', () => {
     expect(client.MergeRequests.allDiffs).toHaveBeenCalledWith('2', 5, expect.objectContaining({ showExpanded: true, perPage: 30, maxPages: 67 }));
   });
 
+  it('bounds the assembled patch at 50 MiB, counting every file diff toward the total', async () => {
+    const header = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n';
+    const body = '@@ -1 +1 @@\n+' + 'x'.repeat(50 * 1024 * 1024 - header.length - '@@ -1 +1 @@\n+'.length - 1) + '\n';
+    const atCap = setup({
+      MergeRequests: {
+        ...setup().client.MergeRequests,
+        allDiffs: list([{ old_path: 'a.ts', new_path: 'a.ts', a_mode: '100644', b_mode: '100644', diff: body }]),
+      },
+    });
+    const { patch } = await atCap.service.changeRequestPatch('/repo', 5, { project: { owner: 'team', name: 'repo' }, remote: 'origin' });
+    expect(patch).toBe(header + body);
+    expect(Buffer.byteLength(patch)).toBe(50 * 1024 * 1024);
+
+    // Three diffs of about 18 MiB each are individually far under the cap;
+    // only the assembled patch crosses it.
+    const hunk = '@@ -1 +1 @@\n+' + 'x'.repeat(18 * 1024 * 1024) + '\n';
+    const diff = { old_path: 'a.ts', new_path: 'a.ts', a_mode: '100644', b_mode: '100644', diff: hunk };
+    const overCap = setup({
+      MergeRequests: { ...setup().client.MergeRequests, allDiffs: list([diff, diff, diff]) },
+    });
+    await expect(overCap.service.changeRequestPatch('/repo', 5, { project: { owner: 'team', name: 'repo' }, remote: 'origin' }))
+      .rejects.toMatchObject({ code: 'patch-too-large', status: 413 });
+  });
+
   it('reads both sides of a file at the merge base and the head', async () => {
     const showRaw = vi.fn(async (_project, path, ref) => `${path}@${ref.slice(0, 1)}`);
     const { service } = setup({
