@@ -443,6 +443,22 @@ describe('readConfigFile / writeConfig size cap (issue #1150)', () => {
     expect(fs.existsSync(`${file}.openchamber.backup`)).toBe(false);
   });
 
+  it('writeConfig refuses a serialized result over the byte cap and preserves the original', () => {
+    const original = JSON.stringify({ $schema: 'https://opencode.ai/config.json' });
+    const file = writeFixture('grows-over-cap.json', original);
+    const huge = { pad: 'x'.repeat(MAX_CONFIG_FILE_BYTES) };
+
+    let thrown;
+    try {
+      writeConfig(huge, file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(fs.readFileSync(file, 'utf8')).toBe(original);
+    expect(readConfigFile(file)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+  });
+
   it('loads and rewrites a config exactly at the byte cap', () => {
     const overhead = Buffer.byteLength(JSON.stringify({ pad: '' }), 'utf8');
     const pad = 'x'.repeat(MAX_CONFIG_FILE_BYTES - overhead);

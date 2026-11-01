@@ -622,7 +622,20 @@ function writeConfig(config, filePath = CONFIG_FILE) {
     // A JSON round-trip normalizes the config at the write boundary: it drops
     // `undefined` values exactly like the serialized write would.
     const desired = JSON.parse(JSON.stringify(config));
-    writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
+    const content = buildConfigFileContent(desired, existingRaw, existingParse);
+    // Enforce the cap on the serialized result too: writing a config that
+    // crosses the read cap would strand the layer — later reads omit it as
+    // CONFIG_FILE_TOO_LARGE and later writes refuse it, so the user could
+    // not undo the change through OpenChamber. Reject before replacing the
+    // file, preserving the readable original.
+    if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+      const error = new Error(
+        `Serialized OpenCode configuration for ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be written safely`,
+      );
+      error.code = CONFIG_FILE_TOO_LARGE;
+      throw error;
+    }
+    writeFileAtomic(filePath, content);
     console.log(`Successfully wrote config file: ${filePath}`);
   } catch (error) {
     if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
