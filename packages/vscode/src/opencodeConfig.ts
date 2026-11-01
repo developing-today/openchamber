@@ -3315,9 +3315,25 @@ export const getSkillSources = (
   };
 };
 
+// Skill supporting files are hand-maintained docs and scripts shipped with
+// third-party skills; nothing OpenChamber writes bounds their size, so the
+// bridge GET must never buffer an arbitrary one whole. Judged from stat
+// before any read (the house stat-gate pattern): a file over this cap is
+// refused, never read. 1 MiB matches the web twin's
+// SKILL_SUPPORTING_FILE_MAX_BYTES (packages/web/server/lib/opencode/shared.js).
+export const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
+export const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_large';
+
 export const readSkillSupportingFile = (skillDir: string, relativePath: string): string | null => {
   const fullPath = path.join(skillDir, relativePath);
   if (!fs.existsSync(fullPath)) return null;
+  const stats = fs.statSync(fullPath);
+  if (stats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) {
+    throw codedError(
+      `Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`,
+      SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
+    );
+  }
   return fs.readFileSync(fullPath, 'utf8');
 };
 

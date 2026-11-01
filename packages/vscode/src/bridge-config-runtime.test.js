@@ -19,6 +19,7 @@ process.env.XDG_CONFIG_HOME = path.join(scratchConfigRoot, 'xdg');
 process.env.OPENCODE_CONFIG_DIR = '';
 
 const { handleConfigBridgeMessage } = await import('./bridge-config-runtime.ts');
+const { SKILL_SUPPORTING_FILE_MAX_BYTES } = await import('./opencodeConfig.ts');
 
 const tempRoots = [];
 const originalOpencodeConfig = process.env.OPENCODE_CONFIG;
@@ -329,5 +330,62 @@ describe('VS Code config bridge plugin parity', () => {
       // v1 `enabled: false` becomes the inverse v2 `disabled: true`.
       disabled: true,
     });
+  });
+});
+describe('VS Code config bridge skill supporting-file size gate (#1158)', () => {
+  const SKILL_FILE_CAP = SKILL_SUPPORTING_FILE_MAX_BYTES;
+
+  const createProjectSkill = (files) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-cap-'));
+    tempRoots.push(root);
+    const skillDir = path.join(root, '.opencode', 'skills', 'cap-test-skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: cap-test-skill\ndescription: Size gate test skill\n---\n\nBody.\n',
+      'utf8',
+    );
+    for (const [name, content] of Object.entries(files)) {
+      fs.writeFileSync(path.join(skillDir, name), content, 'utf8');
+    }
+    return root;
+  };
+
+  const getSupportingFile = (root, filePath) => handleConfigBridgeMessage({
+    id: 'skill-file-get',
+    type: 'api:config/skills/files',
+    payload: { method: 'GET', name: 'cap-test-skill', filePath },
+  }, createCtx(root), deps);
+
+  test('refuses an over-cap supporting file with a clear too-large error', async () => {
+    const root = createProjectSkill({ 'big.txt': 'a'.repeat(SKILL_FILE_CAP + 1) });
+
+    const response = await getSupportingFile(root, 'big.txt');
+
+    expect(response?.success).toBe(false);
+    expect(response?.error).toContain('too large');
+    expect(response?.error).toContain(String(SKILL_FILE_CAP));
+  });
+
+  test('returns an at-cap supporting file byte-identically', async () => {
+    const content = 'a'.repeat(SKILL_FILE_CAP);
+    const root = createProjectSkill({ 'at-cap.txt': content });
+
+    const response = await getSupportingFile(root, 'at-cap.txt');
+
+    expect(response?.success).toBe(true);
+    expect(response?.data).toEqual({ content });
+  });
+
+  test('keeps the not-found shape for a missing supporting file', async () => {
+    const root = createProjectSkill({ 'small.txt': 'hello' });
+
+    const missing = await getSupportingFile(root, 'nope.txt');
+    expect(missing?.success).toBe(false);
+    expect(missing?.error).toContain('not found');
+
+    const small = await getSupportingFile(root, 'small.txt');
+    expect(small?.success).toBe(true);
+    expect(small?.data).toEqual({ content: 'hello' });
   });
 });

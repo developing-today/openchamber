@@ -33,6 +33,7 @@ import {
   renameSkill,
   isManagedSkillPath,
   readSkillSupportingFile,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   writeSkillSupportingFile,
   deleteSkillSupportingFile,
   type SkillScope,
@@ -849,7 +850,15 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
-        const fileContent = readSkillSupportingFile(skillDir, relativePath);
+        let fileContent: string | null;
+        try {
+          fileContent = readSkillSupportingFile(skillDir, relativePath);
+        } catch (error) {
+          if ((error as { code?: string })?.code === SKILL_SUPPORTING_FILE_TOO_LARGE_CODE) {
+            return { id, type, success: false, error: (error as Error).message };
+          }
+          throw error;
+        }
         if (fileContent === null) {
           return { id, type, success: false, error: `File "${relativePath}" not found in skill "${skillName}"` };
         }
