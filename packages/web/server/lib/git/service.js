@@ -1,5 +1,6 @@
 import simpleGit from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
+import { trackLiveTree } from '../spaces/run-command.js';
 import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
 import path from 'path';
@@ -2214,6 +2215,11 @@ const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new 
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  // Register the tree with the server's live-tree cleanup (#1084): the
+  // child leads a detached process group, so without this a start command
+  // still running at server shutdown/exit survived the server. The
+  // timeout/escalation behaviour below is unchanged.
+  trackLiveTree(child);
   const stdoutChunks = [];
   const stderrChunks = [];
   let stdoutBytes = 0;

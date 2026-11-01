@@ -10,6 +10,7 @@ import { registerGitRoutes } from './routes.js';
 import { isUserAction } from '../environment/refresh-scope.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { configureProjectStartCommandSource } from '../opencode/project-start-command.js';
+import { killLiveTrees, liveTreeCount } from '../spaces/run-command.js';
 
 import {
   configureGitEnvironment,
@@ -1984,6 +1985,57 @@ describe('createWorktree', () => {
         phase: 'setup-ready',
         error: null,
       });
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
+  it('registers a running start command with the live-tree shutdown cleanup (#1084)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    // Long timeout: the command must still be running when the shutdown
+    // cleanup fires, so only killLiveTrees can end it.
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '120000';
+
+    const hangScript = path.join(dataHome, 'hang.cjs');
+    fs.writeFileSync(hangScript, 'setTimeout(() => {}, 120_000);\n');
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-registered',
+        worktreeName: 'start-command-registered',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(hangScript)}`,
+      });
+
+      // While the start command runs, its tree is registered for shutdown.
+      await expect.poll(() => liveTreeCount(), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+
+      // The shutdown cleanup (what process exit runs) kills the tree, so
+      // the bootstrap finishes instead of the command outliving the server.
+      killLiveTrees();
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 15_000 },
+      ).toBe('setup-ready');
+      expect(liveTreeCount()).toBe(0);
     } finally {
       if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
       else process.env.XDG_DATA_HOME = previousXdgDataHome;
