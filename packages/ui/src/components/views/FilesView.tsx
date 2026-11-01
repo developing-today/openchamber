@@ -68,7 +68,7 @@ import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { isFilePathMoveInFlight, rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { DiagramEditor } from '@/components/diagram';
-import { EMPTY_CANVAS_READ, shouldShowFileCanvas, type FileCanvasHandle } from '@/components/views/files/fileCanvas';
+import { canMountBinaryCanvas, EMPTY_CANVAS_READ, readCanvasResponseBytes, shouldShowFileCanvas, type FileCanvasHandle } from '@/components/views/files/fileCanvas';
 import { GuestFileEditor } from '@/components/views/files/GuestFileEditor';
 import { findGuestFileEditor, useGuestFileEditor } from '@/lib/guests/file-editors';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -970,6 +970,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const [tableViewMode, setTableViewMode] = React.useState<'table' | 'text'>('table');
   // Byte size of the open file, for the artifact meta line.
   const [artifactSize, setArtifactSize] = React.useState<number | null>(null);
+  const [artifactSizeStatSettled, setArtifactSizeStatSettled] = React.useState(false);
   const [drawioRemountNonce, setDrawioRemountNonce] = React.useState(0);
   const [canvasRemountNonce, setCanvasRemountNonce] = React.useState(0);
   const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
@@ -2860,8 +2861,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const isTable = !claimedByGuest && Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
   const hasCanvas = claimedByGuest;
   // A binary editor checks the bytes it reads too; the stat size spares a read.
+  // An unknown size waits for the stat; a settled stat with no size mounts
+  // and lets the bounded byte read judge instead.
   const canMountCanvas = claimedByGuest && (binaryCanvas
-    ? artifactSize === null || artifactSize <= GUEST_FILE_EDITOR_CONTENT_MAX
+    ? canMountBinaryCanvas(artifactSize, artifactSizeStatSettled, GUEST_FILE_EDITOR_CONTENT_MAX)
     : draftContent.length <= GUEST_FILE_EDITOR_CONTENT_MAX);
   // Excalidraw drawings open in the Excalidraw extension. Without it they show
   // their text and a pointer to the Integrations card, where the runtime can
@@ -3021,13 +3024,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   React.useEffect(() => {
     const selectedPath = selectedFile?.path;
     setArtifactSize(null);
+    setArtifactSizeStatSettled(false);
     if (!selectedPath || loadedFilePath !== selectedPath) return;
     let cancelled = false;
     void readFileStat(selectedPath)
       .then((stat) => {
-        if (!cancelled && stat) setArtifactSize(stat.size);
+        if (cancelled) return;
+        if (stat) setArtifactSize(stat.size);
+        setArtifactSizeStatSettled(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setArtifactSizeStatSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -4901,7 +4909,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       },
     });
     if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
-    return new Uint8Array(await response.arrayBuffer());
+    return readCanvasResponseBytes(response, GUEST_FILE_EDITOR_CONTENT_MAX);
   }, [resolveFileReadOptions, root, t]);
 
   const handleCanvasLoadProblem = React.useCallback((message: string) => {
