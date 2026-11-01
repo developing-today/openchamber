@@ -278,6 +278,41 @@ const registry = {
 const pendingFetches = new Map();
 
 /**
+ * The running OpenCode answers a rejected credential read with the bare
+ * string `Authentication required` (its 401 body), and every provider that
+ * reads credentials through `../opencode/auth.js` surfaces that one shared
+ * failure as its own error (#894). The dispatcher rewrites that exact error
+ * wherever a quota result leaves this module, so consumers see the one
+ * credential-path failure — OpenChamber's upstream password for the
+ * running OpenCode, not the provider's own credential — instead of N
+ * identical provider errors that invite per-provider fixes.
+ */
+export const OPENCODE_UPSTREAM_AUTH_ERROR = 'OpenCode upstream authentication failed: the running OpenCode rejected the credentials OpenChamber presented (shared credential path, not this provider’s own credential). Check the OpenCode server password OpenChamber connects with.';
+
+const UPSTREAM_AUTH_ERROR_PATTERN = /^authentication required$/i;
+
+export const isOpenCodeUpstreamAuthError = (error) => {
+  const message = error instanceof Error ? error.message : error;
+  return UPSTREAM_AUTH_ERROR_PATTERN.test(String(message ?? '').trim());
+};
+
+const upstreamAuthFailureResult = (providerId, providerName) => ({
+  ...buildResult({
+    providerId,
+    providerName,
+    ok: false,
+    configured: true,
+    error: OPENCODE_UPSTREAM_AUTH_ERROR
+  }),
+  errorKind: 'opencode_upstream_auth'
+});
+
+const surfaceSharedUpstreamAuthFailure = (result) => {
+  if (!result || result.ok || !isOpenCodeUpstreamAuthError(result.error)) return result;
+  return { ...result, error: OPENCODE_UPSTREAM_AUTH_ERROR, errorKind: 'opencode_upstream_auth' };
+};
+
+/**
  * The two facts the quota listing takes from the merged OpenCode config,
  * read the way the OpenRouter provider reads its baseURL: `disabled_providers`
  * and the provider instances (`instanceOf`). A config that cannot be read is
@@ -359,7 +394,13 @@ const isCredentialUsable = (provider, row, authKey = row.integrationID) => {
  * the filter governs the listing, never an explicit ask.
  */
 export const listConfiguredQuotaProviders = async ({ includeDisabled = false } = {}) => {
-  const auth = await readOpenCodeCredentials();
+  let auth;
+  try {
+    auth = await readOpenCodeCredentials();
+  } catch (error) {
+    if (isOpenCodeUpstreamAuthError(error)) throw new Error(OPENCODE_UPSTREAM_AUTH_ERROR);
+    throw error;
+  }
   const facts = readQuotaConfigFacts();
   const configured = [];
 
@@ -447,7 +488,7 @@ const fetchPerCredential = async (provider, { resultProviderId, resultProviderNa
     };
     if (resultProviderName) labeled.providerName = resultProviderName;
     if (row.label) labeled.credentialLabel = row.label;
-    results.push(labeled);
+    results.push(surfaceSharedUpstreamAuthFailure(labeled));
   }
   return results;
 };
@@ -489,19 +530,29 @@ const getRegistryProvider = (providerId) => (Object.hasOwn(registry, providerId)
 export const fetchQuotaForProviderInstances = async (providerId) => {
   const provider = getRegistryProvider(providerId);
 
-  if (!provider) {
-    return (await fetchInstanceResults(providerId)) ?? [unsupportedResult(providerId)];
-  }
+  try {
+    if (!provider) {
+      return (await fetchInstanceResults(providerId)) ?? [unsupportedResult(providerId)];
+    }
 
-  if (!provider.fetchQuotaForCredential) {
-    return [await fetchQuotaForProvider(providerId)];
-  }
+    if (!provider.fetchQuotaForCredential) {
+      return [await fetchQuotaForProvider(providerId)];
+    }
 
-  const results = await fetchPerCredential(provider, {
-    resultProviderId: providerId,
-    integrationIds: provider.credentialAliases ?? [providerId]
-  });
-  return results ?? [await fetchQuotaForProvider(providerId)];
+    const results = await fetchPerCredential(provider, {
+      resultProviderId: providerId,
+      integrationIds: provider.credentialAliases ?? [providerId]
+    });
+    return results ?? [await fetchQuotaForProvider(providerId)];
+  } catch (error) {
+    // The credential-store read itself failed: that is the shared upstream
+    // path, not this provider, so answer one marked shared-failure row
+    // instead of throwing the bare upstream string at the route.
+    if (isOpenCodeUpstreamAuthError(error)) {
+      return [upstreamAuthFailureResult(providerId, provider?.providerName ?? providerId)];
+    }
+    throw error;
+  }
 };
 
 const fetchQuotaForProviderUncoalesced = async (providerId) => {
@@ -510,7 +561,13 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   if (!provider) {
     // An instance id answers with its active credential's result, keeping
     // the one-result shape this function promises.
-    const instanceResults = await fetchInstanceResults(providerId);
+    let instanceResults;
+    try {
+      instanceResults = await fetchInstanceResults(providerId);
+    } catch (error) {
+      if (isOpenCodeUpstreamAuthError(error)) return upstreamAuthFailureResult(providerId, providerId);
+      throw error;
+    }
     if (instanceResults) {
       return instanceResults.find((result) => result.credentialActive) ?? instanceResults[0];
     }
@@ -518,16 +575,16 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 
   try {
-    return await provider.fetchQuota();
+    return surfaceSharedUpstreamAuthFailure(await provider.fetchQuota());
   } catch (error) {
-    return buildResult({
+    return surfaceSharedUpstreamAuthFailure(buildResult({
       providerId: provider.providerId,
       providerName: provider.providerName,
       aliases: provider.aliases,
       ok: false,
       configured: true,
       error: error instanceof Error ? error.message : 'Request failed'
-    });
+    }));
   }
 };
 

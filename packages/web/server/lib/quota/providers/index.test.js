@@ -3,13 +3,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const authState = vi.hoisted(() => ({ projected: {}, rows: [] }));
+const authState = vi.hoisted(() => ({ projected: {}, rows: [], readError: null, rowsError: null }));
 
 vi.mock('../../opencode/auth.js', () => ({
-  readOpenCodeCredentials: async () => authState.projected,
-  listStoredCredentials: async (integrationID) => (integrationID
-    ? authState.rows.filter((row) => row.integrationID === integrationID)
-    : authState.rows),
+  readOpenCodeCredentials: async () => {
+    if (authState.readError) throw authState.readError;
+    return authState.projected;
+  },
+  listStoredCredentials: async (integrationID) => {
+    if (authState.rowsError) throw authState.rowsError;
+    return integrationID
+      ? authState.rows.filter((row) => row.integrationID === integrationID)
+      : authState.rows;
+  },
 }));
 
 // The registry reads disabled_providers and provider instances through the
@@ -91,6 +97,8 @@ const sharingRow = oauthRow('openai', { id: 'cred_sharing', label: 'OpenAI 2', a
 beforeEach(() => {
   authState.projected = {};
   authState.rows = [];
+  authState.readError = null;
+  authState.rowsError = null;
   setMergedConfig({});
   vi.stubGlobal('fetch', fakeFetch);
 });
@@ -147,6 +155,39 @@ describe('quota provider registry', () => {
     const fresh = await fetchQuotaForProvider('github-copilot');
     expect(fresh.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('shared upstream auth failure (#894)', () => {
+  it('marks a single-provider result whose credential read OpenCode rejected', async () => {
+    authState.readError = new Error('Authentication required');
+    const result = await fetchQuotaForProvider('openrouter');
+    expect(result.ok).toBe(false);
+    expect(result.error).not.toBe('Authentication required');
+    expect(result.error).toContain('OpenCode upstream authentication failed');
+    expect(result.errorKind).toBe('opencode_upstream_auth');
+  });
+
+  it('answers one marked row when the credential-store read itself is rejected', async () => {
+    authState.rowsError = new Error('Authentication required');
+    const results = await fetchQuotaForProviderInstances('codex');
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toContain('OpenCode upstream authentication failed');
+    expect(results[0].errorKind).toBe('opencode_upstream_auth');
+  });
+
+  it('names the shared path when the configured-provider listing cannot read credentials', async () => {
+    authState.readError = new Error('Authentication required');
+    await expect(listConfiguredQuotaProviders()).rejects.toThrow('OpenCode upstream authentication failed');
+  });
+
+  it('leaves a provider-specific failure untouched', async () => {
+    authState.readError = new Error('Request failed');
+    const result = await fetchQuotaForProvider('openrouter');
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Request failed');
+    expect(result.errorKind).toBeUndefined();
   });
 });
 
