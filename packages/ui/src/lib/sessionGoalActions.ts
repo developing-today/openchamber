@@ -115,17 +115,35 @@ const rewriteObjective = async (
   return null;
 };
 
+/** A short content hash identifying one saved objective text (FNV-1a). */
+export const goalObjectiveRevision = (text: string): string => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
 /** Whether the stored goal is still the one an edit started from. */
-const isSameGoal = (current: { id?: unknown; status?: unknown; objective?: unknown; objectiveFile?: unknown } | null, existing: SessionGoalPayload): boolean => {
+const isSameGoal = (current: { id?: unknown; status?: unknown; objective?: unknown; objectiveFile?: unknown; objectiveRevision?: unknown } | null, existing: SessionGoalPayload): boolean => {
   if (current === null) return false;
   if (current.id !== existing.id || current.status !== existing.status) return false;
   // updatedAt is deliberately not compared: the server runtime stamps a
   // fresh one on every accounting merge-write (token/turn settlement), so
   // routine accounting between opening the editor and saving used to read
   // as a conflicting edit. What accounting cannot change is the objective.
-  // For a file-backed goal the objective text lives in the file, not in
-  // the stored record this check reads, so there is nothing to compare.
-  if (existing.objectiveFile) return true;
+  if (existing.objectiveFile) {
+    // The objective text lives in the file, not in this record, so the
+    // record compares by revision: every save stamps the hash of the
+    // objective it wrote, and accounting merge-writes preserve it. A
+    // different revision means another save changed the objective while
+    // this edit was open. Goals saved before revisions existed carry
+    // none on one or both sides; those keep the id/status-only check.
+    const currentRevision = typeof current.objectiveRevision === 'string' ? current.objectiveRevision : '';
+    if (!currentRevision || !existing.objectiveRevision) return true;
+    return currentRevision === existing.objectiveRevision;
+  }
   const currentObjective = typeof current.objective === 'string' ? current.objective.trim() : '';
   return currentObjective === existing.objective;
 };
@@ -141,6 +159,8 @@ export const nextGoalRecord = (input: {
   existing: SessionGoalPayload | null;
   objective: string;
   objectiveFile: boolean;
+  /** Revision of the full objective text being saved (see goalObjectiveRevision). */
+  objectiveRevision: string;
   ignoreLimit: boolean;
   tokenBudget: number | null;
   /** `resumed` starts an idle session's next turn at once. */
@@ -157,6 +177,7 @@ export const nextGoalRecord = (input: {
         ...currentGoal,
         objective: input.objective,
         objectiveFile: input.objectiveFile,
+        objectiveRevision: input.objectiveRevision,
         ignoreObjectiveLimit: input.ignoreLimit,
         tokenBudget: input.tokenBudget,
         status: 'active',
@@ -172,6 +193,7 @@ export const nextGoalRecord = (input: {
       id: input.newId,
       objective: input.objective,
       objectiveFile: input.objectiveFile,
+      objectiveRevision: input.objectiveRevision,
       // Stated outright: a field left out would carry over from the goal this one replaces.
       ignoreObjectiveLimit: input.ignoreLimit,
       status: 'active',
@@ -242,6 +264,7 @@ export async function setSessionGoal(
       existing,
       objective: inline,
       objectiveFile,
+      objectiveRevision: goalObjectiveRevision(objective),
       ignoreLimit,
       tokenBudget,
       kickoff: input.kickoff !== false,

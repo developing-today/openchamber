@@ -8,6 +8,7 @@ const existing: SessionGoalPayload = {
   id: 'goal-1',
   objective: 'Old objective',
   objectiveFile: true,
+  objectiveRevision: 'rev-a',
   ignoreObjectiveLimit: false,
   status: 'active',
   tokenBudget: null,
@@ -28,6 +29,7 @@ const save = (currentGoal: Metadata | null, overrides: Partial<Parameters<typeof
   existing,
   objective: '',
   objectiveFile: true,
+  objectiveRevision: 'rev-new',
   ignoreLimit: false,
   tokenBudget: null,
   kickoff: true,
@@ -64,6 +66,18 @@ describe('goal record for a save', () => {
     const inlineExisting = { ...existing, objectiveFile: false };
     expect(save({ ...stored, objective: 'Old objective' }, { existing: inlineExisting }).changed).toBe(false);
     expect(save({ ...stored, objective: 'Rewritten elsewhere' }, { existing: inlineExisting })).toEqual({ changed: true });
+  });
+
+  // File-backed goals carry no objective text in the record, so an
+  // intervening save is detected by the objective revision it stamps:
+  // accounting preserves the revision, a save replaces it.
+  test('a file-backed goal whose objective was saved elsewhere is refused', () => {
+    expect(save({ ...stored, objectiveRevision: 'rev-b', updatedAt: 999 })).toEqual({ changed: true });
+  });
+
+  test('an accounting bump on a file-backed goal keeps its revision and is not a conflict', () => {
+    const next = save({ ...stored, objectiveRevision: 'rev-a', updatedAt: 999, tokensUsed: 1500 });
+    expect(next).toMatchObject({ changed: false, record: { objectiveRevision: 'rev-new', tokensUsed: 1500 } });
   });
 
   test('an edit is refused when the stored goal changed after it began', () => {
