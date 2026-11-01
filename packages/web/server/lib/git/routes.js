@@ -5,6 +5,7 @@ import { runAsUserAction } from '../environment/refresh-scope.js';
 import { redactRemoteUrl } from '../source-control/url-redaction.js';
 import { parsePublicGitIdentityProfile, toPublicGitIdentityProfile } from './identity-storage.js';
 import { WorktreeCreationError, createWorktreeCreation, hasClientContributorAuthority } from './worktree-creation.js';
+import { MAX_GIT_LOG_COUNT } from './log-limits.js';
 
 const NETWORK_OPERATION_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const toGitIdentitySummary = (identity) => identity ? {
@@ -43,14 +44,17 @@ const parseDiffContextLines = (value) => {
   return Number.isSafeInteger(contextLines) ? Math.min(contextLines, MAX_DIFF_CONTEXT_LINES) : 3;
 };
 
-// Log maxCount: a positive integer, else undefined so the service applies
-// its default. A negative must never reach git: --max-count=-5 asks git
-// for the repository's entire history.
+// Digits alone are not enough for log maxCount (#1120): a huge decimal string
+// can exceed JavaScript's safe integer range or ask git to return the entire
+// history. Unsafe or invalid values use the service default; safe values clamp
+// to the shared ceiling so the route and direct service callers stay bounded.
 const parseLogMaxCount = (value) => {
   const text = String(value ?? '');
   if (!/^\d+$/.test(text)) return undefined;
   const maxCount = Number(text);
-  return maxCount > 0 ? maxCount : undefined;
+  return Number.isSafeInteger(maxCount) && maxCount > 0
+    ? Math.min(maxCount, MAX_GIT_LOG_COUNT)
+    : undefined;
 };
 
 /**

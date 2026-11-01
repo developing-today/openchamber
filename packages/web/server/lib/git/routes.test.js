@@ -1479,7 +1479,11 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app);
     const handler = getRoute('GET', '/api/git/log');
-    const cases = [['10junk', undefined], ['1e3', undefined], ['2.5', undefined], ['0', undefined], ['-5', undefined], ['abc', undefined], [undefined, undefined], ['1', 1], ['50', 50]];
+    const cases = [
+      ['10junk', undefined], ['1e3', undefined], ['2.5', undefined], ['0', undefined], ['-5', undefined], ['abc', undefined],
+      ['9007199254740993', undefined], ['9'.repeat(309), undefined], [undefined, undefined],
+      ['1', 1], ['50', 50], ['100', 100], ['10000', 10000], ['10001', 10000], ['1000000000', 10000],
+    ];
     for (const [maxCount, expected] of cases) {
       gitLibraries.getLog.mockClear();
       const response = createMockResponse();
