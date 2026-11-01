@@ -2866,6 +2866,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const canMountCanvas = claimedByGuest && (binaryCanvas
     ? canMountBinaryCanvas(artifactSize, artifactSizeStatSettled, GUEST_FILE_EDITOR_CONTENT_MAX)
     : draftContent.length <= GUEST_FILE_EDITOR_CONTENT_MAX);
+  // While a binary canvas waits for its stat, the fallback text editor is
+  // read-only: a text draft must not start for a file about to mount as
+  // a binary canvas.
+  const binaryCanvasStatPending = binaryCanvas && !artifactSizeStatSettled;
   // Excalidraw drawings open in the Excalidraw extension. Without it they show
   // their text and a pointer to the Integrations card, where the runtime can
   // install extensions at all.
@@ -5299,7 +5303,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                   detached={!visible}
                   value={draftContent}
                   onChange={setDraftContent}
-                  readOnly={!canEdit}
+                  readOnly={!canEdit || binaryCanvasStatPending}
                   vimMode={fileEditorKeymap === 'vim'}
                   extensions={editorExtensions}
                   className="h-full"
@@ -5586,7 +5590,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 positionKey={`${filePositionKey}:fullscreen`}
                 value={draftContent}
                 onChange={setDraftContent}
-                readOnly={!canEdit}
+                readOnly={!canEdit || binaryCanvasStatPending}
                 vimMode={fileEditorKeymap === 'vim'}
                 extensions={editorExtensions}
                 className="h-full"
