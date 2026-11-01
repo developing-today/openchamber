@@ -70,7 +70,7 @@ const isManagedEntry = (keys) => keys.get(MANAGED_KEY) === 'true';
 
 const readFileOrNull = async (filePath, { maxBytes } = {}) => {
   try {
-    if (typeof maxBytes === 'number' && (await fsp.stat(filePath)).size > maxBytes) return null;
+    if (maxBytes && (await fsp.stat(filePath)).size > maxBytes) return null;
     return await fsp.readFile(filePath);
   } catch (error) {
     if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null;
