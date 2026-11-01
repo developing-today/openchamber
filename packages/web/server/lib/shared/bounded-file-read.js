@@ -20,6 +20,11 @@ import fs from 'node:fs';
 // changes a caller's missing-file behaviour. Unexpected I/O errors
 // (permissions, I/O failures) throw, as they are none of the three.
 
+// Reads accumulate in chunks sized to the bytes actually present, never
+// in a single maxBytes + 1 allocation: a 6-byte file under a 50 MiB cap
+// must not pin a 50 MiB buffer for the duration of the read.
+const READ_CHUNK_BYTES = 64 * 1024;
+
 const openFlags = () =>
   process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
 
@@ -78,18 +83,20 @@ export async function readBoundedFile(filePath, maxBytes) {
     const stat = await handle.stat();
     if (!stat.isFile()) return notRegularResult(filePath);
     if (stat.size > maxBytes) return tooLargeResult(filePath, stat.size, maxBytes);
-    const buffer = Buffer.alloc(maxBytes + 1);
+    const chunks = [];
     let total = 0;
-    while (total < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+    while (total <= maxBytes) {
+      const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, maxBytes + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
       if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
       total += bytesRead;
     }
     // The stat size is only a hint: a file that grew after it crosses the
     // cap here, having read at most maxBytes + 1 bytes. `size` is then the
     // count actually read (maxBytes + 1), a lower bound on the real size.
     if (total > maxBytes) return tooLargeResult(filePath, total, maxBytes);
-    return { ok: true, buffer: buffer.subarray(0, total), size: total };
+    return { ok: true, buffer: Buffer.concat(chunks, total), size: total };
   } finally {
     await handle.close();
   }
@@ -120,15 +127,17 @@ export function readBoundedFileSync(filePath, maxBytes) {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) return notRegularResult(filePath);
     if (stat.size > maxBytes) return tooLargeResult(filePath, stat.size, maxBytes);
-    const buffer = Buffer.alloc(maxBytes + 1);
+    const chunks = [];
     let total = 0;
-    while (total < buffer.length) {
-      const bytesRead = fs.readSync(fd, buffer, total, buffer.length - total, total);
+    while (total <= maxBytes) {
+      const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, maxBytes + 1 - total));
+      const bytesRead = fs.readSync(fd, chunk, 0, chunk.length, total);
       if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
       total += bytesRead;
     }
     if (total > maxBytes) return tooLargeResult(filePath, total, maxBytes);
-    return { ok: true, buffer: buffer.subarray(0, total), size: total };
+    return { ok: true, buffer: Buffer.concat(chunks, total), size: total };
   } finally {
     fs.closeSync(fd);
   }
