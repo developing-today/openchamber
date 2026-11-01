@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseMdFile, parseMdFileAsync, MD_FILE_MAX_BYTES, writeMdFile, readConfigFile, readConfigLayers, writeConfig, walkSkillMdFiles } from './shared.js';
+import { parseMdFile, parseMdFileAsync, MD_FILE_MAX_BYTES, writeMdFile, readConfigFile, readConfigLayer, readConfigLayers, writeConfig, walkSkillMdFiles, MAX_CONFIG_FILE_BYTES } from './shared.js';
 import { updateAgent } from './agents.js';
 import { updateMcpConfig, createMcpConfig, deleteMcpConfig } from './mcp.js';
 
@@ -439,6 +439,90 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
       if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
       else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
     }
+  });
+});
+
+describe('readConfigFile / writeConfig size cap (issue #1150)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const writeOversizedConfig = (name) => {
+    const filePath = writeFixture(name, '{"pad":""}');
+    fs.truncateSync(filePath, MAX_CONFIG_FILE_BYTES + 1);
+    return filePath;
+  };
+
+  it('refuses an over-cap config without reading it whole', () => {
+    const file = writeOversizedConfig('too-big.json');
+    const readSpy = vi.spyOn(fs, 'readFileSync');
+
+    let thrown;
+    try {
+      readConfigFile(file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(thrown?.message).toMatch(/byte limit/);
+    expect(readSpy.mock.calls.some(([target]) => target === file)).toBe(false);
+  });
+
+  it('records the over-cap refusal as a layer error instead of a silent empty config', () => {
+    const file = writeOversizedConfig('layer-too-big.jsonc');
+    const layer = readConfigLayer(file);
+    expect(layer.config).toEqual({});
+    expect(layer.error?.code).toBe('CONFIG_FILE_TOO_LARGE');
+  });
+
+  it('writeConfig refuses to overwrite an over-cap existing config', () => {
+    const file = writeOversizedConfig('existing-too-big.json');
+    const before = fs.statSync(file).size;
+
+    let thrown;
+    try {
+      writeConfig({ $schema: 'https://opencode.ai/config.json' }, file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(fs.statSync(file).size).toBe(before);
+    expect(fs.existsSync(`${file}.openchamber.backup`)).toBe(false);
+  });
+
+  it('writeConfig refuses a serialized result over the byte cap and preserves the original', () => {
+    const original = JSON.stringify({ $schema: 'https://opencode.ai/config.json' });
+    const file = writeFixture('grows-over-cap.json', original);
+    fs.writeFileSync(`${file}.openchamber.backup`, 'previous backup');
+    const huge = { pad: 'x'.repeat(MAX_CONFIG_FILE_BYTES) };
+
+    let thrown;
+    try {
+      writeConfig(huge, file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(fs.readFileSync(file, 'utf8')).toBe(original);
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe('previous backup');
+    expect(readConfigFile(file)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+  });
+
+  it('loads and rewrites a config exactly at the byte cap', () => {
+    const overhead = Buffer.byteLength(JSON.stringify({ pad: '' }), 'utf8');
+    const pad = 'x'.repeat(MAX_CONFIG_FILE_BYTES - overhead);
+    const file = writeFixture('at-cap.json', JSON.stringify({ pad }));
+    expect(fs.statSync(file).size).toBe(MAX_CONFIG_FILE_BYTES);
+
+    expect(readConfigFile(file)).toEqual({ pad });
+    writeConfig({ pad }, file);
+    expect(readConfigFile(file)).toEqual({ pad });
   });
 });
 

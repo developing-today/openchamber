@@ -335,6 +335,29 @@ function isInvalidJsoncError(error) {
   return Boolean(error && typeof error === 'object' && error.code === INVALID_JSONC);
 }
 
+const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
+
+// Config files are hand-written JSONC; the precedent caps in this server run
+// 1-4 MiB (AGENTS.md 1 MiB, SKILL.md 4 MiB). 4 MiB is generous for a config
+// while keeping a cloned project's oversized opencode.json(c) from being
+// buffered whole, synchronously, on every settings/plugin/MCP read.
+const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
+
+function isConfigFileTooLargeError(error) {
+  return Boolean(error && error.code === CONFIG_FILE_TOO_LARGE);
+}
+
+function assertConfigFileWithinCap(filePath) {
+  const { size } = fs.statSync(filePath);
+  if (size > MAX_CONFIG_FILE_BYTES) {
+    const error = new Error(
+      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
+    );
+    error.code = CONFIG_FILE_TOO_LARGE;
+    throw error;
+  }
+}
+
 function formatJsoncParseError(filePath, errors) {
   const first = Array.isArray(errors) && errors.length > 0 ? errors[0] : null;
   const location = first && Number.isFinite(first.offset)
@@ -374,6 +397,7 @@ function readConfigFile(filePath) {
     return {};
   }
   try {
+    assertConfigFileWithinCap(filePath);
     const content = fs.readFileSync(filePath, 'utf8');
     const normalized = content.trim();
     if (!normalized) {
@@ -383,7 +407,7 @@ function readConfigFile(filePath) {
     // rewrite a truncated object (often only `$schema`) over the full config.
     return parseConfigObject(normalized, filePath);
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       throw error;
     }
     console.error(`Failed to read config file: ${filePath}`, error);
@@ -419,7 +443,7 @@ function readConfigLayer(filePath) {
   try {
     return { config: readConfigFile(filePath), error: null };
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       console.error(error.message);
       return { config: {}, error };
     }
@@ -655,26 +679,46 @@ function writeConfig(config, filePath = CONFIG_FILE) {
   try {
     let existingRaw = '';
     let existingParse = null;
-    if (fs.existsSync(filePath)) {
+    const hadExistingFile = fs.existsSync(filePath);
+    if (hadExistingFile) {
       // Defense in depth: never overwrite a file we cannot fully parse.
+      assertConfigFileWithinCap(filePath);
       existingRaw = fs.readFileSync(filePath, 'utf8');
       if (existingRaw.trim()) {
         existingParse = parseConfigResult(existingRaw.trim(), filePath);
       }
-
-      const backupFile = `${filePath}.openchamber.backup`;
-      fs.copyFileSync(filePath, backupFile);
-      console.log(`Created config backup: ${backupFile}`);
     }
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     // A JSON round-trip normalizes the config at the write boundary: it drops
     // `undefined` values exactly like the serialized write would.
     const desired = JSON.parse(JSON.stringify(config));
-    writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
+    const content = buildConfigFileContent(desired, existingRaw, existingParse);
+    // Enforce the cap on the serialized result too: writing a config that
+    // crosses the read cap would strand the layer — later reads omit it as
+    // CONFIG_FILE_TOO_LARGE and later writes refuse it, so the user could
+    // not undo the change through OpenChamber. Reject before replacing the
+    // file, preserving the readable original.
+    if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+      const error = new Error(
+        `Serialized OpenCode configuration for ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be written safely`,
+      );
+      error.code = CONFIG_FILE_TOO_LARGE;
+      throw error;
+    }
+    // The backup is part of the write, so it is created only once the
+    // write is known acceptable: a refused write (unparseable, over-cap,
+    // or a serialized result over the cap) leaves the previous backup —
+    // the restore point from the last successful write — untouched.
+    if (hadExistingFile) {
+      const backupFile = `${filePath}.openchamber.backup`;
+      fs.copyFileSync(filePath, backupFile);
+      console.log(`Created config backup: ${backupFile}`);
+    }
+    writeFileAtomic(filePath, content);
     console.log(`Successfully wrote config file: ${filePath}`);
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       throw error;
     }
     console.error(`Failed to write config file: ${filePath}`, error);
@@ -1154,6 +1198,7 @@ export {
   parseMdFileAsync,
   MD_FILE_MAX_BYTES,
   writeMdFile,
+  MAX_CONFIG_FILE_BYTES,
   readConfigFile,
   readConfigLayer,
   isPlainObject,
