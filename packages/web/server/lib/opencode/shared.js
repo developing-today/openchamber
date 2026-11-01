@@ -789,6 +789,14 @@ function writePromptFile(filePath, content) {
 
 // ============== SKILL FILE OPERATIONS ==============
 
+// Skill supporting files are hand-maintained docs and scripts shipped with
+// third-party skills; nothing OpenChamber writes bounds their size, so the
+// GET route must never buffer an arbitrary one whole. Judged from stat
+// before any read (the house stat-gate pattern): a file over this cap is
+// refused, never read. 1 MiB matches the AGENTS.md behavior-prompt cap.
+const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
+const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_large';
+
 async function pathExists(target) {
   try {
     await fs.promises.access(target);
@@ -974,6 +982,12 @@ function readSkillSupportingFile(skillDir, relativePath) {
   if (!fs.existsSync(fullPath)) {
     return null;
   }
+  if (fs.statSync(fullPath).size > SKILL_SUPPORTING_FILE_MAX_BYTES) {
+    throw Object.assign(
+      new Error(`Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),
+      { code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE },
+    );
+  }
   return fs.readFileSync(fullPath, 'utf8');
 }
 
@@ -1040,6 +1054,8 @@ export {
   addSkillFromMdFile,
   resolveSkillSearchDirectories,
   listSkillSupportingFiles,
+  SKILL_SUPPORTING_FILE_MAX_BYTES,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile

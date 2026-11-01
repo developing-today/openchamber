@@ -17,6 +17,8 @@ import {
 import {
   SKILL_DIR,
   SKILL_SCOPE,
+  SKILL_SUPPORTING_FILE_MAX_BYTES,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   deleteSkillSupportingFile,
   readSkillSupportingFile,
   writeSkillSupportingFile,
@@ -438,6 +440,47 @@ describe('skill-routes directory soft fallback', () => {
       path: path.join('references', 'guide.md'),
       fullPath: path.join(skillDir, 'references', 'guide.md'),
     }]);
+  });
+
+  it('refuses over-cap skill supporting files with 413 and serves at-cap files byte-identically', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'capped-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: capped-skill\ndescription: Has capped files\n---\nBody\n',
+    );
+    const atCap = 'a'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES);
+    fs.writeFileSync(path.join(skillDir, 'references', 'at-cap.md'), atCap);
+    fs.writeFileSync(path.join(skillDir, 'references', 'over-cap.md'), 'b'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
+    fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+
+    // The shared reader refuses over-cap files with a distinct signal,
+    // before reading them whole (a whole read would succeed and return).
+    expect(() => readSkillSupportingFile(skillDir, path.join('references', 'over-cap.md')))
+      .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+    expect(readSkillSupportingFile(skillDir, path.join('references', 'at-cap.md'))).toBe(atCap);
+    expect(readSkillSupportingFile(skillDir, path.join('references', 'missing.md'))).toBeNull();
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+    const filesBase = `${appHandle.baseUrl}/api/config/skills/capped-skill/files`;
+
+    const overCap = await fetch(`${filesBase}/references/over-cap.md${query}`);
+    expect(overCap.status).toBe(413);
+    expect(await overCap.json()).toEqual({ error: 'File too large to read' });
+
+    const atCapResponse = await fetch(`${filesBase}/references/at-cap.md${query}`);
+    expect(atCapResponse.status).toBe(200);
+    expect(await atCapResponse.json()).toEqual({ path: 'references/at-cap.md', content: atCap });
+
+    const small = await fetch(`${filesBase}/references/guide.md${query}`);
+    expect(small.status).toBe(200);
+    expect(await small.json()).toEqual({ path: 'references/guide.md', content: '# Guide\n' });
+
+    const missing = await fetch(`${filesBase}/references/missing.md${query}`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'File not found' });
   });
 
   it('flags the list as partial when OpenCode skill list fails, and not when it succeeds', async () => {
