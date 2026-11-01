@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
+import { GUEST_ASSET_MAX_BYTES, guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
 import { setCapabilityGrants, writeExtensionPaths } from './persist.js';
 
 const writeBuiltGuest = async (root) => {
@@ -465,5 +465,36 @@ describe('catalog cache under a store write', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('guest asset size gate (#1116)', () => {
+  test('resolveGuestServedFile reports the stat size of the served file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'sized');
+    await writeBuiltGuest(guestRoot);
+    const served = await resolveGuestServedFile(guestRoot, 'panel/main.js');
+    expect(served?.size).toBe('console.log("hello")'.length);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('inspectGuestPackage refuses an over-cap entry page as missing-build', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'big-entry');
+    await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'panel', 'main.js'), 'console.log("main")');
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/big-entry',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'big-entry', name: 'Big Entry', icon: 'window', entry: 'panel/index.html' },
+        },
+      },
+    }));
+    await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), 'x'.repeat(GUEST_ASSET_MAX_BYTES + 1));
+    expect(await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' })).toEqual({ ok: false, code: 'missing-build' });
+    await fs.rm(dir, { recursive: true, force: true });
   });
 });
