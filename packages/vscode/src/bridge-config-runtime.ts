@@ -212,7 +212,10 @@ export async function handleConfigBridgeMessage(
     case 'api:behavior/agents-md:save': {
       const request = (payload || {}) as { content?: unknown };
       const content = typeof request.content === 'string' ? request.content : '';
-      if (content.length > MAX_BEHAVIOR_PROMPT_SIZE) {
+      // Measure UTF-8 bytes, not UTF-16 code units: the get handler gates on
+      // the on-disk byte size, so a length-based save check would accept
+      // multibyte content that every later get then refuses.
+      if (Buffer.byteLength(content, 'utf8') > MAX_BEHAVIOR_PROMPT_SIZE) {
         return { id, type, success: false, error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` };
       }
       await fs.promises.mkdir(path.dirname(AGENTS_MD_PATH), { recursive: true });
