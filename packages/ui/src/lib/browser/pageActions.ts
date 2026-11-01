@@ -332,7 +332,12 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
   // that reformats the value has had its say — and fail in the open instead.
   var held = target.isContentEditable ? (target.textContent || '') : target.value;
   if (held !== value) {
-    return { ok: false, error: selector + ' did not keep the typed value; it now holds ' + JSON.stringify(held) };
+    // Never report what the field now holds: for a password field that is
+    // the secret itself, and this error travels to the calling agent and
+    // any log that records it. An ordinary field gets a character count as
+    // the diagnostic; a password field gets not even that.
+    var isPassword = target.tagName === 'INPUT' && String(target.type || '').toLowerCase() === 'password';
+    return { ok: false, error: selector + ' did not keep the typed value' + (isPassword ? '' : '; it now holds ' + held.length + ' character' + (held.length === 1 ? '' : 's')) };
   }
 
   if (${submit ? 'true' : 'false'}) {

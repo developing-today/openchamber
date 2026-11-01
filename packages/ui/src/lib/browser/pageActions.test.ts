@@ -121,6 +121,32 @@ describe('page action scripts', () => {
     expect(win.document.querySelector('input')?.value).toBe('');
   });
 
+  test('a password field mismatch error never contains the held or typed secret', () => {
+    // Issue #1073 (Codex P1 on PR #70): the mismatch error embedded the
+    // field's held value verbatim, so a controlled password field whose
+    // handler restores its value handed the secret to the calling agent.
+    const win = new Window({ url: 'https://example.test/' });
+    win.document.body.innerHTML = '<input type="password" id="field">';
+    const input = win.document.querySelector('input');
+    if (!input) throw new Error('password input missing');
+    const heldSecret = 'held-secret-value';
+    input.value = heldSecret;
+    input.addEventListener('input', () => { input.value = heldSecret; });
+    input.addEventListener('change', () => { input.value = heldSecret; });
+    const runType = new Function(
+      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
+      `return ${buildTypeScript({ selector: '#field', value: 'typed-secret-attempt', submit: false })}`,
+    );
+    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
+    const rendered = JSON.stringify(result);
+    expect(rendered).toContain('"ok":false');
+    expect(rendered).toContain('did not keep the typed value');
+    expect(rendered).not.toContain(heldSecret);
+    expect(rendered).not.toContain('typed-secret-attempt');
+    expect(rendered).not.toContain('character');
+    expect(input.value).toBe(heldSecret);
+  });
+
   test('whitespace regexes survive interpolation', () => {
     // A doubled backslash here would produce a literal backslash-s and match
     // nothing, silently collapsing no whitespace at all.
