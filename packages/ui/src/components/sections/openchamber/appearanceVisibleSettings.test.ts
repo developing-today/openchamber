@@ -1,27 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getAppearanceVisibleSettings } from './appearanceVisibleSettings';
+import { ALL_VISIBLE_SETTINGS, getAppearanceVisibleSettings } from './appearanceVisibleSettings';
 
-// Every value in OpenChamberVisualSettings' VisibleSetting union, as of #1078.
-// This list is the pin: adding a gateable setting to the visual-settings
-// component without adding it to the Appearance allowlist (and here) fails.
-const ALL_GATEABLE_SETTINGS = [
-  'theme',
-  'windowControlsPosition',
-  'pwaInstallName',
-  'pwaOrientation',
-  'mobileKeyboardMode',
-  'timeFormat',
-  'weekStart',
-  'fontSize',
-  'terminalFontSize',
-  'editorFontSize',
-  'spacing',
-  'scrollbars',
-  'inputBarOffset',
-  'animatedActivityIndicators',
-  'sidebarRows',
-];
+// The pin compares against ALL_VISIBLE_SETTINGS — the runtime list the
+// VisibleSetting type itself is derived from — so adding a gateable
+// setting without adding it to the Appearance allowlist fails here.
+const ALL_GATEABLE_SETTINGS = ALL_VISIBLE_SETTINGS;
 
 describe('getAppearanceVisibleSettings', () => {
   test('includes sidebarRows so the session-row controls render on the Appearance page', () => {
