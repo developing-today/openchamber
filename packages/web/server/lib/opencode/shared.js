@@ -87,12 +87,86 @@ function sanitizeFrontmatter(frontmatter) {
     .join('\n');
 }
 
+// Agent/command/skill/loop markdown is project/clone-controlled content;
+// nothing bounds its on-disk size, so never buffer one whole past this cap
+// (same 4 MiB precedent as SKILL_MD_MAX_BYTES in skills-catalog/scan.js).
+const MD_FILE_MAX_BYTES = 4 * 1024 * 1024;
+
+const mdFileTooLargeError = (filePath) => {
+  const error = new Error(
+    `Markdown file exceeds the ${MD_FILE_MAX_BYTES}-byte size limit: ${filePath}`,
+  );
+  error.code = 'ERR_MD_FILE_TOO_LARGE';
+  return error;
+};
+
+// Read at most MD_FILE_MAX_BYTES from an already-open handle: stat-then-read
+// by path would follow a symlink to a device/FIFO and a file swapped or grown
+// between the two calls would escape the gate. O_NONBLOCK (POSIX only) keeps
+// open() itself from blocking on a FIFO before the regular-file check runs.
+const mdFileOpenFlags = () =>
+  process.platform === 'win32'
+    ? fs.constants.O_RDONLY
+    : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+
+function readMdFileSync(filePath) {
+  const fd = fs.openSync(filePath, mdFileOpenFlags());
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error(`Markdown file is not a regular file: ${filePath}`);
+    }
+    if (stat.size > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    const buffer = Buffer.alloc(MD_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function readMdFileAsync(filePath) {
+  const handle = await fs.promises.open(filePath, mdFileOpenFlags());
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error(`Markdown file is not a regular file: ${filePath}`);
+    }
+    if (stat.size > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    const buffer = Buffer.alloc(MD_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    await handle.close();
+  }
+}
+
 function parseMdFile(filePath) {
-  return parseMdContent(fs.readFileSync(filePath, 'utf8'), filePath);
+  return parseMdContent(readMdFileSync(filePath), filePath);
 }
 
 async function parseMdFileAsync(filePath) {
-  return parseMdContent(await fs.promises.readFile(filePath, 'utf8'), filePath);
+  return parseMdContent(await readMdFileAsync(filePath), filePath);
 }
 
 function parseMdContent(rawContent, filePath) {
@@ -1078,6 +1152,7 @@ export {
   ensureDirs,
   parseMdFile,
   parseMdFileAsync,
+  MD_FILE_MAX_BYTES,
   writeMdFile,
   readConfigFile,
   readConfigLayer,
