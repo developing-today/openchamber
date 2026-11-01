@@ -626,6 +626,8 @@ const getPrimaryUserConfigPath = (userPaths: string[]): string => {
 };
 
 const INVALID_JSONC = 'INVALID_JSONC';
+const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
+const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
 
 const formatJsoncParseError = (filePath: string, errors: ParseError[]): string => {
   const first = errors.length > 0 ? errors[0] : null;
@@ -635,8 +637,23 @@ const formatJsoncParseError = (filePath: string, errors: ParseError[]): string =
   return `OpenCode configuration at ${filePath} contains invalid JSONC and cannot be loaded safely${location}`;
 };
 
-const isInvalidJsoncError = (error: unknown): error is Error & { code: string } =>
-  Boolean(error && typeof error === 'object' && 'code' in error && error.code === INVALID_JSONC);
+const isConfigReadError = (error: unknown): error is Error & { code: string } =>
+  Boolean(error && typeof error === 'object' && 'code' in error
+    && (error.code === INVALID_JSONC || error.code === CONFIG_FILE_TOO_LARGE));
+
+const isConfigFileTooLargeError = (error: unknown): error is Error & { code: string } =>
+  Boolean(error && typeof error === 'object' && 'code' in error && error.code === CONFIG_FILE_TOO_LARGE);
+
+const readConfigFileContent = (filePath: string): string => {
+  const { size } = fs.statSync(filePath);
+  if (size > MAX_CONFIG_FILE_BYTES) {
+    throw codedError(
+      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
+      CONFIG_FILE_TOO_LARGE,
+    );
+  }
+  return fs.readFileSync(filePath, 'utf8');
+};
 
 // Comment-only / whitespace-only files parse to undefined with nothing but
 // ValueExpected. Any other error means real content we failed to understand
@@ -664,7 +681,7 @@ const parseConfigObject = (content: string, filePath: string): Record<string, un
 
 const readConfigFile = (filePath?: string | null): Record<string, unknown> => {
   if (!filePath || !fs.existsSync(filePath)) return {};
-  const content = fs.readFileSync(filePath, 'utf8');
+  const content = readConfigFileContent(filePath);
   const normalized = content.trim();
   if (!normalized) return {};
   // Refuse partial jsonc-parser trees. Ignoring errors previously let mutations
@@ -699,7 +716,7 @@ const readConfigLayer = (filePath?: string | null): {
   try {
     return { config: readConfigFile(filePath), error: null };
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isConfigReadError(error)) {
       console.error(error.message);
       return { config: {}, error };
     }
@@ -1069,7 +1086,7 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
   let existingParse: ConfigParseResult | null = null;
   if (fs.existsSync(filePath)) {
     // Defense in depth: never overwrite a file we cannot fully parse.
-    existingRaw = fs.readFileSync(filePath, 'utf8');
+    existingRaw = readConfigFileContent(filePath);
     if (existingRaw.trim()) {
       existingParse = parseConfigResult(existingRaw.trim(), filePath);
     }
@@ -1939,7 +1956,8 @@ const readProjectConfigFiles = (workingDirectory?: string): Array<{ path: string
         if (!fs.existsSync(filePath)) continue;
         try {
           files.push({ path: filePath, config: readConfigFile(filePath) });
-        } catch {
+        } catch (error) {
+          if (isConfigFileTooLargeError(error)) throw error;
           // Skipped: an unreadable file can't be told apart from one without the key.
         }
       }

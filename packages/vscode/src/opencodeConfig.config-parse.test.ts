@@ -10,6 +10,9 @@ import {
   updateMcpConfig,
   createMcpConfig,
   deleteMcpConfig,
+  getWebSearchSource,
+  readConfig,
+  setWebSearchSelection,
   type JsonValue,
 } from './opencodeConfig';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
@@ -56,6 +59,8 @@ const VALID_CONFIG = [
   '',
 ].join('\n');
 
+const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
+
 const isInvalidJsoncError = (error: unknown): boolean => {
   if (!(error instanceof Error) || !/cannot be loaded safely/.test(error.message)) {
     return false;
@@ -77,6 +82,49 @@ describe('opencodeConfig JSONC parse safety (issue #2923)', () => {
     if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
     else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('rejects oversized project configs before parsing them', () => {
+    const projectDir = path.join(tempDir, 'project');
+    fs.mkdirSync(projectDir);
+    const projectConfigPath = path.join(projectDir, 'opencode.json');
+    const content = JSON.stringify({ websearch: 'exa', padding: 'x'.repeat(MAX_CONFIG_FILE_BYTES) });
+    fs.writeFileSync(projectConfigPath, content, 'utf8');
+
+    assert.ok(fs.statSync(projectConfigPath).size > MAX_CONFIG_FILE_BYTES);
+    assert.throws(() => getWebSearchSource(projectDir), {
+      code: 'CONFIG_FILE_TOO_LARGE',
+      message: /exceeds the 4194304-byte limit and cannot be loaded safely/,
+    });
+  });
+
+  test('does not overwrite an oversized config when saving a websearch selection', () => {
+    const configPath = path.join(tempDir, 'oversized.json');
+    const content = JSON.stringify({ websearch: 'old', padding: 'x'.repeat(MAX_CONFIG_FILE_BYTES) });
+    fs.writeFileSync(configPath, content, 'utf8');
+    process.env.OPENCODE_CONFIG = configPath;
+
+    assert.throws(() => setWebSearchSelection('exa'), { code: 'CONFIG_FILE_TOO_LARGE' });
+    assert.equal(fs.readFileSync(configPath, 'utf8'), content);
+    assert.equal(fs.existsSync(`${configPath}.openchamber.backup`), false);
+  });
+
+  test('loads and merges a project config exactly at the byte limit', () => {
+    const projectDir = path.join(tempDir, 'project');
+    fs.mkdirSync(projectDir);
+    const projectConfigPath = path.join(projectDir, 'opencode.json');
+    const userConfigPath = path.join(tempDir, 'user-opencode.json');
+    const prefix = '{"projectMarker":"';
+    const suffix = '"}';
+    const markerLength = MAX_CONFIG_FILE_BYTES - Buffer.byteLength(prefix) - Buffer.byteLength(suffix);
+    const projectContent = `${prefix}${'x'.repeat(markerLength)}${suffix}`;
+    fs.writeFileSync(projectConfigPath, projectContent, 'utf8');
+    fs.writeFileSync(userConfigPath, JSON.stringify({ userMarker: 'preserved' }), 'utf8');
+    process.env.OPENCODE_CONFIG = userConfigPath;
+
+    assert.equal(fs.statSync(projectConfigPath).size, MAX_CONFIG_FILE_BYTES);
+    const config = readConfig(projectDir);
+    assert.deepEqual(config, { userMarker: 'preserved', projectMarker: 'x'.repeat(markerLength) });
   });
 
   test('refuses MCP updates that would overwrite a partial-parse config', () => {
