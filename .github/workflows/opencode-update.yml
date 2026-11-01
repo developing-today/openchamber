@@ -267,6 +267,7 @@ jobs:
           exit 1
 
       - name: Escalate the failure via pm-dispatch (start the fix)
+        id: dispatch-start
         if: always() && steps.outcome.outputs.result == 'failure' && steps.failure-issue.outputs.number == ''
         uses: developing-today/code/.github/actions/pm-dispatch-start@main
         with:
@@ -283,6 +284,20 @@ jobs:
             - Latest attempted: opencode `${{ steps.plan.outputs.new_rev }}`
             - Run: ${{ env.RUN_URL }}
             - Error excerpt: see the failed step's log in the run linked above.
+
+      - name: Persist the first-failure record on the starter-created tracker
+        if: always() && steps.outcome.outputs.result == 'failure' && steps.failure-issue.outputs.number == '' && steps.dispatch-start.outputs.issue_number != ''
+        run: |
+          # pm-dispatch-start creates the tracker from title+prompt only; it
+          # has no body input. The record step above generated the full
+          # first-failure body (Attempts / First failure / Failure history)
+          # but, with no pre-existing tracker, had nowhere to put it — so
+          # the new tracker started empty and the NEXT failure parsed no
+          # previous attempts from it, resetting Attempts to 1 and losing
+          # the first failure. Persist the generated body onto the tracker
+          # the starter just created (#1083).
+          gh issue edit "${{ steps.dispatch-start.outputs.issue_number }}" --body-file "$RUNNER_TEMP/issue-body.md"
+          echo "Persisted the first-failure record on tracker #${{ steps.dispatch-start.outputs.issue_number }}."
 
       - name: Escalate the failure via pm-dispatch (queue on the existing issue)
         if: always() && steps.outcome.outputs.result == 'failure' && steps.failure-issue.outputs.number != ''
