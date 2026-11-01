@@ -835,6 +835,43 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
   });
+
+  test('clamps primary, secondary and spend-control percentages to [0, 100]', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      rate_limit: {
+        primary_window: { used_percent: 150, limit_window_seconds: 18000, reset_at: 1893456000 },
+        secondary_window: { used_percent: -20, limit_window_seconds: 604800, reset_at: 1893456000 },
+      },
+      spend_control: {
+        individual_limit: { limit: '7500', used: '8000', used_percent: 200 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('codex');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 100);
+    assert.equal(result.usage?.windows['5h']?.remainingPercent, 0);
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 0);
+    assert.equal(result.usage?.windows.weekly?.remainingPercent, 100);
+    assert.equal(result.usage?.windows.credits?.usedPercent, 100);
+  });
+
+  test('keeps in-range Codex percentages unchanged and missing ones null', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      rate_limit: {
+        primary_window: { used_percent: 42, limit_window_seconds: 18000, reset_at: 1893456000 },
+        secondary_window: { limit_window_seconds: 604800, reset_at: 1893456000 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('codex');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 42);
+    assert.equal(result.usage?.windows.weekly?.usedPercent, null);
+    assert.equal(result.usage?.windows.weekly?.remainingPercent, null);
+  });
 });
 
 describe('GitHub Copilot quota provider (VS Code parity)', () => {

@@ -1026,12 +1026,15 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     const primary = payload?.rate_limit?.primary_window ?? null;
     const secondary = payload?.rate_limit?.secondary_window ?? null;
     const credits = payload?.credits ?? null;
+    const clampCodexUsedPercent = (percent: number | null): number | null => {
+      return percent === null ? null : clampPercent(percent);
+    };
 
     const windows: Record<string, UsageWindow> = {};
     if (primary) {
       const windowSeconds = toNumber(primary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(primary.used_percent),
+        usedPercent: clampCodexUsedPercent(toNumber(primary.used_percent)),
         windowSeconds,
         resetAt: toTimestamp(primary.reset_at),
       });
@@ -1039,7 +1042,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     if (secondary) {
       const windowSeconds = toNumber(secondary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(secondary.used_percent),
+        usedPercent: clampCodexUsedPercent(toNumber(secondary.used_percent)),
         windowSeconds,
         resetAt: toTimestamp(secondary.reset_at),
       });
@@ -1067,7 +1070,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
         ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
         : null;
       windows.credits = toUsageWindow({
-        usedPercent: toNumber(spendLimit.used_percent),
+        usedPercent: clampCodexUsedPercent(toNumber(spendLimit.used_percent)),
         windowSeconds: null,
         resetAt: null,
         valueLabel,
