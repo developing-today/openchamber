@@ -11,6 +11,7 @@ import { isUserAction } from '../environment/refresh-scope.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { configureProjectStartCommandSource } from '../opencode/project-start-command.js';
 import { killLiveTrees, liveTreeCount } from '../spaces/run-command.js';
+import { MAX_GIT_LOG_COUNT } from './log-limits.js';
 
 import {
   configureGitEnvironment,
@@ -199,6 +200,25 @@ async function createTempRepo() {
   return { tmpDir, git };
 }
 
+const fastImportEmptyCommits = (repository, count) => {
+  const commits = [];
+  for (let index = 1; index <= count; index += 1) {
+    const message = `commit ${index}`;
+    const parent = index > 1 ? `from :${index - 1}\n` : '';
+    commits.push(
+      `commit refs/heads/main\nmark :${index}\n` +
+      'committer Test User <test@example.com> 1700000000 +0000\n' +
+      `data ${Buffer.byteLength(message)}\n${message}\n${parent}\n`,
+    );
+  }
+  execFileSync('git', ['fast-import', '--quiet'], {
+    cwd: repository,
+    encoding: 'utf8',
+    input: commits.join(''),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+};
+
 // ---------------------------------------------------------------------------
 // resolveBaseRefForLog
 // ---------------------------------------------------------------------------
@@ -248,8 +268,19 @@ describe('getLog maxCount guard (#463)', () => {
     expect((await getLog(tmpDir, { maxCount: -5 })).all).toHaveLength(50);
     expect((await getLog(tmpDir, { maxCount: 0 })).all).toHaveLength(50);
     expect((await getLog(tmpDir, { maxCount: 2.5 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: Number.MAX_SAFE_INTEGER + 1 })).all).toHaveLength(50);
     expect((await getLog(tmpDir, {})).all).toHaveLength(50);
     expect((await getLog(tmpDir, { maxCount: 7 })).all).toHaveLength(7);
+  });
+
+  it('clamps direct maxCount values to the shared ceiling', async () => {
+    const { tmpDir } = await createTempRepo();
+    fastImportEmptyCommits(tmpDir, MAX_GIT_LOG_COUNT + 5);
+
+    const history = await getLog(tmpDir, { maxCount: 1_000_000_000 });
+
+    expect(history.all).toHaveLength(MAX_GIT_LOG_COUNT);
+    expect(history.total).toBe(MAX_GIT_LOG_COUNT);
   });
 });
 

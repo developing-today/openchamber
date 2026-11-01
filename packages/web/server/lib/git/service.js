@@ -13,6 +13,7 @@ import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
+import { MAX_GIT_LOG_COUNT } from './log-limits.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
@@ -6641,10 +6642,11 @@ export async function getLog(directory, options = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
-    // Only a positive integer caps the history. Anything else takes the
-    // default: a negative reaching git as --max-count=-5 means unlimited,
-    // so an invalid value must never pass through (#463).
-    const maxCount = Number.isInteger(options.maxCount) && options.maxCount > 0 ? options.maxCount : 50;
+    // Keep direct callers under the same cap as the route. A negative reaching
+    // git as --max-count=-5 means unlimited, and unsafe integers lose precision.
+    const maxCount = Number.isSafeInteger(options.maxCount) && options.maxCount > 0
+      ? Math.min(options.maxCount, MAX_GIT_LOG_COUNT)
+      : 50;
 
     if (options.all) {
       const logArgs = [
