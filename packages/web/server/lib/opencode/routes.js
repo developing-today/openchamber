@@ -2,7 +2,7 @@ import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
 import express from 'express';
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
-import { readBoundedResponseText } from '../shared/response-body.js';
+import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -29,6 +29,8 @@ import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 // OpenCode must settle the version, upgrade-status and health answers with
 // their existing error shapes instead of hanging them forever.
 const OPENCODE_INFO_DEADLINE_MS = 3_000;
+// `/api/info` is a fixed-shape version document; 64 KiB leaves generous headroom.
+const OPENCODE_INFO_MAX_BYTES = 64 * 1024;
 
 // A registry /latest document for one package version is a few KB; 1 MiB is
 // generous headroom while still bounding the memory a user-configured
@@ -207,7 +209,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
           signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
         });
-        return { response, info: await response.json().catch(() => null) };
+        return { response, info: await readBoundedResponseJson(response, OPENCODE_INFO_MAX_BYTES) };
       };
       const [{ response: healthResponse, info }, latestVersion] = await Promise.all([
         readInfo(),

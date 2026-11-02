@@ -14,7 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { renameWithRetry } from '../shared/atomic-rename.js';
-import { readBoundedResponseText } from '../shared/response-body.js';
+import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
 import { isBoolean } from '../shared/guards.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
@@ -45,6 +45,8 @@ const RETRY_MAX_DELAY_MS = 60_000;
 const HOLD_DEFAULT_TTL_MS = 5 * 60 * 1000;
 const HOLD_MAX_TTL_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15_000;
+// 16 MiB matches the session-list proxy cap and accommodates the two-record tail.
+const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 // Error answers are only shown as a 200-char excerpt; cap the body read to match.
 const ERROR_DETAIL_MAX_BYTES = 1_024;
 const MESSAGE_TAIL_LIMIT = 2;
@@ -459,7 +461,7 @@ export function createMessageQueueRuntime({
     if (method === 'POST') {
       await assertPromptResponse(response, 'OpenCode dispatch');
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES));
   };
 
   /**

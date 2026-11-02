@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readBoundedResponseBytes, readBoundedResponseText } from './response-body.js';
+import { readBoundedResponseBytes, readBoundedResponseJson, readBoundedResponseText } from './response-body.js';
 
 const streamOf = (chunks, { declaredLength } = {}) => {
   const stream = new ReadableStream({
@@ -51,5 +51,35 @@ describe('shared bounded response readers', () => {
     });
     await expect(readBoundedResponseText(new Response(stream), 10)).resolves.toEqual({ tooLarge: true });
     expect(cancelled).toBe(true);
+  });
+
+  it('parses a JSON envelope at the exact byte cap and strips a UTF-8 BOM like response.json()', async () => {
+    const text = '{"data":[{"id":"msg_1"}],"cursor":{"next":"page_2"}}';
+    await expect(readBoundedResponseJson(streamOf([text]), Buffer.byteLength(text))).resolves.toEqual(JSON.parse(text));
+    await expect(readBoundedResponseJson(streamOf(['\uFEFF{"data":[]}']), 100)).resolves.toEqual({ data: [] });
+  });
+
+  it('returns null and cancels a streamed JSON body as soon as it crosses the cap', async () => {
+    let cancelled = false;
+    let ended = false;
+    let chunks = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        chunks += 1;
+        if (chunks === 1) controller.enqueue(new TextEncoder().encode('{"data":"12345'));
+        else if (chunks === 2) controller.enqueue(new TextEncoder().encode('67890'));
+        else {
+          ended = true;
+          controller.close();
+        }
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    await expect(readBoundedResponseJson(new Response(stream), 12)).resolves.toBeNull();
+    expect(cancelled).toBe(true);
+    expect(ended).toBe(false);
   });
 });

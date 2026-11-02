@@ -113,6 +113,26 @@ describe('notification template session info', () => {
     expect(seenHeaders[0]).toMatchObject({ Authorization: 'Basic dGVzdDp0ZXN0' });
     expect(variables.session_name).toBe('Nightly cleanup');
   });
+
+  it('does not cache an oversized session record as a successful empty read', async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(new ReadableStream({}), {
+          headers: { 'content-length': String(16 * 1024 * 1024 + 1) },
+        });
+      }
+      return Response.json({ data: { id: 'ses_1', title: 'Nightly cleanup' } });
+    });
+    const runtime = createRuntime();
+
+    await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1');
+    const variables = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1');
+
+    expect(calls).toBe(2);
+    expect(variables.session_name).toBe('Nightly cleanup');
+  });
 });
 
 describe('notification template project of the session', () => {

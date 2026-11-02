@@ -12,10 +12,13 @@
  */
 
 import { unwrapOpenCodeResponse } from './response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 import { z } from 'zod';
 
 const CHILDREN_PAGE_SIZE = 50;
 const CHILDREN_MAX_PAGES = 8;
+// 16 MiB matches the session-list proxy cap and leaves room for a 50-record page.
+const SESSION_ACTIVITY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const sessionLineageSchema = z.object({ id: z.string().min(1), parentID: z.string().min(1).nullish() });
 
 export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch }) => {
@@ -30,7 +33,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     if (!response.ok) {
       throw new Error(`OpenCode GET ${fetchPath} failed with ${response.status}`);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return unwrapOpenCodeResponse(await readBoundedResponseJson(response, SESSION_ACTIVITY_RESPONSE_MAX_BYTES));
   };
 
   /**

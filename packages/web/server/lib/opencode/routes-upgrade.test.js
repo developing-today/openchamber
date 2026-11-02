@@ -109,6 +109,10 @@ describe('OpenCode upgrade routes', () => {
   });
 
   it('never announces a newer version for a bundled binary: it updates with the desktop app', async () => {
+    const previousRegistry = process.env.npm_config_registry;
+    const previousUserConfig = process.env.npm_config_userconfig;
+    process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+    process.env.npm_config_registry = 'https://registry.npmjs.org/';
     globalThis.fetch = vi.fn(async (url) => {
       if (String(url).includes('registry.npmjs.org')) return jsonResponse({ version: '2.0.3' });
       if (String(url).includes('api.github.com')) return jsonResponse({ tag_name: 'v2.0.3' });
@@ -116,20 +120,27 @@ describe('OpenCode upgrade routes', () => {
     });
     const { app } = createApp();
 
-    const response = await request(app)
-      .get('/api/opencode/upgrade-status')
-      .expect(200);
+    try {
+      const response = await request(app)
+        .get('/api/opencode/upgrade-status')
+        .expect(200);
 
-    expect(response.body).toEqual({
-      available: false,
-      currentVersion: '1.18.8',
-      latestVersion: '2.0.3',
-      upgrade: {
-        supported: false,
-        manager: 'openchamber',
-        reason: 'bundled',
-      },
-    });
+      expect(response.body).toEqual({
+        available: false,
+        currentVersion: '1.18.8',
+        latestVersion: '2.0.3',
+        upgrade: {
+          supported: false,
+          manager: 'openchamber',
+          reason: 'bundled',
+        },
+      });
+    } finally {
+      if (previousRegistry === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousRegistry;
+      if (previousUserConfig === undefined) delete process.env.npm_config_userconfig;
+      else process.env.npm_config_userconfig = previousUserConfig;
+    }
   });
 
   it('never claims an upgrade for a malformed version on either side', async () => {
@@ -255,17 +266,18 @@ describe('OpenCode version route probe deadlines (#796)', () => {
     setOpenCodeInfoDeadlineForTest(50);
     globalThis.fetch = vi.fn(async (input, init) => {
       if (String(input).endsWith('/api/info')) {
-        return {
-          ok: true,
-          status: 200,
-          statusText: 'OK',
-          json: async () => {
-            // A real aborted response rejects its body read; the prompt
-            // answer must already be consumed by then.
-            if (init?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-            return { version: '2.0.21', pid: 1, urls: [], paths: { tmp: '/tmp' } };
+        const body = JSON.stringify({ version: '2.0.21', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+        const stream = new ReadableStream({
+          pull(controller) {
+            if (init?.signal?.aborted) {
+              controller.error(new DOMException('The operation was aborted.', 'AbortError'));
+              return;
+            }
+            controller.enqueue(new TextEncoder().encode(body));
+            controller.close();
           },
-        };
+        });
+        return new Response(stream, { headers: { 'content-type': 'application/json' } });
       }
       await new Promise((resolve) => setTimeout(resolve, 150));
       return jsonResponse({ version: '2.0.22' });

@@ -44,6 +44,7 @@ const createOpenCode = () => {
     failNext: null,
     failStatus: 500,
     htmlNext: null,
+    oversizedNext: null,
   };
   // v2 wraps `/api/*` payloads in `{ location, data }`; a message page is
   // `{ data, cursor }` and lists newest first.
@@ -51,6 +52,12 @@ const createOpenCode = () => {
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
     const method = init.method ?? 'GET';
+    if (state.oversizedNext && state.oversizedNext.test(pathname)) {
+      state.oversizedNext = null;
+      return new Response(new ReadableStream({}), {
+        headers: { 'content-length': String(16 * 1024 * 1024 + 1) },
+      });
+    }
     if (state.failNext && state.failNext.test(pathname)) {
       state.failNext = null;
       return new Response('boom', { status: state.failStatus });
@@ -649,6 +656,23 @@ describe('message queue runtime', () => {
     // Retried after the status fetch recovers.
     await settle(40);
     expect(openCode.state.sent).toHaveLength(1);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('keeps an oversized status answer unknown until a bounded retry succeeds', async () => {
+    const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 10 });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    openCode.state.oversizedNext = /\/api\/session\/active$/;
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle(5);
+    expect(openCode.state.sent).toHaveLength(0);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    await settle(40);
+    expect(openCode.state.sent).toHaveLength(1);
+    runtime.stop();
+    await runtime.flush();
   });
 
   it('keeps a failed item and retries with backoff', async () => {

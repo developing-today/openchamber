@@ -120,11 +120,15 @@ variant that answers differently stays with its owner.
   to clear it when the headers arrive. Only the wrapped Response's status,
   headers and body are contractual; other Response metadata of the original
   is not carried over.
-- `response-body.js` — `readBoundedResponseText` / `readBoundedResponseBytes`
+- `response-body.js` — `readBoundedResponseText` / `readBoundedResponseBytes` /
+  `readBoundedResponseJson`
   (plus `discardResponseBody`). The cap is enforced **during** the read: a
   declared `content-length` over the cap refuses before reading, the stream
   is cancelled the moment the cap is crossed, and oversize is reported as
   `{ tooLarge: true }` — never a truncated body returned as complete.
+  `readBoundedResponseJson` parses only a complete body and returns `null` for
+  an over-cap, unreadable, or invalid JSON response, preserving the caller's
+  existing failure policy.
   `guests/response-body.js` re-exports all three, so the guests importers
   keep working unchanged. Phase 2 (#804) pointed the two importers outside
   guests/ at this module directly (`opencode/proxy.js`,

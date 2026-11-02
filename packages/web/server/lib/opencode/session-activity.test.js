@@ -61,6 +61,27 @@ describe('queue descendant activity', () => {
     expect(await createProbe(sessions).probe.hasWorkingDescendants('root', { grandchild: running })).toBe(true);
   });
 
+  it('preserves the page cursor envelope and fails an oversized status read as unknown', async () => {
+    const page = JSON.stringify({ data: [{ id: 'child', parentID: 'root' }], cursor: {} });
+    const pageProbe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async () => new Response(page, { headers: { 'content-length': String(Buffer.byteLength(page)) } }),
+    });
+    expect(await pageProbe.fetchChildSessionIds('root')).toEqual(['child']);
+
+    let cancelled = false;
+    const oversizedProbe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async () => new Response(new ReadableStream({ cancel() { cancelled = true; } }), {
+        headers: { 'content-length': String(16 * 1024 * 1024 + 1) },
+      }),
+    });
+    expect(await oversizedProbe.fetchActiveSessionStatuses()).toBeNull();
+    expect(cancelled).toBe(true);
+  });
+
   it('rejects missing, malformed and mismatched session records', async () => {
     for (const record of [null, {}, { id: 'other' }, { id: 'child', parentID: 123 }, { id: 'child', parentID: '' }]) {
       const { probe } = createProbe({ child: record });
