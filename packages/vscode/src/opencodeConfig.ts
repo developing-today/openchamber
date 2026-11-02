@@ -646,14 +646,30 @@ const isConfigFileTooLargeError = (error: unknown): error is Error & { code: str
   Boolean(error && typeof error === 'object' && 'code' in error && error.code === CONFIG_FILE_TOO_LARGE);
 
 const readConfigFileContent = (filePath: string): string => {
-  const { size } = fs.statSync(filePath);
-  if (size > MAX_CONFIG_FILE_BYTES) {
+  // The stat is only a pre-read size gate. When it cannot answer (the file
+  // vanished after the exists check, or the filesystem view is partial), the
+  // read itself is the authority: fall through and gate on the bytes read
+  // instead of failing a config that existsSync just confirmed.
+  let statSize: number | null = null;
+  try {
+    statSize = fs.statSync(filePath).size;
+  } catch {
+    statSize = null;
+  }
+  if (statSize !== null && statSize > MAX_CONFIG_FILE_BYTES) {
     throw codedError(
       `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
       CONFIG_FILE_TOO_LARGE,
     );
   }
-  return fs.readFileSync(filePath, 'utf8');
+  const content = fs.readFileSync(filePath, 'utf8');
+  if (statSize === null && Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+    throw codedError(
+      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
+      CONFIG_FILE_TOO_LARGE,
+    );
+  }
+  return content;
 };
 
 // Comment-only / whitespace-only files parse to undefined with nothing but
