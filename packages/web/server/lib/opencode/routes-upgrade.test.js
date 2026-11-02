@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { OPENCODE_LATEST_VERSION_MAX_BYTES, registerOpenCodeRoutes, setOpenCodeInfoDeadlineForTest } from './routes.js';
+import { OPENCODE_INFO_MAX_BYTES, OPENCODE_LATEST_VERSION_MAX_BYTES, registerOpenCodeRoutes, setOpenCodeInfoDeadlineForTest } from './routes.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -14,6 +14,21 @@ const jsonResponse = (payload, status = 200) => new Response(JSON.stringify(payl
   status,
   headers: { 'Content-Type': 'application/json' },
 });
+
+const oversizedInfoResponse = () => {
+  let cancelled = false;
+  let pulls = 0;
+  const response = new Response(new ReadableStream({
+    pull(controller) {
+      pulls += 1;
+      controller.enqueue(new Uint8Array(pulls === 1 ? OPENCODE_INFO_MAX_BYTES : 1).fill(32));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }), { headers: { 'Content-Type': 'application/json' } });
+  return { response, wasCancelled: () => cancelled };
+};
 
 const supportedCapability = { supported: true, manager: 'opencode', reason: null };
 
@@ -305,5 +320,27 @@ describe('OpenCode version route probe deadlines (#796)', () => {
     const { app } = createApp();
     const response = await request(app).get('/api/opencode/version').expect(200);
     expect(response.body).toEqual({ version: '2.0.21' });
+  });
+
+  it('does not treat an oversized /api/info body as a version answer', async () => {
+    const oversized = oversizedInfoResponse();
+    globalThis.fetch = vi.fn(async () => oversized.response);
+    const { app } = createApp();
+
+    const response = await request(app).get('/api/opencode/version').expect(200);
+
+    expect(response.body).toEqual({ version: null });
+    expect(oversized.wasCancelled()).toBe(true);
+  });
+
+  it('does not treat an oversized /api/info body as a healthy probe', async () => {
+    const oversized = oversizedInfoResponse();
+    globalThis.fetch = vi.fn(async () => oversized.response);
+    const { app } = createApp();
+
+    const response = await request(app).get('/api/opencode/health').expect(200);
+
+    expect(response.body).toEqual({ healthy: false });
+    expect(oversized.wasCancelled()).toBe(true);
   });
 });

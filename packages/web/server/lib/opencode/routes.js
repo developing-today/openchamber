@@ -30,7 +30,7 @@ import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 // their existing error shapes instead of hanging them forever.
 const OPENCODE_INFO_DEADLINE_MS = 3_000;
 // `/api/info` is a fixed-shape version document; 64 KiB leaves generous headroom.
-const OPENCODE_INFO_MAX_BYTES = 64 * 1024;
+export const OPENCODE_INFO_MAX_BYTES = 64 * 1024;
 
 // A registry /latest document for one package version is a few KB; 1 MiB is
 // generous headroom while still bounding the memory a user-configured
@@ -255,7 +255,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
-      const info = await healthResponse.json().catch(() => null);
+      const info = await readBoundedResponseJson(healthResponse, OPENCODE_INFO_MAX_BYTES);
       if (!healthResponse.ok) {
         return {
           healthy: false,
@@ -301,7 +301,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
-      const info = await healthResponse.json().catch(() => null);
+      const info = await readBoundedResponseJson(healthResponse, OPENCODE_INFO_MAX_BYTES);
       if (!healthResponse.ok) {
         return res.status(healthResponse.status).json({
           version: null,
