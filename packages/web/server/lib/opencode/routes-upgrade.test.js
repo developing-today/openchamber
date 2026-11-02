@@ -109,27 +109,37 @@ describe('OpenCode upgrade routes', () => {
   });
 
   it('never announces a newer version for a bundled binary: it updates with the desktop app', async () => {
+    const previousRegistry = process.env.npm_config_registry;
+    const previousUserConfig = process.env.npm_config_userconfig;
+    process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+    process.env.npm_config_registry = 'https://registry.npmjs.org';
     globalThis.fetch = vi.fn(async (url) => {
       if (String(url).includes('registry.npmjs.org')) return jsonResponse({ version: '2.0.3' });
       if (String(url).includes('api.github.com')) return jsonResponse({ tag_name: 'v2.0.3' });
       return jsonResponse({ version: '1.18.8', pid: 1, urls: [], paths: { tmp: '/tmp' } });
     });
     const { app } = createApp();
+    try {
+      const response = await request(app)
+        .get('/api/opencode/upgrade-status')
+        .expect(200);
 
-    const response = await request(app)
-      .get('/api/opencode/upgrade-status')
-      .expect(200);
-
-    expect(response.body).toEqual({
-      available: false,
-      currentVersion: '1.18.8',
-      latestVersion: '2.0.3',
-      upgrade: {
-        supported: false,
-        manager: 'openchamber',
-        reason: 'bundled',
-      },
-    });
+      expect(response.body).toEqual({
+        available: false,
+        currentVersion: '1.18.8',
+        latestVersion: '2.0.3',
+        upgrade: {
+          supported: false,
+          manager: 'openchamber',
+          reason: 'bundled',
+        },
+      });
+    } finally {
+      if (previousRegistry === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousRegistry;
+      if (previousUserConfig === undefined) delete process.env.npm_config_userconfig;
+      else process.env.npm_config_userconfig = previousUserConfig;
+    }
   });
 
   it('never claims an upgrade for a malformed version on either side', async () => {
