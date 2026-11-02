@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import { PERMISSION_MODES, isAutoAnsweringMode, isPermissionMode, toPermissionMode } from './modes.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 const SETTINGS_KEY = 'permissionAutoAccept';
 const DEFAULT_MODE_SETTINGS_KEY = 'permissionDefaultMode';
 const RETRY_DELAYS_MS = [0, 250, 1000];
 const REQUEST_TIMEOUT_MS = 5000;
+// 16 MiB matches the session-list proxy cap.
+const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_CACHE_LIMIT = 10000;
 const OUTCOME_CACHE_LIMIT = 1000;
 
@@ -203,7 +206,7 @@ export function createPermissionAutoAcceptRuntime({
       error.status = response.status;
       throw error;
     }
-    return response.json().catch(() => null);
+    return readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES);
   };
 
   const getSession = async (sessionId, directory) => {

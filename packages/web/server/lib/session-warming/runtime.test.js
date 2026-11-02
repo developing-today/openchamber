@@ -23,11 +23,11 @@ const status = (type, sessionID = SESSION) => ({ type: 'session.status', propert
  * A fake OpenCode: `active` is what `/api/session/active` lists (the running
  * sessions), `answer` what a ping gets back.
  */
-const makeRuntime = ({ dataDir = makeDataDir(), answer = () => new Response('{"data":{"text":"OK"}}'), active = {} } = {}) => {
+const makeRuntime = ({ dataDir = makeDataDir(), answer = () => new Response('{"data":{"text":"OK"}}'), active = {}, activeResponse = null } = {}) => {
   const events = [];
   const opencode = { active, answer };
   const fetchImpl = vi.fn(async (url) => {
-    if (String(url).includes('/api/session/active')) return Response.json({ data: opencode.active });
+    if (String(url).includes('/api/session/active')) return activeResponse ? activeResponse() : Response.json({ data: opencode.active });
     return opencode.answer();
   });
   const runtime = createSessionWarmingRuntime({
@@ -134,6 +134,45 @@ describe('session warming runtime', () => {
     running.runtime.processPayload(status('idle'));
     await vi.advanceTimersByTimeAsync(WARMING_INTERVAL_MS);
     expect(pings(running.fetchImpl)).toHaveLength(1);
+  });
+
+  it('treats an over-cap active-sessions body as unknown, cancelling the stream instead of draining it', async () => {
+    let cancelled = false;
+    const chunk = new TextEncoder().encode('x'.repeat(9 * 1024 * 1024));
+    const activeResponse = () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(chunk);
+        controller.enqueue(chunk);
+        // Never closed: only the reader cancelling can end this body.
+      },
+      cancel() { cancelled = true; },
+    }));
+    const { runtime, fetchImpl } = makeRuntime({ activeResponse });
+    runtime.setEnabled(true);
+    runtime.setSessionWarm(SESSION, DIRECTORY, true);
+    await runDue();
+    // Unknown (null) is not idle: no ping, and the state is re-asked after the retry delay.
+    expect(pings(fetchImpl)).toHaveLength(0);
+    expect(cancelled).toBe(true);
+    await vi.advanceTimersByTimeAsync(30 * 1000);
+    await runDue();
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes('/api/session/active')).length).toBeGreaterThanOrEqual(2);
+    expect(pings(fetchImpl)).toHaveLength(0);
+  });
+
+  it('parses an active-sessions body at the exact 16 MiB cap, envelope included', async () => {
+    const cap = 16 * 1024 * 1024;
+    const build = (pad) => JSON.stringify({ data: { [SESSION]: { type: 'busy' }, pad: 'x'.repeat(pad) } });
+    const text = build(cap - Buffer.byteLength(build(0)));
+    expect(Buffer.byteLength(text)).toBe(cap);
+    const { runtime, fetchImpl } = makeRuntime({ activeResponse: () => new Response(text) });
+    runtime.setEnabled(true);
+    runtime.setSessionWarm(SESSION, DIRECTORY, true);
+    await runDue();
+    await vi.advanceTimersByTimeAsync(WARMING_DURATION_MS);
+    // Busy at the cap parses exactly as under it: no ping while the turn runs.
+    expect(pings(fetchImpl)).toHaveLength(0);
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes('/api/session/active'))).toHaveLength(1);
   });
 
   it('settles every warmed session again after the event stream reconnects', async () => {

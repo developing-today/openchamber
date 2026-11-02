@@ -42,10 +42,7 @@ describe('PWA manifest route', () => {
             },
           ];
       // v2 pages the session list as `{ data, cursor }`.
-      return {
-        ok: true,
-        json: async () => ({ data: sessions, cursor: {} }),
-      };
+      return new Response(JSON.stringify({ data: sessions, cursor: {} }));
     };
 
     try {
@@ -91,17 +88,14 @@ describe('PWA manifest route', () => {
     const fetchCalls = [];
     globalThis.fetch = async (url) => {
       fetchCalls.push(String(url));
-      return {
-        ok: true,
-        json: async () => [
-          {
-            id: 'root-child',
-            title: 'Root child',
-            directory: '/workspace/app',
-            time: { updated: 2 },
-          },
-        ],
-      };
+      return new Response(JSON.stringify([
+        {
+          id: 'root-child',
+          title: 'Root child',
+          directory: '/workspace/app',
+          time: { updated: 2 },
+        },
+      ]));
     };
 
     try {
@@ -129,6 +123,73 @@ describe('PWA manifest route', () => {
         url: '/?session=root-child',
         icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('falls back to no shortcuts for an over-cap session list, cancelling the stream', async () => {
+    const routes = new Map();
+    const app = { get(route, handler) { routes.set(route, handler); } };
+    const originalFetch = globalThis.fetch;
+    let cancelled = false;
+    const chunk = new TextEncoder().encode('x'.repeat(9 * 1024 * 1024));
+    globalThis.fetch = async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(chunk);
+        controller.enqueue(chunk);
+        // Never closed: only the reader cancelling can end this body.
+      },
+      cancel() { cancelled = true; },
+    }));
+    try {
+      registerPwaManifestRoute(app, {
+        process: { platform: 'darwin' },
+        resolveProjectDirectory: async () => ({ directory: '/workspace/app' }),
+        buildOpenCodeUrl: (route) => route,
+        getOpenCodeAuthHeaders: () => ({}),
+        readSettingsFromDiskMigrated: async () => ({}),
+        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        isRequestAuthorized: async () => true,
+      });
+      const handler = routes.get('/manifest.webmanifest');
+      const res = createResponse();
+      await handler({ query: {} }, res);
+      const manifest = JSON.parse(res.body);
+      expect(manifest.shortcuts.map((shortcut) => shortcut.url)).toEqual(['/?settings=appearance']);
+      expect(cancelled).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('parses a session list at the exact 16 MiB cap, envelope included', async () => {
+    const routes = new Map();
+    const app = { get(route, handler) { routes.set(route, handler); } };
+    const originalFetch = globalThis.fetch;
+    const cap = 16 * 1024 * 1024;
+    const session = { id: 'capped', title: 'Capped session', directory: '/workspace/app', time: { updated: 2 } };
+    const build = (pad) => JSON.stringify({ data: [{ ...session, pad: 'x'.repeat(pad) }], cursor: {} });
+    const text = build(cap - Buffer.byteLength(build(0)));
+    expect(Buffer.byteLength(text)).toBe(cap);
+    globalThis.fetch = async () => new Response(text);
+    try {
+      registerPwaManifestRoute(app, {
+        process: { platform: 'darwin' },
+        resolveProjectDirectory: async () => ({ directory: '/workspace/app' }),
+        buildOpenCodeUrl: (route) => route,
+        getOpenCodeAuthHeaders: () => ({}),
+        readSettingsFromDiskMigrated: async () => ({}),
+        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        isRequestAuthorized: async () => true,
+      });
+      const handler = routes.get('/manifest.webmanifest');
+      const res = createResponse();
+      await handler({ query: {} }, res);
+      const manifest = JSON.parse(res.body);
+      expect(manifest.shortcuts).toContainEqual(expect.objectContaining({ url: '/?session=capped' }));
     } finally {
       globalThis.fetch = originalFetch;
     }

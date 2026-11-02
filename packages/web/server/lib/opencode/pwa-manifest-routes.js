@@ -1,4 +1,8 @@
+import { readBoundedResponseJson } from '../shared/response-body.js';
+
 const DEFAULT_PWA_APP_NAME = 'OpenChamber';
+// 16 MiB matches the session-list proxy cap.
+const SESSION_LIST_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const mapPwaOrientationToManifest = (value) => {
   if (value === 'portrait') {
     return 'portrait-primary';
@@ -118,7 +122,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       }
 
       // v2 pages the session list as `{ data, cursor }`.
-      const body = await response.json().catch(() => null);
+      const body = await readBoundedResponseJson(response, SESSION_LIST_RESPONSE_MAX_BYTES);
       const payload = Array.isArray(body) ? body : body?.data;
       return Array.isArray(payload) ? payload : [];
     };

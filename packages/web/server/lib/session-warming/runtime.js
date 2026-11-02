@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 /** Idle time between keep-alive requests; OpenCode's warming default. */
 export const WARMING_INTERVAL_MS = 4 * 60 * 1000;
@@ -23,6 +24,8 @@ export const ACTIVITY_LIMIT = 500;
 const STATUS_RETRY_MS = 30 * 1000;
 const PING_TIMEOUT_MS = 2 * 60 * 1000;
 const STATUS_TIMEOUT_MS = 10 * 1000;
+// 16 MiB matches the session-list proxy cap.
+const ACTIVE_SESSIONS_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 /**
  * OpenCode's own keep-alive prompt. With its global warming also on, OpenCode
  * recognises the request as a keep-alive and does not restart its window.
@@ -197,7 +200,7 @@ export const createSessionWarmingRuntime = ({
         await response.body?.cancel().catch(() => undefined);
         return null;
       }
-      const active = activeSessionsSchema.safeParse(unwrapOpenCodeResponse(await response.json()));
+      const active = activeSessionsSchema.safeParse(unwrapOpenCodeResponse(await readBoundedResponseJson(response, ACTIVE_SESSIONS_RESPONSE_MAX_BYTES)));
       return active.success ? Boolean(active.data[sessionId]) : null;
     } catch {
       return null;
