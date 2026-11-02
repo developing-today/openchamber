@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { envelopeError } from './zhipuai-coding-plan.js';
 import {
@@ -82,7 +83,7 @@ const attachZaiGiftResets = async (windows, apiKey) => {
       signal: AbortSignal.timeout(15_000)
     });
     if (!response.ok) return;
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const data = payload?.data;
     if (!data) return;
 
@@ -136,7 +137,7 @@ export const useZaiGiftReset = async ({ recordId, resetType }) => {
     signal: AbortSignal.timeout(15_000)
   });
 
-  const payload = await response.json().catch(() => null);
+  const payload = await readQuotaJson(response).catch(() => null);
   if (!response.ok || payload?.success !== true) {
     throw new Error(payload?.msg || `API error: ${response.status}`);
   }
@@ -180,7 +181,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     // Like bigmodel.cn, z.ai reports an expired key or a missing plan as
     // `{code, msg, success: false}` with HTTP 200; without this the card is
     // just empty.

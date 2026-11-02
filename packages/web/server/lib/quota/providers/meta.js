@@ -44,6 +44,7 @@
  * Keep this in sync with `packages/vscode/src/quotaProviders.ts` (`fetchMetaQuota`).
  */
 
+import { readQuotaJson } from '../utils/response-body.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -169,7 +170,7 @@ const requestPlanUsage = async (bearer, fetchImpl) => {
   // reporting both as malformed.
   const readBody = async () => {
     try {
-      return { body: asObject(await response.json()), error: null };
+      return { body: asObject(await readQuotaJson(response)), error: null };
     } catch (error) {
       return { body: null, error };
     }

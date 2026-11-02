@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { deleteLegacyOpenCodeGoCredential } from '../credentials/store.js';
 import {
@@ -138,7 +139,7 @@ export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch, { consoleK
     throw new Error('OpenCode Go authentication failed');
   }
   if (!response.ok) throw new Error(`OpenCode Go usage API returned HTTP ${response.status}`);
-  const windows = parseOpenCodeGoUsage(await response.json().catch(() => null));
+  const windows = parseOpenCodeGoUsage(await readQuotaJson(response).catch(() => null));
   if (Object.keys(windows).length === 0) throw new Error('OpenCode Go usage data could not be parsed');
   return windows;
 };
@@ -165,7 +166,7 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl 
     throw new Error('OpenCode Console sign-in expired. Sign in again in Providers.');
   }
   if (!response.ok) throw new Error(`OpenCode Console Go status API returned HTTP ${response.status}`);
-  const payload = await response.json().catch(() => null);
+  const payload = await readQuotaJson(response).catch(() => null);
   if (!asObject(payload)) throw new Error('OpenCode Console Go status returned an unreadable response');
   if (!CONSOLE_PRODUCTS.has(payload.product)) {
     throw new Error(NO_CONSOLE_SUBSCRIPTION);
@@ -196,7 +197,7 @@ export const fetchConsoleBillingBalance = async ({ access, orgID }, fetchImpl = 
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return null;
-    return parseConsoleBillingBalance(await response.json().catch(() => null));
+    return parseConsoleBillingBalance(await readQuotaJson(response).catch(() => null));
   } catch {
     return null;
   }

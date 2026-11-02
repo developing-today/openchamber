@@ -115,6 +115,16 @@ describe('DeepSeek quota provider', () => {
     expect(result.usage.windows.credits_balance.valueLabel).toBe('$12.50');
   });
 
+  it('fails the result for an over-cap response body instead of buffering it (#1282)', async () => {
+    const body = JSON.stringify({ pad: 'x'.repeat(1024 * 1024) });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Quota response exceeded/);
+  });
+
   it('maps 401 to session-expired error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }));
 

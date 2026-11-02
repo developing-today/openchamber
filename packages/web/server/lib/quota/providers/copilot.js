@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -148,7 +149,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     return buildResult({
       providerId,
       providerName,
@@ -214,7 +215,7 @@ export const fetchQuotaAddon = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     return buildResult({
       providerId: providerIdAddon,
       providerName: providerNameAddon,

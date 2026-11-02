@@ -1,3 +1,4 @@
+import { readQuotaBytes } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { buildResult, toUsageWindow } from '../utils/index.js';
 
@@ -278,7 +279,7 @@ const fetchUsage = async (accessToken, fetchImpl) => {
     if (status !== 0) throw new Error(`xAI billing RPC failed with status ${status}`);
   }
   if (!response.ok) throw new Error(`xAI billing request failed with HTTP ${response.status}`);
-  return parseUsage(new Uint8Array(await response.arrayBuffer()));
+  return parseUsage(new Uint8Array(await readQuotaBytes(response)));
 };
 
 export const isConfigured = (auth) => Boolean(xaiEntryOf(auth));
