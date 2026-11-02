@@ -205,11 +205,32 @@ const isTransportFailure = (error) => {
  * `servedBy()` reports which source the run's reads came from, so the
  * output never presents a store read as a live server read. Writes and
  * the launch environment always stay with the server source.
+ * `usesLocalStore()` forwards the server source's answer, so a resolver
+ * that gates a direct store read on a known-local source (the
+ * Antigravity fallback) works through this combined source too; the
+ * server source only claims local for a managed or loopback OpenCode,
+ * so a remote server is never answered with this machine's store.
+ * `getLaunchEnvironment()` forwards the server source's answer too,
+ * because the direct store read resolves the store's location from it
+ * and refuses without one. A standalone CLI never launched the server,
+ * so its server source has no launch environment to forward; when the
+ * server is nevertheless known-local (loopback), the CLI's own
+ * environment (`localEnvironment`) is the safely established location:
+ * it is the very environment the local fallback source behind this
+ * combined source already resolves the store from when the server is
+ * down. A remote server gets no environment, exactly as it gets no
+ * `usesLocalStore()`.
  */
-const createFallbackCredentialSource = (primary, fallback) => {
+const createFallbackCredentialSource = (primary, fallback, localEnvironment = null) => {
   let fellBack = false;
   const source = {
     servedBy: () => (fellBack ? 'local' : 'server'),
+    usesLocalStore: () => primary.usesLocalStore?.() ?? false,
+    getLaunchEnvironment: () => {
+      const primaryEnvironment = primary.getLaunchEnvironment?.() ?? null;
+      if (primaryEnvironment) return primaryEnvironment;
+      return primary.usesLocalStore?.() ? localEnvironment : null;
+    },
     list: async () => {
       if (fellBack) return fallback.list();
       try {
@@ -389,7 +410,7 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
       buildOpenCodeUrl: (requestPath) => `${resolveOpenCodeBaseUrl(env)}${requestPath ?? ''}`,
       getOpenCodeAuthHeaders: () => buildOpenCodeAuthHeaders(env),
     });
-    const credentialSource = createFallbackCredentialSource(serverSource, runtime.openCodeLocalCredentialSource());
+    const credentialSource = createFallbackCredentialSource(serverSource, runtime.openCodeLocalCredentialSource(), env);
     runtime.configureOpenCodeCredentials(credentialSource);
     const timeoutMs = resolveQuotaTimeoutMs(env);
 
