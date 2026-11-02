@@ -36,6 +36,26 @@ export const readBoundedResponseText = async (response, maxBytes) => {
 };
 
 /**
+ * Reads and parses a complete JSON body under `maxBytes`. A body that is too
+ * large, unreadable, or invalid JSON returns null, matching the callers'
+ * existing response.json().catch(() => null) behavior.
+ *
+ * @param {Response} response
+ * @param {number} maxBytes
+ * @returns {Promise<unknown | null>}
+ */
+export const readBoundedResponseJson = async (response, maxBytes) => {
+  const bounded = await readBoundedResponseText(response, maxBytes).catch(() => ({ tooLarge: true }));
+  if (bounded.tooLarge) return null;
+  const text = bounded.text.charCodeAt(0) === 0xfeff ? bounded.text.slice(1) : bounded.text;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
+/**
  * The same bounded read for a binary answer (a surface frame): the cap is
  * enforced while the body streams in, and the stream is cancelled as soon
  * as it crosses the limit, so a body with no declared length cannot grow

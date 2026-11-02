@@ -31,6 +31,7 @@ import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
+import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
 
 // Socket activation hands OpenCode's listen socket to OpenChamber as fd 3. Node closes only the fds it
 // opened itself, so an inherited fd 3 would reach OpenCode and keep the port open after OpenChamber exits.
@@ -67,6 +68,10 @@ export const resolveHealthCheckIntervalOverrideMs = (env = process.env) =>
   parseBoundedIntWithDefault(env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0, 0, 2_147_483_647);
 
 const HEALTH_CHECK_TIMEOUT_MS = resolveHealthCheckTimeoutMs();
+// `/api/info` is a fixed-shape version document; 64 KiB leaves generous headroom.
+const OPENCODE_INFO_MAX_BYTES = 64 * 1024;
+// Agent catalogs can carry plugin descriptions; match the 16 MiB session-list cap.
+const OPENCODE_AGENT_MAX_BYTES = 16 * 1024 * 1024;
 const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
   process.env.OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES,
   20
@@ -920,9 +925,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           },
         };
       }
+      const bounded = await readBoundedResponseText(response, OPENCODE_INFO_MAX_BYTES)
+        .catch(() => ({ tooLarge: true }));
+      if (bounded.tooLarge) {
+        return {
+          healthy: false,
+          failure: {
+            class: 'invalid_response',
+            detail: 'Info endpoint returned an oversized or unreadable body',
+          },
+        };
+      }
       let body;
       try {
-        body = await response.json();
+        const text = bounded.text.charCodeAt(0) === 0xfeff ? bounded.text.slice(1) : bounded.text;
+        body = JSON.parse(text);
       } catch {
         return {
           healthy: false,
@@ -1498,8 +1515,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         if (scopedDirectory) headers['x-opencode-directory'] = encodeURIComponent(scopedDirectory);
         // Bound each attempt the way waitForOpenCodeReady bounds its health
         // checks, so one stalled /api/agent request cannot defeat the overall
-        // deadline. The abort stays live until the body has been read,
-        // because response.json() is just as unbounded against a stall.
+        // deadline. The abort stays live until the bounded body read completes.
         const controller = new AbortController();
         timeout = setTimeout(
           () => controller.abort(),
@@ -1513,7 +1529,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
         if (response.ok) {
           // OpenCode 2.x answers `/api/*` with `{ location, data }`.
-          const body = await response.json();
+          const body = await readBoundedResponseJson(response, OPENCODE_AGENT_MAX_BYTES);
           const agents = Array.isArray(body) ? body : body?.data;
           if (Array.isArray(agents) && agents.some((agent) => agent?.id === agentName)) {
             return;

@@ -262,10 +262,7 @@ describe('OpenCode lifecycle', () => {
       queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
       return child;
     });
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.19' }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.19' }));
     const runtime = createRuntime();
     const firstServer = await runtime.startOpenCode();
     runtime.testState.openCodeProcess = firstServer;
@@ -323,10 +320,7 @@ describe('OpenCode lifecycle', () => {
       queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
       return child;
     });
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.19' }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.19' }));
     const runtime = createRuntime({
       getActiveSessionCount: () => 5,
       getActiveHostSessionCount: () => 2,
@@ -376,10 +370,7 @@ describe('OpenCode lifecycle', () => {
   });
 
   it('records an authoritative ready terminal event for external startup', async () => {
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -408,10 +399,7 @@ describe('OpenCode lifecycle', () => {
   });
 
   it('recovers an external OPENCODE_HOST connection using its configured endpoint', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    const fetchMock = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     globalThis.fetch = fetchMock;
     const runtime = createRuntime({}, {
       openCodePort: null,
@@ -491,10 +479,7 @@ describe('OpenCode lifecycle', () => {
     const otherProject = path.join(root, 'project-b');
     await fs.mkdir(lastUsed);
     await fs.mkdir(otherProject);
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    const fetchMock = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     globalThis.fetch = fetchMock;
     const runtime = createRuntime({
       env: {
@@ -529,10 +514,7 @@ describe('OpenCode lifecycle', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-stale-'));
     const stale = path.join(root, 'worktree-a');
     await fs.mkdir(stale);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -570,10 +552,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(chats);
     await fs.mkdir(project);
     let warmup = [];
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -610,10 +589,7 @@ describe('OpenCode lifecycle', () => {
     const current = path.join(root, 'current');
     await fs.mkdir(leftChat);
     await fs.mkdir(current);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -645,10 +621,7 @@ describe('OpenCode lifecycle', () => {
     const surviving = path.join(root, 'still-here');
     await fs.mkdir(stale);
     await fs.mkdir(surviving);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     // The warm pass offered both; only the first was cached as the default.
     const runtime = createRuntime({
       env: {
@@ -680,10 +653,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(stale);
     await fs.mkdir(navigated);
     let current = stale;
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -719,10 +689,7 @@ describe('OpenCode lifecycle', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-perm-'));
     const locked = path.join(root, 'locked');
     await fs.mkdir(locked);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -758,9 +725,9 @@ describe('OpenCode lifecycle', () => {
     globalThis.fetch = vi.fn(async (url, init) => {
       requested.push([String(url), init?.headers?.['x-opencode-directory'] ?? null]);
       if (String(url).endsWith('/api/info')) {
-        return { ok: true, json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+        return Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } });
       }
-      return { ok: true, json: async () => ({ data: [{ id: 'build' }] }) };
+      return Response.json({ data: [{ id: 'build' }] });
     });
     const runtime = createRuntime({
       env: {
@@ -790,7 +757,7 @@ describe('OpenCode lifecycle', () => {
     const signals = [];
     globalThis.fetch = vi.fn(async (url, init) => {
       if (String(url).endsWith('/api/info')) {
-        return { ok: true, json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+        return Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } });
       }
       signals.push(init?.signal ?? null);
       // A wedged OpenCode: accepts the request and never answers, but like a
@@ -904,12 +871,7 @@ describe('OpenCode lifecycle', () => {
     {
       name: 'invalid JSON',
       expectedClass: 'invalid_response',
-      fetchResult: () => ({
-        ok: true,
-        json: async () => {
-          throw new SyntaxError('Unexpected token');
-        },
-      }),
+      fetchResult: () => new Response('{', { headers: { 'content-type': 'application/json' } }),
     },
   ])('classifies and stores a counted $name health failure', async ({ expectedClass, fetchResult }) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1585,7 +1547,7 @@ describe('readiness on a log shared by several servers', () => {
       });
       return child;
     });
-    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    globalThis.fetch = vi.fn(async () => Response.json({}));
     const server = await createRuntime({ ensureOpencodeCliEnv: vi.fn(() => 'opencode') }).startOpenCode();
     expect(server.url).toBe('http://127.0.0.1:45678');
   });
@@ -1611,7 +1573,7 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
       queueMicrotask(() => child.stdout.emit('data', READY_LINE));
       return child;
     });
-    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    globalThis.fetch = vi.fn(async () => Response.json({}));
     const server = await createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') }).startOpenCode();
     spawnMock.mockClear();
     return { dataDir, server };
@@ -1635,7 +1597,7 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     const { dataDir } = await startFirstRuntime();
     const recorded = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
     spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
-    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    globalThis.fetch = vi.fn(async () => Response.json({}));
     spawnMock.mockImplementationOnce((command, args) => {
       const child = createMockChild();
       // Like OpenCode, the line names the port the child was started on.
@@ -1786,7 +1748,7 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     const foreign = { pid: 424242, port: 50075, binary: '/opt/other/opencode', drainStartedAt: Date.now() };
     fsSync.writeFileSync(drainingPath, JSON.stringify({ version: 1, draining: [foreign] }));
     spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
-    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    globalThis.fetch = vi.fn(async () => Response.json({}));
     spawnMock.mockImplementationOnce((command, args) => {
       const child = createMockChild();
       queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));

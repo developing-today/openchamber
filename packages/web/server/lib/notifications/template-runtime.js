@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { summarizeText as summarizeSharedText } from '../text/summarization.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 export const createNotificationTemplateRuntime = (deps) => {
   const {
@@ -15,6 +16,10 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
   const GIT_TIMEOUT_MS = 3000;
+  const OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS = 3000;
+  const OPEN_CODE_SESSION_FETCH_TIMEOUT_MS = 2000;
+  // 16 MiB matches the session-list proxy cap and allows normal message pages.
+  const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
   // The sidebar's name for standalone chats; a chat's folder name is a generated id.
   const CHATS_PROJECT_LABEL = 'Chats';
 
@@ -169,14 +174,14 @@ export const createNotificationTemplateRuntime = (deps) => {
           Accept: 'application/json',
           ...source.getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS),
       });
 
       if (!response.ok) return '';
 
       // v2 pages messages as `{ data, cursor }`, newest first, and a message is
       // a flat record: an assistant one carries `content[]`, not `parts`.
-      const page = await response.json().catch(() => null);
+      const page = await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES);
       const messages = Array.isArray(page?.data) ? page.data : null;
       if (!messages) return '';
 
@@ -239,13 +244,13 @@ export const createNotificationTemplateRuntime = (deps) => {
           Accept: 'application/json',
           ...source.getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(OPEN_CODE_SESSION_FETCH_TIMEOUT_MS),
       });
       if (!response.ok) {
         console.warn(`[Notification] fetchSessionInfo: ${response.status} for session ${sessionId}`);
         return null;
       }
-      const data = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      const data = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES));
       if (data && typeof data === 'object') {
         if (isHost) setBoundedCacheEntry(sessionInfoCache, sessionId, { data, at: Date.now() });
         return data;

@@ -31,6 +31,7 @@ import {
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -62,6 +63,8 @@ const KICKOFF_QUIET_MS = 3_000;
 // coalesces duplicate session.updated events.
 const RESUME_KICKOFF_MS = 250;
 const FETCH_TIMEOUT_MS = 10_000;
+// 16 MiB matches the session-list proxy cap and accommodates the 40-message audit window.
+const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const MESSAGE_FETCH_LIMIT = 40;
 const REASON_CHAR_LIMIT = 200;
 // Hard safety cap on auto-continuations per goal id. The audit and markers are
@@ -392,7 +395,7 @@ export const createSessionGoalRuntime = ({
     } else if (!response.ok) {
       throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES));
   };
 
   const fetchRecentMessages = async (sessionId, directory) => {

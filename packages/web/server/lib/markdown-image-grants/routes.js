@@ -4,8 +4,12 @@ import { mintOutsideFileGrant } from '../fs/routes.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { renderPageImageSources } from '../openchamber-control/render-page.js';
 import { isString } from '../shared/guards.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS = 10_000;
+// 16 MiB matches the session-list proxy cap and permits large tool messages.
+const OPEN_CODE_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 // A clip streams by byte ranges on every seek, so it is never read whole.
 const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 const VIDEO_EXTENSION_RE = /\.(?:mp4|m4v|mov|webm)$/i;
@@ -244,11 +248,11 @@ const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl,
       'x-opencode-directory': encodeURIComponent(directory),
       ...getOpenCodeAuthHeaders(),
     },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS),
   });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`OpenCode returned ${response.status}`);
-  const message = unwrapOpenCodeResponse(await response.json().catch(() => null));
+  const message = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_MESSAGE_RESPONSE_MAX_BYTES));
   return message && typeof message === 'object' && typeof message.id === 'string' ? message : null;
 };
 

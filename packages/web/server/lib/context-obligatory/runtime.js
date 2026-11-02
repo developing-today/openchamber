@@ -1,7 +1,10 @@
 import { isRecord } from '../shared/guards.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 const FETCH_TIMEOUT_MS = 15_000;
+// 16 MiB matches the session-list proxy cap and accommodates a 20-message page.
+const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const MESSAGE_FETCH_LIMIT = 20;
 
 // A stored pin is only usable when its createdAt can become a Date:
@@ -78,7 +81,7 @@ export const createContextObligatoryRuntime = ({
     } else if (!response.ok) {
       throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES));
   };
 
   const tick = async (sessionId, directory) => {

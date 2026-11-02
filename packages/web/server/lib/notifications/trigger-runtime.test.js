@@ -273,8 +273,8 @@ describe('alerts about a nested subagent\'s request', () => {
   const stubLineage = (records = sameDirectory) => vi.stubGlobal('fetch', vi.fn(async (input) => {
     const id = decodeURIComponent(new URL(String(input)).pathname.replace('/api/session/', ''));
     const record = records[id];
-    if (!record) return { ok: false, json: async () => null };
-    return { ok: true, json: async () => ({ data: { id, parentID: record.parentID, location: { directory: record.directory } } }) };
+    if (!record) return new Response(null, { status: 503 });
+    return Response.json({ data: { id, parentID: record.parentID, location: { directory: record.directory } } });
   }));
   const makeNestedRuntime = () => {
     const emitDesktopNotification = vi.fn(() => true);

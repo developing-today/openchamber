@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { truncateNotificationText } from './message.js';
 
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
+const OPEN_CODE_SESSION_FETCH_TIMEOUT_MS = 2_000;
+// Session records carry metadata; keep room for normal records while bounding a malformed response.
+const OPEN_CODE_SESSION_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 
 // What the parent walks read from an OpenCode session record: its parent and
 // the directory it runs in now. A missing or malformed location only leaves
@@ -364,10 +368,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           Accept: 'application/json',
           ...source.getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(OPEN_CODE_SESSION_FETCH_TIMEOUT_MS),
       });
       if (!response.ok) return null;
-      const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      const session = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_SESSION_RESPONSE_MAX_BYTES));
       return session && typeof session === 'object' ? session : null;
     } catch {
       return null;
@@ -1004,10 +1008,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       const response = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(OPEN_CODE_SESSION_FETCH_TIMEOUT_MS),
       });
       if (response.ok) {
-        const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
+        const session = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_SESSION_RESPONSE_MAX_BYTES));
         if (typeof session?.title === 'string') sessionName = session.title.trim();
       }
     } catch {
