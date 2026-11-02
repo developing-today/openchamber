@@ -83,6 +83,11 @@ requested (`requestedDirectory`), so a project opened through a symlink gets the
 same paths as its file tree. Matches are sorted by path,
 then line.
 
+One ripgrep line is accumulated whole before it can be parsed, so a single
+line is capped at `CONTENT_SEARCH_MAX_LINE_BYTES` (1 MiB): a line past the cap
+is skipped — its pieces are dropped as they arrive and the search resumes at
+the next newline — which is not an error and does not set `stopped`.
+
 `limit` defaults to 200 and is capped at 500; when it is reached the process
 is killed and `stopped` is `'limit'`. A search running for 30 seconds is killed
 too and answers what it found with `stopped: 'deadline'`. Neither is an error.

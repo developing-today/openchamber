@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { createContentSearchRuntime } from './content-search.js';
+import { CONTENT_SEARCH_MAX_LINE_BYTES, createContentSearchRuntime } from './content-search.js';
 import { createRipgrepResolver } from './ripgrep.js';
 
 const { resolveRipgrepBinary } = createRipgrepResolver({ fs, path });
@@ -122,6 +122,16 @@ describe('content search with ripgrep', () => {
     expect(await find({ query: 'nothing-has-this-text' })).toEqual({ status: 'ok', matches: [], stopped: null });
   });
 
+  it('skips a line past the byte cap and still returns a later match in the same file', async () => {
+    const huge = `${'z'.repeat(CONTENT_SEARCH_MAX_LINE_BYTES + 1024)}capneedle`;
+    await writeFile(path.join(repo, 'src', 'huge-cap.js'), `${huge}\ncapneedle on a normal line\n`);
+    await writeFile(path.join(repo, 'src', 'huge-unterminated.js'), huge);
+    const result = await find({ query: 'capneedle' });
+    expect(result.status).toBe('ok');
+    expect(result.stopped).toBeNull();
+    expect(result.matches.map((match) => [match.relativePath, match.line])).toEqual([['src/huge-cap.js', 2]]);
+  });
+
   it('answers unavailable without spawning when there is no ripgrep', async () => {
     const spawnSpy = vi.fn();
     const runtime = createContentSearchRuntime({ spawn: spawnSpy, path, resolveRipgrepBinary: async () => null });
@@ -198,6 +208,25 @@ describe('content search process control', () => {
     const runtime = createContentSearchRuntime({ spawn: spawnFake, path, resolveRipgrepBinary });
     const result = await runtime.searchFileContents('/root', { query: 'x', regex: false });
     expect(result.matches.map((match) => match.relativePath)).toEqual(['long.min.js', 'long.min.js']);
+  });
+
+  it('skips a match event split across chunks once its line passes the cap, and keeps the next event', async () => {
+    const hugeEvent = matchEvent('huge.min.js', 1, `x${'y'.repeat(CONTENT_SEARCH_MAX_LINE_BYTES)}`);
+    const normalEvent = matchEvent('a.txt', 1, 'x marks');
+    const stdoutChunks = `${hugeEvent}\n${normalEvent}\n`.match(/[\s\S]{1,65536}/g);
+    const { spawn: spawnFake } = createHangingSpawn({ stdoutChunks, exitCode: 0 });
+    const runtime = createContentSearchRuntime({ spawn: spawnFake, path, resolveRipgrepBinary });
+    const result = await runtime.searchFileContents('/root', { query: 'x', regex: false });
+    expect(result).toMatchObject({ status: 'ok', stopped: null });
+    expect(result.matches.map((match) => match.relativePath)).toEqual(['a.txt']);
+  });
+
+  it('skips an over-cap final line that ends without a newline', async () => {
+    const hugeEvent = matchEvent('huge.min.js', 1, `x${'y'.repeat(CONTENT_SEARCH_MAX_LINE_BYTES)}`);
+    const { spawn: spawnFake } = createHangingSpawn({ stdoutChunks: [hugeEvent], exitCode: 0 });
+    const runtime = createContentSearchRuntime({ spawn: spawnFake, path, resolveRipgrepBinary });
+    const result = await runtime.searchFileContents('/root', { query: 'x', regex: false });
+    expect(result).toEqual({ status: 'ok', matches: [], stopped: null });
   });
 
   it('passes the ripgrep flags the options ask for', async () => {
