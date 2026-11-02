@@ -8,6 +8,7 @@
  * @module quota/providers/claude
  */
 
+import { readQuotaJson } from '../../utils/response-body.js';
 import { createHash } from 'crypto';
 
 import { buildResult } from '../../utils/index.js';
@@ -119,7 +120,7 @@ const fetchQuotaUncoalesced = async () => {
 
   let payload;
   try {
-    payload = await response.json();
+    payload = await readQuotaJson(response);
   } catch {
     return failure('Unexpected response from Anthropic');
   }

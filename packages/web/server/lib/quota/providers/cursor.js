@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -150,7 +151,7 @@ const refreshAccessToken = async (auth) => {
     signal: AbortSignal.timeout(15_000)
   });
 
-  const body = await response.json().catch(() => null);
+  const body = await readQuotaJson(response).catch(() => null);
   if (body?.shouldLogout === true) {
     throw new Error('Session expired - please sign in to Cursor again');
   }
@@ -195,7 +196,7 @@ const connectPost = async (url, accessToken, body = {}) => {
     throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
   }
 
-  return response.json();
+  return readQuotaJson(response);
 };
 
 const connectGet = async (url, accessToken) => {
@@ -211,7 +212,7 @@ const connectGet = async (url, accessToken) => {
     throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
   }
 
-  return response.json();
+  return readQuotaJson(response);
 };
 
 const centsLabel = (cents) => {

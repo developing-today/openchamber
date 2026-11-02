@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -52,7 +53,7 @@ const fetchEndpoint = async (url, apiKey) => {
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) return null;
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     if (!isUsablePayload(payload)) return null;
     return payload;
   } catch {

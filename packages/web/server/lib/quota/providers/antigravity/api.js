@@ -5,6 +5,7 @@
  * @module quota/providers/antigravity/api
  */
 
+import { readQuotaJson } from '../../utils/response-body.js';
 import { refreshGoogleAccessToken } from '../google/oauth.js';
 import { antigravityHeaders } from './client.js';
 
@@ -53,7 +54,7 @@ export const fetchAntigravityModels = async (accessToken, projectId) => {
       });
 
       if (response.ok) {
-        return await response.json();
+        return await readQuotaJson(response);
       }
     } catch {
       continue;
@@ -80,7 +81,7 @@ export const fetchAntigravityQuotaSummary = async (accessToken, projectId) => {
       });
 
       if (response.ok) {
-        return await response.json();
+        return await readQuotaJson(response);
       }
     } catch {
       continue;

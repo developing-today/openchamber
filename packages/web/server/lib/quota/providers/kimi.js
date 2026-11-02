@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -29,7 +30,7 @@ const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, timeoutMs = REQUES
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) return null;
-    const balance = asObject(asObject(await response.json())?.data)?.available_balance;
+    const balance = asObject(asObject(await readQuotaJson(response))?.data)?.available_balance;
     if (!Number.isFinite(balance)) return null;
     return {
       credits_balance: toUsageWindow({
@@ -182,7 +183,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
     // client reads only `usages`, so when that block is present the `limits[]`
     // entry for the same 5-hour window is a coarser duplicate and is not read.

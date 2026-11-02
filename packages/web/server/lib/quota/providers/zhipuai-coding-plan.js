@@ -16,6 +16,7 @@
  *
  * `data.level` is the plan tier (for example "lite") and becomes `planLabel`.
  */
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import {
@@ -141,7 +142,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
 
     const failure = envelopeError(payload);
     if (failure) {

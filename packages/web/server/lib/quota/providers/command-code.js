@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { asNonEmptyString, asObject, buildResult, getAuthEntry, normalizeAuthEntry, toNumber, toUsageWindow } from '../utils/index.js';
 
@@ -24,7 +25,7 @@ const requestJson = async (path, apiKey, fetchImpl) => {
   });
   if (response.status === 401 || response.status === 403) throw new Error('Command Code authentication failed');
   if (!response.ok) throw new Error(`Command Code usage API returned HTTP ${response.status}`);
-  return response.json().catch(() => null);
+  return readQuotaJson(response).catch(() => null);
 };
 
 const formatCredits = (value) => String(Math.round((value + Number.EPSILON) * 100) / 100);

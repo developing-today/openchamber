@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -57,7 +58,7 @@ export const fetchQuota = async ({ readCredentials = readOpenCodeCredentials } =
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     // Documented at https://docs.deepinfra.com/api-reference/account/me:
     // checklist.stripe_balance is negative when funds are ready to spend and
     // positive when money is owed, so the spendable credit is its negation.

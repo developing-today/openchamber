@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -57,7 +58,7 @@ const fetchQuotaForEntry = async (entry) => {
       // usage endpoint for that sign-in and sends users to the ChatGPT usage page
       // instead, so the message does the same rather than asking to sign in again.
       if (response.status === 401) {
-        const body = await response.json().catch(() => null);
+        const body = await readQuotaJson(response).catch(() => null);
         const errorType = asNonEmptyString(body?.error?.type);
         if (errorType === 'rejected_by_access_enforcement') {
           return buildResult({
@@ -85,7 +86,7 @@ const fetchQuotaForEntry = async (entry) => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const primary = payload?.rate_limit?.primary_window ?? null;
     const secondary = payload?.rate_limit?.secondary_window ?? null;
     const credits = payload?.credits ?? null;

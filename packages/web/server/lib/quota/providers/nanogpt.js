@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
@@ -82,7 +83,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = nanoGptUsageSchema.parse(await response.json());
+    const payload = nanoGptUsageSchema.parse(await readQuotaJson(response));
     const windows = {};
     const state = payload.state ?? 'active';
     // A null current daily quota means no daily cap; only absent fields use legacy data.
