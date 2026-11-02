@@ -127,14 +127,13 @@ describe('OpenCode upgrade routes', () => {
     const previousRegistry = process.env.npm_config_registry;
     const previousUserConfig = process.env.npm_config_userconfig;
     process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
-    process.env.npm_config_registry = 'https://registry.npmjs.org/';
+    process.env.npm_config_registry = 'https://registry.npmjs.org';
     globalThis.fetch = vi.fn(async (url) => {
       if (String(url).includes('registry.npmjs.org')) return jsonResponse({ version: '2.0.3' });
       if (String(url).includes('api.github.com')) return jsonResponse({ tag_name: 'v2.0.3' });
       return jsonResponse({ version: '1.18.8', pid: 1, urls: [], paths: { tmp: '/tmp' } });
     });
     const { app } = createApp();
-
     try {
       const response = await request(app)
         .get('/api/opencode/upgrade-status')

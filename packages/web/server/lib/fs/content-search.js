@@ -26,6 +26,14 @@ const PREVIEW_MAX_CHARS = 200;
 const MAX_RANGES_PER_LINE = 32;
 const STDERR_MAX_BYTES = 64 * 1024;
 
+// One ripgrep `--json` line is accumulated whole before it can be parsed,
+// so a single file line sets the memory cost of a search. Lines longer than
+// this cap are skipped: their pieces are dropped as they arrive and the
+// search resumes at the next newline. A result preview shows 200 characters
+// of a line, so a cap of 1 MiB only ever costs a match deep inside a
+// minified or generated line, never a hand-written one.
+export const CONTENT_SEARCH_MAX_LINE_BYTES = 1 * 1024 * 1024;
+
 // ripgrep's `--json` text fields: UTF-8 as `text`, anything else as base64 `bytes`.
 const decodeRipgrepText = (value) => {
   if (!isRecord(value)) return null;
@@ -170,6 +178,8 @@ export const createContentSearchRuntime = ({
       let stderr = '';
       const stdoutDecoder = new StringDecoder('utf8');
       let pending = [];
+      let pendingBytes = 0;
+      let lineOversized = false;
 
       const finish = (result) => {
         if (settled) return;
@@ -220,18 +230,38 @@ export const createContentSearchRuntime = ({
       // A single line can be tens of megabytes (a minified file). The pieces
       // of an unfinished line wait in a list and only the new chunk is
       // scanned, so a long line costs one join instead of a rescan per chunk.
+      // The accumulated bytes are counted as pieces arrive; once a line
+      // passes CONTENT_SEARCH_MAX_LINE_BYTES its pieces are dropped and the
+      // rest of the line is ignored, so an over-cap line is never joined or
+      // parsed whole and the search resumes at its newline.
+      const pushPiece = (piece) => {
+        if (!piece || lineOversized) return;
+        pendingBytes += Buffer.byteLength(piece, 'utf8');
+        if (pendingBytes > CONTENT_SEARCH_MAX_LINE_BYTES) {
+          lineOversized = true;
+          pending = [];
+          pendingBytes = 0;
+          return;
+        }
+        pending.push(piece);
+      };
+      const finishLine = () => {
+        if (!lineOversized) consume(pending.join(''));
+        pending = [];
+        pendingBytes = 0;
+        lineOversized = false;
+      };
       child.stdout.on('data', (chunk) => {
         const text = stdoutDecoder.write(chunk);
         let lineStart = 0;
         let newline = text.indexOf('\n');
         while (newline !== -1) {
-          pending.push(text.slice(lineStart, newline));
-          consume(pending.join(''));
-          pending = [];
+          pushPiece(text.slice(lineStart, newline));
+          finishLine();
           lineStart = newline + 1;
           newline = text.indexOf('\n', lineStart);
         }
-        if (lineStart < text.length) pending.push(text.slice(lineStart));
+        if (lineStart < text.length) pushPiece(text.slice(lineStart));
       });
       // Read stderr to the end: an unread pipe can block ripgrep forever.
       child.stderr.on('data', (chunk) => {
@@ -243,8 +273,8 @@ export const createContentSearchRuntime = ({
           finish({ status: 'aborted' });
           return;
         }
-        pending.push(stdoutDecoder.end());
-        consume(pending.join(''));
+        pushPiece(stdoutDecoder.end());
+        if (!lineOversized) consume(pending.join(''));
         matches.sort((a, b) => (a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : a.line - b.line));
         // 0: matches, 1: none, 2: an error. ripgrep also exits 2 after a
         // search that produced matches but could not read every file.
