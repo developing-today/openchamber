@@ -150,18 +150,80 @@ describe('Linear issue list/get', () => {
   it('abandons a GraphQL body read that never finishes at the deadline', async () => {
     const realTimeout = AbortSignal.timeout.bind(AbortSignal);
     vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => realTimeout(Math.min(ms, 10)));
-    vi.stubGlobal('fetch', vi.fn((_url, options) => Promise.resolve({
-      ok: true,
-      status: 200,
-      json: () => new Promise((_resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
-      }),
-    })));
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => new Response(new ReadableStream({
+      start(controller) {
+        options.signal.addEventListener('abort', () => controller.error(options.signal.reason), { once: true });
+      },
+    }), { status: 200 })));
 
     await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
       name: 'LinearApiError',
       message: 'Linear GraphQL request timed out',
       status: 504,
+    });
+  });
+
+  it('rejects a streamed GraphQL response after it exceeds the body cap', async () => {
+    const cancel = vi.fn();
+    const chunk = new Uint8Array(1024 * 1024);
+    const stream = new ReadableStream({
+      start(controller) {
+        for (let index = 0; index < 17; index += 1) {
+          controller.enqueue(chunk);
+        }
+      },
+      cancel,
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(stream, { status: 200 })));
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL response exceeded the size limit',
+      status: 502,
+      userError: false,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps GraphQL 401 handling ahead of an oversized-body error', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream({ cancel });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, {
+      status: 401,
+      headers: { 'Content-Length': String(16 * 1024 * 1024 + 1) },
+    })));
+
+    await expect(listLinearIssues()).resolves.toEqual({ connected: false });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps non-OK HTTP status handling ahead of an oversized-body error', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream({ cancel });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, {
+      status: 503,
+      headers: { 'Content-Length': String(16 * 1024 * 1024 + 1) },
+    })));
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL request failed (503)',
+      status: 503,
+      userError: false,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('parses BOM-prefixed GraphQL JSON responses', async () => {
+    const payload = { data: { issue: issueNode } };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(`\uFEFF${JSON.stringify(payload)}`, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await expect(getLinearIssue('ENG-12')).resolves.toMatchObject({
+      connected: true,
+      issue: { identifier: 'ENG-12' },
     });
   });
 
