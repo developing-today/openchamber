@@ -7,7 +7,8 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  toTimestamp
+  toTimestamp,
+  asNonEmptyString
 } from '../utils/index.js';
 
 const nanoGptQuotaWindowSchema = z.object({
@@ -43,15 +44,15 @@ export const providerId = 'nano-gpt';
 export const providerName = 'NanoGPT';
 export const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch, timeoutMs = REQUEST_TIMEOUT_MS } = {}) => {
-  const auth = await readAuth();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({

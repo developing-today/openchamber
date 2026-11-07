@@ -7,7 +7,8 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
-  formatCredits
+  formatCredits,
+  asNonEmptyString
 } from '../utils/index.js';
 
 const buildCopilotWindows = (payload) => {
@@ -105,15 +106,17 @@ const copilotUserUrl = (enterpriseUrl) => {
   return `https://api.${url.hostname}/copilot_internal/user`;
 };
 
+const getAccessToken = (entry) => asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
+
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.access || entry?.token);
+  return Boolean(getAccessToken(entry));
 };
 
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
   const auth = await readAuth();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const accessToken = entry?.access ?? entry?.token;
+  const accessToken = getAccessToken(entry);
 
   if (!accessToken) {
     return buildResult({
@@ -179,7 +182,7 @@ export const providerNameAddon = 'GitHub Copilot Add-on';
 export const fetchQuotaAddon = async ({ readAuth = readOpenCodeCredentials } = {}) => {
   const auth = await readAuth();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const accessToken = entry?.access ?? entry?.token;
+  const accessToken = getAccessToken(entry);
 
   if (!accessToken) {
     return buildResult({

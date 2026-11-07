@@ -19,13 +19,15 @@ export const aliases = ['openai', 'codex', 'chatgpt'];
 
 const clampPercent = (value) => value === null ? null : Math.min(100, Math.max(0, value));
 
+const getAccessToken = (entry) => asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
+
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.access || entry?.token);
+  return Boolean(getAccessToken(entry));
 };
 
 const fetchQuotaForEntry = async (entry) => {
-  const accessToken = entry?.access ?? entry?.token;
+  const accessToken = getAccessToken(entry);
   const accountId = entry?.accountId;
 
   if (!accessToken) {
@@ -198,7 +200,7 @@ const readCodexInstanceIds = () => {
 
 const entryWithToken = (entry) => {
   const normalized = normalizeAuthEntry(entry);
-  return normalized && (normalized.access || normalized.token) ? normalized : null;
+  return normalized && getAccessToken(normalized) ? normalized : null;
 };
 
 /**

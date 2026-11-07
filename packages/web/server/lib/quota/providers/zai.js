@@ -9,7 +9,8 @@ import {
   toNumber,
   resolveWindowSeconds,
   resolveWindowLabel,
-  normalizeTimestamp
+  normalizeTimestamp,
+  asNonEmptyString
 } from '../utils/index.js';
 
 export const providerId = 'zai-coding-plan';
@@ -102,18 +103,18 @@ const attachZaiGiftResets = async (windows, apiKey) => {
   }
 };
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
+
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
 const ZAI_GIFT_RESET_USE_URL = 'https://api.z.ai/api/biz/customer-package-reset/use';
 export const giftResetTypes = ['FIVE_HOUR', 'WEEK'];
 
 export const useZaiGiftReset = async ({ recordId, resetType, readAuth = readOpenCodeCredentials }) => {
-  const auth = await readAuth();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     throw new Error('Not configured');
@@ -145,9 +146,7 @@ export const useZaiGiftReset = async ({ recordId, resetType, readAuth = readOpen
 };
 
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
-  const auth = await readAuth();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({

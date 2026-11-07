@@ -56,15 +56,15 @@ export const resolveResetAt = (limitReset, nowMs) => {
   return null;
 };
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
-  const auth = await readAuth();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
